@@ -1,0 +1,138 @@
+syntax = "proto3";
+
+package promise;
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+
+message Promise {
+  string id = 1;
+  string state = 2;
+  Value param = 3;
+  Value value = 4;
+  int64 timeout = 5;
+}
+
+message Subscription {
+  int64 id = 1;
+  string url = 2;
+}
+
+enum Status {
+  UNKNOWN = 0;
+  OK = 200;
+  CREATED = 201;
+  NOCONTENT = 204;
+  FORBIDDEN = 403;
+  NOTFOUND = 404;
+  CONFLICT = 409;
+}
+
+message Value {
+  map<string, string> headers = 1;
+  string ikey = 2;
+  bytes data = 3;
+}
+
+message ReadPromiseRequest {
+  string id = 1;
+}
+
+message ReadPromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
+message SearchPromisesRequest {
+  string q = 1;
+  string state = 2;
+}
+
+message SearchPromisesResponse {
+  Status status = 1;
+  repeated Promise promises = 2;
+}
+
+message CreatePromiseRequest {
+  string id = 1;
+  Value param = 2;
+  int64 timeout = 3;
+  repeated Subscription subscriptions = 4;
+}
+
+message CreatePromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
+message CancelPromiseRequest {
+  string id = 1;
+  Value value = 2;
+}
+
+message CancelPromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
+message ResolvePromiseRequest {
+  string id = 1;
+  Value value = 2;
+}
+
+message ResolvePromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
+message RejectPromiseRequest {
+  string id = 1;
+  Value value = 2;
+}
+
+message RejectPromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
+message ReadSubscriptionsRequest {
+  string promiseId = 1;
+}
+
+message ReadSubscriptionsResponse {
+  Status status = 1;
+  repeated Subscription subscriptions = 2;
+}
+
+message CreateSubscriptionRequest {
+  string promiseId = 1;
+  string url = 2;
+}
+
+message CreateSubscriptionResponse {
+  Status status = 1;
+  Subscription subscription = 2;
+}
+
+message DeleteSubscriptionRequest {
+  string promiseId = 1;
+  int64 id = 2;
+}
+
+message DeleteSubscriptionResponse {
+  Status status = 1;
+}
+
+service PromiseService {
+  // Promise
+  rpc ReadPromise(ReadPromiseRequest) returns (ReadPromiseResponse) {}
+  rpc SearchPromises(SearchPromisesRequest) returns (SearchPromisesResponse) {}
+  rpc CreatePromise(CreatePromiseRequest) returns (CreatePromiseResponse) {}
+  rpc CancelPromise(CancelPromiseRequest) returns (CancelPromiseResponse) {}
+  rpc ResolvePromise(ResolvePromiseRequest) returns (ResolvePromiseResponse) {}
+  rpc RejectPromise(RejectPromiseRequest) returns (RejectPromiseResponse) {}
+
+  // Subscription
+  rpc ReadSubscriptions(ReadSubscriptionsRequest) returns (ReadSubscriptionsResponse) {}
+  rpc CreateSubscription(CreateSubscriptionRequest) returns (CreateSubscriptionResponse) {}
+  rpc DeleteSubscription(DeleteSubscriptionRequest) returns (DeleteSubscriptionResponse) {}
+}

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: "1.20"
+        cache: false
+
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+  lint:
+    needs: setup
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install and run golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.52
+        args: --verbose --timeout=3m
+
+  test:
+    needs: setup
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Run go test and generate coverage report
+      run: |
+        go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+
+    - name: Upload coverage report to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
