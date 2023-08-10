@@ -25,12 +25,12 @@ const issueFmt = ` # DST Failed
 
 **Command**
 ~~~
-SEED=%d go test -v --count=1 --timeout=60m -run ^TestDST$ ./...
+SEED=%d go test -v --count=1 --timeout=2h ./test/dst
 ~~~
 
 **Logs**
 ~~~
-SEED=%d go test -v --count=1 --timeout=60m -run ^TestDST$ ./...
+SEED=%d go test -v --count=1 --timeout=2h ./test/dst
 
 %s
 ~~~

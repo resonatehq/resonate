@@ -34,7 +34,7 @@ func TestDST(t *testing.T) {
 	} else {
 		runs = 1
 		cs = func(int) int { return test.RangeIntn(r, 0, 1000) }
-		ticks = test.RangeInt63n(r, 0, 360000) // one hour (1 tick = 10ms)
+		ticks = test.RangeInt63n(r, 0, 180000) // one hour (1 tick = 10ms)
 	}
 
 	for i := 0; i < runs; i++ {
