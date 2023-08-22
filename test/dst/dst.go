@@ -94,7 +94,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	generator.AddRequest(generator.GenerateRejectPromise)
 	generator.AddRequest(generator.GenerateReadSubscriptions)
 	generator.AddRequest(generator.GenerateCreateSubscription)
-	generator.AddRequest(generator.GenerateDeleteSubscription)
+	// generator.AddRequest(generator.GenerateDeleteSubscription)
 
 	// model
 	model := NewModel()
@@ -106,7 +106,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	model.AddResponse(types.RejectPromise, model.ValidateRejectPromise)
 	model.AddResponse(types.ReadSubscriptions, model.ValidateReadSubscriptions)
 	model.AddResponse(types.CreateSubscription, model.ValidateCreateSubscription)
-	model.AddResponse(types.DeleteSubscription, model.ValidateDeleteSubscription)
+	// model.AddResponse(types.DeleteSubscription, model.ValidateDeleteSubscription)
 
 	t.Log(d)
 

@@ -421,8 +421,7 @@ func (s *server) DeleteSubscription(ctx context.Context, req *grpcApi.DeleteSubs
 		Submission: &types.Request{
 			Kind: types.DeleteSubscription,
 			DeleteSubscription: &types.DeleteSubscriptionRequest{
-				PromiseId: req.PromiseId,
-				Id:        req.Id,
+				Id: req.Id,
 			},
 		},
 		Callback: s.sendOrPanic(cq),

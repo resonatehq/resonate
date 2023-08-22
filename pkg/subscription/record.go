@@ -16,6 +16,7 @@ func (r *SubscriptionRecord) Subscription() (*Subscription, error) {
 	}
 
 	return &Subscription{
+		PromiseId:   r.PromiseId,
 		Id:          r.Id,
 		Url:         r.Url,
 		RetryPolicy: retryPolicy,

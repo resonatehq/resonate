@@ -5,6 +5,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
@@ -59,13 +60,21 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					},
 				}
 
-				for _, subscription := range req.CreatePromise.Subscriptions {
+				for _, s := range req.CreatePromise.Subscriptions {
+					// default retry policy
+					if s.RetryPolicy == nil {
+						s.RetryPolicy = &subscription.RetryPolicy{
+							Delay:    30,
+							Attempts: 3,
+						}
+					}
+
 					commands = append(commands, &types.Command{
 						Kind: types.StoreCreateSubscription,
 						CreateSubscription: &types.CreateSubscriptionCommand{
 							PromiseId:   req.CreatePromise.Id,
-							Url:         subscription.Url,
-							RetryPolicy: subscription.RetryPolicy,
+							Url:         s.Url,
+							RetryPolicy: s.RetryPolicy,
 						},
 					})
 				}

@@ -114,8 +114,7 @@ message CreateSubscriptionResponse {
 }
 
 message DeleteSubscriptionRequest {
-  string promiseId = 1;
-  int64 id = 2;
+  int64 id = 1;
 }
 
 message DeleteSubscriptionResponse {

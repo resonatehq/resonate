@@ -135,7 +135,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			c.Yield(submission, func(completion *types.Completion, err error) {
 				var command *types.Command
 
-				if !isSuccessful(completion.Network.Http) && notification.Attempt < notification.RetryPolicy.Attempts {
+				if (err != nil || !isSuccessful(completion.Network.Http)) && notification.Attempt < notification.RetryPolicy.Attempts {
 					command = &types.Command{
 						Kind: types.StoreUpdateNotification,
 						UpdateNotification: &types.UpdateNotificationCommand{

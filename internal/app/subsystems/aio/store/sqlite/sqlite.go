@@ -117,7 +117,7 @@ const (
 		(?, ?, ?)`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM Subscriptions WHERE id = ? AND promiseId = ?`
+	DELETE FROM Subscriptions WHERE id = ?`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
@@ -649,7 +649,7 @@ func (d *SqliteStoreDevice) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 
 func (d *SqliteStoreDevice) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
+	res, err := stmt.Exec(cmd.Id)
 	if err != nil {
 		return nil, err
 	}

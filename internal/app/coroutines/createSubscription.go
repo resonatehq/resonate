@@ -9,6 +9,14 @@ import (
 
 func CreateSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		// default retry policy
+		if req.CreateSubscription.RetryPolicy == nil {
+			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
+				Delay:    30,
+				Attempts: 3,
+			}
+		}
+
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -44,6 +52,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 					CreateSubscription: &types.CreateSubscriptionResponse{
 						Status: types.ResponseCreated,
 						Subscription: &subscription.Subscription{
+							PromiseId:   req.CreateSubscription.PromiseId,
 							Id:          result.LastInsertId,
 							Url:         req.CreateSubscription.Url,
 							RetryPolicy: req.CreateSubscription.RetryPolicy,

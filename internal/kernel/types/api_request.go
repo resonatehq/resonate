@@ -62,8 +62,7 @@ type CreateSubscriptionRequest struct {
 }
 
 type DeleteSubscriptionRequest struct {
-	PromiseId string `json:"promiseId"`
-	Id        int64  `json:"id"`
+	Id int64 `json:"id"`
 }
 
 func (r *Request) String() string {
@@ -116,8 +115,7 @@ func (r *Request) String() string {
 		)
 	case DeleteSubscription:
 		return fmt.Sprintf(
-			"DeleteSubscription(promiseId=%s, id=%d)",
-			r.DeleteSubscription.PromiseId,
+			"DeleteSubscription(id=%d)",
 			r.DeleteSubscription.Id,
 		)
 	default:

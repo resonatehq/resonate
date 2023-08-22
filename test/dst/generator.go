@@ -234,14 +234,12 @@ func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Req
 }
 
 func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *types.Request {
-	promiseId := g.idSet[r.Intn(len(g.idSet))]
 	id := r.Int63n(g.subscriptions + 1)
 
 	return &types.Request{
 		Kind: types.DeleteSubscription,
 		DeleteSubscription: &types.DeleteSubscriptionRequest{
-			PromiseId: promiseId,
-			Id:        id,
+			Id: id,
 		},
 	}
 }

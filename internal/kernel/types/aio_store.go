@@ -138,8 +138,7 @@ type CreateSubscriptionCommand struct {
 }
 
 type DeleteSubscriptionCommand struct {
-	PromiseId string
-	Id        int64
+	Id int64
 }
 
 type QuerySubscriptionsResult struct {

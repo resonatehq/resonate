@@ -16,8 +16,7 @@ func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, e
 						{
 							Kind: types.StoreDeleteSubscription,
 							DeleteSubscription: &types.DeleteSubscriptionCommand{
-								PromiseId: req.DeleteSubscription.PromiseId,
-								Id:        req.DeleteSubscription.Id,
+								Id: req.DeleteSubscription.Id,
 							},
 						},
 					},

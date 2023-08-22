@@ -1207,8 +1207,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreDeleteSubscription,
 				DeleteSubscription: &types.DeleteSubscriptionCommand{
-					PromiseId: "foo",
-					Id:        1,
+					Id: 1,
 				},
 			},
 		},

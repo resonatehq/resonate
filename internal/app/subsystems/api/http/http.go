@@ -25,15 +25,15 @@ func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
 	// Promise API
 	r.GET("/promises", s.searchPromises)
 	r.GET("/promises/:id", s.readPromise)
+	r.GET("/promises/:id/subscriptions", s.readSubscriptions)
 	r.POST("/promises/:id/create", s.createPromise)
 	r.POST("/promises/:id/cancel", s.cancelPromise)
 	r.POST("/promises/:id/resolve", s.resolvePromise)
 	r.POST("/promises/:id/reject", s.rejectPromise)
 
 	// Subscription API
-	r.GET("/promises/:id/subscriptions", s.readSubscriptions)
-	r.POST("/promises/:id/subscriptions", s.createSubscription)
-	r.DELETE("/promises/:id/subscriptions", s.deleteSubscription)
+	r.POST("/subscriptions", s.createSubscription)
+	r.DELETE("/subscriptions/:id", s.deleteSubscription)
 
 	return &Http{
 		addr:    addr,

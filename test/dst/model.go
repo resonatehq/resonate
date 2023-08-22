@@ -95,8 +95,9 @@ func (m *Model) ValidateCreateSubscription(req *types.Request, res *types.Respon
 }
 
 func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
-	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
-	return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
+	// pm := m.promises.Get(req.DeleteSubscription.PromiseId)
+	// return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
+	return nil
 }
 
 type Promises map[string]*PromiseModel

@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -44,8 +45,6 @@ func (s *server) createSubscription(c *gin.Context) {
 		return
 	}
 
-	createSubscription.PromiseId = c.Param("id")
-
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
@@ -70,23 +69,21 @@ func (s *server) createSubscription(c *gin.Context) {
 }
 
 func (s *server) deleteSubscription(c *gin.Context) {
-	var deleteSubscription *types.DeleteSubscriptionRequest
-	if err := c.ShouldBindJSON(&deleteSubscription); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid id"})
 		return
 	}
-
-	deleteSubscription.PromiseId = c.Param("id")
 
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
 		Submission: &types.Request{
-			Kind:               types.DeleteSubscription,
-			DeleteSubscription: deleteSubscription,
+			Kind: types.DeleteSubscription,
+			DeleteSubscription: &types.DeleteSubscriptionRequest{
+				Id: id,
+			},
 		},
 		Callback: s.sendOrPanic(cq),
 	})
