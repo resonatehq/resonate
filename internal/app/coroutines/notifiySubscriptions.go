@@ -2,6 +2,7 @@ package coroutines
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
@@ -56,18 +57,23 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 
 			for _, record := range records {
 				if t >= record.Time && !inflights.get(record.Id) {
-					s.Add(notifySubscription(record))
+					notification, err := record.Notification()
+					if err != nil {
+						// TODO: log
+						continue
+					}
+					s.Add(notifySubscription(notification))
 				}
 			}
 		})
 	})
 }
 
-func notifySubscription(record *notification.NotificationRecord) *scheduler.Coroutine {
+func notifySubscription(notification *notification.Notification) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// handle inflight cache
-		inflights.add(record.Id)
-		c.OnDone(func() { inflights.remove(record.Id) })
+		inflights.add(notification.Id)
+		c.OnDone(func() { inflights.remove(notification.Id) })
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -76,7 +82,7 @@ func notifySubscription(record *notification.NotificationRecord) *scheduler.Coro
 					Commands: []*types.Command{
 						{
 							ReadPromise: &types.ReadPromiseCommand{
-								Id: record.PromiseId,
+								Id: notification.PromiseId,
 							},
 						},
 					},
@@ -97,21 +103,21 @@ func notifySubscription(record *notification.NotificationRecord) *scheduler.Coro
 
 			if result.RowsReturned == 0 {
 				// TODO: log
-				abort(c, record)
+				abort(c, notification)
 				return
 			}
 
 			promise, err := result.Records[0].Promise()
 			if err != nil {
 				// TODO: log
-				abort(c, record)
+				abort(c, notification)
 				return
 			}
 
 			body, err := json.Marshal(promise)
 			if err != nil {
 				// TODO: log
-				abort(c, record)
+				abort(c, notification)
 				return
 			}
 
@@ -120,7 +126,7 @@ func notifySubscription(record *notification.NotificationRecord) *scheduler.Coro
 				Network: &types.NetworkSubmission{
 					Http: &types.HttpRequest{
 						Method: "POST",
-						Url:    record.Url,
+						Url:    notification.Url,
 						Body:   body,
 					},
 				},
@@ -129,20 +135,20 @@ func notifySubscription(record *notification.NotificationRecord) *scheduler.Coro
 			c.Yield(submission, func(completion *types.Completion, err error) {
 				var command *types.Command
 
-				if backoff, ok := util.Backoff(record.Attempt); ok && (err != nil || !isSuccessful(completion.Network.Http)) {
+				if !isSuccessful(completion.Network.Http) && notification.Attempt < notification.RetryPolicy.Attempts {
 					command = &types.Command{
 						Kind: types.StoreUpdateNotification,
 						UpdateNotification: &types.UpdateNotificationCommand{
-							Id:      record.Id,
-							Time:    record.Time + backoff.Milliseconds(),
-							Attempt: record.Attempt + 1,
+							Id:      notification.Id,
+							Time:    backoff(notification.RetryPolicy.Delay, notification.Attempt),
+							Attempt: notification.Attempt + 1,
 						},
 					}
 				} else {
 					command = &types.Command{
 						Kind: types.StoreDeleteNotification,
 						DeleteNotification: &types.DeleteNotificationCommand{
-							Id: record.Id,
+							Id: notification.Id,
 						},
 					}
 				}
@@ -166,7 +172,7 @@ func notifySubscription(record *notification.NotificationRecord) *scheduler.Coro
 	})
 }
 
-func abort(c *scheduler.Coroutine, record *notification.NotificationRecord) {
+func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 	submission := &types.Submission{
 		Kind: types.Store,
 		Store: &types.StoreSubmission{
@@ -175,7 +181,7 @@ func abort(c *scheduler.Coroutine, record *notification.NotificationRecord) {
 					{
 						Kind: types.StoreDeleteNotification,
 						DeleteNotification: &types.DeleteNotificationCommand{
-							Id: record.Id,
+							Id: notification.Id,
 						},
 					},
 				},
@@ -194,4 +200,11 @@ func isSuccessful(res *http.Response) bool {
 	// svix only checks for 2xx response codes and retries under all
 	// other circumstances
 	return res.StatusCode >= 200 && res.StatusCode < 300
+}
+
+func backoff(delay int64, attempt int64) int64 {
+	util.Assert(delay >= 0, "delay must be non-negative")
+	util.Assert(attempt >= 0, "delay must be non-negative")
+
+	return delay * int64(math.Pow(2, float64(attempt)))
 }

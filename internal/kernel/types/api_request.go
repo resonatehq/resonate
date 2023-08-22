@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Request struct {
@@ -55,8 +56,9 @@ type ReadSubscriptionsRequest struct {
 }
 
 type CreateSubscriptionRequest struct {
-	PromiseId string `json:"promiseId"`
-	Url       string `json:"url"`
+	PromiseId   string                    `json:"promiseId"`
+	Url         string                    `json:"url"`
+	RetryPolicy *subscription.RetryPolicy `json:"retryPolicy"`
 }
 
 type DeleteSubscriptionRequest struct {

@@ -129,10 +129,10 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 								commands = append(commands, &types.Command{
 									Kind: types.StoreCreateNotification,
 									CreateNotification: &types.CreateNotificationCommand{
-										PromiseId: record.PromiseId,
-										Url:       record.Url,
-										Time:      t,
-										Attempt:   0,
+										PromiseId:   record.PromiseId,
+										Url:         record.Url,
+										RetryPolicy: record.RetryPolicy,
+										Time:        t,
 									},
 								})
 							}

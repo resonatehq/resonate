@@ -1140,8 +1140,9 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{},
 				},
 			},
 		},
@@ -1161,15 +1162,17 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{},
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{},
 				},
 			},
 		},
@@ -1196,8 +1199,9 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{},
 				},
 			},
 			{
@@ -1230,22 +1234,25 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "bar",
-					Url:       "https://bar.com",
+					PromiseId:   "bar",
+					Url:         "https://bar.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					PromiseId: "baz",
-					Url:       "https://baz.com",
+					PromiseId:   "baz",
+					Url:         "https://baz.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
 				},
 			},
 			{
@@ -1283,19 +1290,22 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*subscription.SubscriptionRecord{
 						{
-							PromiseId: "bar",
-							Id:        2,
-							Url:       "https://bar.com",
+							PromiseId:   "bar",
+							Id:          2,
+							Url:         "https://bar.com",
+							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 						},
 						{
-							PromiseId: "baz",
-							Id:        3,
-							Url:       "https://baz.com",
+							PromiseId:   "baz",
+							Id:          3,
+							Url:         "https://baz.com",
+							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
 						},
 						{
-							PromiseId: "foo",
-							Id:        1,
-							Url:       "https://foo.com",
+							PromiseId:   "foo",
+							Id:          1,
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 						},
 					},
 				},
@@ -1308,10 +1318,10 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      0,
-					Attempt:   0,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        0,
+					RetryPolicy: []byte("{}"),
 				},
 			},
 		},
@@ -1331,19 +1341,19 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      0,
-					Attempt:   0,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        0,
+					RetryPolicy: []byte("{}"),
 				},
 			},
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      1,
-					Attempt:   1,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        1,
+					RetryPolicy: []byte("{}"),
 				},
 			},
 		},
@@ -1369,10 +1379,10 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      0,
-					Attempt:   0,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        0,
+					RetryPolicy: []byte("{}"),
 				},
 			},
 			{
@@ -1406,10 +1416,10 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      0,
-					Attempt:   0,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        0,
+					RetryPolicy: []byte("{}"),
 				},
 			},
 			{
@@ -1441,28 +1451,28 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "foo",
-					Url:       "https://foo.com",
-					Time:      0,
-					Attempt:   0,
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					Time:        0,
+					RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 				},
 			},
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "bar",
-					Url:       "https://bar.com",
-					Time:      1,
-					Attempt:   1,
+					PromiseId:   "bar",
+					Url:         "https://bar.com",
+					Time:        1,
+					RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 				},
 			},
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
-					PromiseId: "baz",
-					Url:       "https://baz.com",
-					Time:      2,
-					Attempt:   2,
+					PromiseId:   "baz",
+					Url:         "https://baz.com",
+					Time:        2,
+					RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
 				},
 			},
 			{
@@ -1500,25 +1510,28 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
-							PromiseId: "foo",
-							Id:        1,
-							Url:       "https://foo.com",
-							Time:      0,
-							Attempt:   0,
+							PromiseId:   "foo",
+							Id:          1,
+							Url:         "https://foo.com",
+							Time:        0,
+							Attempt:     0,
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 						},
 						{
-							PromiseId: "bar",
-							Id:        2,
-							Url:       "https://bar.com",
-							Time:      1,
-							Attempt:   1,
+							PromiseId:   "bar",
+							Id:          2,
+							Url:         "https://bar.com",
+							Time:        1,
+							Attempt:     0,
+							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 						},
 						{
-							PromiseId: "baz",
-							Id:        3,
-							Url:       "https://baz.com",
-							Time:      2,
-							Attempt:   2,
+							PromiseId:   "baz",
+							Id:          3,
+							Url:         "https://baz.com",
+							Time:        2,
+							Attempt:     0,
+							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
 						},
 					},
 				},

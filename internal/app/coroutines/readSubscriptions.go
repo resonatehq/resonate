@@ -37,7 +37,12 @@ func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, er
 			subscriptions := []*subscription.Subscription{}
 
 			for _, records := range records {
-				subscriptions = append(subscriptions, records.Subscription())
+				subscription, err := records.Subscription()
+				if err != nil {
+					continue
+				}
+
+				subscriptions = append(subscriptions, subscription)
 			}
 
 			res(&types.Response{

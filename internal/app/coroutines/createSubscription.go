@@ -17,8 +17,9 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 						{
 							Kind: types.StoreCreateSubscription,
 							CreateSubscription: &types.CreateSubscriptionCommand{
-								PromiseId: req.CreateSubscription.PromiseId,
-								Url:       req.CreateSubscription.Url,
+								PromiseId:   req.CreateSubscription.PromiseId,
+								Url:         req.CreateSubscription.Url,
+								RetryPolicy: req.CreateSubscription.RetryPolicy,
 							},
 						},
 					},
@@ -43,8 +44,9 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 					CreateSubscription: &types.CreateSubscriptionResponse{
 						Status: types.ResponseCreated,
 						Subscription: &subscription.Subscription{
-							Id:  result.LastInsertId,
-							Url: req.CreateSubscription.Url,
+							Id:          result.LastInsertId,
+							Url:         req.CreateSubscription.Url,
+							RetryPolicy: req.CreateSubscription.RetryPolicy,
 						},
 					},
 				}, nil)

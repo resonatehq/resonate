@@ -132,8 +132,9 @@ type ReadSubscriptionsCommand struct {
 }
 
 type CreateSubscriptionCommand struct {
-	PromiseId string
-	Url       string
+	PromiseId   string
+	Url         string
+	RetryPolicy *subscription.RetryPolicy
 }
 
 type DeleteSubscriptionCommand struct {
@@ -156,10 +157,10 @@ type ReadNotificationsCommand struct {
 }
 
 type CreateNotificationCommand struct {
-	PromiseId string
-	Url       string
-	Time      int64
-	Attempt   int64
+	PromiseId   string
+	Url         string
+	RetryPolicy []byte
+	Time        int64
 }
 
 type UpdateNotificationCommand struct {

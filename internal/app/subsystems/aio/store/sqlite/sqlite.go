@@ -39,18 +39,20 @@ const (
 		PRIMARY KEY("id")
 	);
 	CREATE TABLE IF NOT EXISTS "Subscriptions" (
-		"id"        INTEGER PRIMARY KEY AUTOINCREMENT,
-		"promiseId" TEXT,
-		"url"       TEXT,
+		"id"          INTEGER PRIMARY KEY AUTOINCREMENT,
+		"promiseId"   TEXT,
+		"url"         TEXT,
+		"retryPolicy" BLOB,
 		UNIQUE("promiseId", "url"),
 		FOREIGN KEY("promiseId") REFERENCES Promises("id")
 	);
 	CREATE TABLE IF NOT EXISTS "Notifications" (
-		"id"      INTEGER PRIMARY KEY AUTOINCREMENT,
-		"promiseId" TEXT,
-		"url"       TEXT,
-		"time"    INTEGER,
-		"attempt" INTEGER,
+		"id"          INTEGER PRIMARY KEY AUTOINCREMENT,
+		"promiseId"   TEXT,
+		"url"         TEXT,
+		"retryPolicy" BLOB,
+		"time"        INTEGER,
+		"attempt"     INTEGER,
 		UNIQUE("promiseId", "url"),
 		FOREIGN KEY("promiseId") REFERENCES Promises("id")
 	);`
@@ -102,7 +104,7 @@ const (
 
 	SUBSCRIPTION_SELECT_STATEMENT = `
 	SELECT
-		id, promiseId, url
+		id, promiseId, url, retryPolicy
 	FROM
 		Subscriptions
 	WHERE
@@ -110,16 +112,16 @@ const (
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO Subscriptions
-		(promiseId, url)
+		(promiseId, url, retryPolicy)
 	VALUES
-		(?, ?)`
+		(?, ?, ?)`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
 	DELETE FROM Subscriptions WHERE id = ? AND promiseId = ?`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
-		id, promiseId, url, time, attempt
+		id, promiseId, url, retryPolicy, time, attempt
 	FROM
 		Notifications
 	ORDER BY
@@ -128,9 +130,9 @@ const (
 
 	NOTIFICATION_INSERT_STATEMENT = `
 	INSERT INTO Notifications
-		(promiseId, url, time, attempt)
+		(promiseId, url, retryPolicy, time, attempt)
 	VALUES
-		(?, ?, ?, ?)`
+		(?, ?, ?, ?, 0)`
 
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE Notifications
@@ -589,7 +591,7 @@ func (d *SqliteStoreDevice) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 
 	for rows.Next() {
 		record := &subscription.SubscriptionRecord{}
-		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url); err != nil {
+		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy); err != nil {
 			return nil, err
 		}
 
@@ -607,11 +609,18 @@ func (d *SqliteStoreDevice) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 }
 
 func (d *SqliteStoreDevice) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateSubscriptionCommand) (*types.Result, error) {
+	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
+
+	retryPolicy, err := json.Marshal(cmd.RetryPolicy)
+	if err != nil {
+		return nil, err
+	}
+
 	var rowsAffected int64
 	var lastInsertId int64
 
 	// insert
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Url)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, retryPolicy)
 	if err != nil {
 		sqliteErr, ok := err.(sqlite3.Error)
 		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintUnique {
@@ -671,7 +680,7 @@ func (d *SqliteStoreDevice) readNotifications(tx *sql.Tx, cmd *types.ReadNotific
 
 	for rows.Next() {
 		record := &notification.NotificationRecord{}
-		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.Time, &record.Attempt); err != nil {
+		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.Time, &record.Attempt); err != nil {
 			return nil, err
 		}
 
@@ -690,11 +699,13 @@ func (d *SqliteStoreDevice) readNotifications(tx *sql.Tx, cmd *types.ReadNotific
 
 func (d *SqliteStoreDevice) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationCommand) (*types.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
+	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
+
 	var rowsAffected int64
 	var lastInsertId int64
 
 	// insert
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, cmd.Time, cmd.Attempt)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, cmd.RetryPolicy, cmd.Time)
 	if err != nil {
 		sqliteErr, ok := err.(sqlite3.Error)
 		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintUnique {

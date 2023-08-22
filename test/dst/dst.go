@@ -28,8 +28,9 @@ type DST struct {
 	SQEsPerTick           int
 	Ids                   int
 	Ikeys                 int
-	Datum                 int
+	Data                  int
 	Headers               int
+	Retries               int
 	Subscriptions         int
 	PromiseCacheSize      int
 	TimeoutCacheSize      int
@@ -84,7 +85,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	system.AddOnTick(1, coroutines.NotifySubscriptions)
 
 	// generator
-	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Datum, d.Headers, d.Subscriptions, d.Time(d.Ticks))
+	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Data, d.Headers, d.Retries, d.Subscriptions, d.Time(d.Ticks))
 	generator.AddRequest(generator.GenerateReadPromise)
 	generator.AddRequest(generator.GenerateSearchPromises)
 	generator.AddRequest(generator.GenerateCreatePromise)
@@ -163,13 +164,14 @@ func (d *DST) Time(tick int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ticks=%d, time=0->%d, sqesPerTick=%d, ids=%d, ikeys=%d, datum=%d, headers=%d, promiseCacheSize=%d, timeoutCacheSize=%d, notificationCacheSize=%d)\n",
+		"DST(ticks=%d, time=0->%d, sqesPerTick=%d, ids=%d, ikeys=%d, data=%d, headers=%d, retries=%d, promiseCacheSize=%d, timeoutCacheSize=%d, notificationCacheSize=%d)\n",
 		d.Ticks,
 		d.Time(d.Ticks),
 		d.SQEsPerTick,
 		d.Ids,
 		d.Ikeys,
-		d.Datum,
+		d.Data,
+		d.Retries,
 		d.Headers,
 		d.PromiseCacheSize,
 		d.TimeoutCacheSize,

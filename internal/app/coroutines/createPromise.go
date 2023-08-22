@@ -63,8 +63,9 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					commands = append(commands, &types.Command{
 						Kind: types.StoreCreateSubscription,
 						CreateSubscription: &types.CreateSubscriptionCommand{
-							PromiseId: req.CreatePromise.Id,
-							Url:       subscription.Url,
+							PromiseId:   req.CreatePromise.Id,
+							Url:         subscription.Url,
+							RetryPolicy: subscription.RetryPolicy,
 						},
 					})
 				}
