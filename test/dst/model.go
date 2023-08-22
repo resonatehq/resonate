@@ -94,11 +94,10 @@ func (m *Model) ValidateCreateSubscription(req *types.Request, res *types.Respon
 	return pm.createSubscription(req.CreateSubscription, res.CreateSubscription)
 }
 
-func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
-	// pm := m.promises.Get(req.DeleteSubscription.PromiseId)
-	// return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
-	return nil
-}
+// func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
+// 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
+// 	return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
+// }
 
 type Promises map[string]*PromiseModel
 
@@ -302,27 +301,27 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 	return m.verifySubscription(res.Subscription)
 }
 
-func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
-	switch res.Status {
-	case types.ResponseNoContent:
-	case types.ResponseNotFound:
-		for _, subscription := range m.subscriptions {
-			if subscription.Id == req.Id {
-				return fmt.Errorf("subscription exists '%d' already exists for promise '%s'", subscription.Id, m.promise.Id)
-			}
-		}
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
-	}
+// func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
+// 	switch res.Status {
+// 	case types.ResponseNoContent:
+// 	case types.ResponseNotFound:
+// 		for _, subscription := range m.subscriptions {
+// 			if subscription.Id == req.Id {
+// 				return fmt.Errorf("subscription exists '%d' already exists for promise '%s'", subscription.Id, m.promise.Id)
+// 			}
+// 		}
+// 	default:
+// 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
+// 	}
 
-	for i, subscription := range m.subscriptions {
-		if subscription.Id == req.Id {
-			m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
-		}
-	}
+// 	for i, subscription := range m.subscriptions {
+// 		if subscription.Id == req.Id {
+// 			m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
 func (m *PromiseModel) verifySubscription(subscription *subscription.Subscription) error {
 	if subscription != nil {
