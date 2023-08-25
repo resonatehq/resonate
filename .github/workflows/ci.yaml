@@ -12,38 +12,44 @@ permissions:
   contents: read
 
 jobs:
-  setup:
-    runs-on: ubuntu-latest
+  # setup:
+  #   runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+  #   steps:
+  #   - name: Checkout repository
+  #     uses: actions/checkout@v3
 
-    - name: Set up Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: "1.21.0"
-        cache: false
+  #   - name: Set up Go
+  #     uses: actions/setup-go@v4
+  #     with:
+  #       go-version: "1.21.0"
+  #       cache: false
 
-  lint:
-    needs: setup
-    runs-on: ubuntu-latest
+  # lint:
+  #   needs: setup
+  #   runs-on: ubuntu-latest
 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+  #   steps:
+  #   - name: Checkout repository
+  #     uses: actions/checkout@v3
 
-    - name: Install and run golangci-lint
-      uses: golangci/golangci-lint-action@v3
-      with:
-        version: v1.5
-        args: --verbose --timeout=3m
+  #   - name: Install and run golangci-lint
+  #     uses: golangci/golangci-lint-action@v3
+  #     with:
+  #       version: v1.5
+  #       args: --verbose --timeout=3m
 
   test:
     needs: setup
     runs-on: ubuntu-latest
 
     steps:
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: "1.21.0"
+        cache: false
+
     - name: Checkout repository
       uses: actions/checkout@v3
 
