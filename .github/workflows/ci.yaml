@@ -28,7 +28,7 @@ jobs:
     - name: Install and run golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.5
+        version: v1.52
         args: --verbose --timeout=3m
 
     - name: Run go test and generate coverage report
