@@ -22,7 +22,7 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version-file: go.mod
+        go-version: "1.21.0"
         cache: false
 
   lint:
@@ -36,7 +36,7 @@ jobs:
     - name: Install and run golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
-        version: v1.54
+        version: v1.5
         args: --verbose --timeout=3m
 
   test:
