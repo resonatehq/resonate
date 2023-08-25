@@ -28,10 +28,10 @@ type State int
 
 const (
 	Pending State = 1 << iota
-	Canceled
 	Resolved
 	Rejected
 	Timedout
+	Canceled
 )
 
 func (s State) String() string {
