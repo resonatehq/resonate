@@ -14,14 +14,14 @@ jobs:
     timeout-minutes: 150
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
           go-version-file: go.mod
           cache: false
-
-      - name: Checkout repository
-        uses: actions/checkout@v3
 
       - name: Set random seed
         run: |
