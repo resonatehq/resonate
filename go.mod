@@ -1,6 +1,6 @@
 module github.com/resonatehq/resonate
 
-go 1.21
+go 1.21.0
 
 require (
 	github.com/gin-gonic/gin v1.9.1
