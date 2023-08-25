@@ -11,13 +11,13 @@ const (
 func (k AIOKind) String() string {
 	switch k {
 	case Echo:
-		return "echo"
+		return "Echo"
 	case Network:
-		return "network"
+		return "Network"
 	case Store:
-		return "store"
+		return "Store"
 	default:
-		return "io"
+		panic("invalid submission")
 	}
 }
 
@@ -28,9 +28,19 @@ type Submission struct {
 	Store   *StoreSubmission
 }
 
+func (s *Submission) String() string {
+	// TODO: expand
+	return s.Kind.String()
+}
+
 type Completion struct {
 	Kind    AIOKind
 	Echo    *EchoCompletion
 	Network *NetworkCompletion
 	Store   *StoreCompletion
+}
+
+func (c *Completion) String() string {
+	// TODO: expand
+	return c.Kind.String()
 }

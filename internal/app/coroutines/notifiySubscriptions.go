@@ -2,6 +2,7 @@ package coroutines
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -30,7 +31,7 @@ func (i inflight) remove(id int64) {
 }
 
 func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions:%d", t), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -71,7 +72,7 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 }
 
 func notifySubscription(notification *notification.Notification) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscription:%d", notification.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// handle inflight cache
 		inflights.add(notification.Id)
 		c.OnDone(func() { inflights.remove(notification.Id) })

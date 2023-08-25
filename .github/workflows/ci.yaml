@@ -12,49 +12,24 @@ permissions:
   contents: read
 
 jobs:
-  # setup:
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #   - name: Checkout repository
-  #     uses: actions/checkout@v3
-
-  #   - name: Set up Go
-  #     uses: actions/setup-go@v4
-  #     with:
-  #       go-version: "1.21.0"
-  #       cache: false
-
-  # lint:
-  #   needs: setup
-  #   runs-on: ubuntu-latest
-
-  #   steps:
-  #   - name: Checkout repository
-  #     uses: actions/checkout@v3
-
-  #   - name: Install and run golangci-lint
-  #     uses: golangci/golangci-lint-action@v3
-  #     with:
-  #       version: v1.5
-  #       args: --verbose --timeout=3m
-
-  test:
-    # needs: setup
+  ci:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: "1.21.0"
+        go-version-file: go.mod
         cache: false
 
-    - name: Go version
-      run: go version
-
-    - name: Checkout repository
-      uses: actions/checkout@v3
+    - name: Install and run golangci-lint
+      uses: golangci/golangci-lint-action@v3
+      with:
+        version: v1.5
+        args: --verbose --timeout=3m
 
     - name: Run go test and generate coverage report
       run: |

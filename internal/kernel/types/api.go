@@ -38,6 +38,6 @@ func (k APIKind) String() string {
 	case DeleteSubscription:
 		return "DeleteSubscription"
 	default:
-		return "api"
+		panic("invalid request")
 	}
 }

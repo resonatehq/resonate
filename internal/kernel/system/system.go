@@ -1,6 +1,7 @@
 package system
 
 import (
+	"log/slog"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -58,6 +59,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.cfg.SubmissionBatchSize, timeoutCh) {
 			if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
+				slog.Info("api:dequeue", "sqe", sqe.Submission)
 				s.scheduler.Add(coroutine(t, sqe.Submission, sqe.Callback))
 			} else {
 				panic("invalid api request")

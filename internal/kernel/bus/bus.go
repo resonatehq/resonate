@@ -1,6 +1,8 @@
 package bus
 
-import "github.com/resonatehq/resonate/internal/kernel/types"
+import (
+	"github.com/resonatehq/resonate/internal/kernel/types"
+)
 
 type Submission interface {
 	types.Submission | types.Request
