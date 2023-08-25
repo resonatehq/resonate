@@ -40,7 +40,7 @@ jobs:
   #       args: --verbose --timeout=3m
 
   test:
-    needs: setup
+    # needs: setup
     runs-on: ubuntu-latest
 
     steps:
@@ -49,6 +49,9 @@ jobs:
       with:
         go-version: "1.21.0"
         cache: false
+
+    - name: Go version
+      run: go version
 
     - name: Checkout repository
       uses: actions/checkout@v3
