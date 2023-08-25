@@ -6,10 +6,18 @@ option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/
 
 message Promise {
   string id = 1;
-  string state = 2;
+  State state = 2;
   Value param = 3;
   Value value = 4;
   int64 timeout = 5;
+}
+
+enum State {
+  PENDING = 0;
+  RESOLVED = 1;
+  REJECTED = 2;
+  REJECTED_TIMEDOUT = 3;
+  REJECTED_CANCELED = 4;
 }
 
 message Subscription {

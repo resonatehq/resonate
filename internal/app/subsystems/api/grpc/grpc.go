@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
@@ -473,7 +472,7 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 
 	return &grpcApi.Promise{
 		Id:    promise.Id,
-		State: strings.ToUpper(promise.State.String()),
+		State: protoState(promise.State),
 		Param: &grpcApi.Value{
 			Headers: promise.Param.Headers,
 			Ikey:    paramIkey,
@@ -485,6 +484,23 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 			Data:    promise.Param.Data,
 		},
 		Timeout: promise.Timeout,
+	}
+}
+
+func protoState(state promise.State) grpcApi.State {
+	switch state {
+	case promise.Pending:
+		return grpcApi.State_PENDING
+	case promise.Resolved:
+		return grpcApi.State_RESOLVED
+	case promise.Rejected:
+		return grpcApi.State_REJECTED
+	case promise.Timedout:
+		return grpcApi.State_REJECTED_TIMEDOUT
+	case promise.Canceled:
+		return grpcApi.State_REJECTED_CANCELED
+	default:
+		panic("invalid state")
 	}
 }
 

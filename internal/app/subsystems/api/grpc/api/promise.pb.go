@@ -20,6 +20,61 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type State int32
+
+const (
+	State_PENDING           State = 0
+	State_RESOLVED          State = 1
+	State_REJECTED          State = 2
+	State_REJECTED_TIMEDOUT State = 3
+	State_REJECTED_CANCELED State = 4
+)
+
+// Enum value maps for State.
+var (
+	State_name = map[int32]string{
+		0: "PENDING",
+		1: "RESOLVED",
+		2: "REJECTED",
+		3: "REJECTED_TIMEDOUT",
+		4: "REJECTED_CANCELED",
+	}
+	State_value = map[string]int32{
+		"PENDING":           0,
+		"RESOLVED":          1,
+		"REJECTED":          2,
+		"REJECTED_TIMEDOUT": 3,
+		"REJECTED_CANCELED": 4,
+	}
+)
+
+func (x State) Enum() *State {
+	p := new(State)
+	*p = x
+	return p
+}
+
+func (x State) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (State) Descriptor() protoreflect.EnumDescriptor {
+	return file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[0].Descriptor()
+}
+
+func (State) Type() protoreflect.EnumType {
+	return &file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[0]
+}
+
+func (x State) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use State.Descriptor instead.
+func (State) EnumDescriptor() ([]byte, []int) {
+	return file_internal_app_subsystems_api_grpc_api_promise_proto_rawDescGZIP(), []int{0}
+}
+
 type Status int32
 
 const (
@@ -65,11 +120,11 @@ func (x Status) String() string {
 }
 
 func (Status) Descriptor() protoreflect.EnumDescriptor {
-	return file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[0].Descriptor()
+	return file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[1].Descriptor()
 }
 
 func (Status) Type() protoreflect.EnumType {
-	return &file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[0]
+	return &file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes[1]
 }
 
 func (x Status) Number() protoreflect.EnumNumber {
@@ -78,7 +133,7 @@ func (x Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Status.Descriptor instead.
 func (Status) EnumDescriptor() ([]byte, []int) {
-	return file_internal_app_subsystems_api_grpc_api_promise_proto_rawDescGZIP(), []int{0}
+	return file_internal_app_subsystems_api_grpc_api_promise_proto_rawDescGZIP(), []int{1}
 }
 
 type Promise struct {
@@ -87,7 +142,7 @@ type Promise struct {
 	unknownFields protoimpl.UnknownFields
 
 	Id      string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	State   string `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	State   State  `protobuf:"varint,2,opt,name=state,proto3,enum=promise.State" json:"state,omitempty"`
 	Param   *Value `protobuf:"bytes,3,opt,name=param,proto3" json:"param,omitempty"`
 	Value   *Value `protobuf:"bytes,4,opt,name=value,proto3" json:"value,omitempty"`
 	Timeout int64  `protobuf:"varint,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
@@ -132,11 +187,11 @@ func (x *Promise) GetId() string {
 	return ""
 }
 
-func (x *Promise) GetState() string {
+func (x *Promise) GetState() State {
 	if x != nil {
 		return x.State
 	}
-	return ""
+	return State_PENDING
 }
 
 func (x *Promise) GetParam() *Value {
@@ -1258,10 +1313,11 @@ var file_internal_app_subsystems_api_grpc_api_promise_proto_rawDesc = []byte{
 	0x0a, 0x32, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c, 0x2f, 0x61, 0x70, 0x70, 0x2f, 0x73,
 	0x75, 0x62, 0x73, 0x79, 0x73, 0x74, 0x65, 0x6d, 0x73, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x67, 0x72,
 	0x70, 0x63, 0x2f, 0x61, 0x70, 0x69, 0x2f, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x2e, 0x70,
-	0x72, 0x6f, 0x74, 0x6f, 0x12, 0x07, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x22, 0x95, 0x01,
+	0x72, 0x6f, 0x74, 0x6f, 0x12, 0x07, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x22, 0xa5, 0x01,
 	0x0a, 0x07, 0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x12, 0x0e, 0x0a, 0x02, 0x69, 0x64, 0x18,
-	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x02, 0x69, 0x64, 0x12, 0x14, 0x0a, 0x05, 0x73, 0x74, 0x61,
-	0x74, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x09, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12,
+	0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x02, 0x69, 0x64, 0x12, 0x24, 0x0a, 0x05, 0x73, 0x74, 0x61,
+	0x74, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0e, 0x32, 0x0e, 0x2e, 0x70, 0x72, 0x6f, 0x6d, 0x69,
+	0x73, 0x65, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x65, 0x52, 0x05, 0x73, 0x74, 0x61, 0x74, 0x65, 0x12,
 	0x24, 0x0a, 0x05, 0x70, 0x61, 0x72, 0x61, 0x6d, 0x18, 0x03, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x0e,
 	0x2e, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x2e, 0x56, 0x61, 0x6c, 0x75, 0x65, 0x52, 0x05,
 	0x70, 0x61, 0x72, 0x61, 0x6d, 0x12, 0x24, 0x0a, 0x05, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x18, 0x04,
@@ -1386,7 +1442,13 @@ var file_internal_app_subsystems_api_grpc_api_promise_proto_rawDesc = []byte{
 	0x72, 0x69, 0x70, 0x74, 0x69, 0x6f, 0x6e, 0x52, 0x65, 0x73, 0x70, 0x6f, 0x6e, 0x73, 0x65, 0x12,
 	0x27, 0x0a, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0e, 0x32,
 	0x0f, 0x2e, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x2e, 0x53, 0x74, 0x61, 0x74, 0x75, 0x73,
-	0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x2a, 0x6a, 0x0a, 0x06, 0x53, 0x74, 0x61, 0x74,
+	0x52, 0x06, 0x73, 0x74, 0x61, 0x74, 0x75, 0x73, 0x2a, 0x5e, 0x0a, 0x05, 0x53, 0x74, 0x61, 0x74,
+	0x65, 0x12, 0x0b, 0x0a, 0x07, 0x50, 0x45, 0x4e, 0x44, 0x49, 0x4e, 0x47, 0x10, 0x00, 0x12, 0x0c,
+	0x0a, 0x08, 0x52, 0x45, 0x53, 0x4f, 0x4c, 0x56, 0x45, 0x44, 0x10, 0x01, 0x12, 0x0c, 0x0a, 0x08,
+	0x52, 0x45, 0x4a, 0x45, 0x43, 0x54, 0x45, 0x44, 0x10, 0x02, 0x12, 0x15, 0x0a, 0x11, 0x52, 0x45,
+	0x4a, 0x45, 0x43, 0x54, 0x45, 0x44, 0x5f, 0x54, 0x49, 0x4d, 0x45, 0x44, 0x4f, 0x55, 0x54, 0x10,
+	0x03, 0x12, 0x15, 0x0a, 0x11, 0x52, 0x45, 0x4a, 0x45, 0x43, 0x54, 0x45, 0x44, 0x5f, 0x43, 0x41,
+	0x4e, 0x43, 0x45, 0x4c, 0x45, 0x44, 0x10, 0x04, 0x2a, 0x6a, 0x0a, 0x06, 0x53, 0x74, 0x61, 0x74,
 	0x75, 0x73, 0x12, 0x0b, 0x0a, 0x07, 0x55, 0x4e, 0x4b, 0x4e, 0x4f, 0x57, 0x4e, 0x10, 0x00, 0x12,
 	0x07, 0x0a, 0x02, 0x4f, 0x4b, 0x10, 0xc8, 0x01, 0x12, 0x0c, 0x0a, 0x07, 0x43, 0x52, 0x45, 0x41,
 	0x54, 0x45, 0x44, 0x10, 0xc9, 0x01, 0x12, 0x0e, 0x0a, 0x09, 0x4e, 0x4f, 0x43, 0x4f, 0x4e, 0x54,
@@ -1463,82 +1525,84 @@ func file_internal_app_subsystems_api_grpc_api_promise_proto_rawDescGZIP() []byt
 	return file_internal_app_subsystems_api_grpc_api_promise_proto_rawDescData
 }
 
-var file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_internal_app_subsystems_api_grpc_api_promise_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_internal_app_subsystems_api_grpc_api_promise_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_internal_app_subsystems_api_grpc_api_promise_proto_goTypes = []interface{}{
-	(Status)(0),                        // 0: promise.Status
-	(*Promise)(nil),                    // 1: promise.Promise
-	(*Subscription)(nil),               // 2: promise.Subscription
-	(*Value)(nil),                      // 3: promise.Value
-	(*ReadPromiseRequest)(nil),         // 4: promise.ReadPromiseRequest
-	(*ReadPromiseResponse)(nil),        // 5: promise.ReadPromiseResponse
-	(*SearchPromisesRequest)(nil),      // 6: promise.SearchPromisesRequest
-	(*SearchPromisesResponse)(nil),     // 7: promise.SearchPromisesResponse
-	(*CreatePromiseRequest)(nil),       // 8: promise.CreatePromiseRequest
-	(*CreatePromiseResponse)(nil),      // 9: promise.CreatePromiseResponse
-	(*CancelPromiseRequest)(nil),       // 10: promise.CancelPromiseRequest
-	(*CancelPromiseResponse)(nil),      // 11: promise.CancelPromiseResponse
-	(*ResolvePromiseRequest)(nil),      // 12: promise.ResolvePromiseRequest
-	(*ResolvePromiseResponse)(nil),     // 13: promise.ResolvePromiseResponse
-	(*RejectPromiseRequest)(nil),       // 14: promise.RejectPromiseRequest
-	(*RejectPromiseResponse)(nil),      // 15: promise.RejectPromiseResponse
-	(*ReadSubscriptionsRequest)(nil),   // 16: promise.ReadSubscriptionsRequest
-	(*ReadSubscriptionsResponse)(nil),  // 17: promise.ReadSubscriptionsResponse
-	(*CreateSubscriptionRequest)(nil),  // 18: promise.CreateSubscriptionRequest
-	(*CreateSubscriptionResponse)(nil), // 19: promise.CreateSubscriptionResponse
-	(*DeleteSubscriptionRequest)(nil),  // 20: promise.DeleteSubscriptionRequest
-	(*DeleteSubscriptionResponse)(nil), // 21: promise.DeleteSubscriptionResponse
-	nil,                                // 22: promise.Value.HeadersEntry
+	(State)(0),                         // 0: promise.State
+	(Status)(0),                        // 1: promise.Status
+	(*Promise)(nil),                    // 2: promise.Promise
+	(*Subscription)(nil),               // 3: promise.Subscription
+	(*Value)(nil),                      // 4: promise.Value
+	(*ReadPromiseRequest)(nil),         // 5: promise.ReadPromiseRequest
+	(*ReadPromiseResponse)(nil),        // 6: promise.ReadPromiseResponse
+	(*SearchPromisesRequest)(nil),      // 7: promise.SearchPromisesRequest
+	(*SearchPromisesResponse)(nil),     // 8: promise.SearchPromisesResponse
+	(*CreatePromiseRequest)(nil),       // 9: promise.CreatePromiseRequest
+	(*CreatePromiseResponse)(nil),      // 10: promise.CreatePromiseResponse
+	(*CancelPromiseRequest)(nil),       // 11: promise.CancelPromiseRequest
+	(*CancelPromiseResponse)(nil),      // 12: promise.CancelPromiseResponse
+	(*ResolvePromiseRequest)(nil),      // 13: promise.ResolvePromiseRequest
+	(*ResolvePromiseResponse)(nil),     // 14: promise.ResolvePromiseResponse
+	(*RejectPromiseRequest)(nil),       // 15: promise.RejectPromiseRequest
+	(*RejectPromiseResponse)(nil),      // 16: promise.RejectPromiseResponse
+	(*ReadSubscriptionsRequest)(nil),   // 17: promise.ReadSubscriptionsRequest
+	(*ReadSubscriptionsResponse)(nil),  // 18: promise.ReadSubscriptionsResponse
+	(*CreateSubscriptionRequest)(nil),  // 19: promise.CreateSubscriptionRequest
+	(*CreateSubscriptionResponse)(nil), // 20: promise.CreateSubscriptionResponse
+	(*DeleteSubscriptionRequest)(nil),  // 21: promise.DeleteSubscriptionRequest
+	(*DeleteSubscriptionResponse)(nil), // 22: promise.DeleteSubscriptionResponse
+	nil,                                // 23: promise.Value.HeadersEntry
 }
 var file_internal_app_subsystems_api_grpc_api_promise_proto_depIdxs = []int32{
-	3,  // 0: promise.Promise.param:type_name -> promise.Value
-	3,  // 1: promise.Promise.value:type_name -> promise.Value
-	22, // 2: promise.Value.headers:type_name -> promise.Value.HeadersEntry
-	0,  // 3: promise.ReadPromiseResponse.status:type_name -> promise.Status
-	1,  // 4: promise.ReadPromiseResponse.promise:type_name -> promise.Promise
-	0,  // 5: promise.SearchPromisesResponse.status:type_name -> promise.Status
-	1,  // 6: promise.SearchPromisesResponse.promises:type_name -> promise.Promise
-	3,  // 7: promise.CreatePromiseRequest.param:type_name -> promise.Value
-	2,  // 8: promise.CreatePromiseRequest.subscriptions:type_name -> promise.Subscription
-	0,  // 9: promise.CreatePromiseResponse.status:type_name -> promise.Status
-	1,  // 10: promise.CreatePromiseResponse.promise:type_name -> promise.Promise
-	3,  // 11: promise.CancelPromiseRequest.value:type_name -> promise.Value
-	0,  // 12: promise.CancelPromiseResponse.status:type_name -> promise.Status
-	1,  // 13: promise.CancelPromiseResponse.promise:type_name -> promise.Promise
-	3,  // 14: promise.ResolvePromiseRequest.value:type_name -> promise.Value
-	0,  // 15: promise.ResolvePromiseResponse.status:type_name -> promise.Status
-	1,  // 16: promise.ResolvePromiseResponse.promise:type_name -> promise.Promise
-	3,  // 17: promise.RejectPromiseRequest.value:type_name -> promise.Value
-	0,  // 18: promise.RejectPromiseResponse.status:type_name -> promise.Status
-	1,  // 19: promise.RejectPromiseResponse.promise:type_name -> promise.Promise
-	0,  // 20: promise.ReadSubscriptionsResponse.status:type_name -> promise.Status
-	2,  // 21: promise.ReadSubscriptionsResponse.subscriptions:type_name -> promise.Subscription
-	0,  // 22: promise.CreateSubscriptionResponse.status:type_name -> promise.Status
-	2,  // 23: promise.CreateSubscriptionResponse.subscription:type_name -> promise.Subscription
-	0,  // 24: promise.DeleteSubscriptionResponse.status:type_name -> promise.Status
-	4,  // 25: promise.PromiseService.ReadPromise:input_type -> promise.ReadPromiseRequest
-	6,  // 26: promise.PromiseService.SearchPromises:input_type -> promise.SearchPromisesRequest
-	8,  // 27: promise.PromiseService.CreatePromise:input_type -> promise.CreatePromiseRequest
-	10, // 28: promise.PromiseService.CancelPromise:input_type -> promise.CancelPromiseRequest
-	12, // 29: promise.PromiseService.ResolvePromise:input_type -> promise.ResolvePromiseRequest
-	14, // 30: promise.PromiseService.RejectPromise:input_type -> promise.RejectPromiseRequest
-	16, // 31: promise.PromiseService.ReadSubscriptions:input_type -> promise.ReadSubscriptionsRequest
-	18, // 32: promise.PromiseService.CreateSubscription:input_type -> promise.CreateSubscriptionRequest
-	20, // 33: promise.PromiseService.DeleteSubscription:input_type -> promise.DeleteSubscriptionRequest
-	5,  // 34: promise.PromiseService.ReadPromise:output_type -> promise.ReadPromiseResponse
-	7,  // 35: promise.PromiseService.SearchPromises:output_type -> promise.SearchPromisesResponse
-	9,  // 36: promise.PromiseService.CreatePromise:output_type -> promise.CreatePromiseResponse
-	11, // 37: promise.PromiseService.CancelPromise:output_type -> promise.CancelPromiseResponse
-	13, // 38: promise.PromiseService.ResolvePromise:output_type -> promise.ResolvePromiseResponse
-	15, // 39: promise.PromiseService.RejectPromise:output_type -> promise.RejectPromiseResponse
-	17, // 40: promise.PromiseService.ReadSubscriptions:output_type -> promise.ReadSubscriptionsResponse
-	19, // 41: promise.PromiseService.CreateSubscription:output_type -> promise.CreateSubscriptionResponse
-	21, // 42: promise.PromiseService.DeleteSubscription:output_type -> promise.DeleteSubscriptionResponse
-	34, // [34:43] is the sub-list for method output_type
-	25, // [25:34] is the sub-list for method input_type
-	25, // [25:25] is the sub-list for extension type_name
-	25, // [25:25] is the sub-list for extension extendee
-	0,  // [0:25] is the sub-list for field type_name
+	0,  // 0: promise.Promise.state:type_name -> promise.State
+	4,  // 1: promise.Promise.param:type_name -> promise.Value
+	4,  // 2: promise.Promise.value:type_name -> promise.Value
+	23, // 3: promise.Value.headers:type_name -> promise.Value.HeadersEntry
+	1,  // 4: promise.ReadPromiseResponse.status:type_name -> promise.Status
+	2,  // 5: promise.ReadPromiseResponse.promise:type_name -> promise.Promise
+	1,  // 6: promise.SearchPromisesResponse.status:type_name -> promise.Status
+	2,  // 7: promise.SearchPromisesResponse.promises:type_name -> promise.Promise
+	4,  // 8: promise.CreatePromiseRequest.param:type_name -> promise.Value
+	3,  // 9: promise.CreatePromiseRequest.subscriptions:type_name -> promise.Subscription
+	1,  // 10: promise.CreatePromiseResponse.status:type_name -> promise.Status
+	2,  // 11: promise.CreatePromiseResponse.promise:type_name -> promise.Promise
+	4,  // 12: promise.CancelPromiseRequest.value:type_name -> promise.Value
+	1,  // 13: promise.CancelPromiseResponse.status:type_name -> promise.Status
+	2,  // 14: promise.CancelPromiseResponse.promise:type_name -> promise.Promise
+	4,  // 15: promise.ResolvePromiseRequest.value:type_name -> promise.Value
+	1,  // 16: promise.ResolvePromiseResponse.status:type_name -> promise.Status
+	2,  // 17: promise.ResolvePromiseResponse.promise:type_name -> promise.Promise
+	4,  // 18: promise.RejectPromiseRequest.value:type_name -> promise.Value
+	1,  // 19: promise.RejectPromiseResponse.status:type_name -> promise.Status
+	2,  // 20: promise.RejectPromiseResponse.promise:type_name -> promise.Promise
+	1,  // 21: promise.ReadSubscriptionsResponse.status:type_name -> promise.Status
+	3,  // 22: promise.ReadSubscriptionsResponse.subscriptions:type_name -> promise.Subscription
+	1,  // 23: promise.CreateSubscriptionResponse.status:type_name -> promise.Status
+	3,  // 24: promise.CreateSubscriptionResponse.subscription:type_name -> promise.Subscription
+	1,  // 25: promise.DeleteSubscriptionResponse.status:type_name -> promise.Status
+	5,  // 26: promise.PromiseService.ReadPromise:input_type -> promise.ReadPromiseRequest
+	7,  // 27: promise.PromiseService.SearchPromises:input_type -> promise.SearchPromisesRequest
+	9,  // 28: promise.PromiseService.CreatePromise:input_type -> promise.CreatePromiseRequest
+	11, // 29: promise.PromiseService.CancelPromise:input_type -> promise.CancelPromiseRequest
+	13, // 30: promise.PromiseService.ResolvePromise:input_type -> promise.ResolvePromiseRequest
+	15, // 31: promise.PromiseService.RejectPromise:input_type -> promise.RejectPromiseRequest
+	17, // 32: promise.PromiseService.ReadSubscriptions:input_type -> promise.ReadSubscriptionsRequest
+	19, // 33: promise.PromiseService.CreateSubscription:input_type -> promise.CreateSubscriptionRequest
+	21, // 34: promise.PromiseService.DeleteSubscription:input_type -> promise.DeleteSubscriptionRequest
+	6,  // 35: promise.PromiseService.ReadPromise:output_type -> promise.ReadPromiseResponse
+	8,  // 36: promise.PromiseService.SearchPromises:output_type -> promise.SearchPromisesResponse
+	10, // 37: promise.PromiseService.CreatePromise:output_type -> promise.CreatePromiseResponse
+	12, // 38: promise.PromiseService.CancelPromise:output_type -> promise.CancelPromiseResponse
+	14, // 39: promise.PromiseService.ResolvePromise:output_type -> promise.ResolvePromiseResponse
+	16, // 40: promise.PromiseService.RejectPromise:output_type -> promise.RejectPromiseResponse
+	18, // 41: promise.PromiseService.ReadSubscriptions:output_type -> promise.ReadSubscriptionsResponse
+	20, // 42: promise.PromiseService.CreateSubscription:output_type -> promise.CreateSubscriptionResponse
+	22, // 43: promise.PromiseService.DeleteSubscription:output_type -> promise.DeleteSubscriptionResponse
+	35, // [35:44] is the sub-list for method output_type
+	26, // [26:35] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_internal_app_subsystems_api_grpc_api_promise_proto_init() }
@@ -1805,7 +1869,7 @@ func file_internal_app_subsystems_api_grpc_api_promise_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_internal_app_subsystems_api_grpc_api_promise_proto_rawDesc,
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   1,
