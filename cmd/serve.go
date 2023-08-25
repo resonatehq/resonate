@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -59,9 +60,11 @@ var serveCmd = &cobra.Command{
 
 		// start api/aio
 		if err := api.Start(); err != nil {
+			slog.Error("failed to start api", "error", err)
 			return err
 		}
 		if err := aio.Start(); err != nil {
+			slog.Error("failed to start aio", "error", err)
 			return err
 		}
 
@@ -86,9 +89,12 @@ var serveCmd = &cobra.Command{
 			// halt until we get a shutdown signal or an error
 			// occurs, whicever happens first
 			select {
-			case <-sig:
-			case <-api.Errors():
-			case <-aio.Errors():
+			case s := <-sig:
+				slog.Info("shutdown signal recieved, shutting down", "signal", s)
+			case err := <-api.Errors():
+				slog.Error("api error recieved, shutting down", "error", err)
+			case err := <-aio.Errors():
+				slog.Error("aio error recieved, shutting down", "error", err)
 			}
 
 			// shutdown api/aio
@@ -98,14 +104,17 @@ var serveCmd = &cobra.Command{
 
 		// control loop
 		if err := system.Loop(); err != nil {
+			slog.Error("control loop failed", "error", err)
 			return err
 		}
 
 		// stop api/aio
 		if err := api.Stop(); err != nil {
+			slog.Error("failed to stop api", "error", err)
 			return err
 		}
 		if err := aio.Stop(); err != nil {
+			slog.Error("failed to stop aio", "error", err)
 			return err
 		}
 

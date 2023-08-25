@@ -1,6 +1,8 @@
 package coroutines
 
 import (
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -28,6 +30,7 @@ func SearchPromises(t int64, req *types.Request, res func(*types.Response, error
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to search promises", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
@@ -41,6 +44,7 @@ func SearchPromises(t int64, req *types.Request, res func(*types.Response, error
 				if t < record.Timeout {
 					promise, err := record.Promise()
 					if err != nil {
+						slog.Warn("failed to parse promise record", "record", record, "err", err)
 						continue
 					}
 

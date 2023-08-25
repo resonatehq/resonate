@@ -1,6 +1,8 @@
 package coroutines
 
 import (
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -31,6 +33,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to read promise", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
@@ -52,6 +55,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 
 				param, err := record.Param()
 				if err != nil {
+					slog.Error("failed to parse promise record param", "record", record, "err", err)
 					res(nil, err)
 					return
 				}
@@ -60,6 +64,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 					if t >= record.Timeout {
 						s.Add(TimeoutPromise(t, req.CancelPromise.Id, CancelPromise(t, req, res), func(err error) {
 							if err != nil {
+								slog.Error("failed to timeout promise", "req", req, "err", err)
 								res(nil, err)
 								return
 							}
@@ -101,6 +106,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 
 						c.Yield(submission, func(completion *types.Completion, err error) {
 							if err != nil {
+								slog.Error("failed to read subscriptions", "req", req, "err", err)
 								res(nil, err)
 								return
 							}
@@ -148,6 +154,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 
 							c.Yield(submission, func(completion *types.Completion, err error) {
 								if err != nil {
+									slog.Error("failed to update state", "req", req, "err", err)
 									res(nil, err)
 									return
 								}
@@ -180,6 +187,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 				} else {
 					p, err := record.Promise()
 					if err != nil {
+						slog.Error("failed to parse promise record", "record", record, "err", err)
 						res(nil, err)
 						return
 					}

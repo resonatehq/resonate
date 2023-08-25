@@ -28,10 +28,12 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	for _, coroutine := range s.coroutines {
 		if submission := coroutine.next(); submission != nil {
-			s.aio.Enqueue(&bus.SQE[types.Submission, types.Completion]{
+			sqe := &bus.SQE[types.Submission, types.Completion]{
 				Submission: submission,
 				Callback:   coroutine.resume,
-			})
+			}
+
+			s.aio.Enqueue(sqe)
 		}
 
 		if !coroutine.done() {

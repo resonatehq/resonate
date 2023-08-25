@@ -1,6 +1,8 @@
 package coroutines
 
 import (
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -37,6 +39,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to create subscription", "req", req, "err", err)
 				res(nil, err)
 				return
 			}

@@ -2,8 +2,9 @@ package grpc
 
 import (
 	"context"
-	"fmt"
 	"net"
+
+	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
@@ -43,7 +44,7 @@ func (g *Grpc) Start(errors chan<- error) {
 	}
 
 	// Start the gRPC server
-	fmt.Printf("grpc server listening on %s\n", g.addr)
+	slog.Info("starting grpc server", "addr", g.addr)
 	if err := g.server.Serve(listen); err != nil {
 		errors <- err
 	}

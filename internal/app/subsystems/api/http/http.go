@@ -2,9 +2,10 @@ package http
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
+
+	"log/slog"
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/api"
@@ -46,7 +47,7 @@ func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
 }
 
 func (h *Http) Start(errors chan<- error) {
-	fmt.Printf("http server listening on %s\n", h.addr)
+	slog.Info("starting http server", "addr", h.addr)
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		errors <- err
 	}
