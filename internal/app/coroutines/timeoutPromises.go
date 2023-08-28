@@ -12,7 +12,7 @@ import (
 )
 
 func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromises:%d", t), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromises(t=%d)", t), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{

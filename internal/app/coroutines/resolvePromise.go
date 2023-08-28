@@ -11,7 +11,7 @@ import (
 )
 
 func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("ResolvePromise:%s", req.ResolvePromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("ResolvePromise(id=%s)", req.ResolvePromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.ResolvePromise.Value.Headers == nil {
 			req.ResolvePromise.Value.Headers = map[string]string{}
 		}

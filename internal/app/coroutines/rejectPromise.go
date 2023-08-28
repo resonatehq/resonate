@@ -11,7 +11,7 @@ import (
 )
 
 func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("RejectPromise:%s", req.RejectPromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("RejectPromise(id=%s)", req.RejectPromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
 		}

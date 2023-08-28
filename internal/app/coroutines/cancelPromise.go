@@ -11,7 +11,7 @@ import (
 )
 
 func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("CancelPromise:%s", req.CancelPromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("CancelPromise(id=%s)", req.CancelPromise.Id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CancelPromise.Value.Headers == nil {
 			req.CancelPromise.Value.Headers = map[string]string{}
 		}

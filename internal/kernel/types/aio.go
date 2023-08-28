@@ -1,5 +1,7 @@
 package types
 
+import "fmt"
+
 type AIOKind int
 
 const (
@@ -7,19 +9,6 @@ const (
 	Network
 	Store
 )
-
-func (k AIOKind) String() string {
-	switch k {
-	case Echo:
-		return "Echo"
-	case Network:
-		return "Network"
-	case Store:
-		return "Store"
-	default:
-		panic("invalid submission")
-	}
-}
 
 type Submission struct {
 	Kind    AIOKind
@@ -29,8 +18,16 @@ type Submission struct {
 }
 
 func (s *Submission) String() string {
-	// TODO: expand
-	return s.Kind.String()
+	switch s.Kind {
+	case Echo:
+		return fmt.Sprintf("Echo(data=%s)", s.Echo.Data)
+	case Network:
+		return fmt.Sprintf("Network(url=%s)", s.Network.Http.Url)
+	case Store:
+		return fmt.Sprintf("Store(commands=%d)", len(s.Store.Transaction.Commands))
+	default:
+		panic("invalid submission")
+	}
 }
 
 type Completion struct {
@@ -41,6 +38,14 @@ type Completion struct {
 }
 
 func (c *Completion) String() string {
-	// TODO: expand
-	return c.Kind.String()
+	switch c.Kind {
+	case Echo:
+		return fmt.Sprintf("Echo(data=%s)", c.Echo.Data)
+	case Network:
+		return fmt.Sprintf("Network(status=%s)", c.Network.Http.Status)
+	case Store:
+		return fmt.Sprintf("Store(results=%d)", len(c.Store.Results))
+	default:
+		panic("invalid completion")
+	}
 }

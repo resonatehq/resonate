@@ -31,7 +31,7 @@ func (i inflight) remove(id int64) {
 }
 
 func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions:%d", t), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions(t=%d)", t), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{

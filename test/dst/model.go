@@ -39,14 +39,14 @@ func (m *Model) Step(req *types.Request, res *types.Response, err error) error {
 	}
 
 	if req.Kind != res.Kind {
-		return fmt.Errorf("unexpected response kind '%s' for request kind '%s'", res.Kind, req.Kind)
+		return fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind)
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
 		return f(req, res)
 	}
 
-	return fmt.Errorf("unexpected request/response kind '%s'", req.Kind)
+	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
 }
 
 func (m *Model) ValidateReadPromise(req *types.Request, res *types.Response) error {

@@ -11,7 +11,7 @@ import (
 )
 
 func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise:%s", id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", id), func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
