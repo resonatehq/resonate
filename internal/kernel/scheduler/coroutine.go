@@ -4,21 +4,27 @@ import "github.com/resonatehq/resonate/internal/kernel/types"
 
 type Coroutine struct {
 	name         string
+	kind         string
 	init         func(*Scheduler, *Coroutine)
 	onDone       []func()
 	submission   *types.Submission
 	continuation func(*types.Completion, error)
 }
 
-func NewCoroutine(name string, init func(*Scheduler, *Coroutine)) *Coroutine {
+func NewCoroutine(name string, kind string, init func(*Scheduler, *Coroutine)) *Coroutine {
 	return &Coroutine{
 		name: name,
+		kind: kind,
 		init: init,
 	}
 }
 
 func (c *Coroutine) String() string {
 	return c.name
+}
+
+func (c *Coroutine) Kind() string {
+	return c.kind
 }
 
 func (c *Coroutine) Yield(submission *types.Submission, continuation func(*types.Completion, error)) {

@@ -10,6 +10,19 @@ const (
 	Store
 )
 
+func (k AIOKind) String() string {
+	switch k {
+	case Echo:
+		return "echo"
+	case Network:
+		return "network"
+	case Store:
+		return "store"
+	default:
+		panic("invalid aio")
+	}
+}
+
 type Submission struct {
 	Kind    AIOKind
 	Echo    *EchoSubmission

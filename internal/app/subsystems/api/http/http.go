@@ -8,6 +8,8 @@ import (
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -19,7 +21,7 @@ type Http struct {
 	server  *http.Server
 }
 
-func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
+func New(api api.API, addr string, timeout time.Duration, reg *prometheus.Registry) api.Subsystem {
 	r := gin.Default()
 	s := &server{api: api}
 
@@ -35,6 +37,9 @@ func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
 	// Subscription API
 	r.POST("/subscriptions", s.createSubscription)
 	r.DELETE("/subscriptions/:id", s.deleteSubscription)
+
+	// Metrics
+	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})))
 
 	return &Http{
 		addr:    addr,

@@ -6,22 +6,27 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/metrics"
 )
 
 type Scheduler struct {
 	aio        aio.AIO
+	metrics    *metrics.Metrics
 	coroutines []*Coroutine
 }
 
-func NewScheduler(aio aio.AIO) *Scheduler {
+func NewScheduler(aio aio.AIO, metrics *metrics.Metrics) *Scheduler {
 	return &Scheduler{
 		aio:        aio,
+		metrics:    metrics,
 		coroutines: []*Coroutine{},
 	}
 }
 
 func (s *Scheduler) Add(coroutine *Coroutine) {
-	slog.Info("scheduler:add", "coroutine", coroutine.String())
+	slog.Debug("scheduler:add", "coroutine", coroutine.String())
+	s.metrics.CoroutinesTotal.WithLabelValues(coroutine.Kind()).Inc()
+	s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.Kind()).Inc()
 
 	coroutine.init(s, coroutine)
 	s.coroutines = append(s.coroutines, coroutine)
@@ -32,19 +37,16 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	for _, coroutine := range s.coroutines {
 		if submission := coroutine.next(); submission != nil {
-			sqe := &bus.SQE[types.Submission, types.Completion]{
+			s.aio.Enqueue(&bus.SQE[types.Submission, types.Completion]{
 				Submission: submission,
 				Callback:   coroutine.resume,
-			}
-
-			slog.Info("aio:enqueue", "sqe", sqe.Submission)
-			s.aio.Enqueue(sqe)
+			})
 		}
 
 		if !coroutine.done() {
 			coroutines = append(coroutines, coroutine)
 		} else {
-			slog.Info("scheduler:rmv", "coroutine", coroutine.String())
+			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.Kind()).Dec()
 		}
 	}
 
@@ -56,7 +58,6 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	// callback cqes
 	for _, cqe := range s.aio.Dequeue(batchSize) {
-		slog.Info("aio:dequeue", "cqe", cqe.Completion)
 		cqe.Callback(cqe.Completion, cqe.Error)
 	}
 }

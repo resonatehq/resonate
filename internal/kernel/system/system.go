@@ -6,6 +6,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -16,6 +17,7 @@ type System struct {
 	cfg       *Config
 	api       api.API
 	aio       aio.AIO
+	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
 	onRequest map[types.APIKind]func(int64, *types.Request, func(*types.Response, error)) *scheduler.Coroutine
 	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine
@@ -30,12 +32,13 @@ type Config struct {
 	CompletionBatchSize   int
 }
 
-func New(cfg *Config, api api.API, aio aio.AIO) *System {
+func New(cfg *Config, api api.API, aio aio.AIO, metrics *metrics.Metrics) *System {
 	return &System{
 		cfg:       cfg,
 		api:       api,
 		aio:       aio,
-		scheduler: scheduler.NewScheduler(aio),
+		metrics:   metrics,
+		scheduler: scheduler.NewScheduler(aio, metrics),
 		onRequest: map[types.APIKind]func(int64, *types.Request, func(*types.Response, error)) *scheduler.Coroutine{},
 		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine{},
 	}
@@ -59,7 +62,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.cfg.SubmissionBatchSize, timeoutCh) {
 			if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-				slog.Info("api:dequeue", "sqe", sqe.Submission)
+				slog.Debug("api:dequeue", "sqe", sqe.Submission)
 				s.scheduler.Add(coroutine(t, sqe.Submission, sqe.Callback))
 			} else {
 				panic("invalid api request")
