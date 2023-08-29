@@ -2,9 +2,11 @@ package aio
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/metrics"
 )
 
 type AIO interface {
@@ -19,6 +21,7 @@ type aio struct {
 	subsystems map[types.AIOKind]*subsystemWrapper
 	done       bool
 	errors     chan error
+	metrics    *metrics.Metrics
 }
 
 type subsystemWrapper struct {
@@ -35,11 +38,12 @@ type workerWrapper struct {
 	flushCh chan int64
 }
 
-func New(size int) *aio {
+func New(size int, metrics *metrics.Metrics) *aio {
 	return &aio{
 		cq:         make(chan *bus.CQE[types.Submission, types.Completion], size),
 		subsystems: map[types.AIOKind]*subsystemWrapper{},
 		errors:     make(chan error),
+		metrics:    metrics,
 	}
 }
 
@@ -104,6 +108,8 @@ func (a *aio) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
 	if subsystem, ok := a.subsystems[sqe.Submission.Kind]; ok {
 		select {
 		case subsystem.sq <- sqe:
+			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
+			a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Inc()
 		default:
 			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
 		}
@@ -123,6 +129,18 @@ func (a *aio) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 			if !ok {
 				return cqes
 			}
+
+			var status string
+			if cqe.Error != nil {
+				status = "failure"
+			} else {
+				status = "success"
+			}
+
+			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
+			a.metrics.AioTotal.WithLabelValues(cqe.Completion.Kind.String(), status).Inc()
+			a.metrics.AioInFlight.WithLabelValues(cqe.Completion.Kind.String()).Dec()
+
 			cqes = append(cqes, cqe)
 		default:
 			return cqes

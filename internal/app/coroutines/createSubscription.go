@@ -1,6 +1,9 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -8,7 +11,7 @@ import (
 )
 
 func CreateSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("CreateSubscription(promiseId=%s, url=%s)", req.CreateSubscription.PromiseId, req.CreateSubscription.Url), "CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
 			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
@@ -37,6 +40,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to create subscription", "req", req, "err", err)
 				res(nil, err)
 				return
 			}

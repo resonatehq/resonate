@@ -2,6 +2,8 @@ package coroutines
 
 import (
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 
@@ -29,7 +31,7 @@ func (i inflight) remove(id int64) {
 }
 
 func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions(t=%d)", t), "NotifySubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -48,7 +50,7 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
-				// TODO: log
+				slog.Error("failed to read notifications", "err", err)
 				return
 			}
 
@@ -59,7 +61,7 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 				if t >= record.Time && !inflights.get(record.Id) {
 					notification, err := record.Notification()
 					if err != nil {
-						// TODO: log
+						slog.Warn("failed to parse notification record", "record", record, "err", err)
 						continue
 					}
 					s.Add(notifySubscription(notification))
@@ -70,7 +72,7 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 }
 
 func notifySubscription(notification *notification.Notification) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscription:%d", notification.Id), "NotifySubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// handle inflight cache
 		inflights.add(notification.Id)
 		c.OnDone(func() { inflights.remove(notification.Id) })
@@ -92,7 +94,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
-				// TODO: log (recoverable)
+				slog.Error("failed to read promise", "id", notification.PromiseId, "err", err)
 				return
 			}
 
@@ -102,21 +104,22 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				// TODO: log
+				slog.Warn("promise not found, aborting notification", "id", notification.PromiseId)
 				abort(c, notification)
 				return
 			}
 
-			promise, err := result.Records[0].Promise()
+			record := result.Records[0]
+			promise, err := record.Promise()
 			if err != nil {
-				// TODO: log
+				slog.Warn("failed to parse promise record, aborting notification", "record", record)
 				abort(c, notification)
 				return
 			}
 
 			body, err := json.Marshal(promise)
 			if err != nil {
-				// TODO: log
+				slog.Warn("failed to serialize promise, aborting notification", "promise", promise)
 				abort(c, notification)
 				return
 			}
@@ -133,8 +136,11 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			}
 
 			c.Yield(submission, func(completion *types.Completion, err error) {
-				var command *types.Command
+				if err != nil {
+					slog.Warn("failed to send notification", "promise", promise, "url", notification.Url)
+				}
 
+				var command *types.Command
 				if (err != nil || !isSuccessful(completion.Network.Http)) && notification.Attempt < notification.RetryPolicy.Attempts {
 					command = &types.Command{
 						Kind: types.StoreUpdateNotification,
@@ -163,9 +169,9 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				}
 
 				c.Yield(submission, func(completion *types.Completion, err error) {
-					// if err != nil {
-					// 	// TODO: log
-					// }
+					if err != nil {
+						slog.Warn("failed to update notification", "notification", notification)
+					}
 				})
 			})
 		})
@@ -190,9 +196,9 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 	}
 
 	c.Yield(submission, func(completion *types.Completion, err error) {
-		// if err != nil {
-		// 	// TODO: log
-		// }
+		if err != nil {
+			slog.Warn("failed to delete notification", "notification", notification)
+		}
 	})
 }
 

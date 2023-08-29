@@ -1,6 +1,9 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -8,7 +11,7 @@ import (
 )
 
 func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", id), "TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -27,6 +30,7 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to read subscriptions", "id", id, "err", err)
 				res(err)
 				return
 			}
@@ -78,6 +82,7 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 
 			c.Yield(submission, func(completion *types.Completion, err error) {
 				if err != nil {
+					slog.Error("failed to update state", "id", id, "err", err)
 					res(err)
 					return
 				}

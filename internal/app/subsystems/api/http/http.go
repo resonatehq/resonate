@@ -2,11 +2,14 @@ package http
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"time"
 
+	"log/slog"
+
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -18,7 +21,7 @@ type Http struct {
 	server  *http.Server
 }
 
-func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
+func New(api api.API, addr string, timeout time.Duration, reg *prometheus.Registry) api.Subsystem {
 	r := gin.Default()
 	s := &server{api: api}
 
@@ -35,6 +38,9 @@ func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
 	r.POST("/subscriptions", s.createSubscription)
 	r.DELETE("/subscriptions/:id", s.deleteSubscription)
 
+	// Metrics
+	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})))
+
 	return &Http{
 		addr:    addr,
 		timeout: timeout,
@@ -46,7 +52,7 @@ func New(api api.API, addr string, timeout time.Duration) api.Subsystem {
 }
 
 func (h *Http) Start(errors chan<- error) {
-	fmt.Printf("http server listening on %s\n", h.addr)
+	slog.Info("starting http server", "addr", h.addr)
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		errors <- err
 	}

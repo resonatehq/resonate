@@ -14,60 +14,60 @@ jobs:
     timeout-minutes: 150
 
     steps:
-      - name: Set up Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: "1.20"
-          cache: false
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version-file: go.mod
+        cache: false
 
-      - name: Set random seed
-        run: |
-          echo "SEED=$RANDOM" >> $GITHUB_ENV
+    - name: Set random seed
+      run: |
+        echo "SEED=$RANDOM" >> $GITHUB_ENV
 
-      - id: dst
-        name: Run dst (seed=${{ env.SEED }})
-        continue-on-error: true
-        run: |
-          go test -v --timeout=2h --count=1 -cpuprofile cpu.prof -memprofile mem.prof ./test/dst > logs.txt
+    - id: dst
+      name: Run dst (seed=${{ env.SEED }})
+      continue-on-error: true
+      run: |
+        go test -v --timeout=2h --count=1 -cpuprofile cpu.prof -memprofile mem.prof ./test/dst > logs.txt
 
-      - name: Create issue if dst failed
-        env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
-        if: steps.dst.outcome != 'success'
-        run: |
-          go run ./... dst --seed $SEED --file logs.txt --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
+    - name: Create issue if dst failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.dst.outcome != 'success'
+      run: |
+        go run ./... dst --seed $SEED --file logs.txt --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
 
-      - name: Install graphviz
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y graphviz
+    - name: Install graphviz
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y graphviz
 
-      - name: Generate cpu and mem images
-        run: |
-          go tool pprof --png -output=cpu.png cpu.prof
-          go tool pprof --png -output=mem.png mem.prof
+    - name: Generate cpu and mem images
+      run: |
+        go tool pprof --png -output=cpu.png cpu.prof
+        go tool pprof --png -output=mem.png mem.prof
 
-      # artifacts
-      - uses: actions/upload-artifact@v3
-        with:
-          name: cpu.png
-          path: cpu.png
-      - uses: actions/upload-artifact@v3
-        with:
-          name: cpu.prof
-          path: cpu.prof
-      - uses: actions/upload-artifact@v3
-        with:
-          name: mem.png
-          path: mem.png
-      - uses: actions/upload-artifact@v3
-        with:
-          name: mem.prof
-          path: mem.prof
-      - uses: actions/upload-artifact@v3
-        with:
-          name: logs
-          path: logs.txt
+    # artifacts
+    - uses: actions/upload-artifact@v3
+      with:
+        name: cpu.png
+        path: cpu.png
+    - uses: actions/upload-artifact@v3
+      with:
+        name: cpu.prof
+        path: cpu.prof
+    - uses: actions/upload-artifact@v3
+      with:
+        name: mem.png
+        path: mem.png
+    - uses: actions/upload-artifact@v3
+      with:
+        name: mem.prof
+        path: mem.prof
+    - uses: actions/upload-artifact@v3
+      with:
+        name: logs
+        path: logs.txt

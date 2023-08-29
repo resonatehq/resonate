@@ -1,6 +1,9 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -8,7 +11,7 @@ import (
 )
 
 func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("ReadSubscriptions(promiseId=%s)", req.ReadSubscriptions.PromiseId), "ReadSubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -27,6 +30,7 @@ func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, er
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to read subscriptions", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
@@ -36,9 +40,10 @@ func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, er
 			records := completion.Store.Results[0].ReadSubscriptions.Records
 			subscriptions := []*subscription.Subscription{}
 
-			for _, records := range records {
-				subscription, err := records.Subscription()
+			for _, record := range records {
+				subscription, err := record.Subscription()
 				if err != nil {
+					slog.Warn("failed to parse subscription record", "record", record, "err", err)
 					continue
 				}
 

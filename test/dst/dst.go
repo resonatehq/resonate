@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
@@ -13,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/test"
 )
 
@@ -47,8 +49,12 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 		CompletionBatchSize:   test.RangeIntn(r, 1, d.SQEsPerTick*Q_RATIO),
 	}
 
+	// metrics
+	reg := prometheus.NewRegistry()
+	metrics := metrics.New(reg)
+
 	// instatiate api/aio
-	api := api.New(SQ_SIZE)
+	api := api.New(SQ_SIZE, metrics)
 	aio := aio.NewDST()
 
 	// instatiate aio subsystems
@@ -71,7 +77,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	}
 
 	// instatiate system
-	system := system.New(cfg, api, aio)
+	system := system.New(cfg, api, aio, metrics)
 	system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
 	system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
 	system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
@@ -116,7 +122,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 
 		for _, req := range generator.Generate(r, time, r.Intn(d.SQEsPerTick)) {
 			req := req
-			api.Enqueue(&bus.SQE[types.Request, types.Response]{
+			api.Enqueue("dst", &bus.SQE[types.Request, types.Response]{
 				Submission: req,
 				Callback: func(res *types.Response, err error) {
 					var errMsg string

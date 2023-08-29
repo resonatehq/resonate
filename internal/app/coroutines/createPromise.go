@@ -1,6 +1,9 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -9,7 +12,7 @@ import (
 )
 
 func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("CreatePromise(id=%s)", req.CreatePromise.Id), "CreatePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
 		}
@@ -32,6 +35,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to read promise", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
@@ -90,6 +94,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 
 				c.Yield(submission, func(completion *types.Completion, err error) {
 					if err != nil {
+						slog.Error("failed to update state", "req", req, "err", err)
 						res(nil, err)
 						return
 					}
@@ -129,6 +134,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 				if record.State == promise.Pending && t >= record.Timeout {
 					s.Add(TimeoutPromise(t, req.CreatePromise.Id, CreatePromise(t, req, res), func(err error) {
 						if err != nil {
+							slog.Error("failed to timeout promise", "req", req, "err", err)
 							res(nil, err)
 							return
 						}
@@ -160,6 +166,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 				} else {
 					p, err := record.Promise()
 					if err != nil {
+						slog.Error("failed to parse promise record", "record", record, "err", err)
 						res(nil, err)
 						return
 					}

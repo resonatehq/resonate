@@ -1,13 +1,16 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("DeleteSubscription(id=%d)", req.DeleteSubscription.Id), "DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -26,6 +29,7 @@ func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, e
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to delete subscription", "req", req, "err", err)
 				res(nil, err)
 				return
 			}

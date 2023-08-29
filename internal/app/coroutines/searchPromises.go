@@ -1,6 +1,9 @@
 package coroutines
 
 import (
+	"fmt"
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -8,7 +11,7 @@ import (
 )
 
 func SearchPromises(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("SearchPromises(q=%s)", req.SearchPromises.Q), "SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -28,6 +31,7 @@ func SearchPromises(t int64, req *types.Request, res func(*types.Response, error
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
+				slog.Error("failed to search promises", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
@@ -41,6 +45,7 @@ func SearchPromises(t int64, req *types.Request, res func(*types.Response, error
 				if t < record.Timeout {
 					promise, err := record.Promise()
 					if err != nil {
+						slog.Warn("failed to parse promise record", "record", record, "err", err)
 						continue
 					}
 

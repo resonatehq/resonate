@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
@@ -15,6 +17,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
 )
 
@@ -27,6 +30,10 @@ var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the durable promises server",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// logger
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		slog.SetDefault(logger)
+
 		// config
 		cfg := &system.Config{
 			PromiseCacheSize:      100,
@@ -36,12 +43,16 @@ var serveCmd = &cobra.Command{
 			CompletionBatchSize:   100,
 		}
 
+		// instantiate metrics
+		reg := prometheus.NewRegistry()
+		metrics := metrics.New(reg)
+
 		// instatiate api/aio
-		api := api.New(100)
-		aio := aio.New(100)
+		api := api.New(100, metrics)
+		aio := aio.New(100, metrics)
 
 		// instatiate api subsystems
-		http := http.New(api, httpAddr, 10*time.Second)
+		http := http.New(api, httpAddr, 10*time.Second, reg)
 		grpc := grpc.New(api, grpcAddr)
 
 		// instatiate aio subsystems
@@ -59,14 +70,16 @@ var serveCmd = &cobra.Command{
 
 		// start api/aio
 		if err := api.Start(); err != nil {
+			slog.Error("failed to start api", "error", err)
 			return err
 		}
 		if err := aio.Start(); err != nil {
+			slog.Error("failed to start aio", "error", err)
 			return err
 		}
 
 		// instantiate system
-		system := system.New(cfg, api, aio)
+		system := system.New(cfg, api, aio, metrics)
 		system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
 		system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
 		system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
@@ -79,6 +92,7 @@ var serveCmd = &cobra.Command{
 		system.AddOnTick(2, coroutines.TimeoutPromises)
 		system.AddOnTick(1, coroutines.NotifySubscriptions)
 
+		// listen for shutdown signal
 		go func() {
 			sig := make(chan os.Signal, 1)
 			signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
@@ -86,9 +100,12 @@ var serveCmd = &cobra.Command{
 			// halt until we get a shutdown signal or an error
 			// occurs, whicever happens first
 			select {
-			case <-sig:
-			case <-api.Errors():
-			case <-aio.Errors():
+			case s := <-sig:
+				slog.Info("shutdown signal recieved, shutting down", "signal", s)
+			case err := <-api.Errors():
+				slog.Error("api error recieved, shutting down", "error", err)
+			case err := <-aio.Errors():
+				slog.Error("aio error recieved, shutting down", "error", err)
 			}
 
 			// shutdown api/aio
@@ -98,14 +115,17 @@ var serveCmd = &cobra.Command{
 
 		// control loop
 		if err := system.Loop(); err != nil {
+			slog.Error("control loop failed", "error", err)
 			return err
 		}
 
 		// stop api/aio
 		if err := api.Stop(); err != nil {
+			slog.Error("failed to stop api", "error", err)
 			return err
 		}
 		if err := aio.Stop(); err != nil {
+			slog.Error("failed to stop aio", "error", err)
 			return err
 		}
 
