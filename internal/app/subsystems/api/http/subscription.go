@@ -14,7 +14,8 @@ func (s *server) readSubscriptions(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind: types.ReadSubscriptions,
 			ReadSubscriptions: &types.ReadSubscriptionsRequest{
@@ -48,7 +49,8 @@ func (s *server) createSubscription(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind:               types.CreateSubscription,
 			CreateSubscription: createSubscription,
@@ -78,7 +80,8 @@ func (s *server) deleteSubscription(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind: types.DeleteSubscription,
 			DeleteSubscription: &types.DeleteSubscriptionRequest{

@@ -7,6 +7,7 @@ type Subscription struct {
 	Id          int64        `json:"id"`
 	Url         string       `json:"url"`
 	RetryPolicy *RetryPolicy `json:"retryPolicy"`
+	CreatedOn   int64        `json:"createdOn"`
 }
 
 type RetryPolicy struct {

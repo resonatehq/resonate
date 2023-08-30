@@ -63,6 +63,7 @@ type server struct {
 func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(completion *types.Response, err error) {
 	return func(completion *types.Response, err error) {
 		cqe := &bus.CQE[types.Request, types.Response]{
+			Kind:       "grpc",
 			Completion: completion,
 			Error:      err,
 		}
@@ -79,7 +80,8 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.ReadPromise,
 			ReadPromise: &types.ReadPromiseRequest{
@@ -114,7 +116,8 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		return nil, grpcStatus.Error(codes.InvalidArgument, "")
 	}
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.SearchPromises,
 			SearchPromises: &types.SearchPromisesRequest{
@@ -173,7 +176,8 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		}
 	}
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.CreatePromise,
 			CreatePromise: &types.CreatePromiseRequest{
@@ -225,7 +229,8 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.CancelPromise,
 			CancelPromise: &types.CancelPromiseRequest{
@@ -275,7 +280,8 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.ResolvePromise,
 			ResolvePromise: &types.ResolvePromiseRequest{
@@ -325,7 +331,8 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.RejectPromise,
 			RejectPromise: &types.RejectPromiseRequest{
@@ -357,7 +364,8 @@ func (s *server) ReadSubscriptions(ctx context.Context, req *grpcApi.ReadSubscri
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.ReadSubscriptions,
 			ReadSubscriptions: &types.ReadSubscriptionsRequest{
@@ -389,7 +397,8 @@ func (s *server) CreateSubscription(ctx context.Context, req *grpcApi.CreateSubs
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.CreateSubscription,
 			CreateSubscription: &types.CreateSubscriptionRequest{
@@ -417,7 +426,8 @@ func (s *server) DeleteSubscription(ctx context.Context, req *grpcApi.DeleteSubs
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("grpc", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
 		Submission: &types.Request{
 			Kind: types.DeleteSubscription,
 			DeleteSubscription: &types.DeleteSubscriptionRequest{

@@ -16,6 +16,9 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
 		}
+		if req.CreatePromise.Tags == nil {
+			req.CreatePromise.Tags = map[string]string{}
+		}
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -50,9 +53,11 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					{
 						Kind: types.StoreCreatePromise,
 						CreatePromise: &types.CreatePromiseCommand{
-							Id:      req.CreatePromise.Id,
-							Timeout: req.CreatePromise.Timeout,
-							Param:   req.CreatePromise.Param,
+							Id:        req.CreatePromise.Id,
+							Param:     req.CreatePromise.Param,
+							Timeout:   req.CreatePromise.Timeout,
+							Tags:      req.CreatePromise.Tags,
+							CreatedOn: t,
 						},
 					},
 					{
@@ -79,6 +84,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 							PromiseId:   req.CreatePromise.Id,
 							Url:         s.Url,
 							RetryPolicy: s.RetryPolicy,
+							CreatedOn:   t,
 						},
 					})
 				}
@@ -110,10 +116,12 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 							CreatePromise: &types.CreatePromiseResponse{
 								Status: types.ResponseCreated,
 								Promise: &promise.Promise{
-									Id:      req.CreatePromise.Id,
-									State:   promise.Pending,
-									Timeout: req.CreatePromise.Timeout,
-									Param:   req.CreatePromise.Param,
+									Id:        req.CreatePromise.Id,
+									State:     promise.Pending,
+									Param:     req.CreatePromise.Param,
+									Timeout:   req.CreatePromise.Timeout,
+									Tags:      req.CreatePromise.Tags,
+									CreatedOn: &t,
 								},
 							},
 						}, nil)
@@ -122,25 +130,24 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					}
 				})
 			} else {
-				record := result.Records[0]
+				p, err := result.Records[0].Promise()
+				if err != nil {
+					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
+					res(nil, err)
+					return
+				}
 
 				var status types.ResponseStatus
-				if record.ParamIkey.Match(req.CreatePromise.Param.Ikey) {
+				if p.Param.Ikey.Match(req.CreatePromise.Param.Ikey) {
 					status = types.ResponseOK
 				} else {
 					status = types.ResponseForbidden
 				}
 
-				if record.State == promise.Pending && t >= record.Timeout {
-					s.Add(TimeoutPromise(t, req.CreatePromise.Id, CreatePromise(t, req, res), func(err error) {
+				if p.State == promise.Pending && t >= p.Timeout {
+					s.Add(TimeoutPromise(t, p, CreatePromise(t, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
-							return
-						}
-
-						param, err := record.Param()
-						if err != nil {
 							res(nil, err)
 							return
 						}
@@ -150,27 +157,23 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 							CreatePromise: &types.CreatePromiseResponse{
 								Status: status,
 								Promise: &promise.Promise{
-									Id:    record.Id,
+									Id:    p.Id,
 									State: promise.Timedout,
-									Param: param,
+									Param: p.Param,
 									Value: promise.Value{
 										Headers: map[string]string{},
 										Ikey:    nil,
 										Data:    nil,
 									},
-									Timeout: record.Timeout,
+									Timeout:     p.Timeout,
+									Tags:        p.Tags,
+									CreatedOn:   p.CreatedOn,
+									CompletedOn: &p.Timeout,
 								},
 							},
 						}, nil)
 					}))
 				} else {
-					p, err := record.Promise()
-					if err != nil {
-						slog.Error("failed to parse promise record", "record", record, "err", err)
-						res(nil, err)
-						return
-					}
-
 					res(&types.Response{
 						Kind: types.CreatePromise,
 						CreatePromise: &types.CreatePromiseResponse{

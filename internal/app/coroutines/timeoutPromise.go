@@ -10,8 +10,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", id), "TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", p.Id), "TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -20,7 +20,7 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 						{
 							Kind: types.StoreReadSubscriptions,
 							ReadSubscriptions: &types.ReadSubscriptionsCommand{
-								PromiseIds: []string{id},
+								PromiseIds: []string{p.Id},
 							},
 						},
 					},
@@ -30,7 +30,7 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 
 		c.Yield(submission, func(completion *types.Completion, err error) {
 			if err != nil {
-				slog.Error("failed to read subscriptions", "id", id, "err", err)
+				slog.Error("failed to read subscriptions", "id", p.Id, "err", err)
 				res(err)
 				return
 			}
@@ -42,19 +42,20 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 				{
 					Kind: types.StoreUpdatePromise,
 					UpdatePromise: &types.UpdatePromiseCommand{
-						Id:    id,
+						Id:    p.Id,
 						State: promise.Timedout,
 						Value: promise.Value{
 							Headers: map[string]string{},
 							Ikey:    nil,
 							Data:    nil,
 						},
+						CompletedOn: p.Timeout,
 					},
 				},
 				{
 					Kind: types.StoreDeleteTimeout,
 					DeleteTimeout: &types.DeleteTimeoutCommand{
-						Id: id,
+						Id: p.Id,
 					},
 				},
 			}
@@ -82,7 +83,7 @@ func TimeoutPromise(t int64, id string, retry *scheduler.Coroutine, res func(err
 
 			c.Yield(submission, func(completion *types.Completion, err error) {
 				if err != nil {
-					slog.Error("failed to update state", "id", id, "err", err)
+					slog.Error("failed to update state", "id", p.Id, "err", err)
 					res(err)
 					return
 				}

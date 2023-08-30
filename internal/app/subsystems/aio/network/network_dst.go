@@ -55,6 +55,7 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[types.Submission, types.Compl
 		switch sqe.Submission.Network.Kind {
 		case types.Http:
 			cqe := &bus.CQE[types.Submission, types.Completion]{
+				Kind:     sqe.Kind,
 				Callback: sqe.Callback,
 			}
 

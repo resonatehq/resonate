@@ -11,7 +11,7 @@ import (
 )
 
 type API interface {
-	Enqueue(string, *bus.SQE[types.Request, types.Response])
+	Enqueue(*bus.SQE[types.Request, types.Response])
 	Dequeue(int, <-chan time.Time) []*bus.SQE[types.Request, types.Response]
 	Done() bool
 }
@@ -66,40 +66,42 @@ func (a *api) Errors() <-chan error {
 	return a.errors
 }
 
-func (a *api) Enqueue(kind string, sqe *bus.SQE[types.Request, types.Response]) {
+func (a *api) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
+	// replace sqe.Callback with a callback that wraps the original
+	// function and emits metrics
+	callback := sqe.Callback
+	sqe.Callback = func(res *types.Response, err error) {
+		var status types.ResponseStatus
+		switch res.Kind {
+		case types.ReadPromise:
+			status = res.ReadPromise.Status
+		case types.SearchPromises:
+			status = res.SearchPromises.Status
+		case types.CreatePromise:
+			status = res.CreatePromise.Status
+		case types.CancelPromise:
+			status = res.CancelPromise.Status
+		case types.ResolvePromise:
+			status = res.ResolvePromise.Status
+		case types.RejectPromise:
+			status = res.RejectPromise.Status
+		case types.ReadSubscriptions:
+			status = res.ReadSubscriptions.Status
+		case types.CreateSubscription:
+			status = res.CreateSubscription.Status
+		case types.DeleteSubscription:
+			status = res.DeleteSubscription.Status
+		}
+
+		a.metrics.ApiTotal.WithLabelValues(sqe.Kind, strconv.Itoa(int(status))).Inc()
+		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Dec()
+
+		callback(res, err)
+	}
+
 	select {
 	case a.sq <- sqe:
-		a.metrics.ApiInFlight.WithLabelValues(kind).Inc()
-
-		callback := sqe.Callback
-		sqe.Callback = func(res *types.Response, err error) {
-			var status types.ResponseStatus
-			switch res.Kind {
-			case types.ReadPromise:
-				status = res.ReadPromise.Status
-			case types.SearchPromises:
-				status = res.SearchPromises.Status
-			case types.CreatePromise:
-				status = res.CreatePromise.Status
-			case types.CancelPromise:
-				status = res.CancelPromise.Status
-			case types.ResolvePromise:
-				status = res.ResolvePromise.Status
-			case types.RejectPromise:
-				status = res.RejectPromise.Status
-			case types.ReadSubscriptions:
-				status = res.ReadSubscriptions.Status
-			case types.CreateSubscription:
-				status = res.CreateSubscription.Status
-			case types.DeleteSubscription:
-				status = res.DeleteSubscription.Status
-			}
-
-			a.metrics.ApiTotal.WithLabelValues(kind, strconv.Itoa(int(status))).Inc()
-			a.metrics.ApiInFlight.WithLabelValues(kind).Dec()
-
-			callback(res, err)
-		}
+		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Inc()
 	default:
 		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
 	}

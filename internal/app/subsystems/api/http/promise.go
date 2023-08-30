@@ -14,7 +14,8 @@ func (s *server) readPromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind: types.ReadPromise,
 			ReadPromise: &types.ReadPromiseRequest{
@@ -49,7 +50,8 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind: types.SearchPromises,
 			SearchPromises: &types.SearchPromisesRequest{
@@ -86,7 +88,8 @@ func (s *server) createPromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind:          types.CreatePromise,
 			CreatePromise: createPromise,
@@ -120,7 +123,8 @@ func (s *server) resolvePromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind:           types.ResolvePromise,
 			ResolvePromise: resolvePromise,
@@ -154,7 +158,8 @@ func (s *server) rejectPromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind:          types.RejectPromise,
 			RejectPromise: rejectPromise,
@@ -188,7 +193,8 @@ func (s *server) cancelPromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	s.api.Enqueue("http", &bus.SQE[types.Request, types.Response]{
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
 		Submission: &types.Request{
 			Kind:          types.CancelPromise,
 			CancelPromise: cancelPromise,

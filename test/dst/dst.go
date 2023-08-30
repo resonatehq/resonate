@@ -122,7 +122,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 
 		for _, req := range generator.Generate(r, time, r.Intn(d.SQEsPerTick)) {
 			req := req
-			api.Enqueue("dst", &bus.SQE[types.Request, types.Response]{
+			api.Enqueue(&bus.SQE[types.Request, types.Response]{
 				Submission: req,
 				Callback: func(res *types.Response, err error) {
 					var errMsg string

@@ -52,18 +52,16 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 					},
 				}, nil)
 			} else {
-				record := result.Records[0]
-
-				param, err := record.Param()
+				p, err := result.Records[0].Promise()
 				if err != nil {
-					slog.Error("failed to parse promise record param", "record", record, "err", err)
+					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
 					res(nil, err)
 					return
 				}
 
-				if record.State == promise.Pending {
-					if t >= record.Timeout {
-						s.Add(TimeoutPromise(t, req.ResolvePromise.Id, ResolvePromise(t, req, res), func(err error) {
+				if p.State == promise.Pending {
+					if t >= p.Timeout {
+						s.Add(TimeoutPromise(t, p, ResolvePromise(t, req, res), func(err error) {
 							if err != nil {
 								slog.Error("failed to timeout promise", "req", req, "err", err)
 								res(nil, err)
@@ -75,15 +73,18 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 								ResolvePromise: &types.ResolvePromiseResponse{
 									Status: types.ResponseForbidden,
 									Promise: &promise.Promise{
-										Id:    record.Id,
+										Id:    p.Id,
 										State: promise.Timedout,
-										Param: param,
+										Param: p.Param,
 										Value: promise.Value{
 											Headers: map[string]string{},
 											Ikey:    nil,
 											Data:    nil,
 										},
-										Timeout: record.Timeout,
+										Timeout:     p.Timeout,
+										Tags:        p.Tags,
+										CreatedOn:   p.CreatedOn,
+										CompletedOn: &p.Timeout,
 									},
 								},
 							}, nil)
@@ -119,9 +120,10 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 								{
 									Kind: types.StoreUpdatePromise,
 									UpdatePromise: &types.UpdatePromiseCommand{
-										Id:    req.ResolvePromise.Id,
-										State: promise.Resolved,
-										Value: req.ResolvePromise.Value,
+										Id:          req.ResolvePromise.Id,
+										State:       promise.Resolved,
+										Value:       req.ResolvePromise.Value,
+										CompletedOn: t,
 									},
 								},
 								{
@@ -171,11 +173,13 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 										ResolvePromise: &types.ResolvePromiseResponse{
 											Status: types.ResponseCreated,
 											Promise: &promise.Promise{
-												Id:      record.Id,
-												State:   promise.Resolved,
-												Timeout: record.Timeout,
-												Param:   param,
-												Value:   req.ResolvePromise.Value,
+												Id:          p.Id,
+												State:       promise.Resolved,
+												Param:       p.Param,
+												Value:       req.ResolvePromise.Value,
+												Timeout:     p.Timeout,
+												CreatedOn:   p.CreatedOn,
+												CompletedOn: &t,
 											},
 										},
 									}, nil)
@@ -186,15 +190,8 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 						})
 					}
 				} else {
-					p, err := record.Promise()
-					if err != nil {
-						slog.Error("failed to parse promise record", "record", record, "err", err)
-						res(nil, err)
-						return
-					}
-
 					var status types.ResponseStatus
-					if record.State == promise.Resolved && record.ValueIkey.Match(req.ResolvePromise.Value.Ikey) {
+					if p.State == promise.Resolved && p.Value.Ikey.Match(req.ResolvePromise.Value.Ikey) {
 						status = types.ResponseOK
 					} else {
 						status = types.ResponseForbidden

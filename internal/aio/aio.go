@@ -109,7 +109,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
 		select {
 		case subsystem.sq <- sqe:
 			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
-			a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Inc()
+			a.metrics.AioInFlight.WithLabelValues(sqe.Kind).Inc()
 		default:
 			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
 		}
@@ -138,8 +138,8 @@ func (a *aio) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 			}
 
 			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
-			a.metrics.AioTotal.WithLabelValues(cqe.Completion.Kind.String(), status).Inc()
-			a.metrics.AioInFlight.WithLabelValues(cqe.Completion.Kind.String()).Dec()
+			a.metrics.AioTotal.WithLabelValues(cqe.Kind, status).Inc()
+			a.metrics.AioInFlight.WithLabelValues(cqe.Kind).Dec()
 
 			cqes = append(cqes, cqe)
 		default:

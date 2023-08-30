@@ -31,6 +31,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 								PromiseId:   req.CreateSubscription.PromiseId,
 								Url:         req.CreateSubscription.Url,
 								RetryPolicy: req.CreateSubscription.RetryPolicy,
+								CreatedOn:   t,
 							},
 						},
 					},

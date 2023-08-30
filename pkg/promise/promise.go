@@ -6,11 +6,14 @@ import (
 )
 
 type Promise struct {
-	Id      string `json:"id"`
-	State   State  `json:"state"`
-	Param   Value  `json:"param,omitempty"`
-	Value   Value  `json:"value,omitempty"`
-	Timeout int64  `json:"timeout"`
+	Id          string            `json:"id"`
+	State       State             `json:"state"`
+	Param       Value             `json:"param,omitempty"`
+	Value       Value             `json:"value,omitempty"`
+	Timeout     int64             `json:"timeout"`
+	CreatedOn   *int64            `json:"createdOn,omitempty"`
+	CompletedOn *int64            `json:"completedOn,omitempty"`
+	Tags        map[string]string `json:"tags"`
 }
 
 func (p *Promise) String() string {
