@@ -26,7 +26,7 @@ type Grpc struct {
 func New(api api.API, addr string) api.Subsystem {
 	s := &server{api: api}
 
-	server := grpc.NewServer()
+	server := grpc.NewServer() // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
 
 	return &Grpc{

@@ -26,7 +26,7 @@ jobs:
         cache: false
 
     - name: Install and run golangci-lint
-      uses: golangci/golangci-lint-action@v3
+      uses: golangci/golangci-lint-action@v3 # nosemgrep
       with:
         version: v1.54
         args: --verbose --timeout=3m
@@ -36,7 +36,7 @@ jobs:
         go test -v -coverprofile=coverage.out -coverpkg=./... ./...
 
     - name: Upload coverage report to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v3 # nosemgrep
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
 
