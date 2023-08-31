@@ -8,6 +8,7 @@ import (
 type aioDST struct {
 	sqes       []*bus.SQE[types.Submission, types.Completion]
 	cqes       []*bus.CQE[types.Submission, types.Completion]
+	keys       []types.AIOKind
 	subsystems map[types.AIOKind]Subsystem
 	done       bool
 }
@@ -19,6 +20,7 @@ func NewDST() *aioDST {
 }
 
 func (a *aioDST) AddSubsystem(kind types.AIOKind, subsystem Subsystem) {
+	a.keys = append(a.keys, kind)
 	a.subsystems[kind] = subsystem
 }
 
@@ -56,7 +58,7 @@ func (a *aioDST) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
 
 func (a *aioDST) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 	cqes := a.cqes[:min(n, len(a.cqes))]
-	a.cqes = a.cqes[min(n+1, len(a.cqes)):]
+	a.cqes = a.cqes[min(n, len(a.cqes)):]
 
 	return cqes
 }
@@ -67,21 +69,15 @@ func (a *aioDST) Flush(t int64) {
 		sqes[sqe.Submission.Kind] = append(sqes[sqe.Submission.Kind], sqe)
 	}
 
-	for kind, sqes := range sqes {
-		if subsystem, ok := a.subsystems[kind]; ok {
-			a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes)...)
-		} else {
-			panic("invalid aio submission")
+	for _, kind := range a.keys {
+		if sqes, ok := sqes[kind]; ok {
+			if subsystem, ok := a.subsystems[kind]; ok {
+				a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes)...)
+			} else {
+				panic("invalid aio submission")
+			}
 		}
 	}
 
 	a.sqes = nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-
-	return b
 }
