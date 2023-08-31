@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/timeout"
 )
 
 func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
@@ -38,10 +39,12 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 			util.Assert(completion.Store != nil, "completion must not be nil")
 
 			records := completion.Store.Results[0].ReadTimeouts.Records
+			timeouts := []*timeout.TimeoutRecord{}
 			promiseIds := []string{}
 
 			for _, record := range records {
 				if t >= record.Time {
+					timeouts = append(timeouts, record)
 					promiseIds = append(promiseIds, record.Id)
 				}
 			}
@@ -74,22 +77,23 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 					records := completion.Store.Results[0].ReadSubscriptions.Records
 					commands := []*types.Command{}
 
-					for _, promiseId := range promiseIds {
+					for _, timeout := range timeouts {
 						commands = append(commands, &types.Command{
 							Kind: types.StoreUpdatePromise,
 							UpdatePromise: &types.UpdatePromiseCommand{
-								Id:    promiseId,
+								Id:    timeout.Id,
 								State: promise.Timedout,
 								Value: promise.Value{
 									Headers: map[string]string{},
 									Ikey:    nil,
 									Data:    nil,
 								},
+								CompletedOn: timeout.Time,
 							},
 						}, &types.Command{
 							Kind: types.StoreDeleteTimeout,
 							DeleteTimeout: &types.DeleteTimeoutCommand{
-								Id: promiseId,
+								Id: timeout.Id,
 							},
 						})
 					}

@@ -45,6 +45,7 @@ func TestDST(t *testing.T) {
 			Ikeys:                 test.RangeIntn(r, 1, 100),
 			Data:                  test.RangeIntn(r, 1, 100),
 			Headers:               test.RangeIntn(r, 1, 100),
+			Tags:                  test.RangeIntn(r, 1, 100),
 			Retries:               test.RangeIntn(r, 1, 100),
 			Subscriptions:         test.RangeIntn(r, 1, 100),
 			PromiseCacheSize:      cs(i),

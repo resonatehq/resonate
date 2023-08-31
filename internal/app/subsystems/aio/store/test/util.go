@@ -67,6 +67,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -92,6 +94,8 @@ var TestCases = []*testCase{
 						State:        1,
 						ParamHeaders: []byte("{}"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
 					}},
 				},
 			},
@@ -109,6 +113,8 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Ikey:    ikey("bar"),
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -135,6 +141,8 @@ var TestCases = []*testCase{
 						ParamHeaders: []byte("{}"),
 						ParamIkey:    ikey("bar"),
 						Timeout:      2,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
 					}},
 				},
 			},
@@ -153,6 +161,8 @@ var TestCases = []*testCase{
 						Ikey:    ikey("baz"),
 						Data:    []byte("baz"),
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -180,6 +190,8 @@ var TestCases = []*testCase{
 						ParamIkey:    ikey("baz"),
 						ParamData:    []byte("baz"),
 						Timeout:      3,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
 					}},
 				},
 			},
@@ -202,6 +214,8 @@ var TestCases = []*testCase{
 						Ikey: ikey("baz"),
 						Data: []byte("baz"),
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -229,6 +243,65 @@ var TestCases = []*testCase{
 						ParamIkey:    ikey("baz"),
 						ParamData:    []byte("baz"),
 						Timeout:      3,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+					}},
+				},
+			},
+		},
+	},
+	{
+		name: "CreatePromiseWithIdKeyAndParamAndHeadersAndTags",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "baz",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{
+							"a": "a",
+							"b": "b",
+							"c": "c",
+						},
+						Ikey: ikey("baz"),
+						Data: []byte("baz"),
+					},
+					Tags: map[string]string{
+						"x": "x",
+						"y": "y",
+						"z": "z",
+					},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadPromise,
+				ReadPromise: &types.ReadPromiseCommand{
+					Id: "baz",
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadPromise,
+				ReadPromise: &types.QueryPromisesResult{
+					RowsReturned: 1,
+					Records: []*promise.PromiseRecord{{
+						Id:           "baz",
+						State:        1,
+						ParamHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
+						ParamIkey:    ikey("baz"),
+						ParamData:    []byte("baz"),
+						Timeout:      3,
+						Tags:         []byte(`{"x":"x","y":"y","z":"z"}`),
+						CreatedOn:    int64ToPointer(1),
 					}},
 				},
 			},
@@ -244,6 +317,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -253,6 +328,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 		},
@@ -282,6 +359,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -292,6 +371,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -308,6 +388,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -318,6 +400,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -350,6 +433,9 @@ var TestCases = []*testCase{
 						ParamHeaders: []byte("{}"),
 						ValueHeaders: []byte("{}"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -375,6 +461,9 @@ var TestCases = []*testCase{
 						ParamHeaders: []byte("{}"),
 						ValueHeaders: []byte("{}"),
 						Timeout:      2,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -391,6 +480,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -402,6 +493,7 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Ikey:    ikey("foo"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -418,6 +510,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -429,6 +523,7 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Ikey:    ikey("bar"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -462,6 +557,9 @@ var TestCases = []*testCase{
 						ValueHeaders: []byte("{}"),
 						ValueIkey:    ikey("foo"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -488,6 +586,9 @@ var TestCases = []*testCase{
 						ValueHeaders: []byte("{}"),
 						ValueIkey:    ikey("bar"),
 						Timeout:      2,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -504,6 +605,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -516,6 +619,7 @@ var TestCases = []*testCase{
 						Ikey:    ikey("foo"),
 						Data:    []byte("foo"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -532,6 +636,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -544,6 +650,7 @@ var TestCases = []*testCase{
 						Ikey:    ikey("bar"),
 						Data:    []byte("bar"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -578,6 +685,9 @@ var TestCases = []*testCase{
 						ValueIkey:    ikey("foo"),
 						ValueData:    []byte("foo"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -605,6 +715,9 @@ var TestCases = []*testCase{
 						ValueIkey:    ikey("bar"),
 						ValueData:    []byte("bar"),
 						Timeout:      2,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -621,6 +734,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -637,6 +752,7 @@ var TestCases = []*testCase{
 						Ikey: ikey("foo"),
 						Data: []byte("foo"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -653,6 +769,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -669,6 +787,7 @@ var TestCases = []*testCase{
 						Ikey: ikey("bar"),
 						Data: []byte("bar"),
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -703,6 +822,9 @@ var TestCases = []*testCase{
 						ValueIkey:    ikey("foo"),
 						ValueData:    []byte("foo"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -730,6 +852,9 @@ var TestCases = []*testCase{
 						ValueIkey:    ikey("bar"),
 						ValueData:    []byte("bar"),
 						Timeout:      2,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
+						CompletedOn:  int64ToPointer(2),
 					}},
 				},
 			},
@@ -745,6 +870,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -755,6 +882,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -765,6 +893,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -774,6 +903,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -784,6 +915,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -794,6 +926,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 		},
@@ -847,6 +980,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 			{
@@ -857,6 +991,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 					},
+					CompletedOn: 2,
 				},
 			},
 		},
@@ -886,6 +1021,8 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
@@ -911,6 +1048,8 @@ var TestCases = []*testCase{
 						State:        1,
 						ParamHeaders: []byte("{}"),
 						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    int64ToPointer(1),
 					}},
 				},
 			},
@@ -1585,6 +1724,7 @@ var TestCases = []*testCase{
 				Param: promise.Value{
 					Headers: nil,
 				},
+				Tags: map[string]string{},
 			},
 		}},
 	},
@@ -1618,4 +1758,8 @@ var TestCases = []*testCase{
 func ikey(s string) *promise.Ikey {
 	ikey := promise.Ikey(s)
 	return &ikey
+}
+
+func int64ToPointer(i int64) *int64 {
+	return &i
 }

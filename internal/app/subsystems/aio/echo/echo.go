@@ -39,6 +39,7 @@ func (d *EchoDevice) Process(sqes []*bus.SQE[types.Submission, types.Completion]
 
 	for i, sqe := range sqes {
 		cqes[i] = &bus.CQE[types.Submission, types.Completion]{
+			Kind: sqe.Kind,
 			Completion: &types.Completion{
 				Echo: &types.EchoCompletion{
 					Data: sqe.Submission.Echo.Data,

@@ -16,6 +16,7 @@ type Generator struct {
 	ikeySet         []*promise.Ikey
 	dataSet         [][]byte
 	headersSet      []map[string]string
+	tagsSet         []map[string]string
 	retrySet        []int
 	subscriptionSet []string
 	time            int64
@@ -25,7 +26,7 @@ type Generator struct {
 
 type RequestGenerator func(*rand.Rand, int64) *types.Request
 
-func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, retries int, subscriptions int, time int64) *Generator {
+func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags int, retries int, subscriptions int, time int64) *Generator {
 	idSet := make([]string, ids)
 	for i := 0; i < ids; i++ {
 		idSet[i] = strconv.Itoa(i)
@@ -53,6 +54,16 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, retri
 		headersSet = append(headersSet, headers, nil) // half of all headers are nil
 	}
 
+	tagsSet := []map[string]string{}
+	for i := 0; i < tags; i++ {
+		tags := map[string]string{}
+		for j := 0; j < r.Intn(3)+1; j++ {
+			tags[strconv.Itoa(j)] = fmt.Sprintf("%d.%d", i, j)
+		}
+
+		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
+	}
+
 	retrySet := make([]int, retries)
 	for i := 0; i < retries; i++ {
 		retrySet[i] = i
@@ -68,6 +79,7 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, retri
 		ikeySet:         ikeySet,
 		dataSet:         dataSet,
 		headersSet:      headersSet,
+		tagsSet:         tagsSet,
 		retrySet:        retrySet,
 		subscriptionSet: subscriptionSet,
 		time:            time,
@@ -117,12 +129,26 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	timeout := test.RangeInt63n(r, t, g.time)
 
-	url := g.subscriptionSet[r.Intn(len(g.subscriptionSet))]
-	delay := g.retrySet[r.Intn(len(g.retrySet))]
-	attempts := test.RangeIntn(r, 1, 4)
-	g.subscriptions++
+	// include up to 3 subscriptions
+	n := r.Intn(4)
+	g.subscriptions += int64(n)
+	subscriptions := make([]*types.CreateSubscriptionRequest, n)
+	for i := 0; i < n; i++ {
+		url := g.subscriptionSet[r.Intn(len(g.subscriptionSet))]
+		delay := g.retrySet[r.Intn(len(g.retrySet))]
+		attempts := test.RangeIntn(r, 1, 4)
+
+		subscriptions[i] = &types.CreateSubscriptionRequest{
+			Url: url,
+			RetryPolicy: &subscription.RetryPolicy{
+				Delay:    int64(delay),
+				Attempts: int64(attempts),
+			},
+		}
+	}
 
 	return &types.Request{
 		Kind: types.CreatePromise,
@@ -134,13 +160,8 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 				Ikey:    ikey,
 				Data:    data,
 			},
-			Subscriptions: []*types.CreateSubscriptionRequest{{
-				Url: url,
-				RetryPolicy: &subscription.RetryPolicy{
-					Delay:    int64(delay),
-					Attempts: int64(attempts),
-				},
-			}},
+			Tags:          tags,
+			Subscriptions: subscriptions,
 		},
 	}
 }

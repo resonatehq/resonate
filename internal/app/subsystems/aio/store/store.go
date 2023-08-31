@@ -26,6 +26,7 @@ func Process(store Store, sqes []*bus.SQE[types.Submission, types.Completion]) [
 
 	for i, sqe := range sqes {
 		cqe := &bus.CQE[types.Submission, types.Completion]{
+			Kind:     sqe.Kind,
 			Callback: sqe.Callback,
 		}
 

@@ -31,6 +31,9 @@ const (
 		"valueIkey"    TEXT,
 		"valueData"    BLOB,
 		"timeout"      INTEGER,
+		"tags"         BLOB,
+		"createdOn"    INTEGER,
+		"completedOn"  INGEGER,
 		PRIMARY KEY("id")
 	);
 	 CREATE TABLE IF NOT EXISTS "Timeouts" (
@@ -43,6 +46,7 @@ const (
 		"promiseId"   TEXT,
 		"url"         TEXT,
 		"retryPolicy" BLOB,
+		"createdOn"   INTEGER,
 		UNIQUE("promiseId", "url"),
 		FOREIGN KEY("promiseId") REFERENCES Promises("id")
 	);
@@ -59,7 +63,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, paramHeaders, paramIkey, paramData, valueHeaders, valueIkey, valueData, timeout
+		id, state, paramHeaders, paramIkey, paramData, valueHeaders, valueIkey, valueData, timeout, tags, createdOn, completedOn
 	FROM
 		Promises
 	WHERE
@@ -67,7 +71,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, paramHeaders, paramIkey, paramData, valueHeaders, valueIkey, valueData, timeout
+		id, state, paramHeaders, paramIkey, paramData, valueHeaders, valueIkey, valueData, timeout, tags, createdOn, completedOn
 	FROM
 		Promises
 	WHERE
@@ -75,13 +79,13 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO Promises
-		(id, state, paramHeaders, paramIkey, paramData, timeout)
+		(id, state, paramHeaders, paramIkey, paramData, timeout, tags, createdOn)
 	VALUES
-		(?, ?, ?, ?, ?, ?)`
+		(?, ?, ?, ?, ?, ?, ?, ?)`
 
 	PROMISE_UPDATE_STATMENT = `
 	UPDATE Promises
-	SET state = ?, valueHeaders = ?, valueIkey = ?, valueData = ?
+	SET state = ?, valueHeaders = ?, valueIkey = ?, valueData = ?, completedOn = ?
 	WHERE id = ? AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
@@ -104,7 +108,7 @@ const (
 
 	SUBSCRIPTION_SELECT_STATEMENT = `
 	SELECT
-		id, promiseId, url, retryPolicy
+		id, promiseId, url, retryPolicy, createdOn
 	FROM
 		Subscriptions
 	WHERE
@@ -112,9 +116,9 @@ const (
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO Subscriptions
-		(promiseId, url, retryPolicy)
+		(promiseId, url, retryPolicy, createdOn)
 	VALUES
-		(?, ?, ?)`
+		(?, ?, ?, ?)`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
 	DELETE FROM Subscriptions WHERE id = ?`
@@ -362,6 +366,9 @@ func (d *SqliteStoreDevice) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 		&record.ValueIkey,
 		&record.ValueData,
 		&record.Timeout,
+		&record.Tags,
+		&record.CreatedOn,
+		&record.CompletedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
@@ -409,6 +416,9 @@ func (d *SqliteStoreDevice) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 			&record.ValueIkey,
 			&record.ValueData,
 			&record.Timeout,
+			&record.Tags,
+			&record.CreatedOn,
+			&record.CompletedOn,
 		); err != nil {
 			return nil, err
 		}
@@ -428,14 +438,20 @@ func (d *SqliteStoreDevice) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 
 func (d *SqliteStoreDevice) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreatePromiseCommand) (*types.Result, error) {
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
+	util.Assert(cmd.Tags != nil, "tags must not be nil")
 
 	headers, err := json.Marshal(cmd.Param.Headers)
 	if err != nil {
 		return nil, err
 	}
 
+	tags, err := json.Marshal(cmd.Tags)
+	if err != nil {
+		return nil, err
+	}
+
 	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Ikey, cmd.Param.Data, cmd.Timeout)
+	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Ikey, cmd.Param.Data, cmd.Timeout, tags, cmd.CreatedOn)
 	var rowsAffected int64
 
 	if err != nil {
@@ -468,7 +484,7 @@ func (d *SqliteStoreDevice) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Ikey, cmd.Value.Data, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Ikey, cmd.Value.Data, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}
@@ -591,7 +607,7 @@ func (d *SqliteStoreDevice) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 
 	for rows.Next() {
 		record := &subscription.SubscriptionRecord{}
-		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy); err != nil {
+		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.CreatedOn); err != nil {
 			return nil, err
 		}
 
@@ -620,7 +636,7 @@ func (d *SqliteStoreDevice) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	var lastInsertId int64
 
 	// insert
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, retryPolicy)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, retryPolicy, cmd.CreatedOn)
 	if err != nil {
 		sqliteErr, ok := err.(sqlite3.Error)
 		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintUnique {

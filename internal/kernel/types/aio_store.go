@@ -88,12 +88,15 @@ type CreatePromiseCommand struct {
 	Timeout       int64
 	Param         promise.Value
 	Subscriptions []*CreateSubscriptionCommand
+	Tags          map[string]string
+	CreatedOn     int64
 }
 
 type UpdatePromiseCommand struct {
-	Id    string
-	State promise.State
-	Value promise.Value
+	Id          string
+	State       promise.State
+	Value       promise.Value
+	CompletedOn int64
 }
 
 type QueryPromisesResult struct {
@@ -135,6 +138,7 @@ type CreateSubscriptionCommand struct {
 	PromiseId   string
 	Url         string
 	RetryPolicy *subscription.RetryPolicy
+	CreatedOn   int64
 }
 
 type DeleteSubscriptionCommand struct {

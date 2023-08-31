@@ -34,6 +34,7 @@ type CreatePromiseRequest struct {
 	Param         promise.Value                `json:"param,omitempty"`
 	Timeout       int64                        `json:"timeout"`
 	Subscriptions []*CreateSubscriptionRequest `json:"subscriptions,omitempty"`
+	Tags          map[string]string            `json:"tags,omitempty"`
 }
 
 type CancelPromiseRequest struct {

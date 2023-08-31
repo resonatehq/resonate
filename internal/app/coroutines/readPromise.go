@@ -48,19 +48,17 @@ func ReadPromise(t int64, req *types.Request, res func(*types.Response, error)) 
 					},
 				}, nil)
 			} else {
-				record := result.Records[0]
+				p, err := result.Records[0].Promise()
+				if err != nil {
+					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
+					res(nil, err)
+					return
+				}
 
-				if record.State == promise.Pending && t >= record.Timeout {
-					s.Add(TimeoutPromise(t, req.ReadPromise.Id, ReadPromise(t, req, res), func(err error) {
+				if p.State == promise.Pending && t >= p.Timeout {
+					s.Add(TimeoutPromise(t, p, ReadPromise(t, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
-							return
-						}
-
-						param, err := record.Param()
-						if err != nil {
-							slog.Error("failed to parse promise record param", "record", record, "err", err)
 							res(nil, err)
 							return
 						}
@@ -70,27 +68,23 @@ func ReadPromise(t int64, req *types.Request, res func(*types.Response, error)) 
 							ReadPromise: &types.ReadPromiseResponse{
 								Status: types.ResponseOK,
 								Promise: &promise.Promise{
-									Id:    record.Id,
+									Id:    p.Id,
 									State: promise.Timedout,
-									Param: param,
+									Param: p.Param,
 									Value: promise.Value{
 										Headers: map[string]string{},
 										Ikey:    nil,
 										Data:    nil,
 									},
-									Timeout: record.Timeout,
+									Timeout:     p.Timeout,
+									Tags:        p.Tags,
+									CreatedOn:   p.CreatedOn,
+									CompletedOn: &p.Timeout,
 								},
 							},
 						}, nil)
 					}))
 				} else {
-					p, err := record.Promise()
-					if err != nil {
-						slog.Error("failed to parse promise record", "record", record, "err", err)
-						res(nil, err)
-						return
-					}
-
 					res(&types.Response{
 						Kind: types.ReadPromise,
 						ReadPromise: &types.ReadPromiseResponse{
