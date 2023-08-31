@@ -32,6 +32,7 @@ type DST struct {
 	Ikeys                 int
 	Data                  int
 	Headers               int
+	Tags                  int
 	Retries               int
 	Subscriptions         int
 	PromiseCacheSize      int
@@ -91,7 +92,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	system.AddOnTick(1, coroutines.NotifySubscriptions)
 
 	// generator
-	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Data, d.Headers, d.Retries, d.Subscriptions, d.Time(d.Ticks))
+	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Data, d.Headers, d.Tags, d.Retries, d.Subscriptions, d.Time(d.Ticks))
 	generator.AddRequest(generator.GenerateReadPromise)
 	generator.AddRequest(generator.GenerateSearchPromises)
 	generator.AddRequest(generator.GenerateCreatePromise)
