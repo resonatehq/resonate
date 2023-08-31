@@ -1,0 +1,11 @@
+rules:
+- id: range-over-map
+  pattern-either:
+  - pattern: |
+      for $K, $V := range ($MAP : map[$KT]$VT) { ... }
+  - pattern: |
+      for $K := range ($MAP : map[$KT]$VT) { ... }
+  message: Ranging over a map is non deterministic
+  languages:
+  - go
+  severity: ERROR
