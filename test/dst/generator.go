@@ -2,7 +2,7 @@ package dst
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/kernel/types"

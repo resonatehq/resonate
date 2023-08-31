@@ -70,9 +70,9 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		}
 
 		// add tick coroutines
-		for n, coroutines := range s.onTick {
-			if s.ticks%int64(n) == 0 {
-				for _, coroutine := range coroutines {
+		for _, coroutines := range util.OrderedRangeKV(s.onTick) {
+			if s.ticks%int64(coroutines.Key) == 0 {
+				for _, coroutine := range coroutines.Value {
 					s.scheduler.Add(coroutine(t, s.cfg))
 				}
 			}

@@ -2,7 +2,7 @@ package dst
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"os"
 	"strconv"
 	"testing"
