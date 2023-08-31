@@ -1,7 +1,7 @@
 package network
 
 import (
-	"math/rand"
+	"math/rand" // nosemgrep
 	"net/http"
 
 	"github.com/resonatehq/resonate/internal/aio"

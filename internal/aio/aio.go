@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type AIO interface {
@@ -69,7 +70,7 @@ func (a *aio) AddSubsystem(kind types.AIOKind, subsystem Subsystem, size int, ma
 }
 
 func (a *aio) Start() error {
-	for _, subsystem := range a.subsystems {
+	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Start(); err != nil {
 			return err
 		}
@@ -82,7 +83,7 @@ func (a *aio) Start() error {
 }
 
 func (a *aio) Stop() error {
-	for _, subsystem := range a.subsystems {
+	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
 			return err
 		}
@@ -151,7 +152,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 }
 
 func (a *aio) Flush(t int64) {
-	for _, subsystem := range a.subsystems {
+	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		for _, worker := range subsystem.workers {
 			worker.flush(t)
 		}

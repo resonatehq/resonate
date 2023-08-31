@@ -3,12 +3,12 @@ package aio
 import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type aioDST struct {
 	sqes       []*bus.SQE[types.Submission, types.Completion]
 	cqes       []*bus.CQE[types.Submission, types.Completion]
-	keys       []types.AIOKind
 	subsystems map[types.AIOKind]Subsystem
 	done       bool
 }
@@ -20,12 +20,11 @@ func NewDST() *aioDST {
 }
 
 func (a *aioDST) AddSubsystem(kind types.AIOKind, subsystem Subsystem) {
-	a.keys = append(a.keys, kind)
 	a.subsystems[kind] = subsystem
 }
 
 func (a *aioDST) Start() error {
-	for _, subsystem := range a.subsystems {
+	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Start(); err != nil {
 			return err
 		}
@@ -35,7 +34,7 @@ func (a *aioDST) Start() error {
 }
 
 func (a *aioDST) Stop() error {
-	for _, subsystem := range a.subsystems {
+	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
 			return err
 		}
@@ -64,18 +63,16 @@ func (a *aioDST) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 }
 
 func (a *aioDST) Flush(t int64) {
-	sqes := map[types.AIOKind][]*bus.SQE[types.Submission, types.Completion]{}
+	flush := map[types.AIOKind][]*bus.SQE[types.Submission, types.Completion]{}
 	for _, sqe := range a.sqes {
-		sqes[sqe.Submission.Kind] = append(sqes[sqe.Submission.Kind], sqe)
+		flush[sqe.Submission.Kind] = append(flush[sqe.Submission.Kind], sqe)
 	}
 
-	for _, kind := range a.keys {
-		if sqes, ok := sqes[kind]; ok {
-			if subsystem, ok := a.subsystems[kind]; ok {
-				a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes)...)
-			} else {
-				panic("invalid aio submission")
-			}
+	for _, sqes := range util.OrderedRangeKV(flush) {
+		if subsystem, ok := a.subsystems[sqes.Key]; ok {
+			a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes.Value)...)
+		} else {
+			panic("invalid aio submission")
 		}
 	}
 
