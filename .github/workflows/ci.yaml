@@ -44,7 +44,7 @@ jobs:
     name: semgrep
     runs-on: ubuntu-20.04
     env:
-      SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+      SEMGREP_RULES: "auto semgrep.yml"
     container:
       image: returntocorp/semgrep
     if: (github.actor != 'dependabot[bot]')
