@@ -41,7 +41,7 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
 
   semgrep:
-    name: semgrep/ci
+    name: semgrep
     runs-on: ubuntu-20.04
     env:
       SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
