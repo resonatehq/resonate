@@ -71,29 +71,34 @@ func (a *api) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
 	// function and emits metrics
 	callback := sqe.Callback
 	sqe.Callback = func(res *types.Response, err error) {
-		var status types.ResponseStatus
-		switch res.Kind {
-		case types.ReadPromise:
-			status = res.ReadPromise.Status
-		case types.SearchPromises:
-			status = res.SearchPromises.Status
-		case types.CreatePromise:
-			status = res.CreatePromise.Status
-		case types.CancelPromise:
-			status = res.CancelPromise.Status
-		case types.ResolvePromise:
-			status = res.ResolvePromise.Status
-		case types.RejectPromise:
-			status = res.RejectPromise.Status
-		case types.ReadSubscriptions:
-			status = res.ReadSubscriptions.Status
-		case types.CreateSubscription:
-			status = res.CreateSubscription.Status
-		case types.DeleteSubscription:
-			status = res.DeleteSubscription.Status
+		var status int
+
+		if err != nil {
+			status = 500
+		} else {
+			switch res.Kind {
+			case types.ReadPromise:
+				status = int(res.ReadPromise.Status)
+			case types.SearchPromises:
+				status = int(res.SearchPromises.Status)
+			case types.CreatePromise:
+				status = int(res.CreatePromise.Status)
+			case types.CancelPromise:
+				status = int(res.CancelPromise.Status)
+			case types.ResolvePromise:
+				status = int(res.ResolvePromise.Status)
+			case types.RejectPromise:
+				status = int(res.RejectPromise.Status)
+			case types.ReadSubscriptions:
+				status = int(res.ReadSubscriptions.Status)
+			case types.CreateSubscription:
+				status = int(res.CreateSubscription.Status)
+			case types.DeleteSubscription:
+				status = int(res.DeleteSubscription.Status)
+			}
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(sqe.Kind, strconv.Itoa(int(status))).Inc()
+		a.metrics.ApiTotal.WithLabelValues(sqe.Kind, strconv.Itoa(status)).Inc()
 		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Dec()
 
 		callback(res, err)
