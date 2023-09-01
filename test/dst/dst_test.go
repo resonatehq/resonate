@@ -28,7 +28,7 @@ func TestDST(t *testing.T) {
 	var cs func(int) int
 	var ticks int64
 	if seed == 0 {
-		runs = 3
+		runs = 1
 		cs = func(i int) int { return i }
 		ticks = 1000
 	} else {

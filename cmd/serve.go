@@ -12,7 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -57,7 +57,16 @@ var serveCmd = &cobra.Command{
 
 		// instatiate aio subsystems
 		network := network.New(10 * time.Second)
-		store, err := sqlite.New(sqlite.Config{Path: "resonate.db"})
+		// store, err := sqlite.New(sqlite.Config{Path: "resonate.db"})
+		// if err != nil {
+		// 	return err
+		// }
+
+		store, err := postgres.New(postgres.Config{
+			MaxOpenConns:    3,
+			MaxIdleConns:    3,
+			ConnMaxIdleTime: 0,
+		})
 		if err != nil {
 			return err
 		}
@@ -66,7 +75,7 @@ var serveCmd = &cobra.Command{
 		api.AddSubsystem(http)
 		api.AddSubsystem(grpc)
 		aio.AddSubsystem(types.Network, network, 100, 1, 3)
-		aio.AddSubsystem(types.Store, store, 100, 10, 1)
+		aio.AddSubsystem(types.Store, store, 100, 10, 3)
 
 		// start api/aio
 		if err := api.Start(); err != nil {

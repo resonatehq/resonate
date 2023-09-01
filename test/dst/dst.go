@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -60,7 +60,11 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 
 	// instatiate aio subsystems
 	network := network.NewDST(r, 0.5)
-	store, err := sqlite.New(sqlite.Config{Path: "test.db"})
+	// store, err := sqlite.New(sqlite.Config{Path: "test.db"})
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
+	store, err := postgres.New(postgres.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
