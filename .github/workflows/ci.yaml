@@ -31,9 +31,22 @@ jobs:
         version: v1.54
         args: --verbose --timeout=3m
 
+    - name: Install docker-compose
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install docker-compose
+
+    - name: Start docker-compose
+      run: |
+        docker-compose up -d
+
     - name: Run go test and generate coverage report
       run: |
         go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+
+    - name: Stop docker-compose
+      run: |
+        docker-compose down
 
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v3 # nosemgrep

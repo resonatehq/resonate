@@ -16,17 +16,17 @@ import (
 
 var inflights = inflight{}
 
-type inflight map[int64]bool
+type inflight map[string]bool
 
-func (i inflight) get(id int64) bool {
+func (i inflight) get(id string) bool {
 	return i[id]
 }
 
-func (i inflight) add(id int64) {
+func (i inflight) add(id string) {
 	i[id] = true
 }
 
-func (i inflight) remove(id int64) {
+func (i inflight) remove(id string) {
 	delete(i, id)
 }
 
@@ -58,12 +58,13 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 			records := completion.Store.Results[0].ReadNotifications.Records
 
 			for _, record := range records {
-				if t >= record.Time && !inflights.get(record.Id) {
-					notification, err := record.Notification()
-					if err != nil {
-						slog.Warn("failed to parse notification record", "record", record, "err", err)
-						continue
-					}
+				notification, err := record.Notification()
+				if err != nil {
+					slog.Warn("failed to parse notification record", "record", record, "err", err)
+					continue
+				}
+
+				if t >= record.Time && !inflights.get(id(notification)) {
 					s.Add(notifySubscription(notification))
 				}
 			}
@@ -72,10 +73,10 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 }
 
 func notifySubscription(notification *notification.Notification) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscription:%d", notification.Id), "NotifySubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscription(id=%s, promiseId=%s)", notification.Id, notification.PromiseId), "NotifySubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// handle inflight cache
-		inflights.add(notification.Id)
-		c.OnDone(func() { inflights.remove(notification.Id) })
+		inflights.add(id(notification))
+		c.OnDone(func() { inflights.remove(id(notification)) })
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -145,16 +146,18 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 					command = &types.Command{
 						Kind: types.StoreUpdateNotification,
 						UpdateNotification: &types.UpdateNotificationCommand{
-							Id:      notification.Id,
-							Time:    backoff(notification.RetryPolicy.Delay, notification.Attempt),
-							Attempt: notification.Attempt + 1,
+							Id:        notification.Id,
+							PromiseId: notification.PromiseId,
+							Time:      backoff(notification.RetryPolicy.Delay, notification.Attempt),
+							Attempt:   notification.Attempt + 1,
 						},
 					}
 				} else {
 					command = &types.Command{
 						Kind: types.StoreDeleteNotification,
 						DeleteNotification: &types.DeleteNotificationCommand{
-							Id: notification.Id,
+							Id:        notification.Id,
+							PromiseId: notification.PromiseId,
 						},
 					}
 				}
@@ -187,7 +190,8 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 					{
 						Kind: types.StoreDeleteNotification,
 						DeleteNotification: &types.DeleteNotificationCommand{
-							Id: notification.Id,
+							Id:        notification.Id,
+							PromiseId: notification.PromiseId,
 						},
 					},
 				},
@@ -200,6 +204,10 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 			slog.Warn("failed to delete notification", "notification", notification)
 		}
 	})
+}
+
+func id(notification *notification.Notification) string {
+	return fmt.Sprintf("%s:%s", notification.Id, notification.PromiseId)
 }
 
 func isSuccessful(res *http.Response) bool {

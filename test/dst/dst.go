@@ -33,8 +33,8 @@ type DST struct {
 	Data                  int
 	Headers               int
 	Tags                  int
+	Urls                  int
 	Retries               int
-	Subscriptions         int
 	PromiseCacheSize      int
 	TimeoutCacheSize      int
 	NotificationCacheSize int
@@ -60,7 +60,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 
 	// instatiate aio subsystems
 	network := network.NewDST(r, 0.5)
-	store, err := sqlite.New(sqlite.Config{Path: "test.db"})
+	store, err := sqlite.New(sqlite.Config{Path: ":memory:"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	system.AddOnTick(1, coroutines.NotifySubscriptions)
 
 	// generator
-	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Data, d.Headers, d.Tags, d.Retries, d.Subscriptions, d.Time(d.Ticks))
+	generator := NewGenerator(r, d.Ids, d.Ikeys, d.Data, d.Headers, d.Tags, d.Urls, d.Retries, d.Time(d.Ticks))
 	generator.AddRequest(generator.GenerateReadPromise)
 	generator.AddRequest(generator.GenerateSearchPromises)
 	generator.AddRequest(generator.GenerateCreatePromise)
@@ -149,16 +149,16 @@ func (d *DST) Run(t *testing.T, r *rand.Rand, seed int64) {
 	api.Shutdown()
 	aio.Shutdown()
 
+	// reset store
+	if err := store.Reset(); err != nil {
+		t.Fatal(err)
+	}
+
 	// stop api/aio
 	if err := api.Stop(); err != nil {
 		t.Fatal(err)
 	}
 	if err := aio.Stop(); err != nil {
-		t.Fatal(err)
-	}
-
-	// reset store
-	if err := store.Reset(); err != nil {
 		t.Fatal(err)
 	}
 

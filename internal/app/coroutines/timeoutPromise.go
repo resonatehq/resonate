@@ -47,7 +47,7 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 						Value: promise.Value{
 							Headers: map[string]string{},
 							Ikey:    nil,
-							Data:    nil,
+							Data:    []byte{},
 						},
 						CompletedOn: p.Timeout,
 					},
@@ -58,12 +58,19 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 						Id: p.Id,
 					},
 				},
+				{
+					Kind: types.StoreDeleteSubscriptions,
+					DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+						PromiseId: p.Id,
+					},
+				},
 			}
 
 			for _, record := range records {
 				commands = append(commands, &types.Command{
 					Kind: types.StoreCreateNotification,
 					CreateNotification: &types.CreateNotificationCommand{
+						Id:          record.Id,
 						PromiseId:   record.PromiseId,
 						Url:         record.Url,
 						RetryPolicy: record.RetryPolicy,

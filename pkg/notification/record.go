@@ -7,7 +7,7 @@ import (
 )
 
 type NotificationRecord struct {
-	Id          int64
+	Id          string
 	PromiseId   string
 	Url         string
 	RetryPolicy []byte

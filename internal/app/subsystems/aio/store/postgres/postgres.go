@@ -1,10 +1,11 @@
-package sqlite
+package postgres
 
 import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
+	"net/url"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -17,7 +18,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/lib/pq"
 )
 
 const (
@@ -25,22 +26,22 @@ const (
 	CREATE TABLE IF NOT EXISTS promises (
 		id            TEXT,
 		state         INTEGER DEFAULT 1,
-		param_headers BLOB,
+		param_headers BYTEA,
 		param_ikey    TEXT,
-		param_data    BLOB,
-		value_headers BLOB,
+		param_data    BYTEA,
+		value_headers BYTEA,
 		value_ikey    TEXT,
-		value_data    BLOB,
-		timeout       INTEGER,
-		tags          BLOB,
-		created_on    INTEGER,
-		completed_on  INTEGER,
+		value_data    BYTEA,
+		timeout       BIGINT,
+		tags          BYTEA,
+		created_on    BIGINT,
+		completed_on  BIGINT,
 		PRIMARY KEY(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
-		time INTEGER,
+		time BIGINT,
 		PRIMARY KEY(id)
 	);
 
@@ -48,8 +49,8 @@ const (
 		id           TEXT,
 		promise_id   TEXT,
 		url          TEXT,
-		retry_policy BLOB,
-		created_on   INTEGER,
+		retry_policy BYTEA,
+		created_on   BIGINT,
 		PRIMARY KEY(id, promise_id)
 	);
 
@@ -57,58 +58,64 @@ const (
 		id           TEXT,
 		promise_id   TEXT,
 		url          TEXT,
-		retry_policy BLOB,
-		time         INTEGER,
+		retry_policy BYTEA,
+		time         BIGINT,
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);`
 
+	DROP_TABLE_STATEMENT = `
+	DROP TABLE notifications;
+	DROP TABLE subscriptions;
+	DROP TABLE timeouts;
+	DROP TABLE promises;`
+
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
-	FROM
-		promises
-	WHERE
-		id = ?`
+        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+    FROM
+        promises
+    WHERE
+        id = $1`
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
-	FROM
-		promises
-	WHERE
-		id GLOB ? AND state = ?`
+        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+    FROM
+        promises
+    WHERE
+        id LIKE $1 AND state = $2`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, state, param_headers, param_ikey, param_data, timeout, tags, created_on)
+	    (id, state, param_headers, param_ikey, param_data, timeout, tags, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?)
+	    ($1, $2, $3, $4, $5, $6, $7, $8)
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
 	UPDATE promises
-	SET state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
-	WHERE id = ? AND state = 1`
+    SET state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
+    WHERE id = $6 AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
-		id, time
-	FROM
-		timeouts
-	ORDER BY
-		time ASC
-	LIMIT ?`
+        id, time
+    FROM
+        timeouts
+    ORDER BY
+        time ASC
+    LIMIT $1`
 
 	TIMEOUT_INSERT_STATEMENT = `
 	INSERT INTO timeouts
-		(id, time)
-	VALUES
-		(?, ?)
+        (id, time)
+    VALUES
+        ($1, $2)
 	ON CONFLICT(id) DO NOTHING`
 
 	TIMEOUT_DELETE_STATEMENT = `
-	DELETE FROM timeouts WHERE id = ?`
+	DELETE FROM timeouts WHERE id = $1`
 
 	SUBSCRIPTION_SELECT_STATEMENT = `
 	SELECT
@@ -116,84 +123,104 @@ const (
 	FROM
 		subscriptions
 	WHERE
-		id = ? AND promise_id = ?`
+		id = $1 AND promise_id = $2`
 
 	SUBSCRIPTION_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, promise_id, url, retry_policy, created_on
-	FROM
-		subscriptions
-	WHERE
-		promise_id IN (%s)`
+        id, promise_id, url, retry_policy, created_on
+    FROM
+        subscriptions
+    WHERE
+        promise_id = ANY($1)`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO subscriptions
-		(id, promise_id, url, retry_policy, created_on)
-	VALUES
-		(?, ?, ?, ?, ?)
-	ON CONFLICT(id, promise_id) DO NOTHING`
+        (id, promise_id, url, retry_policy, created_on)
+    VALUES
+        ($1, $2, $3, $4, $5)
+	ON CONFLICT(id, promise_id) DO NOTHING;`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM subscriptions WHERE id = ? and promise_id = ?`
+	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
 
 	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
-	DELETE FROM subscriptions WHERE promise_id = ?`
+	DELETE FROM subscriptions WHERE promise_id = $1`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
-		id, promise_id, url, retry_policy, time, attempt
-	FROM
-		notifications
-	ORDER BY
-		time ASC
-	LIMIT ?`
+        id, promise_id, url, retry_policy, time, attempt
+    FROM
+        notifications
+    ORDER BY
+        time ASC
+    LIMIT $1`
 
 	NOTIFICATION_INSERT_STATEMENT = `
 	INSERT INTO notifications
-		(id, promise_id, url, retry_policy, time, attempt)
-	VALUES
-		(?, ?, ?, ?, ?, 0)
-	ON CONFLICT(id, promise_id) DO NOTHING`
+        (id, promise_id, url, retry_policy, time, attempt)
+    VALUES
+        ($1, $2, $3, $4, $5, 0)
+	ON CONFLICT(id, promise_id) DO NOTHING;`
 
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
-	SET time = ?, attempt = ?
-	WHERE id = ? and promise_id = ?`
+    SET time = $1, attempt = $2
+    WHERE id = $3 and promise_id = $4`
 
 	NOTIFICATION_DELETE_STATEMENT = `
-	DELETE FROM notifications WHERE id = ? and promise_id = ?`
+	DELETE FROM notifications WHERE id = $1 and promise_id = $2`
 )
 
 type Config struct {
-	Path string
+	Host            string
+	Port            string
+	Username        string
+	Password        string
+	Database        string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxIdleTime time.Duration
 }
 
-type SqliteStore struct {
+type PostgresStore struct {
 	db     *sql.DB
 	config Config
 }
 
-type SqliteStoreWorker struct {
-	*SqliteStore
+type PostgresStoreWorker struct {
+	*PostgresStore
+	i int
 }
 
 func New(config Config) (aio.Subsystem, error) {
-	db, err := sql.Open("sqlite3", config.Path)
+	dbUrl := &url.URL{
+		User:     url.UserPassword(config.Username, config.Password),
+		Host:     fmt.Sprintf("%s:%s", config.Host, config.Port),
+		Path:     config.Database,
+		Scheme:   "postgres",
+		RawQuery: "sslmode=disable",
+	}
+
+	db, err := sql.Open("postgres", dbUrl.String())
 	if err != nil {
 		return nil, err
 	}
 
-	return &SqliteStore{
+	db.SetMaxOpenConns(config.MaxOpenConns)
+	db.SetMaxIdleConns(config.MaxIdleConns)
+	db.SetConnMaxIdleTime(config.ConnMaxIdleTime)
+
+	return &PostgresStore{
 		db:     db,
 		config: config,
 	}, nil
 }
 
-func (s *SqliteStore) String() string {
-	return "store:sqlite"
+func (s *PostgresStore) String() string {
+	return "store:postgres"
 }
 
-func (s *SqliteStore) Start() error {
+func (s *PostgresStore) Start() error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
@@ -201,27 +228,30 @@ func (s *SqliteStore) Start() error {
 	return nil
 }
 
-func (s *SqliteStore) Stop() error {
+func (s *PostgresStore) Stop() error {
 	return s.db.Close()
 }
 
-func (s *SqliteStore) Reset() error {
-	if _, err := os.Stat(s.config.Path); err != nil {
-		return nil
+func (s *PostgresStore) Reset() error {
+	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
+		return err
 	}
 
-	return os.Remove(s.config.Path)
+	return nil
 }
 
-func (s *SqliteStore) NewWorker(int) aio.Worker {
-	return &SqliteStoreWorker{s}
+func (s *PostgresStore) NewWorker(i int) aio.Worker {
+	return &PostgresStoreWorker{
+		PostgresStore: s,
+		i:             i,
+	}
 }
 
-func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
+func (w *PostgresStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
 	return store.Process(w, sqes)
 }
 
-func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
+func (w *PostgresStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
 	tx, err := w.db.Begin()
@@ -244,7 +274,7 @@ func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*typ
 	return results, nil
 }
 
-func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Transaction) ([][]*types.Result, error) {
+func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Transaction) ([][]*types.Result, error) {
 	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -383,7 +413,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 	return results, nil
 }
 
-func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseCommand) (*types.Result, error) {
 	// select
 	row := tx.QueryRow(PROMISE_SELECT_STATEMENT, cmd.Id)
 	record := &promise.PromiseRecord{}
@@ -424,7 +454,7 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 	}, nil
 }
 
-func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
 	util.Assert(cmd.State == promise.Pending, "status must be pending")
 
 	// select
@@ -469,9 +499,9 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreatePromiseCommand) (*types.Result, error) {
-	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
-	util.Assert(cmd.Param.Data != nil, "data must not be nil")
+func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreatePromiseCommand) (*types.Result, error) {
+	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
+	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
 
 	headers, err := json.Marshal(cmd.Param.Headers)
@@ -503,7 +533,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdatePromiseCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdatePromiseCommand) (*types.Result, error) {
 	util.Assert(cmd.State.In(promise.Resolved|promise.Rejected|promise.Canceled|promise.Timedout), "state must be canceled, resolved, rejected, or timedout")
 	util.Assert(cmd.Value.Headers != nil, "value headers must not be nil")
 	util.Assert(cmd.Value.Data != nil, "value data must not be nil")
@@ -532,7 +562,7 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsCommand) (*types.Result, error) {
 	// select
 	rows, err := tx.Query(TIMEOUT_SELECT_STATEMENT, cmd.N)
 	if err != nil {
@@ -562,7 +592,7 @@ func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsComm
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateTimeoutCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateTimeoutCommand) (*types.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// insert
@@ -584,7 +614,7 @@ func (w *SqliteStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteTimeoutCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteTimeoutCommand) (*types.Result, error) {
 	// insert
 	res, err := stmt.Exec(cmd.Id)
 	if err != nil {
@@ -604,7 +634,7 @@ func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscriptionCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscriptionCommand) (*types.Result, error) {
 	// select
 	row := tx.QueryRow(SUBSCRIPTION_SELECT_STATEMENT, cmd.Id, cmd.PromiseId)
 	record := &subscription.SubscriptionRecord{}
@@ -632,25 +662,11 @@ func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscrip
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
 	util.Assert(len(cmd.PromiseIds) > 0, "expected a promise id")
 
 	// select
-	var placeholders string
-	promiseIds := make([]interface{}, len(cmd.PromiseIds))
-
-	for i, promiseId := range cmd.PromiseIds {
-		if i == len(cmd.PromiseIds)-1 {
-			placeholders += "?"
-		} else {
-			placeholders += "?,"
-		}
-
-		promiseIds[i] = promiseId
-	}
-
-	stmt := fmt.Sprintf(SUBSCRIPTION_SELECT_ALL_STATEMENT, placeholders)
-	rows, err := tx.Query(stmt, promiseIds...)
+	rows, err := tx.Query(SUBSCRIPTION_SELECT_ALL_STATEMENT, pq.Array(cmd.PromiseIds))
 	if err != nil {
 		return nil, err
 	}
@@ -678,7 +694,7 @@ func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateSubscriptionCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateSubscriptionCommand) (*types.Result, error) {
 	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
 
 	retryPolicy, err := json.Marshal(cmd.RetryPolicy)
@@ -705,8 +721,8 @@ func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
-	// delete
+func (w *PostgresStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
+	// insert
 	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
 		return nil, err
@@ -725,7 +741,7 @@ func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionsCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionsCommand) (*types.Result, error) {
 	// delete
 	res, err := stmt.Exec(cmd.PromiseId)
 	if err != nil {
@@ -744,8 +760,7 @@ func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd 
 		},
 	}, nil
 }
-
-func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotificationsCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotificationsCommand) (*types.Result, error) {
 	// select
 	rows, err := tx.Query(NOTIFICATION_SELECT_STATEMENT, cmd.N)
 	if err != nil {
@@ -775,7 +790,7 @@ func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotific
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationCommand) (*types.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
 
@@ -798,7 +813,7 @@ func (w *SqliteStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdateNotificationCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdateNotificationCommand) (*types.Result, error) {
 	// update
 	res, err := stmt.Exec(cmd.Time, cmd.Attempt, cmd.Id, cmd.PromiseId)
 	if err != nil {
@@ -818,7 +833,7 @@ func (w *SqliteStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteNotificationCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteNotificationCommand) (*types.Result, error) {
 	// insert
 	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {

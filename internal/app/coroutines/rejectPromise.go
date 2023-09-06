@@ -15,6 +15,9 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
 		}
+		if req.RejectPromise.Value.Data == nil {
+			req.RejectPromise.Value.Data = []byte{}
+		}
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -79,7 +82,7 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 										Value: promise.Value{
 											Headers: map[string]string{},
 											Ikey:    nil,
-											Data:    nil,
+											Data:    []byte{},
 										},
 										Timeout:     p.Timeout,
 										Tags:        p.Tags,
@@ -132,12 +135,19 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 										Id: req.RejectPromise.Id,
 									},
 								},
+								{
+									Kind: types.StoreDeleteSubscriptions,
+									DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+										PromiseId: req.RejectPromise.Id,
+									},
+								},
 							}
 
 							for _, record := range records {
 								commands = append(commands, &types.Command{
 									Kind: types.StoreCreateNotification,
 									CreateNotification: &types.CreateNotificationCommand{
+										Id:          record.Id,
 										PromiseId:   record.PromiseId,
 										Url:         record.Url,
 										RetryPolicy: record.RetryPolicy,

@@ -28,15 +28,10 @@ func New(api api.API, addr string, timeout time.Duration, reg *prometheus.Regist
 	// Promise API
 	r.GET("/promises", s.searchPromises)
 	r.GET("/promises/:id", s.readPromise)
-	r.GET("/promises/:id/subscriptions", s.readSubscriptions)
 	r.POST("/promises/:id/create", s.createPromise)
 	r.POST("/promises/:id/cancel", s.cancelPromise)
 	r.POST("/promises/:id/resolve", s.resolvePromise)
 	r.POST("/promises/:id/reject", s.rejectPromise)
-
-	// Subscription API
-	r.POST("/subscriptions", s.createSubscription)
-	r.DELETE("/subscriptions/:id", s.deleteSubscription)
 
 	// Metrics
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg})))

@@ -15,6 +15,9 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 		if req.ResolvePromise.Value.Headers == nil {
 			req.ResolvePromise.Value.Headers = map[string]string{}
 		}
+		if req.ResolvePromise.Value.Data == nil {
+			req.ResolvePromise.Value.Data = []byte{}
+		}
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -79,7 +82,7 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 										Value: promise.Value{
 											Headers: map[string]string{},
 											Ikey:    nil,
-											Data:    nil,
+											Data:    []byte{},
 										},
 										Timeout:     p.Timeout,
 										Tags:        p.Tags,
@@ -132,12 +135,19 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 										Id: req.ResolvePromise.Id,
 									},
 								},
+								{
+									Kind: types.StoreDeleteSubscriptions,
+									DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+										PromiseId: req.ResolvePromise.Id,
+									},
+								},
 							}
 
 							for _, record := range records {
 								commands = append(commands, &types.Command{
 									Kind: types.StoreCreateNotification,
 									CreateNotification: &types.CreateNotificationCommand{
+										Id:          record.Id,
 										PromiseId:   record.PromiseId,
 										Url:         record.Url,
 										RetryPolicy: record.RetryPolicy,

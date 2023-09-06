@@ -95,15 +95,8 @@ func (m *Model) ValidateCreateSubscription(req *types.Request, res *types.Respon
 }
 
 func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
-	for _, pm := range m.promises {
-		for i, subscription := range pm.subscriptions {
-			if subscription.Id == req.DeleteSubscription.Id {
-				return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription, i)
-			}
-		}
-	}
-
-	return nil
+	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
+	return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
 }
 
 type Promises map[string]*PromiseModel
@@ -295,13 +288,13 @@ func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, re
 
 func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, res *types.CreateSubscriptionResponse) error {
 	switch res.Status {
+	case types.ResponseOK:
 	case types.ResponseCreated:
 		for _, subscription := range m.subscriptions {
-			if subscription.Url == res.Subscription.Url {
-				return fmt.Errorf("subscription '%s' already exists for promise '%s'", res.Subscription.Url, m.id)
+			if subscription.Id == res.Subscription.Id {
+				return fmt.Errorf("subscription '%s' already exists for promise '%s'", res.Subscription.Id, m.id)
 			}
 		}
-	case types.ResponseConflict:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
@@ -309,13 +302,23 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 	return m.verifySubscription(res.Subscription)
 }
 
-func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse, i int) error {
+func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
 	switch res.Status {
 	case types.ResponseNoContent:
-		m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
+		for i, subscription := range m.subscriptions {
+			if subscription.Id == req.Id {
+				m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
+				return nil
+			}
+		}
 		return nil
 	case types.ResponseNotFound:
-		return fmt.Errorf("subscription '%d' exists for promise '%s'", req.Id, m.id)
+		for _, subscription := range m.subscriptions {
+			if subscription.Id == req.Id {
+				return fmt.Errorf("subscription '%s' exists for promise '%s'", req.Id, m.id)
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}

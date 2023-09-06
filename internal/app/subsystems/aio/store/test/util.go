@@ -55,6 +55,10 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 	})
 }
 
+func (c *testCase) Panic() bool {
+	return c.panic
+}
+
 var TestCases = []*testCase{
 	{
 		name: "CreatePromise",
@@ -66,6 +70,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -93,6 +98,7 @@ var TestCases = []*testCase{
 						Id:           "foo",
 						State:        1,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						Timeout:      1,
 						Tags:         []byte("{}"),
 						CreatedOn:    int64ToPointer(1),
@@ -112,6 +118,7 @@ var TestCases = []*testCase{
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Ikey:    ikey("bar"),
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -140,6 +147,7 @@ var TestCases = []*testCase{
 						State:        1,
 						ParamHeaders: []byte("{}"),
 						ParamIkey:    ikey("bar"),
+						ParamData:    []byte{},
 						Timeout:      2,
 						Tags:         []byte("{}"),
 						CreatedOn:    int64ToPointer(1),
@@ -316,6 +324,7 @@ var TestCases = []*testCase{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -327,6 +336,7 @@ var TestCases = []*testCase{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -358,6 +368,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -370,6 +381,7 @@ var TestCases = []*testCase{
 					State: 2,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -387,6 +399,7 @@ var TestCases = []*testCase{
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -399,6 +412,7 @@ var TestCases = []*testCase{
 					State: 4,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -431,7 +445,9 @@ var TestCases = []*testCase{
 						Id:           "foo",
 						State:        2,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
+						ValueData:    []byte{},
 						Timeout:      1,
 						Tags:         []byte("{}"),
 						CreatedOn:    int64ToPointer(1),
@@ -459,7 +475,9 @@ var TestCases = []*testCase{
 						Id:           "bar",
 						State:        4,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
+						ValueData:    []byte{},
 						Timeout:      2,
 						Tags:         []byte("{}"),
 						CreatedOn:    int64ToPointer(1),
@@ -479,6 +497,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -492,6 +511,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 						Ikey:    ikey("foo"),
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -509,6 +529,7 @@ var TestCases = []*testCase{
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -522,6 +543,7 @@ var TestCases = []*testCase{
 					Value: promise.Value{
 						Headers: map[string]string{},
 						Ikey:    ikey("bar"),
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -554,7 +576,9 @@ var TestCases = []*testCase{
 						Id:           "foo",
 						State:        2,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
+						ValueData:    []byte{},
 						ValueIkey:    ikey("foo"),
 						Timeout:      1,
 						Tags:         []byte("{}"),
@@ -583,7 +607,9 @@ var TestCases = []*testCase{
 						Id:           "bar",
 						State:        4,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
+						ValueData:    []byte{},
 						ValueIkey:    ikey("bar"),
 						Timeout:      2,
 						Tags:         []byte("{}"),
@@ -604,6 +630,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -635,6 +662,7 @@ var TestCases = []*testCase{
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -681,6 +709,7 @@ var TestCases = []*testCase{
 						Id:           "foo",
 						State:        2,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
 						ValueIkey:    ikey("foo"),
 						ValueData:    []byte("foo"),
@@ -711,6 +740,7 @@ var TestCases = []*testCase{
 						Id:           "bar",
 						State:        4,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte("{}"),
 						ValueIkey:    ikey("bar"),
 						ValueData:    []byte("bar"),
@@ -733,6 +763,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -768,6 +799,7 @@ var TestCases = []*testCase{
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -818,6 +850,7 @@ var TestCases = []*testCase{
 						Id:           "foo",
 						State:        2,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
 						ValueIkey:    ikey("foo"),
 						ValueData:    []byte("foo"),
@@ -848,6 +881,7 @@ var TestCases = []*testCase{
 						Id:           "bar",
 						State:        4,
 						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
 						ValueHeaders: []byte(`{"a":"a","b":"b","c":"c"}`),
 						ValueIkey:    ikey("bar"),
 						ValueData:    []byte("bar"),
@@ -869,6 +903,7 @@ var TestCases = []*testCase{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -881,6 +916,7 @@ var TestCases = []*testCase{
 					State: 2,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -892,6 +928,7 @@ var TestCases = []*testCase{
 					State: 2,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -902,6 +939,7 @@ var TestCases = []*testCase{
 					Id: "bar",
 					Param: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					Tags:      map[string]string{},
 					CreatedOn: 1,
@@ -914,6 +952,7 @@ var TestCases = []*testCase{
 					State: 4,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -925,6 +964,7 @@ var TestCases = []*testCase{
 					State: 4,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -979,6 +1019,7 @@ var TestCases = []*testCase{
 					State: 2,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -990,6 +1031,7 @@ var TestCases = []*testCase{
 					State: 4,
 					Value: promise.Value{
 						Headers: map[string]string{},
+						Data:    []byte{},
 					},
 					CompletedOn: 2,
 				},
@@ -1006,51 +1048,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreUpdatePromise,
 				UpdatePromise: &types.AlterPromisesResult{
 					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "ReadPromise",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "foo",
-					Timeout: 1,
-					Param: promise.Value{
-						Headers: map[string]string{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
-					Id: "foo",
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
-					RowsReturned: 1,
-					Records: []*promise.PromiseRecord{{
-						Id:           "foo",
-						State:        1,
-						ParamHeaders: []byte("{}"),
-						Timeout:      1,
-						Tags:         []byte("{}"),
-						CreatedOn:    int64ToPointer(1),
-					}},
 				},
 			},
 		},
@@ -1279,6 +1276,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					RetryPolicy: &subscription.RetryPolicy{},
@@ -1290,7 +1288,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 		},
@@ -1301,6 +1298,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					RetryPolicy: &subscription.RetryPolicy{},
@@ -1309,6 +1307,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					RetryPolicy: &subscription.RetryPolicy{},
@@ -1320,14 +1319,12 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 0,
-					LastInsertId: 0,
 				},
 			},
 		},
@@ -1338,6 +1335,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					RetryPolicy: &subscription.RetryPolicy{},
@@ -1346,7 +1344,8 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreDeleteSubscription,
 				DeleteSubscription: &types.DeleteSubscriptionCommand{
-					Id: 1,
+					Id:        "foo",
+					PromiseId: "foo",
 				},
 			},
 		},
@@ -1355,7 +1354,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
@@ -1367,11 +1365,55 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "ReadSubscription",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
+					PromiseId:   "bar",
+					Url:         "https://baz.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscription,
+				ReadSubscription: &types.ReadSubscriptionCommand{
+					Id:        "foo",
+					PromiseId: "bar",
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscription,
+				ReadSubscription: &types.QuerySubscriptionsResult{
+					RowsReturned: 1,
+					Records: []*subscription.SubscriptionRecord{
+						{
+							Id:          "foo",
+							PromiseId:   "bar",
+							Url:         "https://baz.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "ReadSubscriptions",
 		commands: []*types.Command{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
@@ -1380,6 +1422,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "bar",
 					PromiseId:   "bar",
 					Url:         "https://bar.com",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
@@ -1388,6 +1431,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "baz",
 					PromiseId:   "baz",
 					Url:         "https://baz.com",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
@@ -1405,21 +1449,18 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 2,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionResult{
 					RowsAffected: 1,
-					LastInsertId: 3,
 				},
 			},
 			{
@@ -1428,22 +1469,22 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*subscription.SubscriptionRecord{
 						{
+							Id:          "foo",
+							PromiseId:   "foo",
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+						},
+						{
+							Id:          "bar",
 							PromiseId:   "bar",
-							Id:          2,
 							Url:         "https://bar.com",
 							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 						},
 						{
+							Id:          "baz",
 							PromiseId:   "baz",
-							Id:          3,
 							Url:         "https://baz.com",
 							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-						},
-						{
-							PromiseId:   "foo",
-							Id:          1,
-							Url:         "https://foo.com",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 						},
 					},
 				},
@@ -1456,6 +1497,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        0,
@@ -1468,7 +1510,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 		},
@@ -1479,6 +1520,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        0,
@@ -1488,6 +1530,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        1,
@@ -1500,7 +1543,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
@@ -1517,6 +1559,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        0,
@@ -1526,9 +1569,10 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreUpdateNotification,
 				UpdateNotification: &types.UpdateNotificationCommand{
-					Id:      1,
-					Time:    1,
-					Attempt: 1,
+					Id:        "foo",
+					PromiseId: "foo",
+					Time:      1,
+					Attempt:   1,
 				},
 			},
 		},
@@ -1537,7 +1581,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
@@ -1554,6 +1597,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        0,
@@ -1563,7 +1607,8 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreDeleteNotification,
 				DeleteNotification: &types.DeleteNotificationCommand{
-					Id: 1,
+					Id:        "foo",
+					PromiseId: "foo",
 				},
 			},
 		},
@@ -1572,7 +1617,6 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
@@ -1589,6 +1633,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
 					Time:        0,
@@ -1598,6 +1643,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "bar",
 					PromiseId:   "bar",
 					Url:         "https://bar.com",
 					Time:        1,
@@ -1607,6 +1653,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.CreateNotificationCommand{
+					Id:          "baz",
 					PromiseId:   "baz",
 					Url:         "https://baz.com",
 					Time:        2,
@@ -1625,21 +1672,18 @@ var TestCases = []*testCase{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 2,
 				},
 			},
 			{
 				Kind: types.StoreCreateNotification,
 				CreateNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-					LastInsertId: 3,
 				},
 			},
 			{
@@ -1648,24 +1692,24 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
+							Id:          "foo",
 							PromiseId:   "foo",
-							Id:          1,
 							Url:         "https://foo.com",
 							Time:        0,
 							Attempt:     0,
 							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 						},
 						{
+							Id:          "bar",
 							PromiseId:   "bar",
-							Id:          2,
 							Url:         "https://bar.com",
 							Time:        1,
 							Attempt:     0,
 							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 						},
 						{
+							Id:          "baz",
 							PromiseId:   "baz",
-							Id:          3,
 							Url:         "https://baz.com",
 							Time:        2,
 							Attempt:     0,
@@ -1715,7 +1759,7 @@ var TestCases = []*testCase{
 		}},
 	},
 	{
-		name:  "PanicsWhenCreatePromiseHeadersNil",
+		name:  "PanicsWhenCreatePromiseParamHeadersNil",
 		panic: true,
 		commands: []*types.Command{{
 			Kind: types.StoreCreatePromise,
@@ -1723,13 +1767,44 @@ var TestCases = []*testCase{
 				Id: "foo",
 				Param: promise.Value{
 					Headers: nil,
+					Data:    []byte{},
 				},
 				Tags: map[string]string{},
 			},
 		}},
 	},
 	{
-		name:  "PanicsWhenUpdatePromiseHeadersNil",
+		name:  "PanicsWhenCreatePromiseParamDataNil",
+		panic: true,
+		commands: []*types.Command{{
+			Kind: types.StoreCreatePromise,
+			CreatePromise: &types.CreatePromiseCommand{
+				Id: "foo",
+				Param: promise.Value{
+					Headers: map[string]string{},
+					Data:    nil,
+				},
+				Tags: map[string]string{},
+			},
+		}},
+	},
+	{
+		name:  "PanicsWhenCreatePromiseTagsNil",
+		panic: true,
+		commands: []*types.Command{{
+			Kind: types.StoreCreatePromise,
+			CreatePromise: &types.CreatePromiseCommand{
+				Id: "foo",
+				Param: promise.Value{
+					Headers: map[string]string{},
+					Data:    []byte{},
+				},
+				Tags: nil,
+			},
+		}},
+	},
+	{
+		name:  "PanicsWhenUpdatePromiseValueHeadersNil",
 		panic: true,
 		commands: []*types.Command{{
 			Kind: types.StoreUpdatePromise,
@@ -1738,6 +1813,22 @@ var TestCases = []*testCase{
 				State: promise.Resolved,
 				Value: promise.Value{
 					Headers: nil,
+					Data:    []byte{},
+				},
+			},
+		}},
+	},
+	{
+		name:  "PanicsWhenUpdatePromiseValueDataNil",
+		panic: true,
+		commands: []*types.Command{{
+			Kind: types.StoreUpdatePromise,
+			UpdatePromise: &types.UpdatePromiseCommand{
+				Id:    "foo",
+				State: promise.Resolved,
+				Value: promise.Value{
+					Headers: map[string]string{},
+					Data:    nil,
 				},
 			},
 		}},

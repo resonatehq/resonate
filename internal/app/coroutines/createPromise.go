@@ -8,13 +8,15 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("CreatePromise(id=%s)", req.CreatePromise.Id), "CreatePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
+		}
+		if req.CreatePromise.Param.Data == nil {
+			req.CreatePromise.Param.Data = []byte{}
 		}
 		if req.CreatePromise.Tags == nil {
 			req.CreatePromise.Tags = map[string]string{}
@@ -49,51 +51,29 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				commands := []*types.Command{
-					{
-						Kind: types.StoreCreatePromise,
-						CreatePromise: &types.CreatePromiseCommand{
-							Id:        req.CreatePromise.Id,
-							Param:     req.CreatePromise.Param,
-							Timeout:   req.CreatePromise.Timeout,
-							Tags:      req.CreatePromise.Tags,
-							CreatedOn: t,
-						},
-					},
-					{
-						Kind: types.StoreCreateTimeout,
-						CreateTimeout: &types.CreateTimeoutCommand{
-							Id:   req.CreatePromise.Id,
-							Time: req.CreatePromise.Timeout,
-						},
-					},
-				}
-
-				for _, s := range req.CreatePromise.Subscriptions {
-					// default retry policy
-					if s.RetryPolicy == nil {
-						s.RetryPolicy = &subscription.RetryPolicy{
-							Delay:    30,
-							Attempts: 3,
-						}
-					}
-
-					commands = append(commands, &types.Command{
-						Kind: types.StoreCreateSubscription,
-						CreateSubscription: &types.CreateSubscriptionCommand{
-							PromiseId:   req.CreatePromise.Id,
-							Url:         s.Url,
-							RetryPolicy: s.RetryPolicy,
-							CreatedOn:   t,
-						},
-					})
-				}
-
 				submission := &types.Submission{
 					Kind: types.Store,
 					Store: &types.StoreSubmission{
 						Transaction: &types.Transaction{
-							Commands: commands,
+							Commands: []*types.Command{
+								{
+									Kind: types.StoreCreatePromise,
+									CreatePromise: &types.CreatePromiseCommand{
+										Id:        req.CreatePromise.Id,
+										Param:     req.CreatePromise.Param,
+										Timeout:   req.CreatePromise.Timeout,
+										Tags:      req.CreatePromise.Tags,
+										CreatedOn: t,
+									},
+								},
+								{
+									Kind: types.StoreCreateTimeout,
+									CreateTimeout: &types.CreateTimeoutCommand{
+										Id:   req.CreatePromise.Id,
+										Time: req.CreatePromise.Timeout,
+									},
+								},
+							},
 						},
 					},
 				}
@@ -163,7 +143,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 									Value: promise.Value{
 										Headers: map[string]string{},
 										Ikey:    nil,
-										Data:    nil,
+										Data:    []byte{},
 									},
 									Timeout:     p.Timeout,
 									Tags:        p.Tags,

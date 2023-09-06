@@ -7,7 +7,7 @@ import (
 )
 
 type Notification struct {
-	Id          int64                     `json:"id"`
+	Id          string                    `json:"id"`
 	PromiseId   string                    `json:"promiseId"`
 	Url         string                    `json:"url"`
 	RetryPolicy *subscription.RetryPolicy `json:"retryPolicy"`
@@ -17,8 +17,9 @@ type Notification struct {
 
 func (n *Notification) String() string {
 	return fmt.Sprintf(
-		"Notification(id=%d, url=%s, retryPolicy=%s, time=%d, attempt=%d)",
+		"Notification(id=%s, promiseId=%s, url=%s, retryPolicy=%s, time=%d, attempt=%d)",
 		n.Id,
+		n.PromiseId,
 		n.Url,
 		n.RetryPolicy,
 		n.Time,

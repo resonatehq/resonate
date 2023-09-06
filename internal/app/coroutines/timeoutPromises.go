@@ -86,7 +86,7 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 								Value: promise.Value{
 									Headers: map[string]string{},
 									Ikey:    nil,
-									Data:    nil,
+									Data:    []byte{},
 								},
 								CompletedOn: timeout.Time,
 							},
@@ -95,6 +95,11 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 							DeleteTimeout: &types.DeleteTimeoutCommand{
 								Id: timeout.Id,
 							},
+						}, &types.Command{
+							Kind: types.StoreDeleteSubscriptions,
+							DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+								PromiseId: timeout.Id,
+							},
 						})
 					}
 
@@ -102,6 +107,7 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 						commands = append(commands, &types.Command{
 							Kind: types.StoreCreateNotification,
 							CreateNotification: &types.CreateNotificationCommand{
+								Id:          record.Id,
 								PromiseId:   record.PromiseId,
 								Url:         record.Url,
 								RetryPolicy: record.RetryPolicy,
