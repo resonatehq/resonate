@@ -58,6 +58,12 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 						Id: p.Id,
 					},
 				},
+				{
+					Kind: types.StoreDeleteSubscriptions,
+					DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+						PromiseId: p.Id,
+					},
+				},
 			}
 
 			for _, record := range records {

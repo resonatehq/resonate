@@ -135,6 +135,12 @@ func ResolvePromise(t int64, req *types.Request, res func(*types.Response, error
 										Id: req.ResolvePromise.Id,
 									},
 								},
+								{
+									Kind: types.StoreDeleteSubscriptions,
+									DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+										PromiseId: req.ResolvePromise.Id,
+									},
+								},
 							}
 
 							for _, record := range records {

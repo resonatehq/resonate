@@ -29,7 +29,6 @@ const (
 	ResponseNoContent ResponseStatus = 204
 	ResponseForbidden ResponseStatus = 403
 	ResponseNotFound  ResponseStatus = 404
-	ResponseConflict  ResponseStatus = 409
 )
 
 type ReadPromiseResponse struct {
@@ -148,8 +147,6 @@ func (s ResponseStatus) HttpStatus() int {
 		return http.StatusForbidden
 	case ResponseNotFound:
 		return http.StatusNotFound
-	case ResponseConflict:
-		return http.StatusConflict
 	default:
 		return 0
 	}

@@ -119,6 +119,14 @@ const (
 
 	SUBSCRIPTION_SELECT_STATEMENT = `
 	SELECT
+		id, promise_id, url, retry_policy, created_on
+	FROM
+		subscriptions
+	WHERE
+		id = $1 AND promise_id = $2`
+
+	SUBSCRIPTION_SELECT_ALL_STATEMENT = `
+	SELECT
         id, promise_id, url, retry_policy, created_on
     FROM
         subscriptions
@@ -134,6 +142,9 @@ const (
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
 	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
+
+	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
+	DELETE FROM subscriptions WHERE promise_id = $1`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
@@ -300,6 +311,12 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 	}
 	defer subscriptionDeleteStmt.Close()
 
+	subscriptionDeleteAllStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer subscriptionDeleteAllStmt.Close()
+
 	notificationInsertStmt, err := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -354,6 +371,9 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 				results[i][j], err = w.deleteTimeout(tx, timeoutDeleteStmt, command.DeleteTimeout)
 
 			// Subscription
+			case types.StoreReadSubscription:
+				util.Assert(command.ReadSubscription != nil, "command must not be nil")
+				results[i][j], err = w.readSubscription(tx, command.ReadSubscription)
 			case types.StoreReadSubscriptions:
 				util.Assert(command.ReadSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.readSubscriptions(tx, command.ReadSubscriptions)
@@ -363,6 +383,9 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 			case types.StoreDeleteSubscription:
 				util.Assert(command.DeleteSubscription != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscription(tx, subscriptionDeleteStmt, command.DeleteSubscription)
+			case types.StoreDeleteSubscriptions:
+				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
+				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
 
 			// Notification
 			case types.StoreReadNotifications:
@@ -611,11 +634,39 @@ func (w *PostgresStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 	}, nil
 }
 
+func (w *PostgresStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscriptionCommand) (*types.Result, error) {
+	// select
+	row := tx.QueryRow(SUBSCRIPTION_SELECT_STATEMENT, cmd.Id, cmd.PromiseId)
+	record := &subscription.SubscriptionRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.CreatedOn); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*subscription.SubscriptionRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &types.Result{
+		Kind: types.StoreReadSubscription,
+		ReadSubscription: &types.QuerySubscriptionsResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
 func (w *PostgresStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
 	util.Assert(len(cmd.PromiseIds) > 0, "expected a promise id")
 
 	// select
-	rows, err := tx.Query(SUBSCRIPTION_SELECT_STATEMENT, pq.Array(cmd.PromiseIds))
+	rows, err := tx.Query(SUBSCRIPTION_SELECT_ALL_STATEMENT, pq.Array(cmd.PromiseIds))
 	if err != nil {
 		return nil, err
 	}
@@ -690,6 +741,25 @@ func (w *PostgresStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd
 	}, nil
 }
 
+func (w *PostgresStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionsCommand) (*types.Result, error) {
+	// delete
+	res, err := stmt.Exec(cmd.PromiseId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Result{
+		Kind: types.StoreDeleteSubscriptions,
+		DeleteSubscriptions: &types.AlterSubscriptionResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
 func (w *PostgresStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotificationsCommand) (*types.Result, error) {
 	// select
 	rows, err := tx.Query(NOTIFICATION_SELECT_STATEMENT, cmd.N)

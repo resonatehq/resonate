@@ -116,6 +116,14 @@ const (
 	FROM
 		subscriptions
 	WHERE
+		id = ? AND promise_id = ?`
+
+	SUBSCRIPTION_SELECT_ALL_STATEMENT = `
+	SELECT
+		id, promise_id, url, retry_policy, created_on
+	FROM
+		subscriptions
+	WHERE
 		promise_id IN (%s)`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
@@ -127,6 +135,9 @@ const (
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
 	DELETE FROM subscriptions WHERE id = ? and promise_id = ?`
+
+	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
+	DELETE FROM subscriptions WHERE promise_id = ?`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
@@ -270,6 +281,12 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 	}
 	defer subscriptionDeleteStmt.Close()
 
+	subscriptionDeleteAllStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer subscriptionDeleteAllStmt.Close()
+
 	notificationInsertStmt, err := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -324,6 +341,9 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 				results[i][j], err = w.deleteTimeout(tx, timeoutDeleteStmt, command.DeleteTimeout)
 
 			// Subscription
+			case types.StoreReadSubscription:
+				util.Assert(command.ReadSubscription != nil, "command must not be nil")
+				results[i][j], err = w.readSubscription(tx, command.ReadSubscription)
 			case types.StoreReadSubscriptions:
 				util.Assert(command.ReadSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.readSubscriptions(tx, command.ReadSubscriptions)
@@ -333,6 +353,9 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 			case types.StoreDeleteSubscription:
 				util.Assert(command.DeleteSubscription != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscription(tx, subscriptionDeleteStmt, command.DeleteSubscription)
+			case types.StoreDeleteSubscriptions:
+				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
+				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
 
 			// Notification
 			case types.StoreReadNotifications:
@@ -581,6 +604,34 @@ func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}, nil
 }
 
+func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscriptionCommand) (*types.Result, error) {
+	// select
+	row := tx.QueryRow(SUBSCRIPTION_SELECT_STATEMENT, cmd.Id, cmd.PromiseId)
+	record := &subscription.SubscriptionRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.CreatedOn); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*subscription.SubscriptionRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &types.Result{
+		Kind: types.StoreReadSubscription,
+		ReadSubscription: &types.QuerySubscriptionsResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
 func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
 	util.Assert(len(cmd.PromiseIds) > 0, "expected a promise id")
 
@@ -598,7 +649,7 @@ func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 		promiseIds[i] = promiseId
 	}
 
-	stmt := fmt.Sprintf(SUBSCRIPTION_SELECT_STATEMENT, placeholders)
+	stmt := fmt.Sprintf(SUBSCRIPTION_SELECT_ALL_STATEMENT, placeholders)
 	rows, err := tx.Query(stmt, promiseIds...)
 	if err != nil {
 		return nil, err
@@ -655,7 +706,7 @@ func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 }
 
 func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
-	// insert
+	// delete
 	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
 		return nil, err
@@ -669,6 +720,26 @@ func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	return &types.Result{
 		Kind: types.StoreDeleteSubscription,
 		DeleteSubscription: &types.AlterSubscriptionResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionsCommand) (*types.Result, error) {
+	// delete
+	res, err := stmt.Exec(cmd.PromiseId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Result{
+		Kind: types.StoreDeleteSubscriptions,
+		DeleteSubscriptions: &types.AlterSubscriptionResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

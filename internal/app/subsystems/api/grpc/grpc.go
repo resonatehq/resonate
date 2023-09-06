@@ -362,8 +362,6 @@ func protoStatus(status types.ResponseStatus) grpcApi.Status {
 		return grpcApi.Status_FORBIDDEN
 	case types.ResponseNotFound:
 		return grpcApi.Status_NOTFOUND
-	case types.ResponseConflict:
-		return grpcApi.Status_CONFLICT
 	default:
 		return grpcApi.Status_UNKNOWN
 	}

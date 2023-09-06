@@ -99,18 +99,6 @@ func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Respon
 	return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
 }
 
-// func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
-// 	for _, pm := range m.promises {
-// 		for i, subscription := range pm.subscriptions {
-// 			if subscription.Id == req.DeleteSubscription.Id {
-// 				return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription, i)
-// 			}
-// 		}
-// 	}
-
-// 	return nil
-// }
-
 type Promises map[string]*PromiseModel
 
 func (p Promises) Get(id string) *PromiseModel {
@@ -300,13 +288,13 @@ func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, re
 
 func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, res *types.CreateSubscriptionResponse) error {
 	switch res.Status {
+	case types.ResponseOK:
 	case types.ResponseCreated:
 		for _, subscription := range m.subscriptions {
 			if subscription.Id == res.Subscription.Id {
 				return fmt.Errorf("subscription '%s' already exists for promise '%s'", res.Subscription.Id, m.id)
 			}
 		}
-	case types.ResponseConflict:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}

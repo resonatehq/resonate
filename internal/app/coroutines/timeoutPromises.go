@@ -95,6 +95,11 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 							DeleteTimeout: &types.DeleteTimeoutCommand{
 								Id: timeout.Id,
 							},
+						}, &types.Command{
+							Kind: types.StoreDeleteSubscriptions,
+							DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+								PromiseId: timeout.Id,
+							},
 						})
 					}
 

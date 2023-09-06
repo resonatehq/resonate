@@ -1365,6 +1365,49 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "ReadSubscription",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
+					PromiseId:   "bar",
+					Url:         "https://baz.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscription,
+				ReadSubscription: &types.ReadSubscriptionCommand{
+					Id:        "foo",
+					PromiseId: "bar",
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscription,
+				ReadSubscription: &types.QuerySubscriptionsResult{
+					RowsReturned: 1,
+					Records: []*subscription.SubscriptionRecord{
+						{
+							Id:          "foo",
+							PromiseId:   "bar",
+							Url:         "https://baz.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "ReadSubscriptions",
 		commands: []*types.Command{
 			{
