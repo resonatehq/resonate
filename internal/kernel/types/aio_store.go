@@ -135,6 +135,7 @@ type ReadSubscriptionsCommand struct {
 }
 
 type CreateSubscriptionCommand struct {
+	Id          string
 	PromiseId   string
 	Url         string
 	RetryPolicy *subscription.RetryPolicy
@@ -142,7 +143,8 @@ type CreateSubscriptionCommand struct {
 }
 
 type DeleteSubscriptionCommand struct {
-	Id int64
+	Id        string
+	PromiseId string
 }
 
 type QuerySubscriptionsResult struct {
@@ -152,7 +154,6 @@ type QuerySubscriptionsResult struct {
 
 type AlterSubscriptionResult struct {
 	RowsAffected int64
-	LastInsertId int64
 }
 
 type ReadNotificationsCommand struct {
@@ -160,6 +161,7 @@ type ReadNotificationsCommand struct {
 }
 
 type CreateNotificationCommand struct {
+	Id          string
 	PromiseId   string
 	Url         string
 	RetryPolicy []byte
@@ -167,13 +169,15 @@ type CreateNotificationCommand struct {
 }
 
 type UpdateNotificationCommand struct {
-	Id      int64
-	Time    int64
-	Attempt int64
+	Id        string
+	PromiseId string
+	Time      int64
+	Attempt   int64
 }
 
 type DeleteNotificationCommand struct {
-	Id int64
+	Id        string
+	PromiseId string
 }
 
 type QueryNotificationsResult struct {
@@ -183,5 +187,4 @@ type QueryNotificationsResult struct {
 
 type AlterNotificationsResult struct {
 	RowsAffected int64
-	LastInsertId int64
 }

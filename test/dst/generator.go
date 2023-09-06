@@ -12,21 +12,20 @@ import (
 )
 
 type Generator struct {
-	idSet           []string
-	ikeySet         []*promise.Ikey
-	dataSet         [][]byte
-	headersSet      []map[string]string
-	tagsSet         []map[string]string
-	retrySet        []int
-	subscriptionSet []string
-	time            int64
-	subscriptions   int64
-	requests        []RequestGenerator
+	idSet      []string
+	ikeySet    []*promise.Ikey
+	dataSet    [][]byte
+	headersSet []map[string]string
+	tagsSet    []map[string]string
+	urlSet     []string
+	retrySet   []int
+	time       int64
+	requests   []RequestGenerator
 }
 
 type RequestGenerator func(*rand.Rand, int64) *types.Request
 
-func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags int, retries int, subscriptions int, time int64) *Generator {
+func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags int, urls int, retries int, time int64) *Generator {
 	idSet := make([]string, ids)
 	for i := 0; i < ids; i++ {
 		idSet[i] = strconv.Itoa(i)
@@ -69,20 +68,20 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags 
 		retrySet[i] = i
 	}
 
-	subscriptionSet := make([]string, subscriptions)
-	for i := 0; i < subscriptions; i++ {
-		subscriptionSet[i] = fmt.Sprintf("https://resonatehq.io/%d", i)
+	urlSet := make([]string, urls)
+	for i := 0; i < urls; i++ {
+		urlSet[i] = fmt.Sprintf("https://resonatehq.io/%d", i)
 	}
 
 	return &Generator{
-		idSet:           idSet,
-		ikeySet:         ikeySet,
-		dataSet:         dataSet,
-		headersSet:      headersSet,
-		tagsSet:         tagsSet,
-		retrySet:        retrySet,
-		subscriptionSet: subscriptionSet,
-		time:            time,
+		idSet:      idSet,
+		ikeySet:    ikeySet,
+		dataSet:    dataSet,
+		headersSet: headersSet,
+		tagsSet:    tagsSet,
+		urlSet:     urlSet,
+		retrySet:   retrySet,
+		time:       time,
 	}
 }
 
@@ -132,24 +131,6 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	timeout := test.RangeInt63n(r, t, g.time)
 
-	// include up to 3 subscriptions
-	n := r.Intn(4)
-	g.subscriptions += int64(n)
-	subscriptions := make([]*types.CreateSubscriptionRequest, n)
-	for i := 0; i < n; i++ {
-		url := g.subscriptionSet[r.Intn(len(g.subscriptionSet))]
-		delay := g.retrySet[r.Intn(len(g.retrySet))]
-		attempts := test.RangeIntn(r, 1, 4)
-
-		subscriptions[i] = &types.CreateSubscriptionRequest{
-			Url: url,
-			RetryPolicy: &subscription.RetryPolicy{
-				Delay:    int64(delay),
-				Attempts: int64(attempts),
-			},
-		}
-	}
-
 	return &types.Request{
 		Kind: types.CreatePromise,
 		CreatePromise: &types.CreatePromiseRequest{
@@ -160,8 +141,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 				Ikey:    ikey,
 				Data:    data,
 			},
-			Tags:          tags,
-			Subscriptions: subscriptions,
+			Tags: tags,
 		},
 	}
 }
@@ -236,15 +216,16 @@ func (g *Generator) GenerateReadSubscriptions(r *rand.Rand, t int64) *types.Requ
 
 func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	url := g.subscriptionSet[r.Intn(len(g.subscriptionSet))]
+	promiseId := g.idSet[r.Intn(len(g.idSet))]
+	url := g.urlSet[r.Intn(len(g.urlSet))]
 	delay := g.retrySet[r.Intn(len(g.retrySet))]
 	attempts := test.RangeIntn(r, 1, 4)
-	g.subscriptions++
 
 	return &types.Request{
 		Kind: types.CreateSubscription,
 		CreateSubscription: &types.CreateSubscriptionRequest{
-			PromiseId: id,
+			Id:        id,
+			PromiseId: promiseId,
 			Url:       url,
 			RetryPolicy: &subscription.RetryPolicy{
 				Delay:    int64(delay),
@@ -255,12 +236,14 @@ func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Req
 }
 
 func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *types.Request {
-	id := r.Int63n(g.subscriptions + 1)
+	id := g.idSet[r.Intn(len(g.idSet))]
+	promiseId := g.idSet[r.Intn(len(g.idSet))]
 
 	return &types.Request{
 		Kind: types.DeleteSubscription,
 		DeleteSubscription: &types.DeleteSubscriptionRequest{
-			Id: id,
+			Id:        id,
+			PromiseId: promiseId,
 		},
 	}
 }

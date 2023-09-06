@@ -15,6 +15,9 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 		if req.CancelPromise.Value.Headers == nil {
 			req.CancelPromise.Value.Headers = map[string]string{}
 		}
+		if req.CancelPromise.Value.Data == nil {
+			req.CancelPromise.Value.Data = []byte{}
+		}
 
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -79,7 +82,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 										Value: promise.Value{
 											Headers: map[string]string{},
 											Ikey:    nil,
-											Data:    nil,
+											Data:    []byte{},
 										},
 										Timeout:     p.Timeout,
 										Tags:        p.Tags,
@@ -138,6 +141,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 								commands = append(commands, &types.Command{
 									Kind: types.StoreCreateNotification,
 									CreateNotification: &types.CreateNotificationCommand{
+										Id:          record.Id,
 										PromiseId:   record.PromiseId,
 										Url:         record.Url,
 										RetryPolicy: record.RetryPolicy,

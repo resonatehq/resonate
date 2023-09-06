@@ -11,7 +11,7 @@ import (
 )
 
 func CreateSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("CreateSubscription(promiseId=%s, url=%s)", req.CreateSubscription.PromiseId, req.CreateSubscription.Url), "CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s)", req.CreateSubscription.Id, req.CreateSubscription.PromiseId), "CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
 			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
@@ -28,6 +28,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 						{
 							Kind: types.StoreCreateSubscription,
 							CreateSubscription: &types.CreateSubscriptionCommand{
+								Id:          req.CreateSubscription.Id,
 								PromiseId:   req.CreateSubscription.PromiseId,
 								Url:         req.CreateSubscription.Url,
 								RetryPolicy: req.CreateSubscription.RetryPolicy,
@@ -57,14 +58,15 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 					CreateSubscription: &types.CreateSubscriptionResponse{
 						Status: types.ResponseCreated,
 						Subscription: &subscription.Subscription{
+							Id:          req.CreateSubscription.Id,
 							PromiseId:   req.CreateSubscription.PromiseId,
-							Id:          result.LastInsertId,
 							Url:         req.CreateSubscription.Url,
 							RetryPolicy: req.CreateSubscription.RetryPolicy,
 						},
 					},
 				}, nil)
 			} else {
+				// TODO: get subscription
 				res(&types.Response{
 					Kind: types.CreateSubscription,
 					CreateSubscription: &types.CreateSubscriptionResponse{

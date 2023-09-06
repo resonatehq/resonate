@@ -6,9 +6,16 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
 )
 
-func TestSqliteStore(t *testing.T) {
+func TestPostgresStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		store, err := New(Config{})
+		// temp config
+		store, err := New(Config{
+			Host:     "localhost",
+			Port:     "5432",
+			Username: "username",
+			Password: "password",
+			Database: "resonate",
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -18,10 +25,13 @@ func TestSqliteStore(t *testing.T) {
 
 		tc.Run(t, store)
 
-		if err := store.Stop(); err != nil {
-			t.Fatal(err)
+		if !tc.Panic() {
+			if err := store.Reset(); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := store.Reset(); err != nil {
+
+		if err := store.Stop(); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -12,7 +12,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/subscription"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -168,14 +167,6 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		data = req.Param.Data
 	}
 
-	subscriptions := make([]*types.CreateSubscriptionRequest, len(req.Subscriptions))
-	for i, subscription := range req.Subscriptions {
-		subscriptions[i] = &types.CreateSubscriptionRequest{
-			PromiseId: req.Id,
-			Url:       subscription.Url,
-		}
-	}
-
 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
 		Kind: "grpc",
 		Submission: &types.Request{
@@ -187,8 +178,7 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 					Ikey:    ikey,
 					Data:    data,
 				},
-				Timeout:       req.Timeout,
-				Subscriptions: subscriptions,
+				Timeout: req.Timeout,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -360,95 +350,6 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}, nil
 }
 
-func (s *server) ReadSubscriptions(ctx context.Context, req *grpcApi.ReadSubscriptionsRequest) (*grpcApi.ReadSubscriptionsResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.ReadSubscriptions,
-			ReadSubscriptions: &types.ReadSubscriptionsRequest{
-				PromiseId: req.PromiseId,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
-
-	util.Assert(cqe.Completion.ReadSubscriptions != nil, "response must not be nil")
-
-	subscriptions := make([]*grpcApi.Subscription, len(cqe.Completion.ReadSubscriptions.Subscriptions))
-	for i, subscription := range cqe.Completion.ReadSubscriptions.Subscriptions {
-		subscriptions[i] = protoSubscription(subscription)
-	}
-
-	return &grpcApi.ReadSubscriptionsResponse{
-		Status:        protoStatus(cqe.Completion.ReadSubscriptions.Status),
-		Subscriptions: subscriptions,
-	}, nil
-}
-
-func (s *server) CreateSubscription(ctx context.Context, req *grpcApi.CreateSubscriptionRequest) (*grpcApi.CreateSubscriptionResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.CreateSubscription,
-			CreateSubscription: &types.CreateSubscriptionRequest{
-				PromiseId: req.PromiseId,
-				Url:       req.Url,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
-
-	util.Assert(cqe.Completion.CreateSubscription != nil, "response must not be nil")
-
-	return &grpcApi.CreateSubscriptionResponse{
-		Status:       protoStatus(cqe.Completion.CreateSubscription.Status),
-		Subscription: protoSubscription(cqe.Completion.CreateSubscription.Subscription),
-	}, nil
-}
-
-func (s *server) DeleteSubscription(ctx context.Context, req *grpcApi.DeleteSubscriptionRequest) (*grpcApi.DeleteSubscriptionResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.DeleteSubscription,
-			DeleteSubscription: &types.DeleteSubscriptionRequest{
-				Id: req.Id,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
-
-	util.Assert(cqe.Completion.DeleteSubscription != nil, "response must not be nil")
-
-	return &grpcApi.DeleteSubscriptionResponse{
-		Status: protoStatus(cqe.Completion.DeleteSubscription.Status),
-	}, nil
-}
-
 func protoStatus(status types.ResponseStatus) grpcApi.Status {
 	switch status {
 	case types.ResponseOK:
@@ -512,16 +413,5 @@ func protoState(state promise.State) grpcApi.State {
 		return grpcApi.State_REJECTED_CANCELED
 	default:
 		panic("invalid state")
-	}
-}
-
-func protoSubscription(subscription *subscription.Subscription) *grpcApi.Subscription {
-	if subscription == nil {
-		return nil
-	}
-
-	return &grpcApi.Subscription{
-		Id:  subscription.Id,
-		Url: subscription.Url,
 	}
 }

@@ -3,8 +3,8 @@ package subscription
 import "fmt"
 
 type Subscription struct {
+	Id          string       `json:"id"`
 	PromiseId   string       `json:"promiseId"`
-	Id          int64        `json:"id"`
 	Url         string       `json:"url"`
 	RetryPolicy *RetryPolicy `json:"retryPolicy"`
 	CreatedOn   int64        `json:"createdOn"`
@@ -17,9 +17,9 @@ type RetryPolicy struct {
 
 func (s *Subscription) String() string {
 	return fmt.Sprintf(
-		"Subscription(promiseId=%s, id=%d, url=%s, retryPolicy=%s)",
-		s.PromiseId,
+		"Subscription(id=%s, promiseId=%s, url=%s, retryPolicy=%s)",
 		s.Id,
+		s.PromiseId,
 		s.Url,
 		s.RetryPolicy,
 	)

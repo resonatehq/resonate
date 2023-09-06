@@ -12,146 +12,160 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 
-	"github.com/mattn/go-sqlite3"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
-		"id"            TEXT PRIMARY KEY,
-		"state"         INTEGER DEFAULT 1,
-		"paramHeaders"  BYTEA,
-		"paramIkey"     TEXT,
-		"paramData"     BYTEA,
-		"valueHeaders"  BYTEA,
-		"valueIkey"     TEXT,
-		"valueData"     BYTEA,
-		"timeout"       BIGINT,
-		"tags"          BYTEA,
-		"createdOn"     BIGINT,
-		"completedOn"   BIGINT
+		id            TEXT,
+		state         INTEGER DEFAULT 1,
+		param_headers BYTEA,
+		param_ikey    TEXT,
+		param_data    BYTEA,
+		value_headers BYTEA,
+		value_ikey    TEXT,
+		value_data    BYTEA,
+		timeout       BIGINT,
+		tags          BYTEA,
+		created_on    BIGINT,
+		completed_on  BIGINT,
+		PRIMARY KEY(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
-		"id"    TEXT PRIMARY KEY,
-		"time"  BIGINT
+		id   TEXT,
+		time BIGINT,
+		PRIMARY KEY(id)
 	);
 
 	CREATE TABLE IF NOT EXISTS subscriptions (
-		"id"            SERIAL PRIMARY KEY,
-		"promiseId"     TEXT,
-		"url"           TEXT,
-		"retryPolicy"   BYTEA,
-		"createdOn"     BIGINT,
-		UNIQUE("promiseId", "url"),
-		FOREIGN KEY("promiseId") REFERENCES promises("id")
+		id           TEXT,
+		promise_id   TEXT,
+		url          TEXT,
+		retry_policy BYTEA,
+		created_on   BIGINT,
+		PRIMARY KEY(id, promise_id)
 	);
 
 	CREATE TABLE IF NOT EXISTS notifications (
-		"id"            SERIAL PRIMARY KEY,
-		"promiseId"     TEXT,
-		"url"           TEXT,
-		"retryPolicy"   BYTEA,
-		"time"          BIGINT,
-		"attempt"       INTEGER,
-		UNIQUE("promiseId", "url"),
-		FOREIGN KEY("promiseId") REFERENCES promises("id")
+		id           TEXT,
+		promise_id   TEXT,
+		url          TEXT,
+		retry_policy BYTEA,
+		time         BIGINT,
+		attempt      INTEGER,
+		PRIMARY KEY(id, promise_id)
 	);`
+
+	DROP_TABLE_STATEMENT = `
+	DROP TABLE notifications;
+	DROP TABLE subscriptions;
+	DROP TABLE timeouts;
+	DROP TABLE promises;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, "paramHeaders", "paramIkey", "paramData", "valueHeaders", "valueIkey", "valueData", timeout, tags, "createdOn", "completedOn"
-	FROM
-		promises
-	WHERE
-		id = $1`
+        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+    FROM
+        promises
+    WHERE
+        id = $1`
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, "paramHeaders", "paramIkey", "paramData", "valueHeaders", "valueIkey", "valueData", timeout, tags, "createdOn", "completedOn"
-	FROM
-		promises
-	WHERE
-		id GLOB $1 AND state = $2`
+        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+    FROM
+        promises
+    WHERE
+        id LIKE $1 AND state = $2`
 
 	PROMISE_INSERT_STATEMENT = `
-	INSERT INTO Promises
-		(id, state, "paramHeaders", "paramIkey", "paramData", timeout, tags, "createdOn")
+	INSERT INTO promises
+	    (id, state, param_headers, param_ikey, param_data, timeout, tags, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8)`
+	    ($1, $2, $3, $4, $5, $6, $7, $8)
+	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
 	UPDATE promises
-	SET state = $1, "valueHeaders" = $2, "valueIkey" = $3, "valueData" = $4, "completedOn" = $5
-	WHERE id = $6 AND state = 1`
+    SET state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
+    WHERE id = $6 AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
-		id, time
-	FROM
-		timeouts
-	ORDER BY
-		time ASC
-	LIMIT $1`
+        id, time
+    FROM
+        timeouts
+    ORDER BY
+        time ASC
+    LIMIT $1`
 
 	TIMEOUT_INSERT_STATEMENT = `
 	INSERT INTO timeouts
-		(id, time)
-	VALUES
-		($1, $2)`
+        (id, time)
+    VALUES
+        ($1, $2)
+	ON CONFLICT(id) DO NOTHING`
 
 	TIMEOUT_DELETE_STATEMENT = `
 	DELETE FROM timeouts WHERE id = $1`
 
 	SUBSCRIPTION_SELECT_STATEMENT = `
 	SELECT
-		id, "promiseId", url, "retryPolicy", "createdOn"
-	FROM
-		subscriptions
-	WHERE
-		"promiseId" IN (%s)`
+        id, promise_id, url, retry_policy, created_on
+    FROM
+        subscriptions
+    WHERE
+        promise_id = ANY($1)`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
-	INSERT INTO Subscriptions
-		("promiseId", url, "retryPolicy", "createdOn")
-	VALUES
-		($1, $2, $3, $4)`
+	INSERT INTO subscriptions
+        (id, promise_id, url, retry_policy, created_on)
+    VALUES
+        ($1, $2, $3, $4, $5)
+	ON CONFLICT(id, promise_id) DO NOTHING;`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM subscriptions WHERE id = $1`
+	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
-		id, "promiseId", url, "retryPolicy", time, attempt
-	FROM
-		notifications
-	ORDER BY
-		time ASC
-	LIMIT $1`
+        id, promise_id, url, retry_policy, time, attempt
+    FROM
+        notifications
+    ORDER BY
+        time ASC
+    LIMIT $1`
 
 	NOTIFICATION_INSERT_STATEMENT = `
-	INSERT INTO Notifications
-		("promiseId", url, "retryPolicy", time, attempt)
-	VALUES
-		($1, $2, $3, $4, 0)`
+	INSERT INTO notifications
+        (id, promise_id, url, retry_policy, time, attempt)
+    VALUES
+        ($1, $2, $3, $4, $5, 0)
+	ON CONFLICT(id, promise_id) DO NOTHING;`
 
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
-	SET time = $1, attempt = $2
-	WHERE id = $3`
+    SET time = $1, attempt = $2
+    WHERE id = $3 and promise_id = $4`
 
 	NOTIFICATION_DELETE_STATEMENT = `
-	DELETE FROM notifications WHERE id = $1`
+	DELETE FROM notifications WHERE id = $1 and promise_id = $2`
 )
 
 type Config struct {
+	Host            string
+	Port            string
+	Username        string
+	Password        string
+	Database        string
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxIdleTime time.Duration
@@ -169,14 +183,12 @@ type PostgresStoreWorker struct {
 
 func New(config Config) (aio.Subsystem, error) {
 	dbUrl := &url.URL{
-		// User:     url.UserPassword("username", "password"),
-		Host:     "localhost",
-		Path:     "resonate",
+		User:     url.UserPassword(config.Username, config.Password),
+		Host:     fmt.Sprintf("%s:%s", config.Host, config.Port),
+		Path:     config.Database,
 		Scheme:   "postgres",
 		RawQuery: "sslmode=disable",
 	}
-
-	fmt.Println(dbUrl.String())
 
 	db, err := sql.Open("postgres", dbUrl.String())
 	if err != nil {
@@ -210,6 +222,10 @@ func (s *PostgresStore) Stop() error {
 }
 
 func (s *PostgresStore) Reset() error {
+	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -461,7 +477,8 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 }
 
 func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreatePromiseCommand) (*types.Result, error) {
-	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
+	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
+	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
 
 	headers, err := json.Marshal(cmd.Param.Headers)
@@ -476,18 +493,13 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 
 	// insert
 	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Ikey, cmd.Param.Data, cmd.Timeout, tags, cmd.CreatedOn)
-	var rowsAffected int64
-
 	if err != nil {
-		sqliteErr, ok := err.(sqlite3.Error)
-		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintPrimaryKey {
-			return nil, err
-		}
-	} else {
-		rowsAffected, err = res.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.Result{
@@ -500,7 +512,8 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 
 func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdatePromiseCommand) (*types.Result, error) {
 	util.Assert(cmd.State.In(promise.Resolved|promise.Rejected|promise.Canceled|promise.Timedout), "state must be canceled, resolved, rejected, or timedout")
-	util.Assert(cmd.Value.Headers != nil, "headers must not be nil")
+	util.Assert(cmd.Value.Headers != nil, "value headers must not be nil")
+	util.Assert(cmd.Value.Data != nil, "value data must not be nil")
 
 	headers, err := json.Marshal(cmd.Value.Headers)
 	if err != nil {
@@ -558,20 +571,16 @@ func (w *PostgresStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsCo
 
 func (w *PostgresStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateTimeoutCommand) (*types.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
-	var rowsAffected int64
 
 	// insert
 	res, err := stmt.Exec(cmd.Id, cmd.Time)
 	if err != nil {
-		sqliteErr, ok := err.(sqlite3.Error)
-		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintPrimaryKey {
-			return nil, err
-		}
-	} else {
-		rowsAffected, err = res.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.Result{
@@ -606,21 +615,7 @@ func (w *PostgresStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubsc
 	util.Assert(len(cmd.PromiseIds) > 0, "expected a promise id")
 
 	// select
-	var placeholders string
-	promiseIds := make([]interface{}, len(cmd.PromiseIds))
-
-	for i, promiseId := range cmd.PromiseIds {
-		if i == len(cmd.PromiseIds)-1 {
-			placeholders += fmt.Sprintf("$%d", i+1)
-		} else {
-			placeholders += fmt.Sprintf("$%d,", i+1)
-		}
-
-		promiseIds[i] = promiseId
-	}
-
-	stmt := fmt.Sprintf(SUBSCRIPTION_SELECT_STATEMENT, placeholders)
-	rows, err := tx.Query(stmt, promiseIds...)
+	rows, err := tx.Query(SUBSCRIPTION_SELECT_STATEMENT, pq.Array(cmd.PromiseIds))
 	if err != nil {
 		return nil, err
 	}
@@ -656,40 +651,28 @@ func (w *PostgresStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd
 		return nil, err
 	}
 
-	var rowsAffected int64
-	var lastInsertId int64
-
 	// insert
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, retryPolicy, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.PromiseId, cmd.Url, retryPolicy, cmd.CreatedOn)
 	if err != nil {
-		sqliteErr, ok := err.(sqlite3.Error)
-		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintUnique {
-			return nil, err
-		}
-	} else {
-		rowsAffected, err = res.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
+	}
 
-		lastInsertId, err = res.LastInsertId()
-		if err != nil {
-			return nil, err
-		}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.Result{
 		Kind: types.StoreCreateSubscription,
 		CreateSubscription: &types.AlterSubscriptionResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
 		},
 	}, nil
 }
 
 func (w *PostgresStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.Id)
+	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -741,40 +724,28 @@ func (w *PostgresStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
 
-	var rowsAffected int64
-	var lastInsertId int64
-
 	// insert
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Url, cmd.RetryPolicy, cmd.Time)
+	res, err := stmt.Exec(cmd.Id, cmd.PromiseId, cmd.Url, cmd.RetryPolicy, cmd.Time)
 	if err != nil {
-		sqliteErr, ok := err.(sqlite3.Error)
-		if !ok || sqliteErr.ExtendedCode != sqlite3.ErrConstraintUnique {
-			return nil, err
-		}
-	} else {
-		rowsAffected, err = res.RowsAffected()
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
+	}
 
-		lastInsertId, err = res.LastInsertId()
-		if err != nil {
-			return nil, err
-		}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.Result{
 		Kind: types.StoreCreateNotification,
 		CreateNotification: &types.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
 		},
 	}, nil
 }
 
 func (w *PostgresStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdateNotificationCommand) (*types.Result, error) {
 	// update
-	res, err := stmt.Exec(cmd.Time, cmd.Attempt, cmd.Id)
+	res, err := stmt.Exec(cmd.Time, cmd.Attempt, cmd.Id, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -794,7 +765,7 @@ func (w *PostgresStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd
 
 func (w *PostgresStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteNotificationCommand) (*types.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.Id)
+	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}

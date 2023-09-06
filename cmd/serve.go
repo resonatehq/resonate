@@ -63,6 +63,11 @@ var serveCmd = &cobra.Command{
 		// }
 
 		store, err := postgres.New(postgres.Config{
+			Host:            os.Getenv("POSTGRES_HOST"),
+			Port:            os.Getenv("POSTGRES_PORT"),
+			Username:        os.Getenv("POSTGRES_USER"),
+			Password:        os.Getenv("POSTGRES_PASSWORD"),
+			Database:        os.Getenv("POSTGRES_DB"),
 			MaxOpenConns:    3,
 			MaxIdleConns:    3,
 			ConnMaxIdleTime: 0,

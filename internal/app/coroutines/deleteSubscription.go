@@ -10,7 +10,7 @@ import (
 )
 
 func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("DeleteSubscription(id=%d)", req.DeleteSubscription.Id), "DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine(fmt.Sprintf("DeleteSubscription(id=%s, promiseId=%s)", req.DeleteSubscription.Id, req.DeleteSubscription.PromiseId), "DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
 			Store: &types.StoreSubmission{
@@ -19,7 +19,8 @@ func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, e
 						{
 							Kind: types.StoreDeleteSubscription,
 							DeleteSubscription: &types.DeleteSubscriptionCommand{
-								Id: req.DeleteSubscription.Id,
+								Id:        req.DeleteSubscription.Id,
+								PromiseId: req.DeleteSubscription.PromiseId,
 							},
 						},
 					},

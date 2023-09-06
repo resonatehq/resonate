@@ -8,7 +8,7 @@ import (
 
 func TestSqliteStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		store, err := New(Config{Path: "db.db"})
+		store, err := New(Config{Path: ":memory:"})
 		if err != nil {
 			t.Fatal(err)
 		}

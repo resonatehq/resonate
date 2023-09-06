@@ -28,7 +28,7 @@ func TestDST(t *testing.T) {
 	var cs func(int) int
 	var ticks int64
 	if seed == 0 {
-		runs = 1
+		runs = 3
 		cs = func(i int) int { return i }
 		ticks = 1000
 	} else {
@@ -46,8 +46,8 @@ func TestDST(t *testing.T) {
 			Data:                  test.RangeIntn(r, 1, 100),
 			Headers:               test.RangeIntn(r, 1, 100),
 			Tags:                  test.RangeIntn(r, 1, 100),
+			Urls:                  test.RangeIntn(r, 1, 100),
 			Retries:               test.RangeIntn(r, 1, 100),
-			Subscriptions:         test.RangeIntn(r, 1, 100),
 			PromiseCacheSize:      cs(i),
 			TimeoutCacheSize:      cs(i),
 			NotificationCacheSize: test.RangeIntn(r, 1, 100),

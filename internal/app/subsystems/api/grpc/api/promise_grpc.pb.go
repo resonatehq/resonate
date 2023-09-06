@@ -19,15 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	PromiseService_ReadPromise_FullMethodName        = "/promise.PromiseService/ReadPromise"
-	PromiseService_SearchPromises_FullMethodName     = "/promise.PromiseService/SearchPromises"
-	PromiseService_CreatePromise_FullMethodName      = "/promise.PromiseService/CreatePromise"
-	PromiseService_CancelPromise_FullMethodName      = "/promise.PromiseService/CancelPromise"
-	PromiseService_ResolvePromise_FullMethodName     = "/promise.PromiseService/ResolvePromise"
-	PromiseService_RejectPromise_FullMethodName      = "/promise.PromiseService/RejectPromise"
-	PromiseService_ReadSubscriptions_FullMethodName  = "/promise.PromiseService/ReadSubscriptions"
-	PromiseService_CreateSubscription_FullMethodName = "/promise.PromiseService/CreateSubscription"
-	PromiseService_DeleteSubscription_FullMethodName = "/promise.PromiseService/DeleteSubscription"
+	PromiseService_ReadPromise_FullMethodName    = "/promise.PromiseService/ReadPromise"
+	PromiseService_SearchPromises_FullMethodName = "/promise.PromiseService/SearchPromises"
+	PromiseService_CreatePromise_FullMethodName  = "/promise.PromiseService/CreatePromise"
+	PromiseService_CancelPromise_FullMethodName  = "/promise.PromiseService/CancelPromise"
+	PromiseService_ResolvePromise_FullMethodName = "/promise.PromiseService/ResolvePromise"
+	PromiseService_RejectPromise_FullMethodName  = "/promise.PromiseService/RejectPromise"
 )
 
 // PromiseServiceClient is the client API for PromiseService service.
@@ -41,10 +38,6 @@ type PromiseServiceClient interface {
 	CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error)
 	ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error)
 	RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error)
-	// Subscription
-	ReadSubscriptions(ctx context.Context, in *ReadSubscriptionsRequest, opts ...grpc.CallOption) (*ReadSubscriptionsResponse, error)
-	CreateSubscription(ctx context.Context, in *CreateSubscriptionRequest, opts ...grpc.CallOption) (*CreateSubscriptionResponse, error)
-	DeleteSubscription(ctx context.Context, in *DeleteSubscriptionRequest, opts ...grpc.CallOption) (*DeleteSubscriptionResponse, error)
 }
 
 type promiseServiceClient struct {
@@ -109,33 +102,6 @@ func (c *promiseServiceClient) RejectPromise(ctx context.Context, in *RejectProm
 	return out, nil
 }
 
-func (c *promiseServiceClient) ReadSubscriptions(ctx context.Context, in *ReadSubscriptionsRequest, opts ...grpc.CallOption) (*ReadSubscriptionsResponse, error) {
-	out := new(ReadSubscriptionsResponse)
-	err := c.cc.Invoke(ctx, PromiseService_ReadSubscriptions_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *promiseServiceClient) CreateSubscription(ctx context.Context, in *CreateSubscriptionRequest, opts ...grpc.CallOption) (*CreateSubscriptionResponse, error) {
-	out := new(CreateSubscriptionResponse)
-	err := c.cc.Invoke(ctx, PromiseService_CreateSubscription_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *promiseServiceClient) DeleteSubscription(ctx context.Context, in *DeleteSubscriptionRequest, opts ...grpc.CallOption) (*DeleteSubscriptionResponse, error) {
-	out := new(DeleteSubscriptionResponse)
-	err := c.cc.Invoke(ctx, PromiseService_DeleteSubscription_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // PromiseServiceServer is the server API for PromiseService service.
 // All implementations must embed UnimplementedPromiseServiceServer
 // for forward compatibility
@@ -147,10 +113,6 @@ type PromiseServiceServer interface {
 	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
 	ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error)
 	RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error)
-	// Subscription
-	ReadSubscriptions(context.Context, *ReadSubscriptionsRequest) (*ReadSubscriptionsResponse, error)
-	CreateSubscription(context.Context, *CreateSubscriptionRequest) (*CreateSubscriptionResponse, error)
-	DeleteSubscription(context.Context, *DeleteSubscriptionRequest) (*DeleteSubscriptionResponse, error)
 	mustEmbedUnimplementedPromiseServiceServer()
 }
 
@@ -175,15 +137,6 @@ func (UnimplementedPromiseServiceServer) ResolvePromise(context.Context, *Resolv
 }
 func (UnimplementedPromiseServiceServer) RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RejectPromise not implemented")
-}
-func (UnimplementedPromiseServiceServer) ReadSubscriptions(context.Context, *ReadSubscriptionsRequest) (*ReadSubscriptionsResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ReadSubscriptions not implemented")
-}
-func (UnimplementedPromiseServiceServer) CreateSubscription(context.Context, *CreateSubscriptionRequest) (*CreateSubscriptionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateSubscription not implemented")
-}
-func (UnimplementedPromiseServiceServer) DeleteSubscription(context.Context, *DeleteSubscriptionRequest) (*DeleteSubscriptionResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method DeleteSubscription not implemented")
 }
 func (UnimplementedPromiseServiceServer) mustEmbedUnimplementedPromiseServiceServer() {}
 
@@ -306,60 +259,6 @@ func _PromiseService_RejectPromise_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_ReadSubscriptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReadSubscriptionsRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PromiseServiceServer).ReadSubscriptions(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PromiseService_ReadSubscriptions_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).ReadSubscriptions(ctx, req.(*ReadSubscriptionsRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PromiseService_CreateSubscription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateSubscriptionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PromiseServiceServer).CreateSubscription(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PromiseService_CreateSubscription_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).CreateSubscription(ctx, req.(*CreateSubscriptionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _PromiseService_DeleteSubscription_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeleteSubscriptionRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PromiseServiceServer).DeleteSubscription(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: PromiseService_DeleteSubscription_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).DeleteSubscription(ctx, req.(*DeleteSubscriptionRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // PromiseService_ServiceDesc is the grpc.ServiceDesc for PromiseService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -390,18 +289,6 @@ var PromiseService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectPromise",
 			Handler:    _PromiseService_RejectPromise_Handler,
-		},
-		{
-			MethodName: "ReadSubscriptions",
-			Handler:    _PromiseService_ReadSubscriptions_Handler,
-		},
-		{
-			MethodName: "CreateSubscription",
-			Handler:    _PromiseService_CreateSubscription_Handler,
-		},
-		{
-			MethodName: "DeleteSubscription",
-			Handler:    _PromiseService_DeleteSubscription_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -30,11 +30,11 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id            string                       `json:"id"`
-	Param         promise.Value                `json:"param,omitempty"`
-	Timeout       int64                        `json:"timeout"`
-	Subscriptions []*CreateSubscriptionRequest `json:"subscriptions,omitempty"`
-	Tags          map[string]string            `json:"tags,omitempty"`
+	Id      string        `json:"id"`
+	Param   promise.Value `json:"param,omitempty"`
+	Timeout int64         `json:"timeout"`
+	// Subscriptions []*CreateSubscriptionRequest `json:"subscriptions,omitempty"`
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 type CancelPromiseRequest struct {
@@ -57,13 +57,15 @@ type ReadSubscriptionsRequest struct {
 }
 
 type CreateSubscriptionRequest struct {
+	Id          string                    `json:"id"`
 	PromiseId   string                    `json:"promiseId"`
 	Url         string                    `json:"url"`
 	RetryPolicy *subscription.RetryPolicy `json:"retryPolicy"`
 }
 
 type DeleteSubscriptionRequest struct {
-	Id int64 `json:"id"`
+	Id        string `json:"id"`
+	PromiseId string `json:"promiseId"`
 }
 
 func (r *Request) String() string {
@@ -110,14 +112,16 @@ func (r *Request) String() string {
 		)
 	case CreateSubscription:
 		return fmt.Sprintf(
-			"CreateSubscription(promiseId=%s, url=%s)",
+			"CreateSubscription(id=%s, promiseId=%s, url=%s)",
+			r.CreateSubscription.Id,
 			r.CreateSubscription.PromiseId,
 			r.CreateSubscription.Url,
 		)
 	case DeleteSubscription:
 		return fmt.Sprintf(
-			"DeleteSubscription(id=%d)",
+			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
+			r.DeleteSubscription.PromiseId,
 		)
 	default:
 		return "Request"

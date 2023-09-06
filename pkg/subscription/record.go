@@ -3,8 +3,8 @@ package subscription
 import "encoding/json"
 
 type SubscriptionRecord struct {
+	Id          string
 	PromiseId   string
-	Id          int64
 	Url         string
 	RetryPolicy []byte
 	CreatedOn   int64
@@ -17,8 +17,8 @@ func (r *SubscriptionRecord) Subscription() (*Subscription, error) {
 	}
 
 	return &Subscription{
-		PromiseId:   r.PromiseId,
 		Id:          r.Id,
+		PromiseId:   r.PromiseId,
 		Url:         r.Url,
 		RetryPolicy: retryPolicy,
 		CreatedOn:   r.CreatedOn,
