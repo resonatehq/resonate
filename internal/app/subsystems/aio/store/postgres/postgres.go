@@ -84,7 +84,9 @@ const (
     FROM
         promises
     WHERE
-        id LIKE $1 AND state = $2`
+        id LIKE $1 AND state = $2
+	ORDER BY
+		id`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -104,7 +106,7 @@ const (
     FROM
         timeouts
     ORDER BY
-        time ASC
+        time ASC, id
     LIMIT $1`
 
 	TIMEOUT_INSERT_STATEMENT = `
@@ -131,14 +133,16 @@ const (
     FROM
         subscriptions
     WHERE
-        promise_id = ANY($1)`
+        promise_id = ANY($1)
+	ORDER BY
+		id, promise_id`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO subscriptions
         (id, promise_id, url, retry_policy, created_on)
     VALUES
         ($1, $2, $3, $4, $5)
-	ON CONFLICT(id, promise_id) DO NOTHING;`
+	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
 	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
@@ -152,7 +156,7 @@ const (
     FROM
         notifications
     ORDER BY
-        time ASC
+        time ASC, id
     LIMIT $1`
 
 	NOTIFICATION_INSERT_STATEMENT = `
@@ -160,7 +164,7 @@ const (
         (id, promise_id, url, retry_policy, time, attempt)
     VALUES
         ($1, $2, $3, $4, $5, 0)
-	ON CONFLICT(id, promise_id) DO NOTHING;`
+	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
@@ -760,6 +764,7 @@ func (w *PostgresStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cm
 		},
 	}, nil
 }
+
 func (w *PostgresStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotificationsCommand) (*types.Result, error) {
 	// select
 	rows, err := tx.Query(NOTIFICATION_SELECT_STATEMENT, cmd.N)

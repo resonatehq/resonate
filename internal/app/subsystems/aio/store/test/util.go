@@ -1469,12 +1469,6 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*subscription.SubscriptionRecord{
 						{
-							Id:          "foo",
-							PromiseId:   "foo",
-							Url:         "https://foo.com",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-						},
-						{
 							Id:          "bar",
 							PromiseId:   "bar",
 							Url:         "https://bar.com",
@@ -1485,6 +1479,12 @@ var TestCases = []*testCase{
 							PromiseId:   "baz",
 							Url:         "https://baz.com",
 							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
+						},
+						{
+							Id:          "foo",
+							PromiseId:   "foo",
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 						},
 					},
 				},

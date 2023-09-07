@@ -77,7 +77,9 @@ const (
 	FROM
 		promises
 	WHERE
-		id GLOB ? AND state = ?`
+		id GLOB ? AND state = ?
+	ORDER BY
+		id`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -97,7 +99,7 @@ const (
 	FROM
 		timeouts
 	ORDER BY
-		time ASC
+		time ASC, id
 	LIMIT ?`
 
 	TIMEOUT_INSERT_STATEMENT = `
@@ -124,7 +126,9 @@ const (
 	FROM
 		subscriptions
 	WHERE
-		promise_id IN (%s)`
+		promise_id IN (%s)
+	ORDER BY
+		id, promise_id`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO subscriptions
@@ -145,7 +149,7 @@ const (
 	FROM
 		notifications
 	ORDER BY
-		time ASC
+		time ASC, id
 	LIMIT ?`
 
 	NOTIFICATION_INSERT_STATEMENT = `
