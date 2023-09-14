@@ -46,6 +46,13 @@ func orderedRangeSort[K cmp.Ordered, V any](m map[K]V) []K {
 		i++
 	}
 
-	sort.SliceStable(keys, cmp.Less)
+	sort.SliceStable(keys, func(i, j int) bool {
+		return keys[i] < keys[j]
+	})
+
+	for i := 0; i < len(keys)-1; i++ {
+		Assert(keys[i] <= keys[i+1], "slice not sorted")
+	}
+
 	return keys
 }

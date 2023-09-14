@@ -87,7 +87,8 @@ func TestNetworkHttpRequest(t *testing.T) {
 				},
 			}
 
-			worker := New(0).NewWorker(0)
+			config := &Config{Timeout: 0}
+			worker := New(config).NewWorker(0)
 			cqes := worker.Process([]*bus.SQE[types.Submission, types.Completion]{sqe})
 
 			res := cqes[0].Completion.Network.Http

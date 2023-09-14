@@ -8,10 +8,10 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
-	"github.com/resonatehq/resonate/test"
 )
 
 type Generator struct {
+	ticks      int64
 	idSet      []string
 	ikeySet    []*promise.Ikey
 	dataSet    [][]byte
@@ -19,32 +19,31 @@ type Generator struct {
 	tagsSet    []map[string]string
 	urlSet     []string
 	retrySet   []int
-	time       int64
 	requests   []RequestGenerator
 }
 
 type RequestGenerator func(*rand.Rand, int64) *types.Request
 
-func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags int, urls int, retries int, time int64) *Generator {
-	idSet := make([]string, ids)
-	for i := 0; i < ids; i++ {
+func NewGenerator(r *rand.Rand, config *Config) *Generator {
+	idSet := make([]string, config.Ids)
+	for i := 0; i < config.Ids; i++ {
 		idSet[i] = strconv.Itoa(i)
 	}
 
 	ikeySet := []*promise.Ikey{}
-	for i := 0; i < ikeys; i++ {
+	for i := 0; i < config.Ikeys; i++ {
 		s := strconv.Itoa(i)
 		ikey := promise.Ikey(s)
 		ikeySet = append(ikeySet, &ikey, nil) // half of all ikeys are nil
 	}
 
 	dataSet := [][]byte{}
-	for i := 0; i < data; i++ {
+	for i := 0; i < config.Data; i++ {
 		dataSet = append(dataSet, []byte(strconv.Itoa(i)), nil) // half of all values are nil
 	}
 
 	headersSet := []map[string]string{}
-	for i := 0; i < headers; i++ {
+	for i := 0; i < config.Headers; i++ {
 		headers := map[string]string{}
 		for j := 0; j < r.Intn(3)+1; j++ {
 			headers[strconv.Itoa(j)] = fmt.Sprintf("%d.%d", i, j)
@@ -54,7 +53,7 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags 
 	}
 
 	tagsSet := []map[string]string{}
-	for i := 0; i < tags; i++ {
+	for i := 0; i < config.Tags; i++ {
 		tags := map[string]string{}
 		for j := 0; j < r.Intn(3)+1; j++ {
 			tags[strconv.Itoa(j)] = fmt.Sprintf("%d.%d", i, j)
@@ -63,17 +62,18 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags 
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
 	}
 
-	retrySet := make([]int, retries)
-	for i := 0; i < retries; i++ {
+	retrySet := make([]int, config.Retries)
+	for i := 0; i < config.Retries; i++ {
 		retrySet[i] = i
 	}
 
-	urlSet := make([]string, urls)
-	for i := 0; i < urls; i++ {
+	urlSet := make([]string, config.Urls)
+	for i := 0; i < config.Urls; i++ {
 		urlSet[i] = fmt.Sprintf("https://resonatehq.io/%d", i)
 	}
 
 	return &Generator{
+		ticks:      config.Ticks,
 		idSet:      idSet,
 		ikeySet:    ikeySet,
 		dataSet:    dataSet,
@@ -81,7 +81,6 @@ func NewGenerator(r *rand.Rand, ids int, ikeys int, data int, headers int, tags 
 		tagsSet:    tagsSet,
 		urlSet:     urlSet,
 		retrySet:   retrySet,
-		time:       time,
 	}
 }
 
@@ -129,7 +128,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
-	timeout := test.RangeInt63n(r, t, g.time)
+	timeout := RangeInt63n(r, t, g.ticks)
 
 	return &types.Request{
 		Kind: types.CreatePromise,
@@ -219,7 +218,7 @@ func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Req
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
 	url := g.urlSet[r.Intn(len(g.urlSet))]
 	delay := g.retrySet[r.Intn(len(g.retrySet))]
-	attempts := test.RangeIntn(r, 1, 4)
+	attempts := RangeIntn(r, 1, 4)
 
 	return &types.Request{
 		Kind: types.CreateSubscription,

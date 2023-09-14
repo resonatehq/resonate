@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
-	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -156,7 +155,7 @@ const (
     FROM
         notifications
     ORDER BY
-        time ASC, id
+        time ASC, id, promise_id
     LIMIT $1`
 
 	NOTIFICATION_INSERT_STATEMENT = `
@@ -176,19 +175,16 @@ const (
 )
 
 type Config struct {
-	Host            string
-	Port            string
-	Username        string
-	Password        string
-	Database        string
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxIdleTime time.Duration
+	Host     string
+	Port     string
+	Username string
+	Password string
+	Database string
 }
 
 type PostgresStore struct {
+	config *Config
 	db     *sql.DB
-	config Config
 }
 
 type PostgresStoreWorker struct {
@@ -196,7 +192,7 @@ type PostgresStoreWorker struct {
 	i int
 }
 
-func New(config Config) (aio.Subsystem, error) {
+func New(config *Config, workers int) (aio.Subsystem, error) {
 	dbUrl := &url.URL{
 		User:     url.UserPassword(config.Username, config.Password),
 		Host:     fmt.Sprintf("%s:%s", config.Host, config.Port),
@@ -210,13 +206,13 @@ func New(config Config) (aio.Subsystem, error) {
 		return nil, err
 	}
 
-	db.SetMaxOpenConns(config.MaxOpenConns)
-	db.SetMaxIdleConns(config.MaxIdleConns)
-	db.SetConnMaxIdleTime(config.ConnMaxIdleTime)
+	db.SetMaxOpenConns(workers)
+	db.SetMaxIdleConns(workers)
+	db.SetConnMaxIdleTime(0)
 
 	return &PostgresStore{
-		db:     db,
 		config: config,
+		db:     db,
 	}, nil
 }
 

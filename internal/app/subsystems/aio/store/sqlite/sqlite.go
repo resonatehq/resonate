@@ -149,7 +149,7 @@ const (
 	FROM
 		notifications
 	ORDER BY
-		time ASC, id
+		time ASC, id, promise_id
 	LIMIT ?`
 
 	NOTIFICATION_INSERT_STATEMENT = `
@@ -173,23 +173,23 @@ type Config struct {
 }
 
 type SqliteStore struct {
+	config *Config
 	db     *sql.DB
-	config Config
 }
 
 type SqliteStoreWorker struct {
 	*SqliteStore
 }
 
-func New(config Config) (aio.Subsystem, error) {
+func New(config *Config) (aio.Subsystem, error) {
 	db, err := sql.Open("sqlite3", config.Path)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SqliteStore{
-		db:     db,
 		config: config,
+		db:     db,
 	}, nil
 }
 

@@ -1,6 +1,8 @@
 package aio
 
 import (
+	"fmt"
+
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/util"
@@ -77,4 +79,11 @@ func (a *aioDST) Flush(t int64) {
 	}
 
 	a.sqes = nil
+}
+
+func (a *aioDST) String() string {
+	return fmt.Sprintf(
+		"AIODST(subsystems=%s)",
+		util.OrderedRange[types.AIOKind](a.subsystems),
+	)
 }

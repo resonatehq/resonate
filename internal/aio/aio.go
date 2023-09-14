@@ -11,6 +11,7 @@ import (
 )
 
 type AIO interface {
+	String() string
 	Enqueue(*bus.SQE[types.Submission, types.Completion])
 	Dequeue(int) []*bus.CQE[types.Submission, types.Completion]
 	Done() bool
@@ -157,6 +158,14 @@ func (a *aio) Flush(t int64) {
 			worker.flush(t)
 		}
 	}
+}
+
+func (a *aio) String() string {
+	return fmt.Sprintf(
+		"AIO(size=%d, subsystems=%s)",
+		cap(a.cq),
+		a.subsystems,
+	)
 }
 
 // worker

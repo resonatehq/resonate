@@ -15,6 +15,13 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
+    env:
+      POSTGRES_HOST: "localhost"
+      POSTGRES_PORT: "5432"
+      POSTGRES_USERNAME: "username"
+      POSTGRES_PASSWORD: "password"
+      POSTGRES_DATABASE: "resonate"
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3

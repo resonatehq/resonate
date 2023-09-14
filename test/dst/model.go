@@ -5,7 +5,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Model struct {
@@ -112,9 +111,8 @@ func (p Promises) Get(id string) *PromiseModel {
 type ResponseValidator func(*types.Request, *types.Response) error
 
 type PromiseModel struct {
-	id            string
-	promise       *promise.Promise
-	subscriptions []*subscription.Subscription
+	id      string
+	promise *promise.Promise
 }
 
 func (m *PromiseModel) readPromise(req *types.ReadPromiseRequest, res *types.ReadPromiseResponse) error {
@@ -277,12 +275,6 @@ func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, re
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 
-	for _, subscription := range res.Subscriptions {
-		if err := m.verifySubscription(subscription); err != nil {
-			return err
-		}
-	}
-
 	return nil
 }
 
@@ -290,57 +282,19 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 	switch res.Status {
 	case types.ResponseOK:
 	case types.ResponseCreated:
-		for _, subscription := range m.subscriptions {
-			if subscription.Id == res.Subscription.Id {
-				return fmt.Errorf("subscription '%s' already exists for promise '%s'", res.Subscription.Id, m.id)
-			}
-		}
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 
-	return m.verifySubscription(res.Subscription)
+	return nil
 }
 
 func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
 	switch res.Status {
 	case types.ResponseNoContent:
-		for i, subscription := range m.subscriptions {
-			if subscription.Id == req.Id {
-				m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
-				return nil
-			}
-		}
-		return nil
 	case types.ResponseNotFound:
-		for _, subscription := range m.subscriptions {
-			if subscription.Id == req.Id {
-				return fmt.Errorf("subscription '%s' exists for promise '%s'", req.Id, m.id)
-			}
-		}
-		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
-	}
-}
-
-func (m *PromiseModel) verifySubscription(subscription *subscription.Subscription) error {
-	if subscription != nil {
-		var found bool
-		for _, s := range m.subscriptions {
-			if s.Id == subscription.Id {
-				if s.Url != subscription.Url {
-					return fmt.Errorf("subscriptions do not match (%s, %s)", s, subscription)
-				}
-
-				s = subscription
-				found = true
-			}
-		}
-
-		if !found {
-			m.subscriptions = append(m.subscriptions, subscription)
-		}
 	}
 
 	return nil
