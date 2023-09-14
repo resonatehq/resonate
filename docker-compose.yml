@@ -4,7 +4,7 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-    - POSTGRES_USER=${POSTGRES_HOST}
+    - POSTGRES_USER=${POSTGRES_USERNAME}
     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     - POSTGRES_DB=${POSTGRES_DATABASE}
     ports:
