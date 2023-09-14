@@ -12,7 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -57,24 +57,24 @@ var serveCmd = &cobra.Command{
 
 		// instatiate aio subsystems
 		network := network.New(10 * time.Second)
-		// store, err := sqlite.New(sqlite.Config{Path: "resonate.db"})
-		// if err != nil {
-		// 	return err
-		// }
-
-		store, err := postgres.New(postgres.Config{
-			Host:            os.Getenv("POSTGRES_HOST"),
-			Port:            os.Getenv("POSTGRES_PORT"),
-			Username:        os.Getenv("POSTGRES_USER"),
-			Password:        os.Getenv("POSTGRES_PASSWORD"),
-			Database:        os.Getenv("POSTGRES_DB"),
-			MaxOpenConns:    3,
-			MaxIdleConns:    3,
-			ConnMaxIdleTime: 0,
-		})
+		store, err := sqlite.New(sqlite.Config{Path: "resonate.db"})
 		if err != nil {
 			return err
 		}
+
+		// store, err := postgres.New(postgres.Config{
+		// 	Host:            os.Getenv("POSTGRES_HOST"),
+		// 	Port:            os.Getenv("POSTGRES_PORT"),
+		// 	Username:        os.Getenv("POSTGRES_USER"),
+		// 	Password:        os.Getenv("POSTGRES_PASSWORD"),
+		// 	Database:        os.Getenv("POSTGRES_DB"),
+		// 	MaxOpenConns:    3,
+		// 	MaxIdleConns:    3,
+		// 	ConnMaxIdleTime: 0,
+		// })
+		// if err != nil {
+		// 	return err
+		// }
 
 		// add subsystems
 		api.AddSubsystem(http)
