@@ -261,6 +261,42 @@ jobs:
       continue-on-error: true
       run: |
         diff logs-1.txt logs-2.txt
+    - name: Create issue if diff failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.diff.outcome != 'success'
+      run: |
+        chmod +x resonate
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store postgres \
+          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
+
+  dst-sqlite-postgres-diff:
+    runs-on: ubuntu-latest
+    needs: [build, seed, dst-sqlite-1, dst-postgres-1]
+    steps:
+    - name: Download resonate binary
+      uses: actions/download-artifact@v3
+      with:
+        name: resonate
+    - name: Download logs from run 1
+      uses: actions/download-artifact@v3
+      with:
+        name: sqlite-logs-1
+        path: logs-1.txt
+    - name: Download logs from run 2
+      uses: actions/download-artifact@v3
+      with:
+        name: postgres-logs-1
+        path: logs-2.txt
+    - id: diff
+      name: Diff
+      continue-on-error: true
+      run: |
+        diff logs-1.txt logs-2.txt
     # - name: Create issue if diff failed
     #   env:
     #     GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -269,7 +305,7 @@ jobs:
     #     chmod +x resonate
     #     ./resonate dst issue \
     #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --store postgres \
-    #       --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+    #       --store sqlite/postgres \
+    #       --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite/postgres." \
     #       --repo $GITHUB_REPOSITORY \
     #       --commit $GITHUB_SHA
