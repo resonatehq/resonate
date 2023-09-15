@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand" // nosemgrep
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/internal/aio"

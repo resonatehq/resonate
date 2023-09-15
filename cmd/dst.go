@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand" // nosemgrep
 	netHttp "net/http"
 	"os"
 	"strings"

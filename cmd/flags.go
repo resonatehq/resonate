@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"strconv"
 	"strings"
 
