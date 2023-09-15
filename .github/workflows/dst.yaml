@@ -2,13 +2,7 @@ name: DST
 
 on:
   schedule:
-  - cron: '0 0 * * *'  # every day at 0:00 UTC
-  push:
-    branches:
-    - '*'
-  pull_request:
-    branches:
-    - '*'
+  - cron: '0 */4 * * *'  # every day at 0:00 UTC
 
 permissions:
   contents: read
@@ -37,10 +31,10 @@ jobs:
       name: Run dst (seed=${{ env.SEED }})
       continue-on-error: true
       run: |
-        go run ./... dst run --seed $SEED --ticks 100 > logs-sqlite-1.txt &
+        go run ./... dst run --seed $SEED > logs-sqlite-1.txt &
         pid1=$!
 
-        go run ./... dst run --seed $SEED --ticks 100 > logs-sqlite-2.txt &
+        go run ./... dst run --seed $SEED > logs-sqlite-2.txt &
         pid2=$!
 
         # wait and grab exit statuses
