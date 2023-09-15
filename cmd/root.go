@@ -38,8 +38,10 @@ func initConfig() {
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		slog.Error("error reading config file", "error", err)
-		os.Exit(1)
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			slog.Error("error reading config file", "error", err)
+			os.Exit(1)
+		}
 	}
 }
 
