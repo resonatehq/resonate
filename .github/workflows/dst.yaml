@@ -2,7 +2,10 @@ name: DST
 
 on:
   schedule:
-  - cron: '0 */4 * * *'  # every day at 0:00 UTC
+  - cron: '0 */4 * * *'  # every 4 hours
+  pull_request:
+    branches:
+    - '*'
 
 permissions:
   contents: read
@@ -12,6 +15,12 @@ jobs:
   dst:
     runs-on: ubuntu-latest
     timeout-minutes: 150
+
+    env:
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
 
     steps:
     - name: Checkout repository
@@ -23,32 +32,90 @@ jobs:
         go-version-file: go.mod
         cache: false
 
+    - name: Install docker-compose
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install docker-compose
+
+    - name: Start docker-compose
+      run: |
+        docker-compose up -d
+
     - name: Set random seed
       run: |
         echo "SEED=$RANDOM" >> $GITHUB_ENV
+
+    - name: Build resonate
+      run: |
+        go build -o resonate
 
     - id: dst
       name: Run dst (seed=${{ env.SEED }})
       continue-on-error: true
       run: |
-        go run ./... dst run --seed $SEED > logs-sqlite-1.txt &
-        pid1=$!
+        ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-1.txt &
+        p1=$!
 
-        go run ./... dst run --seed $SEED > logs-sqlite-2.txt &
-        pid2=$!
+        ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-2.txt &
+        p2=$!
+
+        ./resonate dst run --seed $SEED --aio-store postgres --aio-store-postgres-database resonate_dst_1 > logs-postgres-1.txt &
+        p3=$!
+
+        ./resonate dst run --seed $SEED --aio-store postgres --aio-store-postgres-database resonate_dst_2 > logs-postgres-2.txt &
+        p4=$!
 
         # wait and grab exit statuses
-        wait $pid1
-        status1=$?
-        wait $pid2
-        status2=$?
+        wait $p1
+        s1=$?
+        wait $p2
+        s2=$?
+        wait $p3
+        s3=$?
+        wait $p4
+        s4=$?
 
-        if [ $status1 -ne 0 ] || [ $status2 -ne 0 ]; then
-            exit 1
+        # check status codes
+        if [ $s1 -ne 0 ]; then
+          echo "STORE=sqlite" >> $GITHUB_ENV
+          echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
+          echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
+          exit 1
+        fi
+        if [ $s2 -ne 0 ]; then
+          echo "STORE=sqlite" >> $GITHUB_ENV
+          echo "FILE=logs-sqlite-2.txt" >> $GITHUB_ENV
+          echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
+          exit 1
+        fi
+        if [ $s3 -ne 0 ]; then
+          echo "STORE=postgres" >> $GITHUB_ENV
+          echo "FILE=logs-postgres-1.txt" >> $GITHUB_ENV
+          echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
+          exit 1
+        fi
+        if [ $s4 -ne 0 ]; then
+          echo "STORE=postgres" >> $GITHUB_ENV
+          echo "FILE=logs-postgres-2.txt" >> $GITHUB_ENV
+          echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
+          exit 1
         fi
 
+        # check diffs
         if ! diff -q logs-sqlite-1.txt logs-sqlite-2.txt > /dev/null; then
-            exit 1
+          echo "STORE=sqlite" >> $GITHUB_ENV
+          echo "REASON='Two executions of `resonate dst run` against an sqlite store completed with different results.'" >> $GITHUB_ENV
+          exit 1
+        fi
+        if ! diff -q logs-postgres-1.txt logs-postgres-2.txt > /dev/null; then
+          echo "STORE=postgres" >> $GITHUB_ENV
+          echo "REASON='Two executions of `resonate dst run` against a postgres store completed with different results.'" >> $GITHUB_ENV
+          exit 1
+        fi
+        if ! diff -q logs-sqlite-1.txt logs-postgres-1.txt > /dev/null; then
+          echo "STORE=sqlite,postgres" >> $GITHUB_ENV
+          echo "REASON='An execution of `resonate dst run` against an sqlite store and another against a postgres store completed with different results.'" >> $GITHUB_ENV
+          exit 1
         fi
 
     - name: Create issue if dst failed
@@ -56,7 +123,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: steps.dst.outcome != 'success'
       run: |
-        go run ./... dst issue --seed $SEED --file logs-sqlite-1.txt --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
+        ./resonate dst issue --seed $SEED --store $STORE --reason $REASON --file $FILE --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
 
     # artifacts
     - uses: actions/upload-artifact@v3
@@ -67,3 +134,11 @@ jobs:
       with:
         name: sqlite-logs-2
         path: logs-sqlite-2.txt
+    - uses: actions/upload-artifact@v3
+      with:
+        name: postgres-logs-1
+        path: logs-postgres-1.txt
+    - uses: actions/upload-artifact@v3
+      with:
+        name: postgres-logs-2
+        path: logs-postgres-2.txt

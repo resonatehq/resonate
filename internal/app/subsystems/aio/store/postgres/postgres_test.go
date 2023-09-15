@@ -9,17 +9,16 @@ import (
 
 func TestPostgresStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		host := os.Getenv("POSTGRES_HOST")
-		port := os.Getenv("POSTGRES_PORT")
-		username := os.Getenv("POSTGRES_USERNAME")
-		password := os.Getenv("POSTGRES_PASSWORD")
-		database := os.Getenv("POSTGRES_DATABASE")
+		host := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST", "")
+		port := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT", "localhost")
+		username := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME", "username")
+		password := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD", "password")
+		database := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE", "resonate_test")
 
 		if host == "" {
 			t.Skip("Postgres is not configured, skipping")
 		}
 
-		// temp config
 		store, err := New(&Config{
 			Host:     host,
 			Port:     port,
@@ -46,4 +45,12 @@ func TestPostgresStore(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func withDefault(key, defaultValue string) string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return defaultValue
+	}
+	return value
 }

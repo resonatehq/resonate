@@ -40,6 +40,8 @@ var (
 	retries     = rangeIntFlag{Min: 1, Max: 1000}
 
 	// issue command
+	store  string
+	reason string
 	file   string
 	repo   string
 	commit string
@@ -51,9 +53,16 @@ type Issue struct {
 }
 
 const issueFmt = ` # DST Failed
+%s
+
 **Seed**
 ~~~
 %d
+~~~
+
+**Store**
+~~~
+%s
 ~~~
 
 **Commit**
@@ -63,13 +72,11 @@ const issueFmt = ` # DST Failed
 
 **Command**
 ~~~
-SEED=%d go test -v --count=1 --timeout=2h ./test/dst
+go run ./... dst run --seed %d --aio-store %s
 ~~~
 
 **Logs**
 ~~~
-SEED=%d go test -v --count=1 --timeout=2h ./test/dst
-
 %s
 ~~~
 `
@@ -192,15 +199,19 @@ var dstIssueCmd = &cobra.Command{
 		}
 
 		// read logs file
-		logs, err := parseLogs(file, 50, 100)
-		if err != nil {
-			return fmt.Errorf("failed to parse logs")
+		logs := "n/a"
+		if file != "" {
+			var err error
+			logs, err = parseLogs(file, 50, 100)
+			if err != nil {
+				return fmt.Errorf("failed to parse logs")
+			}
 		}
 
 		// create github issue
 		issue := &Issue{
 			Title: fmt.Sprintf("DST: %d", seed),
-			Body:  fmt.Sprintf(issueFmt, seed, commit, seed, seed, logs),
+			Body:  fmt.Sprintf(issueFmt, reason, seed, store, commit, seed, store, logs),
 		}
 
 		return createGitHubIssue(repo, token, issue)
@@ -234,7 +245,7 @@ func init() {
 	dstRunCmd.Flags().String("aio-store-postgres-port", "5432", "postgres port")
 	dstRunCmd.Flags().String("aio-store-postgres-username", "", "postgres username")
 	dstRunCmd.Flags().String("aio-store-postgres-password", "", "postgres password")
-	dstRunCmd.Flags().String("aio-store-postgres-database", "resonate", "postgres database name")
+	dstRunCmd.Flags().String("aio-store-postgres-database", "resonate_dst", "postgres database name")
 	dstRunCmd.Flags().Float32("aio-network-success-rate", 0.5, "simulated success rate of http requests")
 
 	_ = viper.BindPFlag("dst.aio.size", dstRunCmd.Flags().Lookup("aio-size"))
@@ -263,6 +274,8 @@ func init() {
 
 	// issue command
 	dstIssueCmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
+	dstIssueCmd.Flags().StringVar(&store, "store", "", "dst store")
+	dstIssueCmd.Flags().StringVar(&reason, "reason", "", "dst failure reason")
 	dstIssueCmd.Flags().StringVar(&file, "file", "", "dst logs file")
 	dstIssueCmd.Flags().StringVar(&repo, "repo", "", "github repo")
 	dstIssueCmd.Flags().StringVar(&commit, "commit", "", "git commit sha")
