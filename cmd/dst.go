@@ -30,7 +30,7 @@ var (
 
 	// run command
 	ticks       int64
-	reqsPerTick = rangeIntFlag{Min: 1, Max: 10000}
+	reqsPerTick = rangeIntFlag{Min: 1, Max: 1000}
 	ids         = rangeIntFlag{Min: 1, Max: 1000}
 	ikeys       = rangeIntFlag{Min: 1, Max: 1000}
 	data        = rangeIntFlag{Min: 1, Max: 1000}
@@ -223,11 +223,11 @@ func init() {
 	dstRunCmd.Flags().Var(&retries, "retries", "number subscription retries")
 
 	// api
-	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 100000}, "api-size", "size of the submission queue buffered channel")
+	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000000}, "api-size", "size of the submission queue buffered channel")
 	_ = viper.BindPFlag("dst.api.size", dstRunCmd.Flags().Lookup("api-size"))
 
 	// aio
-	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 100000}, "aio-size", "size of the completion queue buffered channel")
+	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000000}, "aio-size", "size of the completion queue buffered channel")
 	dstRunCmd.Flags().String("aio-store", "sqlite", "promise store type")
 	dstRunCmd.Flags().String("aio-store-sqlite-path", ":memory:", "sqlite database path")
 	dstRunCmd.Flags().String("aio-store-postgres-host", "localhost", "postgres host")

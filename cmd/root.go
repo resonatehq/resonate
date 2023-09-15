@@ -22,6 +22,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (defaults to resonate.yml)")
 	rootCmd.PersistentFlags().Int("log-level", 0, "log level")
 	_ = viper.BindPFlag("logs.level", rootCmd.PersistentFlags().Lookup("log-level"))
+	_ = viper.BindPFlag("dst.logs.level", rootCmd.PersistentFlags().Lookup("log-level"))
 }
 
 func initConfig() {
@@ -37,8 +38,10 @@ func initConfig() {
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		slog.Error("error reading config file", "error", err)
-		os.Exit(1)
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			slog.Error("error reading config file", "error", err)
+			os.Exit(1)
+		}
 	}
 }
 
