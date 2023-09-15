@@ -124,7 +124,7 @@ jobs:
     
   dst-sqlite-diff:
     runs-on: ubuntu-latest
-    needs: [dst-sqlite-1, dst-sqlite-2]
+    needs: [build, seed, dst-sqlite-1, dst-sqlite-2]
     steps:
     - name: Download resonate binary
       uses: actions/download-artifact@v3
