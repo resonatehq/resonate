@@ -43,11 +43,8 @@ jobs:
 
   dst-sqlite-1:
     runs-on: ubuntu-latest
+    needs: [build, seed]
     timeout-minutes: 150
-
-    needs:
-    - build
-    - seed
 
     # env:
     #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
@@ -55,6 +52,7 @@ jobs:
     #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
     #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
 
+    steps:
     # - name: Install docker-compose
     #   run: |
     #     sudo apt-get update
