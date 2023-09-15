@@ -3,6 +3,9 @@ name: DST
 on:
   schedule:
   - cron: '0 0 * * *'  # every day at 0:00 UTC
+  - push:
+      branches:
+      - '*'
 
 permissions:
   contents: read
@@ -31,43 +34,39 @@ jobs:
       name: Run dst (seed=${{ env.SEED }})
       continue-on-error: true
       run: |
-        go test -v --timeout=2h --count=1 -cpuprofile cpu.prof -memprofile mem.prof ./test/dst > logs.txt
+        go run ./... dst run --seed $SEED --ticks 100 > logs-sqlite-1.txt &
+        pid1=$!
+
+        go run ./... dst run --seed $SEED --ticks 100 > logs-sqlite-2.txt &
+        pid2=$!
+
+        # wait and grab exit statuses
+        wait $pid1
+        status1=$?
+        wait $pid2
+        status2=$?
+
+        if [ $status1 -ne 0 ] || [ $status2 -ne 0 ]; then
+            exit 1
+        fi
+
+        if ! diff -q logs-sqlite-1.txt logs-sqlite-2.txt > /dev/null; then
+            exit 1
+        fi
 
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: steps.dst.outcome != 'success'
       run: |
-        go run ./... dst --seed $SEED --file logs.txt --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
-
-    - name: Install graphviz
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y graphviz
-
-    - name: Generate cpu and mem images
-      run: |
-        go tool pprof --png -output=cpu.png cpu.prof
-        go tool pprof --png -output=mem.png mem.prof
+        go run ./... dst issue --seed $SEED --file logs-sqlite-1.txt --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
 
     # artifacts
     - uses: actions/upload-artifact@v3
       with:
-        name: cpu.png
-        path: cpu.png
+        name: sqlite-logs-1
+        path: logs-sqlite-1.txt
     - uses: actions/upload-artifact@v3
       with:
-        name: cpu.prof
-        path: cpu.prof
-    - uses: actions/upload-artifact@v3
-      with:
-        name: mem.png
-        path: mem.png
-    - uses: actions/upload-artifact@v3
-      with:
-        name: mem.prof
-        path: mem.prof
-    - uses: actions/upload-artifact@v3
-      with:
-        name: logs
-        path: logs.txt
+        name: sqlite-logs-2
+        path: logs-sqlite-2.txt
