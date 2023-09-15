@@ -25,8 +25,7 @@ jobs:
         cache: false
 
     - name: Build resonate
-      run: |
-        go build -o resonate
+      run: go build -o resonate
 
     - name: Upload resonate binary
       uses: actions/upload-artifact@v3
@@ -37,18 +36,20 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     steps:
-    - name: Set random seed
-      id: x
-      run: echo x=$RANDOM >> "$GITHUB_OUTPUT"
-    - name: Set y
-      id: y
-      run: echo "y=helloworld" >> "$GITHUB_OUTPUT"
-    - name: Test
-      run: |
-        echo ${{ steps.x.outputs.x }}
-        echo ${{ steps.x.outputs.y }}
-        echo "${{ steps.x.outputs.x }}"
-        echo "${{ steps.x.outputs.y }}"
+    - id: seed
+      name: Set random seed
+      run: echo seed=$RANDOM >> "$GITHUB_OUTPUT"
+    outputs:
+      seed: ${{ steps.seed.outputs.seed }}
+    # - name: Set y
+    #   id: y
+    #   run: echo "y=helloworld" >> "$GITHUB_OUTPUT"
+    # - name: Test
+    #   run: |
+    #     echo ${{ steps.x.outputs.x }}
+    #     echo ${{ steps.x.outputs.y }}
+    #     echo "${{ steps.x.outputs.x }}"
+    #     echo "${{ steps.x.outputs.y }}"
 
   dst-sqlite-1:
     runs-on: ubuntu-latest
@@ -77,13 +78,12 @@ jobs:
         name: resonate
 
     - id: dst
-      name: Run dst (seed=${{ needs.seed.outputs.x }})
+      name: Run dst (seed=${{ needs.seed.outputs.seed }})
       continue-on-error: true
       run: |
         chmod +x resonate
-        echo "${{ needs.seed.outputs.x }}"
-        echo "${{ needs.seed.outputs.y }}"
-        ./resonate dst run --seed ${{ needs.seed.outputs.x }} --ticks 10 --aio-store sqlite > logs.txt
+        echo "${{ needs.seed.outputs.seed }}"
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
 
     # - name: Create issue if dst failed
     #   env:
