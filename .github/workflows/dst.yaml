@@ -53,7 +53,10 @@ jobs:
       name: Run dst (seed=${{ env.SEED }})
       continue-on-error: true
       run: |
-        ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-1.txt &
+        echo "STORE=sqlite" >> $GITHUB_ENV
+        echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
+
+        ./resonate dst run --seed $SEED --ticks 10:0 --aio-store sqlite > logs-sqlite-1.txt &
         p1=$!
 
         ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-2.txt &
@@ -81,35 +84,35 @@ jobs:
           > logs-postgres-2.txt &
         p4=$!
 
-        # wait and grab exit statuses
         wait $p1
         s1=$?
-        wait $p2
-        s2=$?
-        wait $p3
-        s3=$?
-        wait $p4
-        s4=$?
-
-        # check status codes
         if [ $s1 -ne 0 ]; then
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
           echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
           exit 1
         fi
+
+        wait $p2
+        s2=$?
         if [ $s2 -ne 0 ]; then
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "FILE=logs-sqlite-2.txt" >> $GITHUB_ENV
           echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
           exit 1
         fi
+
+        wait $p3
+        s3=$?
         if [ $s3 -ne 0 ]; then
           echo "STORE=postgres" >> $GITHUB_ENV
           echo "FILE=logs-postgres-1.txt" >> $GITHUB_ENV
           echo "REASON='`resonate dst run` finished with a non zero exit code.'" >> $GITHUB_ENV
           exit 1
         fi
+
+        wait $p4
+        s4=$?
         if [ $s4 -ne 0 ]; then
           echo "STORE=postgres" >> $GITHUB_ENV
           echo "FILE=logs-postgres-2.txt" >> $GITHUB_ENV
