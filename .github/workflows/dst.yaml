@@ -123,7 +123,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: steps.dst.outcome != 'success'
       run: |
-        ./resonate dst issue --seed $SEED --store $STORE --reason $REASON --file $FILE --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
+        ./resonate dst issue --seed $SEED --store $STORE --reason $REASON --file '$FILE' --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
 
     # artifacts
     - uses: actions/upload-artifact@v3
