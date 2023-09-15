@@ -59,10 +59,26 @@ jobs:
         ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-2.txt &
         p2=$!
 
-        ./resonate dst run --seed $SEED --aio-store postgres --aio-store-postgres-database resonate_dst_1 > logs-postgres-1.txt &
+        ./resonate dst run \
+          --seed $SEED \
+          --aio-store postgres \
+          --aio-store-postgres-host $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST \
+          --aio-store-postgres-port $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT \
+          --aio-store-postgres-username $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME \
+          --aio-store-postgres-password $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD \
+          --aio-store-postgres-database resonate_dst_1 \
+          > logs-postgres-1.txt &
         p3=$!
 
-        ./resonate dst run --seed $SEED --aio-store postgres --aio-store-postgres-database resonate_dst_2 > logs-postgres-2.txt &
+        ./resonate dst run \
+          --seed $SEED \
+          --aio-store postgres \
+          --aio-store-postgres-host $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST \
+          --aio-store-postgres-port $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT \
+          --aio-store-postgres-username $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME \
+          --aio-store-postgres-password $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD \
+          --aio-store-postgres-database resonate_dst_2 \
+          > logs-postgres-2.txt &
         p4=$!
 
         # wait and grab exit statuses

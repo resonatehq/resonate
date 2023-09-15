@@ -9,11 +9,11 @@ import (
 
 func TestPostgresStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		host := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST", "")
-		port := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT", "localhost")
-		username := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME", "username")
-		password := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD", "password")
-		database := withDefault("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE", "resonate_test")
+		host := withDefault("AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST", "")
+		port := withDefault("AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT", "localhost")
+		username := withDefault("AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME", "username")
+		password := withDefault("AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD", "password")
+		database := "resonate_test"
 
 		if host == "" {
 			t.Skip("Postgres is not configured, skipping")
