@@ -4,29 +4,12 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-      POSTGRES_USER: username
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: resonate
+    - POSTGRES_USER=${POSTGRES_USERNAME}
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    - POSTGRES_DB=${POSTGRES_DATABASE}
     ports:
     - "5432:5432"
     read_only: true
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
     - no-new-privileges:true
-
-  # app:
-  #   build:
-  #     context: "."
-  #   container_name: resonate
-  #   command: ["serve"]
-  #   depends_on:
-  #   - postgres
-  #   environment:
-  #     POSTGRES_HOST: postgres
-  #     POSTGRES_PORT: 5432
-  #     POSTGRES_USER: username
-  #     POSTGRES_PASSWORD: password
-  #     POSTGRES_DB: resonate
-  #   ports:
-  #   - "8001:8001"
-  #   - "50051:50051"

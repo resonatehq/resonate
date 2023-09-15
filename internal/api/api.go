@@ -11,6 +11,7 @@ import (
 )
 
 type API interface {
+	String() string
 	Enqueue(*bus.SQE[types.Request, types.Response])
 	Dequeue(int, <-chan time.Time) []*bus.SQE[types.Request, types.Response]
 	Done() bool
@@ -148,4 +149,12 @@ func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[types.Reques
 	}
 
 	return sqes
+}
+
+func (a *api) String() string {
+	return fmt.Sprintf(
+		"API(size=%d, subsystems=%s)",
+		cap(a.sq),
+		a.subsystems,
+	)
 }

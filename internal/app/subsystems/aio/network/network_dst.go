@@ -10,19 +10,23 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
+type ConfigDST struct {
+	P float32
+}
+
 type NetworkDST struct {
-	r *rand.Rand
-	p float32
+	config *ConfigDST
+	r      *rand.Rand
 }
 
 type NetworkDSTDevice struct {
 	*NetworkDST
 }
 
-func NewDST(r *rand.Rand, p float32) aio.Subsystem {
+func NewDST(config *ConfigDST, r *rand.Rand) aio.Subsystem {
 	return &NetworkDST{
-		r: r,
-		p: p,
+		config: config,
+		r:      r,
 	}
 }
 
@@ -61,7 +65,7 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[types.Submission, types.Compl
 
 			var res *http.Response
 
-			if d.r.Float32() < d.p {
+			if d.r.Float32() < d.config.P {
 				res = &http.Response{
 					StatusCode: http.StatusOK,
 				}

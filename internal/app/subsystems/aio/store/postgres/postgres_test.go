@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"os"
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
@@ -8,14 +9,24 @@ import (
 
 func TestPostgresStore(t *testing.T) {
 	for _, tc := range test.TestCases {
+		host := os.Getenv("POSTGRES_HOST")
+		port := os.Getenv("POSTGRES_PORT")
+		username := os.Getenv("POSTGRES_USERNAME")
+		password := os.Getenv("POSTGRES_PASSWORD")
+		database := os.Getenv("POSTGRES_DATABASE")
+
+		if host == "" {
+			t.Skip("Postgres is not configured, skipping")
+		}
+
 		// temp config
-		store, err := New(Config{
-			Host:     "localhost",
-			Port:     "5432",
-			Username: "username",
-			Password: "password",
-			Database: "resonate",
-		})
+		store, err := New(&Config{
+			Host:     host,
+			Port:     port,
+			Username: username,
+			Password: password,
+			Database: database,
+		}, 1)
 		if err != nil {
 			t.Fatal(err)
 		}

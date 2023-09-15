@@ -1,0 +1,175 @@
+package cmd
+
+import (
+	"fmt"
+	"log/slog"
+	"math/rand" // nosemgrep
+
+	"github.com/mitchellh/mapstructure"
+	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
+	"github.com/resonatehq/resonate/internal/kernel/system"
+	"github.com/spf13/viper"
+)
+
+// Config
+
+type Config struct {
+	API     *APIConfig
+	AIO     *AIOConfig
+	System  *system.Config
+	Metrics *MetricsConfig
+	Logs    *LogsConfig
+}
+
+type APIConfig struct {
+	Size       int
+	Subsystems *APISubsystems
+}
+
+type AIOConfig struct {
+	Size       int
+	Subsystems *AIOSubsystems
+}
+
+type APISubsystems struct {
+	Http *http.Config
+	Grpc *grpc.Config
+}
+
+type AIOSubsystems struct {
+	Store      *AIOSubsystemConfig[StoreConfig]
+	Network    *AIOSubsystemConfig[network.Config]
+	NetworkDST *AIOSubsystemConfig[network.ConfigDST]
+}
+
+type AIOSubsystemConfig[T any] struct {
+	Size      int
+	Workers   int
+	BatchSize int
+	Config    *T
+}
+
+type MetricsConfig struct {
+	Port int
+}
+
+type LogsConfig struct {
+	Level slog.Level
+}
+
+// DST Config
+
+type ConfigDST struct {
+	DST configDST
+}
+
+func (c *ConfigDST) Resolve(r *rand.Rand) *Config {
+	return &Config{
+		API:    c.DST.API.Resolve(r),
+		AIO:    c.DST.AIO.Resolve(r),
+		System: c.DST.System.Resolve(r),
+		Logs:   c.DST.Logs,
+	}
+}
+
+type configDST struct {
+	API    *APIConfigDST
+	AIO    *AIOConfigDST
+	System *SystemConfigDST
+	Logs   *LogsConfig
+}
+
+type APIConfigDST struct {
+	Size *rangeIntFlag
+}
+
+func (c *APIConfigDST) Resolve(r *rand.Rand) *APIConfig {
+	return &APIConfig{
+		Size: c.Size.Resolve(r),
+	}
+}
+
+type AIOConfigDST struct {
+	Size       *rangeIntFlag
+	Subsystems *AIOSubsystems
+}
+
+func (c *AIOConfigDST) Resolve(r *rand.Rand) *AIOConfig {
+	return &AIOConfig{
+		Size:       c.Size.Resolve(r),
+		Subsystems: c.Subsystems,
+	}
+}
+
+type SystemConfigDST struct {
+	TimeoutCacheSize      *rangeIntFlag
+	NotificationCacheSize *rangeIntFlag
+	SubmissionBatchSize   *rangeIntFlag
+	CompletionBatchSize   *rangeIntFlag
+}
+
+func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
+	return &system.Config{
+		TimeoutCacheSize:      c.TimeoutCacheSize.Resolve(r),
+		NotificationCacheSize: c.NotificationCacheSize.Resolve(r),
+		SubmissionBatchSize:   c.SubmissionBatchSize.Resolve(r),
+		CompletionBatchSize:   c.CompletionBatchSize.Resolve(r),
+	}
+}
+
+// Store
+
+type StoreKind string
+
+const (
+	Sqlite   StoreKind = "sqlite"
+	Postgres StoreKind = "postgres"
+)
+
+type StoreConfig struct {
+	Kind     StoreKind
+	Sqlite   *sqlite.Config
+	Postgres *postgres.Config
+}
+
+func NewConfig() (*Config, error) {
+	var config *Config
+
+	if err := viper.Unmarshal(&config); err != nil {
+		return nil, err
+	}
+
+	return config, nil
+}
+
+func NewConfigDST(r *rand.Rand) (*Config, error) {
+	var config *ConfigDST
+
+	decodeHooks := mapstructure.ComposeDecodeHookFunc(
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+		mapstructure.TextUnmarshallerHookFunc(),
+	)
+
+	if err := viper.Unmarshal(&config, viper.DecodeHook(decodeHooks)); err != nil {
+		return nil, err
+	}
+
+	return config.Resolve(r), nil
+}
+
+func NewStore(config *AIOSubsystemConfig[StoreConfig]) (aio.Subsystem, error) {
+	switch config.Config.Kind {
+	case Sqlite:
+		return sqlite.New(config.Config.Sqlite)
+	case Postgres:
+		return postgres.New(config.Config.Postgres, config.Workers)
+	default:
+		return nil, fmt.Errorf("unsupported store '%s'", config.Config.Kind)
+	}
+}

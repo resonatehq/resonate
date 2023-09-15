@@ -12,7 +12,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/timeout"
 )
 
-func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
+func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromises(t=%d)", t), "TimeoutPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -22,7 +22,7 @@ func TimeoutPromises(t int64, cfg *system.Config) *scheduler.Coroutine {
 						{
 							Kind: types.StoreReadTimeouts,
 							ReadTimeouts: &types.ReadTimeoutsCommand{
-								N: cfg.TimeoutCacheSize,
+								N: config.TimeoutCacheSize,
 							},
 						},
 					},

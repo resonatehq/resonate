@@ -3,62 +3,105 @@ package dst
 import (
 	"fmt"
 	"math/rand" // nosemgrep
-	"os"
-	"strconv"
 	"testing"
 
-	"github.com/resonatehq/resonate/test"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
+	"github.com/resonatehq/resonate/internal/kernel/system"
+	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/metrics"
 )
 
 func TestDST(t *testing.T) {
-	seedEnvVar, ok := os.LookupEnv("SEED")
-	if !ok {
-		seedEnvVar = "0"
-	}
+	r := rand.New(rand.NewSource(0))
 
-	seed, err := strconv.ParseInt(seedEnvVar, 10, 64)
-	if err != nil {
-		t.FailNow()
-	}
+	// instantiate metrics
+	reg := prometheus.NewRegistry()
+	metrics := metrics.New(reg)
 
-	r := rand.New(rand.NewSource(seed))
-
-	// restrict time for ci tests
-	var runs int
-	var cs func(int) int
-	var ticks int64
-	if seed == 0 {
-		runs = 3
-		cs = func(i int) int { return i }
-		ticks = 1000
-	} else {
-		runs = 1
-		cs = func(int) int { return test.RangeIntn(r, 0, 1000) }
-		ticks = test.RangeInt63n(r, 0, 180000) // one hour (1 tick = 10ms)
-	}
-
-	for i := 0; i < runs; i++ {
-		dst := &DST{
-			Ticks:                 ticks,
-			SQEsPerTick:           test.RangeIntn(r, 2, 1000),
-			Ids:                   test.RangeIntn(r, 1, 1000000),
-			Ikeys:                 test.RangeIntn(r, 1, 100),
-			Data:                  test.RangeIntn(r, 1, 100),
-			Headers:               test.RangeIntn(r, 1, 100),
-			Tags:                  test.RangeIntn(r, 1, 100),
-			Urls:                  test.RangeIntn(r, 1, 100),
-			Retries:               test.RangeIntn(r, 1, 100),
-			PromiseCacheSize:      cs(i),
-			TimeoutCacheSize:      cs(i),
-			NotificationCacheSize: test.RangeIntn(r, 1, 100),
+	for i := 0; i < 3; i++ {
+		// config
+		config := &system.Config{
+			TimeoutCacheSize:      i,
+			NotificationCacheSize: i,
+			SubmissionBatchSize:   100,
+			CompletionBatchSize:   100,
 		}
 
-		ok := t.Run(fmt.Sprintf("seed=%d, dst=%s", seed, dst), func(t *testing.T) {
-			dst.Run(t, r, seed)
+		// instatiate api/aio
+		api := api.New(1000, metrics)
+		aio := aio.NewDST()
+
+		// instatiate aio subsystems
+		network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
+		store, err := sqlite.New(&sqlite.Config{Path: ":memory:"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// add api subsystems
+		aio.AddSubsystem(types.Network, network)
+		aio.AddSubsystem(types.Store, store)
+
+		// instantiate system
+		system := system.New(api, aio, config, metrics)
+		system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
+		system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
+		system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
+		system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
+		system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
+		system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
+		system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
+		system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
+		system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnTick(2, coroutines.TimeoutPromises)
+		system.AddOnTick(1, coroutines.NotifySubscriptions)
+
+		// start api/aio
+		if err := api.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if err := aio.Start(); err != nil {
+			t.Fatal(err)
+		}
+
+		dst := New(&Config{
+			Ticks:   1000,
+			Reqs:    func() int { return 100 },
+			Ids:     100,
+			Ikeys:   100,
+			Data:    100,
+			Headers: 100,
+			Tags:    100,
+			Urls:    100,
+			Retries: 100,
 		})
 
-		if !ok {
-			t.FailNow()
+		t.Run(fmt.Sprintf("i=%d, dst=%s", i, dst), func(t *testing.T) {
+			if errors := dst.Run(r, api, aio, system); len(errors) > 0 {
+				t.Fatal(errors[0])
+			}
+		})
+
+		// shutdown api/aio
+		api.Shutdown()
+		aio.Shutdown()
+
+		// reset store
+		if err := store.Reset(); err != nil {
+			t.Fatal(err)
+		}
+
+		// stop api/aio
+		if err := api.Stop(); err != nil {
+			t.Fatal(err)
+		}
+		if err := aio.Stop(); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

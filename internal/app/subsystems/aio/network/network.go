@@ -11,17 +11,21 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
+type Config struct {
+	Timeout time.Duration
+}
+
 type Network struct {
-	timeout time.Duration
+	config *Config
 }
 
 type NetworkDevice struct {
 	client *http.Client
 }
 
-func New(timeout time.Duration) aio.Subsystem {
+func New(config *Config) aio.Subsystem {
 	return &Network{
-		timeout: timeout,
+		config: config,
 	}
 }
 
@@ -44,7 +48,7 @@ func (n *Network) Reset() error {
 func (n *Network) NewWorker(int) aio.Worker {
 	return &NetworkDevice{
 		client: &http.Client{
-			Timeout: n.timeout,
+			Timeout: n.config.Timeout,
 		},
 	}
 }

@@ -30,7 +30,7 @@ func (i inflight) remove(id string) {
 	delete(i, id)
 }
 
-func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
+func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions(t=%d)", t), "NotifySubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -40,7 +40,7 @@ func NotifySubscriptions(t int64, cfg *system.Config) *scheduler.Coroutine {
 						{
 							Kind: types.StoreReadNotifications,
 							ReadNotifications: &types.ReadNotificationsCommand{
-								N: cfg.NotificationCacheSize,
+								N: config.NotificationCacheSize,
 							},
 						},
 					},

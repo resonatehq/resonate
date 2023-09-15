@@ -17,33 +17,37 @@ import (
 	grpcStatus "google.golang.org/grpc/status"
 )
 
+type Config struct {
+	Addr string
+}
+
 type Grpc struct {
-	addr   string
+	config *Config
 	server *grpc.Server
 }
 
-func New(api api.API, addr string) api.Subsystem {
+func New(api api.API, config *Config) api.Subsystem {
 	s := &server{api: api}
 
 	server := grpc.NewServer() // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
 
 	return &Grpc{
-		addr:   addr,
+		config: config,
 		server: server,
 	}
 }
 
 func (g *Grpc) Start(errors chan<- error) {
 	// Create a listener on a specific port
-	listen, err := net.Listen("tcp", g.addr)
+	listen, err := net.Listen("tcp", g.config.Addr)
 	if err != nil {
 		errors <- err
 		return
 	}
 
 	// Start the gRPC server
-	slog.Info("starting grpc server", "addr", g.addr)
+	slog.Info("starting grpc server", "addr", g.config.Addr)
 	if err := g.server.Serve(listen); err != nil {
 		errors <- err
 	}
@@ -52,6 +56,10 @@ func (g *Grpc) Start(errors chan<- error) {
 func (g *Grpc) Stop() error {
 	g.server.GracefulStop()
 	return nil
+}
+
+func (g *Grpc) String() string {
+	return "grpc"
 }
 
 type server struct {
