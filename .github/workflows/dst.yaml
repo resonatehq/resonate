@@ -38,9 +38,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Set random seed
+      id: x
       run: echo x=$RANDOM >> "$GITHUB_OUTPUT"
-    - name: Set random seed
+    - name: Set y
+      id: y
       run: echo "y=helloworld" >> "$GITHUB_OUTPUT"
+    - name: Test
+      run: |
+        echo ${{ steps.x.outputs.x }}
+        echo ${{ steps.x.outputs.y }}
+        echo "${{ steps.x.outputs.x }}"
+        echo "${{ steps.x.outputs.y }}"
 
   dst-sqlite-1:
     runs-on: ubuntu-latest
