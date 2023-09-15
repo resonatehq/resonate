@@ -3,9 +3,9 @@ name: DST
 on:
   schedule:
   - cron: '0 0 * * *'  # every day at 0:00 UTC
-  - push:
-      branches:
-      - '*'
+  push:
+    branches:
+    - '*'
 
 permissions:
   contents: read
