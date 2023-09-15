@@ -17,16 +17,13 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version-file: go.mod
         cache: false
-
     - name: Build resonate
       run: go build -o resonate
-
     - name: Upload resonate binary
       uses: actions/upload-artifact@v3
       with:
@@ -47,22 +44,7 @@ jobs:
     needs: [build, seed]
     timeout-minutes: 150
 
-    # env:
-    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
-
     steps:
-    # - name: Install docker-compose
-    #   run: |
-    #     sudo apt-get update
-    #     sudo apt-get -y install docker-compose
-
-    # - name: Start docker-compose
-    #   run: |
-    #     docker-compose up -d
-
     - name: Download resonate binary
       uses: actions/download-artifact@v3
       with:
@@ -104,7 +86,7 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10:0 --aio-store sqlite > logs.txt
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -121,7 +103,54 @@ jobs:
       with:
         name: sqlite-logs-2
         path: logs.txt
-    
+
+  dst-postgres-1:
+    runs-on: ubuntu-latest
+    needs: [build, seed]
+    timeout-minutes: 150
+
+    env:
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_dst"
+
+    steps:
+    - name: Install docker-compose
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install docker-compose
+    - name: Start docker-compose
+      run: |
+        docker-compose up -d
+    - name: Download resonate binary
+      uses: actions/download-artifact@v3
+      with:
+        name: resonate
+    - id: dst
+      name: Run dst (seed=${{ needs.seed.outputs.seed }})
+      continue-on-error: true
+      run: |
+        chmod +x resonate
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store postgres > logs.txt
+    # - name: Create issue if dst failed
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.github_token }}
+    #   if: steps.dst.outcome != 'success'
+    #   run: |
+    #     ./resonate dst issue \
+    #       --seed ${{ needs.seed.outputs.seed }} \
+    #       --store postgres \
+    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+    #       --file logs.txt \
+    #       --repo $GITHUB_REPOSITORY \
+    #       --commit $GITHUB_SHA
+    - uses: actions/upload-artifact@v3
+      with:
+        name: postgres-logs-1
+        path: logs.txt
+
   dst-sqlite-diff:
     runs-on: ubuntu-latest
     needs: [build, seed, dst-sqlite-1, dst-sqlite-2]
