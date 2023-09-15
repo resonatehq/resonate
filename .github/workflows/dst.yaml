@@ -29,10 +29,10 @@ jobs:
         go build -o resonate
 
     - name: Upload resonate binary
-        uses: actions/upload-artifact@v3
-        with:
-          name: resonate
-          path: resonate
+      uses: actions/upload-artifact@v3
+      with:
+        name: resonate
+        path: resonate
 
   seed:
     runs-on: ubuntu-latest
