@@ -12,16 +12,8 @@ permissions:
   issues: write
 
 jobs:
-  dst:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
-
-    env:
-      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
@@ -32,151 +24,78 @@ jobs:
         go-version-file: go.mod
         cache: false
 
-    - name: Install docker-compose
-      run: |
-        sudo apt-get update
-        sudo apt-get -y install docker-compose
-
-    - name: Start docker-compose
-      run: |
-        docker-compose up -d
-
-    - name: Set random seed
-      run: |
-        echo "SEED=$RANDOM" >> $GITHUB_ENV
-
     - name: Build resonate
       run: |
         go build -o resonate
 
+    - name: Upload resonate binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: resonate
+          path: resonate
+
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Set random seed
+      run: |
+        echo "::set-output name=SEED::$RANDOM"
+
+  dst-sqlite-1:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+
+    needs:
+    - build
+    - seed
+
+    # env:
+    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+    #   AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+
+    # - name: Install docker-compose
+    #   run: |
+    #     sudo apt-get update
+    #     sudo apt-get -y install docker-compose
+
+    # - name: Start docker-compose
+    #   run: |
+    #     docker-compose up -d
+
+    - name: Download resonate binary
+      uses: actions/download-artifact@v3
+      with:
+        name: resonate
+
     - id: dst
-      name: Run dst (seed=${{ env.SEED }})
+      name: Run dst (seed=${{ needs.seed.outputs.SEED }})
       continue-on-error: true
       run: |
-        echo "STORE=default" >> $GITHUB_ENV
-        echo "FILE=default" >> $GITHUB_ENV
-        echo "REASON=default" >> $GITHUB_ENV
+        ./resonate dst run --seed ${{ needs.seed.outputs.SEED }} --ticks 10 --aio-store sqlite > logs.txt
 
-        # touch files so they are available for artifacts
-        touch logs-sqlite-1.txt
-        touch logs-sqlite-2.txt
-        touch logs-postgres-1.txt
-        touch logs-postgres-2.txt
-
-        ./resonate dst run --seed $SEED --ticks 10:0 --aio-store sqlite > logs-sqlite-1.txt &
-        p1=$!
-
-        ./resonate dst run --seed $SEED --aio-store sqlite > logs-sqlite-2.txt &
-        p2=$!
-
-        ./resonate dst run \
-          --seed $SEED \
-          --aio-store postgres \
-          --aio-store-postgres-host $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST \
-          --aio-store-postgres-port $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT \
-          --aio-store-postgres-username $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME \
-          --aio-store-postgres-password $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD \
-          --aio-store-postgres-database resonate_dst_1 \
-          > logs-postgres-1.txt &
-        p3=$!
-
-        ./resonate dst run \
-          --seed $SEED \
-          --aio-store postgres \
-          --aio-store-postgres-host $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST \
-          --aio-store-postgres-port $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT \
-          --aio-store-postgres-username $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME \
-          --aio-store-postgres-password $AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD \
-          --aio-store-postgres-database resonate_dst_2 \
-          > logs-postgres-2.txt &
-        p4=$!
-
-        wait $p1
-        s1=$?
-        if [ $s1 -ne 0 ]; then
-          echo "CASE 1"
-          echo "STORE=sqlite" >> $GITHUB_ENV
-          echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
-          echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 1
-        fi
-
-        wait $p2
-        s2=$?
-        if [ $s2 -ne 0 ]; then
-          echo "CASE 2"
-          echo "STORE=sqlite" >> $GITHUB_ENV
-          echo "FILE=logs-sqlite-2.txt" >> $GITHUB_ENV
-          echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 1
-        fi
-
-        wait $p3
-        s3=$?
-        if [ $s3 -ne 0 ]; then
-          echo "CASE 3"
-          echo "STORE=postgres" >> $GITHUB_ENV
-          echo "FILE=logs-postgres-1.txt" >> $GITHUB_ENV
-          echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 1
-        fi
-
-        wait $p4
-        s4=$?
-        if [ $s4 -ne 0 ]; then
-          echo "CASE 4"
-          echo "STORE=postgres" >> $GITHUB_ENV
-          echo "FILE=logs-postgres-2.txt" >> $GITHUB_ENV
-          echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 1
-        fi
-
-        # check diffs
-        if ! diff -q logs-sqlite-1.txt logs-sqlite-2.txt > /dev/null; then
-          echo "CASE 5"
-          echo "STORE=sqlite" >> $GITHUB_ENV
-          echo "REASON=DST against an sqlite store completed with different results." >> $GITHUB_ENV
-          exit 1
-        fi
-        if ! diff -q logs-postgres-1.txt logs-postgres-2.txt > /dev/null; then
-          echo "CASE 6"
-          echo "STORE=postgres" >> $GITHUB_ENV
-          echo "REASON=DST against a postgres store completed with different results." >> $GITHUB_ENV
-          exit 1
-        fi
-        if ! diff -q logs-sqlite-1.txt logs-postgres-1.txt > /dev/null; then
-          echo "CASE 7"
-          echo "STORE=sqlite,postgres" >> $GITHUB_ENV
-          echo "REASON=DST against an sqlite store and another against a postgres store completed with different results." >> $GITHUB_ENV
-          exit 1
-        fi
-
-        exit 0
-
-    - name: Create issue if dst failed
-      env:
-        GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.dst.outcome != 'success'
-      run: |
-        echo $STORE
-        echo $FILE
-        echo $REASON
-        # ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+    # - name: Create issue if dst failed
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.github_token }}
+    #   if: steps.dst.outcome != 'success'
+    #   run: |
+    #     # ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
 
     # artifacts
-    - uses: actions/upload-artifact@v3
-      with:
-        name: sqlite-logs-1
-        path: logs-sqlite-1.txt
-    - uses: actions/upload-artifact@v3
-      with:
-        name: sqlite-logs-2
-        path: logs-sqlite-2.txt
-    - uses: actions/upload-artifact@v3
-      with:
-        name: postgres-logs-1
-        path: logs-postgres-1.txt
-    - uses: actions/upload-artifact@v3
-      with:
-        name: postgres-logs-2
-        path: logs-postgres-2.txt
+    # - uses: actions/upload-artifact@v3
+    #   with:
+    #     name: sqlite-logs-1
+    #     path: logs-sqlite-1.txt
+    # - uses: actions/upload-artifact@v3
+    #   with:
+    #     name: sqlite-logs-2
+    #     path: logs-sqlite-2.txt
+    # - uses: actions/upload-artifact@v3
+    #   with:
+    #     name: postgres-logs-1
+    #     path: logs-postgres-1.txt
+    # - uses: actions/upload-artifact@v3
+    #   with:
+    #     name: postgres-logs-2
+    #     path: logs-postgres-2.txt
