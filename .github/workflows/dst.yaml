@@ -92,17 +92,19 @@ jobs:
         p4=$!
 
         wait $p1
-        if [ $? -ne 0 ]; then
-          echo "WE ARE HERE BRO"
+        s1=$?
+        if [ $s1 -ne 0 ]; then
+          echo "CASE 1"
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
           echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 2
+          exit 1
         fi
 
         wait $p2
         s2=$?
         if [ $s2 -ne 0 ]; then
+          echo "CASE 2"
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "FILE=logs-sqlite-2.txt" >> $GITHUB_ENV
           echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
@@ -112,6 +114,7 @@ jobs:
         wait $p3
         s3=$?
         if [ $s3 -ne 0 ]; then
+          echo "CASE 3"
           echo "STORE=postgres" >> $GITHUB_ENV
           echo "FILE=logs-postgres-1.txt" >> $GITHUB_ENV
           echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
@@ -121,6 +124,7 @@ jobs:
         wait $p4
         s4=$?
         if [ $s4 -ne 0 ]; then
+          echo "CASE 4"
           echo "STORE=postgres" >> $GITHUB_ENV
           echo "FILE=logs-postgres-2.txt" >> $GITHUB_ENV
           echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
@@ -129,20 +133,25 @@ jobs:
 
         # check diffs
         if ! diff -q logs-sqlite-1.txt logs-sqlite-2.txt > /dev/null; then
+          echo "CASE 5"
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "REASON=DST against an sqlite store completed with different results." >> $GITHUB_ENV
           exit 1
         fi
         if ! diff -q logs-postgres-1.txt logs-postgres-2.txt > /dev/null; then
+          echo "CASE 6"
           echo "STORE=postgres" >> $GITHUB_ENV
           echo "REASON=DST against a postgres store completed with different results." >> $GITHUB_ENV
           exit 1
         fi
         if ! diff -q logs-sqlite-1.txt logs-postgres-1.txt > /dev/null; then
+          echo "CASE 7"
           echo "STORE=sqlite,postgres" >> $GITHUB_ENV
           echo "REASON=DST against an sqlite store and another against a postgres store completed with different results." >> $GITHUB_ENV
           exit 1
         fi
+
+        exit 0
 
     - name: Create issue if dst failed
       env:
