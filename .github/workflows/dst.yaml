@@ -117,6 +117,8 @@ jobs:
       DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_dst"
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
     - name: Install docker-compose
       run: |
         sudo apt-get update
