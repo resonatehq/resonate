@@ -17,10 +17,10 @@ jobs:
     timeout-minutes: 150
 
     env:
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
 
     steps:
     - name: Checkout repository
@@ -123,7 +123,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: steps.dst.outcome != 'success'
       run: |
-        ./resonate dst issue --seed $SEED --store $STORE --reason $REASON --file "$FILE" --repo $GITHUB_REPOSITORY --commit $GITHUB_SHA
+        ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
 
     # artifacts
     - uses: actions/upload-artifact@v3
