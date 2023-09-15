@@ -82,21 +82,26 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        echo "${{ needs.seed.outputs.seed }}"
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
 
-    # - name: Create issue if dst failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: steps.dst.outcome != 'success'
-    #   run: |
-    #     # ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+    - name: Create issue if dst failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.dst.outcome != 'success'
+      run: |
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store sqlite \
+          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
+          --file logs.txt \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
 
     # artifacts
-    # - uses: actions/upload-artifact@v3
-    #   with:
-    #     name: sqlite-logs-1
-    #     path: logs-sqlite-1.txt
+    - uses: actions/upload-artifact@v3
+      with:
+        name: sqlite-logs-1
+        path: logs.txt
     # - uses: actions/upload-artifact@v3
     #   with:
     #     name: sqlite-logs-2
