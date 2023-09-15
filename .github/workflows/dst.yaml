@@ -53,8 +53,9 @@ jobs:
       name: Run dst (seed=${{ env.SEED }})
       continue-on-error: true
       run: |
-        # echo "STORE=sqlite" >> $GITHUB_ENV
-        # echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
+        echo "STORE=default" >> $GITHUB_ENV
+        echo "FILE=default" >> $GITHUB_ENV
+        echo "REASON=default" >> $GITHUB_ENV
 
         # touch files so they are available for artifacts
         touch logs-sqlite-1.txt
@@ -92,10 +93,11 @@ jobs:
 
         wait $p1
         if [ $? -ne 0 ]; then
+          echo "WE ARE HERE BRO"
           echo "STORE=sqlite" >> $GITHUB_ENV
           echo "FILE=logs-sqlite-1.txt" >> $GITHUB_ENV
           echo "REASON=DST finished with a non zero exit code." >> $GITHUB_ENV
-          exit 1
+          exit 2
         fi
 
         wait $p2
@@ -147,7 +149,10 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: steps.dst.outcome != 'success'
       run: |
-        ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
+        echo $STORE
+        echo $FILE
+        echo $REASON
+        # ./resonate dst issue --seed "$SEED" --store "$STORE" --reason "$REASON" --file "$FILE" --repo "$GITHUB_REPOSITORY" --commit "$GITHUB_SHA"
 
     # artifacts
     - uses: actions/upload-artifact@v3
