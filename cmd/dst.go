@@ -200,9 +200,6 @@ var dstIssueCmd = &cobra.Command{
 
 		// read logs file
 		logs := "n/a"
-		fmt.Println("*********")
-		fmt.Println(file)
-		fmt.Println("*********")
 		if file != "" {
 			var err error
 			logs, err = parseLogs(file, 50, 100)
