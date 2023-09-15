@@ -67,14 +67,12 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-
     - id: dst
       name: Run dst (seed=${{ needs.seed.outputs.seed }})
       continue-on-error: true
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
-
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -87,7 +85,6 @@ jobs:
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
-
     - uses: actions/upload-artifact@v3
       with:
         name: sqlite-logs-1
@@ -102,14 +99,12 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-
     - id: dst
       name: Run dst (seed=${{ needs.seed.outputs.seed }})
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
-
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10:0 --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -122,7 +117,6 @@ jobs:
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
-
     - uses: actions/upload-artifact@v3
       with:
         name: sqlite-logs-2
@@ -142,6 +136,19 @@ jobs:
       with:
         name: sqlite-logs-2
         path: logs-2.txt
-    - name: Diff
+    - id: diff
+      name: Diff
+      continue-on-error: true
       run: |
         diff logs-1.txt logs-2.txt
+    - name: Create issue if diff failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.diff.outcome != 'success'
+      run: |
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store sqlite \
+          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
