@@ -37,9 +37,9 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     steps:
-    - name: Set random seed
+    - name: Set random seed'
       run: |
-        echo "::set-output name=SEED::$RANDOM"
+        echo "SEED=$RANDOM" >> $GITHUB_OUTPUT
 
   dst-sqlite-1:
     runs-on: ubuntu-latest
@@ -71,6 +71,7 @@ jobs:
       name: Run dst (seed=${{ needs.seed.outputs.SEED }})
       continue-on-error: true
       run: |
+        chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.SEED }} --ticks 10 --aio-store sqlite > logs.txt
 
     # - name: Create issue if dst failed
