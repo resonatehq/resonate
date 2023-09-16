@@ -95,10 +95,8 @@ jobs:
     needs: [build, seed]
     timeout-minutes: 150
 
-    container: node:10.18-jessie
-
     env:
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "postgres"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
       DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
       DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
       DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
