@@ -16,11 +16,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      POSTGRES_HOST: "localhost"
-      POSTGRES_PORT: "5432"
-      POSTGRES_USERNAME: "username"
-      POSTGRES_PASSWORD: "password"
-      POSTGRES_DATABASE: "resonate"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
 
     steps:
     - name: Checkout repository

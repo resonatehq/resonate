@@ -82,8 +82,11 @@ func (a *aioDST) Flush(t int64) {
 }
 
 func (a *aioDST) String() string {
-	return fmt.Sprintf(
-		"AIODST(subsystems=%s)",
-		util.OrderedRange[types.AIOKind](a.subsystems),
-	)
+	// use subsystem keys so that we can compare cross-store dst runs
+	subsystems := make([]types.AIOKind, len(a.subsystems))
+	for i, subsystem := range util.OrderedRangeKV[types.AIOKind](a.subsystems) {
+		subsystems[i] = subsystem.Key
+	}
+
+	return fmt.Sprintf("AIODST(subsystems=%s)", subsystems)
 }

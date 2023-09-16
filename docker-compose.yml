@@ -4,12 +4,14 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-    - POSTGRES_USER=${POSTGRES_USERNAME}
-    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-    - POSTGRES_DB=${POSTGRES_DATABASE}
+    - POSTGRES_USER=${DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME}
+    - POSTGRES_PASSWORD=${DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD}
+    - POSTGRES_DB=${DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE}
     ports:
     - "5432:5432"
     read_only: true
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
     - no-new-privileges:true
+    # volumes:
+    # - ./init.sql:/docker-entrypoint-initdb.d/init.sql
