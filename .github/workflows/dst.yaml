@@ -3,6 +3,9 @@ name: DST
 on:
   schedule:
   - cron: '0 */4 * * *'  # every 4 hours
+  pull_request:
+    branches:
+    - '*'
 
 permissions:
   contents: read
@@ -46,16 +49,14 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - id: dst
-      name: Run dst (seed=${{ needs.seed.outputs.seed }})
-      continue-on-error: true
+    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.dst.outcome != 'success'
+      if: ${{ failure() }}
       run: |
         ./resonate dst issue \
           --seed ${{ needs.seed.outputs.seed }} \
@@ -65,6 +66,7 @@ jobs:
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
       with:
         name: sqlite-logs-1
         path: logs.txt
@@ -78,25 +80,12 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - id: dst
-      name: Run dst (seed=${{ needs.seed.outputs.seed }})
-      continue-on-error: true
+    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
-    - name: Create issue if dst failed
-      env:
-        GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.dst.outcome != 'success'
-      run: |
-        ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
-          --store sqlite \
-          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
-          --file logs.txt \
-          --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
       with:
         name: sqlite-logs-2
         path: logs.txt
@@ -127,16 +116,14 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - id: dst
-      name: Run dst (seed=${{ needs.seed.outputs.seed }})
-      continue-on-error: true
+    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.dst.outcome != 'success'
+      if: ${{ failure() }}
       run: |
         ./resonate dst issue \
           --seed ${{ needs.seed.outputs.seed }} \
@@ -146,6 +133,7 @@ jobs:
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
       with:
         name: postgres-logs-1
         path: logs.txt
@@ -176,25 +164,12 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - id: dst
-      name: Run dst (seed=${{ needs.seed.outputs.seed }})
-      continue-on-error: true
+    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
-    - name: Create issue if dst failed
-      env:
-        GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.dst.outcome != 'success'
-      run: |
-        ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
-          --store postgres \
-          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
-          --file logs.txt \
-          --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
       with:
         name: postgres-logs-2
         path: logs.txt
@@ -217,15 +192,13 @@ jobs:
       with:
         name: sqlite-logs-2
         path: logs-2.txt
-    - id: diff
-      name: Diff
-      continue-on-error: true
+    - name: Diff
       run: |
         diff logs-1.txt logs-2.txt
-    - name: Create issue if diff failed
+    - name: Create issue if diff
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.diff.outcome != 'success'
+      if: ${{ failure() }}
       run: |
         chmod +x resonate
         ./resonate dst issue \
@@ -253,15 +226,13 @@ jobs:
       with:
         name: postgres-logs-2
         path: logs-2.txt
-    - id: diff
-      name: Diff
-      continue-on-error: true
+    - name: Diff
       run: |
         diff logs-1.txt logs-2.txt
-    - name: Create issue if diff failed
+    - name: Create issue if diff
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.diff.outcome != 'success'
+      if: ${{ failure() }}
       run: |
         chmod +x resonate
         ./resonate dst issue \
@@ -289,15 +260,13 @@ jobs:
       with:
         name: postgres-logs-1
         path: logs-2.txt
-    - id: diff
-      name: Diff
-      continue-on-error: true
+    - name: Diff
       run: |
         diff logs-1.txt logs-2.txt
-    - name: Create issue if diff failed
+    - name: Create issue if diff
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: steps.diff.outcome != 'success'
+      if: ${{ failure() }}
       run: |
         chmod +x resonate
         ./resonate dst issue \
