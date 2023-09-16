@@ -3,9 +3,6 @@ name: DST
 on:
   schedule:
   - cron: '0 */4 * * *'  # every 4 hours
-  pull_request:
-    branches:
-    - '*'
 
 permissions:
   contents: read
