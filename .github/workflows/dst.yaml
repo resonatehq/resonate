@@ -54,7 +54,7 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -86,7 +86,7 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store sqlite > logs.txt
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -135,19 +135,19 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store postgres > logs.txt
-    # - name: Create issue if dst failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: steps.dst.outcome != 'success'
-    #   run: |
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --store postgres \
-    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
-    #       --file logs.txt \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
+    - name: Create issue if dst failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.dst.outcome != 'success'
+      run: |
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store postgres \
+          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+          --file logs.txt \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
       with:
         name: postgres-logs-1
@@ -184,19 +184,19 @@ jobs:
       continue-on-error: true
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks 10 --aio-store postgres > logs.txt
-    # - name: Create issue if dst failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: steps.dst.outcome != 'success'
-    #   run: |
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --store postgres \
-    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
-    #       --file logs.txt \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
+    - name: Create issue if dst failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.dst.outcome != 'success'
+      run: |
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store postgres \
+          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+          --file logs.txt \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
       with:
         name: postgres-logs-2
@@ -297,15 +297,15 @@ jobs:
       continue-on-error: true
       run: |
         diff logs-1.txt logs-2.txt
-    # - name: Create issue if diff failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: steps.diff.outcome != 'success'
-    #   run: |
-    #     chmod +x resonate
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --store sqlite/postgres \
-    #       --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite/postgres." \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA
+    - name: Create issue if diff failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: steps.diff.outcome != 'success'
+      run: |
+        chmod +x resonate
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --store sqlite/postgres \
+          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite/postgres." \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA
