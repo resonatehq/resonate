@@ -135,18 +135,18 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
-    - name: Create issue if dst failed
-      env:
-        GITHUB_TOKEN: ${{ secrets.github_token }}
-      if: ${{ failure() }}
-      run: |
-        ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
-          --store postgres \
-          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
-          --file logs.txt \
-          --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+    # - name: Create issue if dst failed
+    #   env:
+    #     GITHUB_TOKEN: ${{ secrets.github_token }}
+    #   if: ${{ failure() }}
+    #   run: |
+    #     ./resonate dst issue \
+    #       --seed ${{ needs.seed.outputs.seed }} \
+    #       --store postgres \
+    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+    #       --file logs.txt \
+    #       --repo $GITHUB_REPOSITORY \
+    #       --commit $GITHUB_SHA
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}
       with:
