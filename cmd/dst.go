@@ -122,10 +122,6 @@ var dstRunCmd = &cobra.Command{
 
 		// instatiate aio subsystems
 		network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
-
-		fmt.Println("**************")
-		fmt.Println(config.AIO.Subsystems.Store.Config.Postgres)
-		fmt.Println("**************")
 		store, err := NewStore(config.AIO.Subsystems.Store)
 		if err != nil {
 			return err
