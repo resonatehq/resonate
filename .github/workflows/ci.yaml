@@ -16,11 +16,26 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+      AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_TEST_DATABASE: "resonate_test"
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_TEST_DATABASE }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+        - 5432:5432
 
     steps:
     - name: Checkout repository
@@ -37,15 +52,6 @@ jobs:
       with:
         version: v1.54
         args: --verbose --timeout=3m
-
-    - name: Install docker-compose
-      run: |
-        sudo apt-get update
-        sudo apt-get -y install docker-compose
-
-    - name: Start docker-compose
-      run: |
-        docker-compose up -d
 
     - name: Run go test and generate coverage report
       run: |
