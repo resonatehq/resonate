@@ -358,6 +358,58 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}, nil
 }
 
+func (s *server) CompletePromise(ctx context.Context, req *grpcApi.CompletePromiseRequest) (*grpcApi.CompletePromiseResponse, error) {
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
+
+	var headers map[string]string
+	if req.Value != nil && req.Value.Headers != nil {
+		headers = req.Value.Headers
+	} else {
+		headers = map[string]string{}
+	}
+
+	var ikey *promise.Ikey
+	if req.Value != nil && req.Value.Ikey != "" {
+		i := promise.Ikey(req.Value.Ikey)
+		ikey = &i
+	}
+
+	var data []byte
+	if req.Value != nil && req.Value.Data != nil {
+		data = req.Value.Data
+	}
+
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
+		Submission: &types.Request{
+			Kind: types.CompletePromise,
+			CompletePromise: &types.CompletePromiseRequest{
+				Id: req.Id,
+				Value: promise.Value{
+					Headers: headers,
+					Ikey:    ikey,
+					Data:    data,
+				},
+				State: promise.State(req.State),
+			},
+		},
+		Callback: s.sendOrPanic(cq),
+	})
+
+	cqe := <-cq
+	if cqe.Error != nil {
+		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	}
+
+	util.Assert(cqe.Completion.CompletePromise != nil, "response must not be nil")
+
+	return &grpcApi.CompletePromiseResponse{
+		Status:  protoStatus(cqe.Completion.CompletePromise.Status),
+		Promise: protoPromise(cqe.Completion.CompletePromise.Promise),
+	}, nil
+}
+
 func protoStatus(status types.ResponseStatus) grpcApi.Status {
 	switch status {
 	case types.ResponseOK:

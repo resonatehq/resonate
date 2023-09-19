@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -35,6 +36,20 @@ func New(config *Config) *DST {
 }
 
 func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System) []error {
+	// system
+	system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
+	system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
+	system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
+	system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
+	system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
+	system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
+	system.AddOnRequest(types.CompletePromise, coroutines.CompletePromise)
+	system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
+	system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
+	system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)
+	system.AddOnTick(2, coroutines.TimeoutPromises)
+	system.AddOnTick(10, coroutines.NotifySubscriptions)
+
 	// generator
 	generator := NewGenerator(r, d.config)
 	generator.AddRequest(generator.GenerateReadPromise)
@@ -43,6 +58,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	generator.AddRequest(generator.GenerateCancelPromise)
 	generator.AddRequest(generator.GenerateResolvePromise)
 	generator.AddRequest(generator.GenerateRejectPromise)
+	generator.AddRequest(generator.GenerateCompletePromise)
 	generator.AddRequest(generator.GenerateReadSubscriptions)
 	generator.AddRequest(generator.GenerateCreateSubscription)
 	generator.AddRequest(generator.GenerateDeleteSubscription)
@@ -55,6 +71,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	model.AddResponse(types.CancelPromise, model.ValidateCancelPromise)
 	model.AddResponse(types.ResolvePromise, model.ValidateResolvePromise)
 	model.AddResponse(types.RejectPromise, model.ValidateRejectPromise)
+	model.AddResponse(types.CompletePromise, model.ValidateCompletePromise)
 	model.AddResponse(types.ReadSubscriptions, model.ValidateReadSubscriptions)
 	model.AddResponse(types.CreateSubscription, model.ValidateCreateSubscription)
 	model.AddResponse(types.DeleteSubscription, model.ValidateDeleteSubscription)

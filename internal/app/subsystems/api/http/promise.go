@@ -213,3 +213,44 @@ func (s *server) cancelPromise(c *gin.Context) {
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
 	c.JSON(cqe.Completion.CancelPromise.Status.HttpStatus(), cqe.Completion.CancelPromise.Promise)
 }
+
+func (s *server) completePromise(c *gin.Context) {
+	var completePromise *types.CompletePromiseRequest
+	if err := c.ShouldBindJSON(&completePromise); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+	if !completePromise.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "state must be one of resolved, rejected, or canceled",
+		})
+		return
+	}
+
+	completePromise.Id = c.Param("id")
+
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
+
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
+		Submission: &types.Request{
+			Kind:            types.CompletePromise,
+			CompletePromise: completePromise,
+		},
+		Callback: s.sendOrPanic(cq),
+	})
+
+	cqe := <-cq
+	if cqe.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": cqe.Error.Error(),
+		})
+		return
+	}
+
+	util.Assert(cqe.Completion.CompletePromise != nil, "response must not be nil")
+	c.JSON(cqe.Completion.CompletePromise.Status.HttpStatus(), cqe.Completion.CompletePromise.Promise)
+}

@@ -16,6 +16,7 @@ type Response struct {
 	CancelPromise      *CancelPromiseResponse
 	ResolvePromise     *ResolvePromiseResponse
 	RejectPromise      *RejectPromiseResponse
+	CompletePromise    *CompletePromiseResponse
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
@@ -57,6 +58,11 @@ type ResolvePromiseResponse struct {
 }
 
 type RejectPromiseResponse struct {
+	Status  ResponseStatus   `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+type CompletePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
@@ -112,6 +118,12 @@ func (r *Response) String() string {
 			"RejectPromise(status=%d, promise=%s)",
 			r.RejectPromise.Status,
 			r.RejectPromise.Promise,
+		)
+	case CompletePromise:
+		return fmt.Sprintf(
+			"CompletePromise(status=%d, promise=%s)",
+			r.CompletePromise.Status,
+			r.CompletePromise.Promise,
 		)
 	case ReadSubscriptions:
 		return fmt.Sprintf(

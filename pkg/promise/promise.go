@@ -3,6 +3,7 @@ package promise
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 type Promise struct {
@@ -54,8 +55,32 @@ func (s State) String() string {
 	}
 }
 
-func (s State) MarshalJSON() ([]byte, error) {
+func (s *State) MarshalJSON() ([]byte, error) {
 	return json.Marshal(s.String())
+}
+
+func (s *State) UnmarshalJSON(data []byte) error {
+	var state string
+	if err := json.Unmarshal(data, &state); err != nil {
+		return err
+	}
+
+	switch strings.ToUpper(state) {
+	case "Pending":
+		*s = Pending
+	case "RESOLVED":
+		*s = Resolved
+	case "REJECTED":
+		*s = Rejected
+	case "REJECTED_TIMEDOUT":
+		*s = Timedout
+	case "REJECTED_CANCELED":
+		*s = Canceled
+	default:
+		return fmt.Errorf("invalid state '%s'", state)
+	}
+
+	return nil
 }
 
 func (s State) In(mask State) bool {

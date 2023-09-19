@@ -96,6 +96,17 @@ message RejectPromiseResponse {
   Promise promise = 2;
 }
 
+message CompletePromiseRequest {
+  string id = 1;
+  Value value = 2;
+  State state = 3;
+}
+
+message CompletePromiseResponse {
+  Status status = 1;
+  Promise promise = 2;
+}
+
 service PromiseService {
   // Promise
   rpc ReadPromise(ReadPromiseRequest) returns (ReadPromiseResponse) {}
@@ -104,4 +115,5 @@ service PromiseService {
   rpc CancelPromise(CancelPromiseRequest) returns (CancelPromiseResponse) {}
   rpc ResolvePromise(ResolvePromiseRequest) returns (ResolvePromiseResponse) {}
   rpc RejectPromise(RejectPromiseRequest) returns (RejectPromiseResponse) {}
+  rpc CompletePromise(CompletePromiseRequest) returns (CompletePromiseResponse) {}
 }

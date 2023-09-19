@@ -34,6 +34,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	r.POST("/promises/:id/cancel", s.cancelPromise)
 	r.POST("/promises/:id/resolve", s.resolvePromise)
 	r.POST("/promises/:id/reject", s.rejectPromise)
+	r.POST("/promises/:id/complete", s.completePromise)
 
 	return &Http{
 		config: config,

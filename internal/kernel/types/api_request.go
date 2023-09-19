@@ -15,6 +15,7 @@ type Request struct {
 	CancelPromise      *CancelPromiseRequest
 	ResolvePromise     *ResolvePromiseRequest
 	RejectPromise      *RejectPromiseRequest
+	CompletePromise    *CompletePromiseRequest
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
@@ -50,6 +51,12 @@ type ResolvePromiseRequest struct {
 type RejectPromiseRequest struct {
 	Id    string        `json:"id"`
 	Value promise.Value `json:"value,omitempty"`
+}
+
+type CompletePromiseRequest struct {
+	Id    string        `json:"id"`
+	Value promise.Value `json:"value,omitempty"`
+	State promise.State `json:"state"`
 }
 
 type ReadSubscriptionsRequest struct {
@@ -104,6 +111,13 @@ func (r *Request) String() string {
 			"RejectPromise(id=%s, ikey=%s)",
 			r.RejectPromise.Id,
 			r.RejectPromise.Value.Ikey,
+		)
+	case CompletePromise:
+		return fmt.Sprintf(
+			"CompletePromise(id=%s, ikey=%s, state=%s)",
+			r.CompletePromise.Id,
+			r.CompletePromise.Value.Ikey,
+			r.CompletePromise.State,
 		)
 	case ReadSubscriptions:
 		return fmt.Sprintf(
