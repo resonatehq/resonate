@@ -362,6 +362,18 @@ func (s *server) CompletePromise(ctx context.Context, req *grpcApi.CompletePromi
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
+	var state promise.State
+	switch req.State {
+	case grpcApi.State_RESOLVED:
+		state = promise.Resolved
+	case grpcApi.State_REJECTED:
+		state = promise.Rejected
+	case grpcApi.State_REJECTED_CANCELED:
+		state = promise.Canceled
+	default:
+		return nil, grpcStatus.Error(codes.InvalidArgument, "state must be one of resolved, rejected, or canceled")
+	}
+
 	var headers map[string]string
 	if req.Value != nil && req.Value.Headers != nil {
 		headers = req.Value.Headers
@@ -391,7 +403,7 @@ func (s *server) CompletePromise(ctx context.Context, req *grpcApi.CompletePromi
 					Ikey:    ikey,
 					Data:    data,
 				},
-				State: promise.State(req.State),
+				State: state,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
