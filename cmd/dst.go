@@ -14,7 +14,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -141,17 +140,6 @@ var dstRunCmd = &cobra.Command{
 
 		// instantiate system
 		system := system.New(api, aio, config.System, metrics)
-		system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
-		system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
-		system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
-		system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
-		system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
-		system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
-		system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
-		system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
-		system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)
-		system.AddOnTick(2, coroutines.TimeoutPromises)
-		system.AddOnTick(10, coroutines.NotifySubscriptions)
 
 		dst := dst.New(&dst.Config{
 			Ticks: ticks,

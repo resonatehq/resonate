@@ -19,12 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	PromiseService_ReadPromise_FullMethodName    = "/promise.PromiseService/ReadPromise"
-	PromiseService_SearchPromises_FullMethodName = "/promise.PromiseService/SearchPromises"
-	PromiseService_CreatePromise_FullMethodName  = "/promise.PromiseService/CreatePromise"
-	PromiseService_CancelPromise_FullMethodName  = "/promise.PromiseService/CancelPromise"
-	PromiseService_ResolvePromise_FullMethodName = "/promise.PromiseService/ResolvePromise"
-	PromiseService_RejectPromise_FullMethodName  = "/promise.PromiseService/RejectPromise"
+	PromiseService_ReadPromise_FullMethodName     = "/promise.PromiseService/ReadPromise"
+	PromiseService_SearchPromises_FullMethodName  = "/promise.PromiseService/SearchPromises"
+	PromiseService_CreatePromise_FullMethodName   = "/promise.PromiseService/CreatePromise"
+	PromiseService_CancelPromise_FullMethodName   = "/promise.PromiseService/CancelPromise"
+	PromiseService_ResolvePromise_FullMethodName  = "/promise.PromiseService/ResolvePromise"
+	PromiseService_RejectPromise_FullMethodName   = "/promise.PromiseService/RejectPromise"
+	PromiseService_CompletePromise_FullMethodName = "/promise.PromiseService/CompletePromise"
 )
 
 // PromiseServiceClient is the client API for PromiseService service.
@@ -38,6 +39,7 @@ type PromiseServiceClient interface {
 	CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error)
 	ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error)
 	RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error)
+	CompletePromise(ctx context.Context, in *CompletePromiseRequest, opts ...grpc.CallOption) (*CompletePromiseResponse, error)
 }
 
 type promiseServiceClient struct {
@@ -102,6 +104,15 @@ func (c *promiseServiceClient) RejectPromise(ctx context.Context, in *RejectProm
 	return out, nil
 }
 
+func (c *promiseServiceClient) CompletePromise(ctx context.Context, in *CompletePromiseRequest, opts ...grpc.CallOption) (*CompletePromiseResponse, error) {
+	out := new(CompletePromiseResponse)
+	err := c.cc.Invoke(ctx, PromiseService_CompletePromise_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PromiseServiceServer is the server API for PromiseService service.
 // All implementations must embed UnimplementedPromiseServiceServer
 // for forward compatibility
@@ -113,6 +124,7 @@ type PromiseServiceServer interface {
 	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
 	ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error)
 	RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error)
+	CompletePromise(context.Context, *CompletePromiseRequest) (*CompletePromiseResponse, error)
 	mustEmbedUnimplementedPromiseServiceServer()
 }
 
@@ -137,6 +149,9 @@ func (UnimplementedPromiseServiceServer) ResolvePromise(context.Context, *Resolv
 }
 func (UnimplementedPromiseServiceServer) RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RejectPromise not implemented")
+}
+func (UnimplementedPromiseServiceServer) CompletePromise(context.Context, *CompletePromiseRequest) (*CompletePromiseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CompletePromise not implemented")
 }
 func (UnimplementedPromiseServiceServer) mustEmbedUnimplementedPromiseServiceServer() {}
 
@@ -259,6 +274,24 @@ func _PromiseService_RejectPromise_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PromiseService_CompletePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompletePromiseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PromiseServiceServer).CompletePromise(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PromiseService_CompletePromise_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PromiseServiceServer).CompletePromise(ctx, req.(*CompletePromiseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // PromiseService_ServiceDesc is the grpc.ServiceDesc for PromiseService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -289,6 +322,10 @@ var PromiseService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectPromise",
 			Handler:    _PromiseService_RejectPromise_Handler,
+		},
+		{
+			MethodName: "CompletePromise",
+			Handler:    _PromiseService_CompletePromise_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

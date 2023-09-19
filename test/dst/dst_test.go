@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -49,17 +48,6 @@ func TestDST(t *testing.T) {
 
 		// instantiate system
 		system := system.New(api, aio, config, metrics)
-		system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
-		system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
-		system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
-		system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
-		system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
-		system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
-		system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
-		system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
-		system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)
-		system.AddOnTick(2, coroutines.TimeoutPromises)
-		system.AddOnTick(1, coroutines.NotifySubscriptions)
 
 		// start api/aio
 		if err := api.Start(); err != nil {

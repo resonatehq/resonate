@@ -10,6 +10,7 @@ const (
 	CancelPromise
 	ResolvePromise
 	RejectPromise
+	CompletePromise
 
 	// Subscription
 	ReadSubscriptions
