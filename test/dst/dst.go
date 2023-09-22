@@ -53,7 +53,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// generator
 	generator := NewGenerator(r, d.config)
 	generator.AddRequest(generator.GenerateReadPromise)
-	// generator.AddRequest(generator.GenerateSearchPromises)
+	generator.AddRequest(generator.GenerateSearchPromises)
 	generator.AddRequest(generator.GenerateCreatePromise)
 	generator.AddRequest(generator.GenerateCancelPromise)
 	generator.AddRequest(generator.GenerateResolvePromise)

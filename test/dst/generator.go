@@ -111,13 +111,18 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *types.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request {
-	q := fmt.Sprintf("%05d*", r.Intn(99999))
-
 	return &types.Request{
 		Kind: types.SearchPromises,
 		SearchPromises: &types.SearchPromisesRequest{
-			Q:     q,
-			State: promise.Pending,
+			Q: "*",
+			States: []promise.State{
+				promise.Pending,
+				promise.Resolved,
+				promise.Rejected,
+				promise.Timedout,
+				promise.Canceled,
+			},
+			Limit: 5,
 		},
 	}
 }

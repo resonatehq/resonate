@@ -111,47 +111,47 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 	}, nil
 }
 
-func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
+// func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
+// 	cq := make(chan *bus.CQE[types.Request, types.Response])
+// 	defer close(cq)
 
-	var state promise.State
-	switch req.State {
-	case "pending":
-		state = promise.Pending
-	default:
-		return nil, grpcStatus.Error(codes.InvalidArgument, "")
-	}
+// 	var state promise.State
+// 	switch req.State {
+// 	case "pending":
+// 		state = promise.Pending
+// 	default:
+// 		return nil, grpcStatus.Error(codes.InvalidArgument, "")
+// 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.SearchPromises,
-			SearchPromises: &types.SearchPromisesRequest{
-				Q:     req.Q,
-				State: state,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+// 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+// 		Kind: "grpc",
+// 		Submission: &types.Request{
+// 			Kind: types.SearchPromises,
+// 			SearchPromises: &types.SearchPromisesRequest{
+// 				Q:     req.Q,
+// 				State: state,
+// 			},
+// 		},
+// 		Callback: s.sendOrPanic(cq),
+// 	})
 
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
+// 	cqe := <-cq
+// 	if cqe.Error != nil {
+// 		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+// 	}
 
-	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
+// 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
 
-	promises := make([]*grpcApi.Promise, len(cqe.Completion.SearchPromises.Promises))
-	for i, promise := range cqe.Completion.SearchPromises.Promises {
-		promises[i] = protoPromise(promise)
-	}
+// 	promises := make([]*grpcApi.Promise, len(cqe.Completion.SearchPromises.Promises))
+// 	for i, promise := range cqe.Completion.SearchPromises.Promises {
+// 		promises[i] = protoPromise(promise)
+// 	}
 
-	return &grpcApi.SearchPromisesResponse{
-		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
-		Promises: promises,
-	}, nil
-}
+// 	return &grpcApi.SearchPromisesResponse{
+// 		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
+// 		Promises: promises,
+// 	}, nil
+// }
 
 func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])

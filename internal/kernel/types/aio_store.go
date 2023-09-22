@@ -85,8 +85,10 @@ type ReadPromiseCommand struct {
 }
 
 type SearchPromisesCommand struct {
-	Q     string
-	State promise.State
+	Q      string
+	States []promise.State
+	Limit  int
+	SortId *int64
 }
 
 type CreatePromiseCommand struct {
@@ -107,6 +109,7 @@ type UpdatePromiseCommand struct {
 
 type QueryPromisesResult struct {
 	RowsReturned int64
+	LastSortId   int64
 	Records      []*promise.PromiseRecord
 }
 

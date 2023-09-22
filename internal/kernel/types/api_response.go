@@ -38,8 +38,9 @@ type ReadPromiseResponse struct {
 }
 
 type SearchPromisesResponse struct {
-	Status   ResponseStatus     `json:"status"`
-	Promises []*promise.Promise `json:"promises,omitempty"`
+	Status   ResponseStatus                 `json:"status"`
+	Promises []*promise.Promise             `json:"promises,omitempty"`
+	Cursor   *Cursor[SearchPromisesRequest] `json:"cursor,omitempty"`
 }
 
 type CreatePromiseResponse struct {

@@ -66,7 +66,7 @@ func (s *State) UnmarshalJSON(data []byte) error {
 	}
 
 	switch strings.ToUpper(state) {
-	case "Pending":
+	case "PENDING":
 		*s = Pending
 	case "RESOLVED":
 		*s = Resolved

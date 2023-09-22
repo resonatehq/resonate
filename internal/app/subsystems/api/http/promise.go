@@ -2,6 +2,7 @@ package http
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -37,27 +38,86 @@ func (s *server) readPromise(c *gin.Context) {
 	c.JSON(cqe.Completion.ReadPromise.Status.HttpStatus(), cqe.Completion.ReadPromise.Promise)
 }
 
-func (s *server) searchPromises(c *gin.Context) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
+type SearchPromiseParams struct {
+	Q      string                                     `json:"q"`
+	State  string                                     `json:"state"`
+	Limit  int                                        `json:"limit"`
+	Cursor *types.Cursor[types.SearchPromisesRequest] `json:"cursor"`
+}
 
-	var state promise.State
-	switch c.DefaultQuery("s", "pending") {
-	case "pending":
-		state = promise.Pending
-	default:
-		c.JSON(http.StatusBadRequest, nil)
+func (s *server) searchPromises(c *gin.Context) {
+	var params *SearchPromiseParams
+	if err := c.ShouldBindJSON(&params); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
 		return
 	}
+
+	var searchPromises *types.SearchPromisesRequest
+
+	if params.Cursor != nil {
+		searchPromises = params.Cursor.Next
+	} else {
+		// validate
+		if params.Q == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "query must be provided",
+			})
+			return
+		}
+
+		var states []promise.State
+		switch strings.ToLower(params.State) {
+		case "":
+			states = []promise.State{
+				promise.Pending,
+				promise.Resolved,
+				promise.Rejected,
+				promise.Timedout,
+				promise.Canceled,
+			}
+		case "pending":
+			states = []promise.State{
+				promise.Pending,
+			}
+		case "resolved":
+			states = []promise.State{
+				promise.Resolved,
+			}
+		case "rejected":
+			states = []promise.State{
+				promise.Rejected,
+				promise.Timedout,
+				promise.Canceled,
+			}
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "state must be one of: pending, resolved, rejected",
+			})
+			return
+		}
+
+		limit := params.Limit
+		if params.Limit < 0 || params.Limit > 100 {
+			limit = 100
+		}
+
+		searchPromises = &types.SearchPromisesRequest{
+			Q:      params.Q,
+			States: states,
+			Limit:  limit,
+		}
+	}
+
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
 		Kind: "http",
 		Submission: &types.Request{
-			Kind: types.SearchPromises,
-			SearchPromises: &types.SearchPromisesRequest{
-				Q:     c.DefaultQuery("q", "*"),
-				State: state,
-			},
+			Kind:           types.SearchPromises,
+			SearchPromises: searchPromises,
 		},
 		Callback: s.sendOrPanic(cq),
 	})
@@ -71,7 +131,10 @@ func (s *server) searchPromises(c *gin.Context) {
 	}
 
 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
-	c.JSON(cqe.Completion.SearchPromises.Status.HttpStatus(), cqe.Completion.SearchPromises.Promises)
+	c.JSON(cqe.Completion.SearchPromises.Status.HttpStatus(), gin.H{
+		"cursor":   cqe.Completion.SearchPromises.Cursor,
+		"promises": cqe.Completion.SearchPromises.Promises,
+	})
 }
 
 func (s *server) createPromise(c *gin.Context) {

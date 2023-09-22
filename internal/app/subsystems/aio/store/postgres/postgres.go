@@ -455,10 +455,8 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
-	util.Assert(cmd.State == promise.Pending, "status must be pending")
-
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.Q, cmd.State)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.Q, cmd.States)
 	if err != nil {
 		return nil, err
 	}
