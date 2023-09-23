@@ -30,7 +30,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read timeouts", "err", err)
 				return
@@ -66,7 +66,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 					},
 				}
 
-				c.Yield(submission, func(completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to read subscriptions", "err", err)
 						return
@@ -125,7 +125,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 						},
 					}
 
-					c.Yield(submission, func(completion *types.Completion, err error) {
+					c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 						if err != nil {
 							slog.Error("failed to update state", "err", err)
 							return

@@ -24,6 +24,7 @@ const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
 		id            TEXT,
+		sort_id       SERIAL,
 		state         INTEGER DEFAULT 1,
 		param_headers BYTEA,
 		param_ikey    TEXT,
@@ -37,6 +38,8 @@ const (
 		completed_on  BIGINT,
 		PRIMARY KEY(id)
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_sort_id ON promises(sort_id);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -79,13 +82,16 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
-    FROM
-        promises
-    WHERE
-        id LIKE $1 AND state = $2
+		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on, sort_id
+	FROM
+		promises
+	WHERE
+		($1::int IS NULL OR sort_id < $1) AND
+		(state & $2 != 0)
 	ORDER BY
-		id`
+		sort_id DESC
+	LIMIT
+		$3`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -95,9 +101,12 @@ const (
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
-	UPDATE promises
-    SET state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
-    WHERE id = $6 AND state = 1`
+	UPDATE
+		promises
+    SET
+		state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
+    WHERE
+		id = $6 AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -144,7 +153,7 @@ const (
 	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
+	DELETE FROM subscriptions WHERE id = $1 AND promise_id = $2`
 
 	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
 	DELETE FROM subscriptions WHERE promise_id = $1`
@@ -168,10 +177,10 @@ const (
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
     SET time = $1, attempt = $2
-    WHERE id = $3 and promise_id = $4`
+    WHERE id = $3 AND promise_id = $4`
 
 	NOTIFICATION_DELETE_STATEMENT = `
-	DELETE FROM notifications WHERE id = $1 and promise_id = $2`
+	DELETE FROM notifications WHERE id = $1 AND promise_id = $2`
 )
 
 type Config struct {
@@ -455,8 +464,14 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
+	// convert list of state to bit mask
+	mask := 0
+	for _, state := range cmd.States {
+		mask = mask | int(state)
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.Q, cmd.States)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -464,6 +479,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
+	var lastSortId int64
 
 	for rows.Next() {
 		record := &promise.PromiseRecord{}
@@ -480,6 +496,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
+			&lastSortId, // keep track of the last sort id
 		); err != nil {
 			return nil, err
 		}
@@ -492,6 +509,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 		Kind: types.StoreSearchPromises,
 		SearchPromises: &types.QueryPromisesResult{
 			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
 			Records:      records,
 		},
 	}, nil

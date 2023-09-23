@@ -23,12 +23,40 @@ func (c *Claims[T]) Valid() error {
 	return nil
 }
 
-func (c *Cursor[T]) MarshalJSON() ([]byte, error) {
+func NewCursor[T any](tokenString string) (*Cursor[T], error) {
+	cursor := &Cursor[T]{}
+
+	if err := cursor.Decode(tokenString); err != nil {
+		return nil, err
+	}
+
+	return cursor, nil
+}
+
+func (c *Cursor[T]) Encode() (string, error) {
 	token := jwt.NewWithClaims(signingMethod, &Claims[T]{
 		Next: c.Next,
 	})
 
-	tokenString, err := token.SignedString(secretKey)
+	return token.SignedString(secretKey)
+}
+
+func (c *Cursor[T]) Decode(tokenString string) error {
+	claims := &Claims[T]{}
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
+		return secretKey, nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	c.Next = claims.Next
+	return nil
+}
+
+func (c *Cursor[T]) MarshalJSON() ([]byte, error) {
+	tokenString, err := c.Encode()
 	if err != nil {
 		return nil, err
 	}
@@ -42,15 +70,5 @@ func (c *Cursor[T]) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	claims := &Claims[T]{}
-	_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
-		return secretKey, nil
-	})
-
-	if err != nil {
-		return err
-	}
-
-	c.Next = claims.Next
-	return nil
+	return c.Decode(tokenString)
 }

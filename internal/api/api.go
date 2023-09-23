@@ -71,7 +71,7 @@ func (a *api) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
 	// replace sqe.Callback with a callback that wraps the original
 	// function and emits metrics
 	callback := sqe.Callback
-	sqe.Callback = func(res *types.Response, err error) {
+	sqe.Callback = func(t int64, res *types.Response, err error) {
 		var status int
 
 		if err != nil {
@@ -102,14 +102,14 @@ func (a *api) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
 		a.metrics.ApiTotal.WithLabelValues(sqe.Kind, strconv.Itoa(status)).Inc()
 		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Dec()
 
-		callback(res, err)
+		callback(t, res, err)
 	}
 
 	select {
 	case a.sq <- sqe:
 		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Inc()
 	default:
-		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
+		sqe.Callback(0, nil, fmt.Errorf("api submission queue full"))
 	}
 }
 

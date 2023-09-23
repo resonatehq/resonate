@@ -37,7 +37,7 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[types.APIKind]func(int64, *types.Request, func(*types.Response, error)) *scheduler.Coroutine
+	onRequest map[types.APIKind]func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine
 	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine
 	ticks     int64
 }
@@ -49,14 +49,14 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[types.APIKind]func(int64, *types.Request, func(*types.Response, error)) *scheduler.Coroutine{},
+		onRequest: map[types.APIKind]func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine{},
 		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine{},
 	}
 }
 
 func (s *System) Loop() error {
 	for {
-		t := time.Now().Unix()
+		t := time.Now().UnixMilli()
 		s.Tick(t, time.After(10*time.Millisecond))
 
 		if s.api.Done() && s.scheduler.Done() {
@@ -93,7 +93,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	s.scheduler.Tick(t, s.config.CompletionBatchSize)
 }
 
-func (s *System) AddOnRequest(kind types.APIKind, constructor func(int64, *types.Request, func(*types.Response, error)) *scheduler.Coroutine) {
+func (s *System) AddOnRequest(kind types.APIKind, constructor func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine) {
 	s.onRequest[kind] = constructor
 }
 

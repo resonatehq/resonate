@@ -54,7 +54,16 @@ func (m *Model) ValidateReadPromise(req *types.Request, res *types.Response) err
 }
 
 func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) error {
+	states := map[promise.State]bool{}
+	for _, state := range req.SearchPromises.States {
+		states[state] = true
+	}
+
 	for _, p := range res.SearchPromises.Promises {
+		if _, ok := states[p.State]; !ok {
+			return fmt.Errorf("unexpected state %s, searched for %s", p.State, req.SearchPromises.States)
+		}
+
 		pm := m.promises.Get(p.Id)
 		if err := pm.searchPromise(req.SearchPromises, res.SearchPromises, p); err != nil {
 			return err

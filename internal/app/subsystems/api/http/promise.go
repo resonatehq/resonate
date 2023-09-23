@@ -39,25 +39,32 @@ func (s *server) readPromise(c *gin.Context) {
 }
 
 type SearchPromiseParams struct {
-	Q      string                                     `json:"q"`
-	State  string                                     `json:"state"`
-	Limit  int                                        `json:"limit"`
-	Cursor *types.Cursor[types.SearchPromisesRequest] `json:"cursor"`
+	Q      string `form:"q" json:"q"`
+	State  string `form:"state" json:"state"`
+	Limit  int    `form:"limit" json:"limit"`
+	Cursor string `form:"cursor" json:"cursor"`
 }
 
 func (s *server) searchPromises(c *gin.Context) {
-	var params *SearchPromiseParams
-	if err := c.ShouldBindJSON(&params); err != nil {
+	var params SearchPromiseParams
+	var searchPromises *types.SearchPromisesRequest
+
+	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
 
-	var searchPromises *types.SearchPromisesRequest
-
-	if params.Cursor != nil {
-		searchPromises = params.Cursor.Next
+	if params.Cursor != "" {
+		cursor, err := types.NewCursor[types.SearchPromisesRequest](params.Cursor)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+		searchPromises = cursor.Next
 	} else {
 		// validate
 		if params.Q == "" {

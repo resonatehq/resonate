@@ -111,18 +111,30 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *types.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request {
+	limit := r.Intn(10)
+	states := []promise.State{}
+
+	for i := 0; i < r.Intn(5); i++ {
+		switch r.Intn(5) {
+		case 0:
+			states = append(states, promise.Pending)
+		case 1:
+			states = append(states, promise.Resolved)
+		case 2:
+			states = append(states, promise.Rejected)
+		case 3:
+			states = append(states, promise.Timedout)
+		case 4:
+			states = append(states, promise.Canceled)
+		}
+	}
+
 	return &types.Request{
 		Kind: types.SearchPromises,
 		SearchPromises: &types.SearchPromisesRequest{
-			Q: "*",
-			States: []promise.State{
-				promise.Pending,
-				promise.Resolved,
-				promise.Rejected,
-				promise.Timedout,
-				promise.Canceled,
-			},
-			Limit: 5,
+			Q:      "*",
+			States: states,
+			Limit:  limit,
 		},
 	}
 }

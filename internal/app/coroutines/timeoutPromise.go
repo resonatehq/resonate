@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
+func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res func(int64, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", p.Id), "TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -28,10 +28,10 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read subscriptions", "id", p.Id, "err", err)
-				res(err)
+				res(t, err)
 				return
 			}
 
@@ -88,10 +88,10 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 				},
 			}
 
-			c.Yield(submission, func(completion *types.Completion, err error) {
+			c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 				if err != nil {
 					slog.Error("failed to update state", "id", p.Id, "err", err)
-					res(err)
+					res(t, err)
 					return
 				}
 
@@ -101,7 +101,7 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 				if result.RowsAffected == 1 {
-					res(nil)
+					res(t, nil)
 				} else {
 					s.Add(retry)
 				}

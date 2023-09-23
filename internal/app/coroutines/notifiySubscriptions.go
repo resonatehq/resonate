@@ -48,7 +48,7 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read notifications", "err", err)
 				return
@@ -93,7 +93,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "id", notification.PromiseId, "err", err)
 				return
@@ -136,7 +136,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				},
 			}
 
-			c.Yield(submission, func(completion *types.Completion, err error) {
+			c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 				if err != nil {
 					slog.Warn("failed to send notification", "promise", promise, "url", notification.Url)
 				}
@@ -171,7 +171,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 					},
 				}
 
-				c.Yield(submission, func(completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 					if err != nil {
 						slog.Warn("failed to update notification", "notification", notification)
 					}
@@ -199,7 +199,7 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 		},
 	}
 
-	c.Yield(submission, func(completion *types.Completion, err error) {
+	c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 		if err != nil {
 			slog.Warn("failed to delete notification", "notification", notification)
 		}

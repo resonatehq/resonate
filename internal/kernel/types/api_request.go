@@ -30,7 +30,6 @@ type SearchPromisesRequest struct {
 	States []promise.State `json:"states"`
 	Limit  int             `json:"limit"`
 	SortId *int64          `json:"sortId"`
-	T      *int64          `json:"t"`
 }
 
 type CreatePromiseRequest struct {

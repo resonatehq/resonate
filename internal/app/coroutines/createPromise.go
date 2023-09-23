@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("CreatePromise(id=%s)", req.CreatePromise.Id), "CreatePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
@@ -38,10 +38,10 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
-				res(nil, err)
+				res(t, nil, err)
 				return
 			}
 
@@ -78,10 +78,10 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					},
 				}
 
-				c.Yield(submission, func(completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to update state", "req", req, "err", err)
-						res(nil, err)
+						res(t, nil, err)
 						return
 					}
 
@@ -91,7 +91,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 					util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 					if result.RowsAffected == 1 {
-						res(&types.Response{
+						res(t, &types.Response{
 							Kind: types.CreatePromise,
 							CreatePromise: &types.CreatePromiseResponse{
 								Status: types.ResponseCreated,
@@ -113,7 +113,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 				p, err := result.Records[0].Promise()
 				if err != nil {
 					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-					res(nil, err)
+					res(t, nil, err)
 					return
 				}
 
@@ -125,14 +125,14 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 				}
 
 				if p.State == promise.Pending && t >= p.Timeout {
-					s.Add(TimeoutPromise(t, p, CreatePromise(t, req, res), func(err error) {
+					s.Add(TimeoutPromise(t, p, CreatePromise(t, req, res), func(t int64, err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
+							res(t, nil, err)
 							return
 						}
 
-						res(&types.Response{
+						res(t, &types.Response{
 							Kind: types.CreatePromise,
 							CreatePromise: &types.CreatePromiseResponse{
 								Status: status,
@@ -154,7 +154,7 @@ func CreatePromise(t int64, req *types.Request, res func(*types.Response, error)
 						}, nil)
 					}))
 				} else {
-					res(&types.Response{
+					res(t, &types.Response{
 						Kind: types.CreatePromise,
 						CreatePromise: &types.CreatePromiseResponse{
 							Status:  status,

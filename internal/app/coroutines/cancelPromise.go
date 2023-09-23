@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func CancelPromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("CancelPromise(id=%s)", req.CancelPromise.Id), "CancelPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CancelPromise.Value.Headers == nil {
 			req.CancelPromise.Value.Headers = map[string]string{}
@@ -35,10 +35,10 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
-				res(nil, err)
+				res(t, nil, err)
 				return
 			}
 
@@ -48,7 +48,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(&types.Response{
+				res(t, &types.Response{
 					Kind: types.CancelPromise,
 					CancelPromise: &types.CancelPromiseResponse{
 						Status: types.ResponseNotFound,
@@ -58,20 +58,20 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 				p, err := result.Records[0].Promise()
 				if err != nil {
 					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-					res(nil, err)
+					res(t, nil, err)
 					return
 				}
 
 				if p.State == promise.Pending {
 					if t >= p.Timeout {
-						s.Add(TimeoutPromise(t, p, CancelPromise(t, req, res), func(err error) {
+						s.Add(TimeoutPromise(t, p, CancelPromise(t, req, res), func(t int64, err error) {
 							if err != nil {
 								slog.Error("failed to timeout promise", "req", req, "err", err)
-								res(nil, err)
+								res(t, nil, err)
 								return
 							}
 
-							res(&types.Response{
+							res(t, &types.Response{
 								Kind: types.CancelPromise,
 								CancelPromise: &types.CancelPromiseResponse{
 									Status: types.ResponseForbidden,
@@ -109,10 +109,10 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 							},
 						}
 
-						c.Yield(submission, func(completion *types.Completion, err error) {
+						c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 							if err != nil {
 								slog.Error("failed to read subscriptions", "req", req, "err", err)
-								res(nil, err)
+								res(t, nil, err)
 								return
 							}
 
@@ -165,10 +165,10 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 								},
 							}
 
-							c.Yield(submission, func(completion *types.Completion, err error) {
+							c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 								if err != nil {
 									slog.Error("failed to update state", "req", req, "err", err)
-									res(nil, err)
+									res(t, nil, err)
 									return
 								}
 
@@ -178,7 +178,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 								util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 								if result.RowsAffected == 1 {
-									res(&types.Response{
+									res(t, &types.Response{
 										Kind: types.CancelPromise,
 										CancelPromise: &types.CancelPromiseResponse{
 											Status: types.ResponseCreated,
@@ -208,7 +208,7 @@ func CancelPromise(t int64, req *types.Request, res func(*types.Response, error)
 						status = types.ResponseForbidden
 					}
 
-					res(&types.Response{
+					res(t, &types.Response{
 						Kind: types.CancelPromise,
 						CancelPromise: &types.CancelPromiseResponse{
 							Status:  status,

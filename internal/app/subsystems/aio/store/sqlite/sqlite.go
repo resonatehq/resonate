@@ -94,9 +94,12 @@ const (
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
-	UPDATE promises
-	SET state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
-	WHERE id = ? AND state = 1`
+	UPDATE
+		promises
+	SET
+		state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
+	WHERE
+		id = ? AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
