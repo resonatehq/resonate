@@ -66,11 +66,15 @@ const (
 		PRIMARY KEY(id, promise_id)
 	);`
 
+	// DROP_TABLE_STATEMENT = `
+	// DROP TABLE notifications;
+	// DROP TABLE subscriptions;
+	// DROP TABLE timeouts;
+	// DROP TABLE promises;`
+
 	DROP_TABLE_STATEMENT = `
-	DROP TABLE notifications;
-	DROP TABLE subscriptions;
-	DROP TABLE timeouts;
-	DROP TABLE promises;`
+	DROP DATABASE resonate_test;
+	CREATE DATABASE resonate_test;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -189,6 +193,7 @@ type Config struct {
 	Username string
 	Password string
 	Database string
+	schema   string
 }
 
 type PostgresStore struct {
@@ -230,6 +235,16 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
+	// schema for unit tests
+	if s.config.schema != "" {
+		q := `
+		CREATE SCHEMA %s;
+		ALTER USER %s SET search_path TO %s;`
+		if _, err := s.db.Exec(fmt.Sprintf(q, pq.QuoteIdentifier(s.config.schema), pq.QuoteIdentifier(s.config.Username), pq.QuoteIdentifier(s.config.schema))); err != nil {
+			return err
+		}
+	}
+
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
@@ -242,10 +257,6 @@ func (s *PostgresStore) Stop() error {
 }
 
 func (s *PostgresStore) Reset() error {
-	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
-		return err
-	}
-
 	return nil
 }
 

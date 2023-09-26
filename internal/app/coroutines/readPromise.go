@@ -56,7 +56,7 @@ func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, e
 				}
 
 				if p.State == promise.Pending && t >= p.Timeout {
-					s.Add(TimeoutPromise(t, p, ReadPromise(t, req, res), func(t int64, err error) {
+					s.Add(TimeoutPromise(t, p, nil, ReadPromise(t, req, res), func(t int64, err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
 							res(t, nil, err)
