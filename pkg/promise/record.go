@@ -17,6 +17,7 @@ type PromiseRecord struct {
 	CreatedOn    *int64
 	CompletedOn  *int64
 	Tags         []byte
+	SortId       int64
 }
 
 func (r *PromiseRecord) Promise() (*Promise, error) {
@@ -44,6 +45,7 @@ func (r *PromiseRecord) Promise() (*Promise, error) {
 		CreatedOn:   r.CreatedOn,
 		CompletedOn: r.CompletedOn,
 		Tags:        tags,
+		SortId:      r.SortId,
 	}, nil
 }
 

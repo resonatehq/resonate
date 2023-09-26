@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func RejectPromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("RejectPromise(id=%s)", req.RejectPromise.Id), "RejectPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
@@ -30,25 +30,34 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 								Id: req.RejectPromise.Id,
 							},
 						},
+						{
+							Kind: types.StoreReadSubscriptions,
+							ReadSubscriptions: &types.ReadSubscriptionsCommand{
+								PromiseIds: []string{req.RejectPromise.Id},
+							},
+						},
 					},
 				},
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
-				slog.Error("failed to read promise", "req", req, "err", err)
-				res(nil, err)
+				slog.Error("failed to read promise or read subscriptions", "req", req, "err", err)
+				res(t, nil, err)
 				return
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
+			util.Assert(len(completion.Store.Results) == 2, "completion must contain two results")
 
 			result := completion.Store.Results[0].ReadPromise
+			records := completion.Store.Results[1].ReadSubscriptions.Records
+
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(&types.Response{
+				res(t, &types.Response{
 					Kind: types.RejectPromise,
 					RejectPromise: &types.RejectPromiseResponse{
 						Status: types.ResponseNotFound,
@@ -58,20 +67,20 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 				p, err := result.Records[0].Promise()
 				if err != nil {
 					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-					res(nil, err)
+					res(t, nil, err)
 					return
 				}
 
 				if p.State == promise.Pending {
 					if t >= p.Timeout {
-						s.Add(TimeoutPromise(t, p, RejectPromise(t, req, res), func(err error) {
+						s.Add(TimeoutPromise(t, p, records, RejectPromise(t, req, res), func(t int64, err error) {
 							if err != nil {
 								slog.Error("failed to timeout promise", "req", req, "err", err)
-								res(nil, err)
+								res(t, nil, err)
 								return
 							}
 
-							res(&types.Response{
+							res(t, &types.Response{
 								Kind: types.RejectPromise,
 								RejectPromise: &types.RejectPromiseResponse{
 									Status: types.ResponseForbidden,
@@ -93,111 +102,84 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 							}, nil)
 						}))
 					} else {
-						submission := &types.Submission{
-							Kind: types.Store,
-							Store: &types.StoreSubmission{
-								Transaction: &types.Transaction{
-									Commands: []*types.Command{
-										{
-											Kind: types.StoreReadSubscriptions,
-											ReadSubscriptions: &types.ReadSubscriptionsCommand{
-												PromiseIds: []string{req.RejectPromise.Id},
-											},
-										},
-									},
+						commands := []*types.Command{
+							{
+								Kind: types.StoreUpdatePromise,
+								UpdatePromise: &types.UpdatePromiseCommand{
+									Id:          req.RejectPromise.Id,
+									State:       promise.Rejected,
+									Value:       req.RejectPromise.Value,
+									CompletedOn: t,
+								},
+							},
+							{
+								Kind: types.StoreDeleteTimeout,
+								DeleteTimeout: &types.DeleteTimeoutCommand{
+									Id: req.RejectPromise.Id,
+								},
+							},
+							{
+								Kind: types.StoreDeleteSubscriptions,
+								DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+									PromiseId: req.RejectPromise.Id,
 								},
 							},
 						}
 
-						c.Yield(submission, func(completion *types.Completion, err error) {
+						for _, record := range records {
+							commands = append(commands, &types.Command{
+								Kind: types.StoreCreateNotification,
+								CreateNotification: &types.CreateNotificationCommand{
+									Id:          record.Id,
+									PromiseId:   record.PromiseId,
+									Url:         record.Url,
+									RetryPolicy: record.RetryPolicy,
+									Time:        t,
+								},
+							})
+						}
+
+						submission := &types.Submission{
+							Kind: types.Store,
+							Store: &types.StoreSubmission{
+								Transaction: &types.Transaction{
+									Commands: commands,
+								},
+							},
+						}
+
+						c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 							if err != nil {
-								slog.Error("failed to read subscriptions", "req", req, "err", err)
-								res(nil, err)
+								slog.Error("failed to update state", "req", req, "err", err)
+								res(t, nil, err)
 								return
 							}
 
 							util.Assert(completion.Store != nil, "completion must not be nil")
-							records := completion.Store.Results[0].ReadSubscriptions.Records
 
-							commands := []*types.Command{
-								{
-									Kind: types.StoreUpdatePromise,
-									UpdatePromise: &types.UpdatePromiseCommand{
-										Id:          req.RejectPromise.Id,
-										State:       promise.Rejected,
-										Value:       req.RejectPromise.Value,
-										CompletedOn: t,
-									},
-								},
-								{
-									Kind: types.StoreDeleteTimeout,
-									DeleteTimeout: &types.DeleteTimeoutCommand{
-										Id: req.RejectPromise.Id,
-									},
-								},
-								{
-									Kind: types.StoreDeleteSubscriptions,
-									DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
-										PromiseId: req.RejectPromise.Id,
-									},
-								},
-							}
+							result := completion.Store.Results[0].UpdatePromise
+							util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-							for _, record := range records {
-								commands = append(commands, &types.Command{
-									Kind: types.StoreCreateNotification,
-									CreateNotification: &types.CreateNotificationCommand{
-										Id:          record.Id,
-										PromiseId:   record.PromiseId,
-										Url:         record.Url,
-										RetryPolicy: record.RetryPolicy,
-										Time:        t,
-									},
-								})
-							}
-
-							submission := &types.Submission{
-								Kind: types.Store,
-								Store: &types.StoreSubmission{
-									Transaction: &types.Transaction{
-										Commands: commands,
-									},
-								},
-							}
-
-							c.Yield(submission, func(completion *types.Completion, err error) {
-								if err != nil {
-									slog.Error("failed to update state", "req", req, "err", err)
-									res(nil, err)
-									return
-								}
-
-								util.Assert(completion.Store != nil, "completion must not be nil")
-
-								result := completion.Store.Results[0].UpdatePromise
-								util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
-
-								if result.RowsAffected == 1 {
-									res(&types.Response{
-										Kind: types.RejectPromise,
-										RejectPromise: &types.RejectPromiseResponse{
-											Status: types.ResponseCreated,
-											Promise: &promise.Promise{
-												Id:          p.Id,
-												State:       promise.Rejected,
-												Param:       p.Param,
-												Value:       req.RejectPromise.Value,
-												Timeout:     p.Timeout,
-												Tags:        p.Tags,
-												CreatedOn:   p.CreatedOn,
-												CompletedOn: &t,
-											},
+							if result.RowsAffected == 1 {
+								res(t, &types.Response{
+									Kind: types.RejectPromise,
+									RejectPromise: &types.RejectPromiseResponse{
+										Status: types.ResponseCreated,
+										Promise: &promise.Promise{
+											Id:          p.Id,
+											State:       promise.Rejected,
+											Param:       p.Param,
+											Value:       req.RejectPromise.Value,
+											Timeout:     p.Timeout,
+											Tags:        p.Tags,
+											CreatedOn:   p.CreatedOn,
+											CompletedOn: &t,
 										},
-									}, nil)
-								} else {
-									s.Add(RejectPromise(t, req, res))
-								}
-							})
+									},
+								}, nil)
+							} else {
+								s.Add(RejectPromise(t, req, res))
+							}
 						})
 					}
 				} else {
@@ -208,7 +190,7 @@ func RejectPromise(t int64, req *types.Request, res func(*types.Response, error)
 						status = types.ResponseForbidden
 					}
 
-					res(&types.Response{
+					res(t, &types.Response{
 						Kind: types.RejectPromise,
 						RejectPromise: &types.RejectPromiseResponse{
 							Status:  status,

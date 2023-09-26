@@ -67,8 +67,8 @@ type server struct {
 	api api.API
 }
 
-func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(completion *types.Response, err error) {
-	return func(completion *types.Response, err error) {
+func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(int64, *types.Response, error) {
+	return func(t int64, completion *types.Response, err error) {
 		cqe := &bus.CQE[types.Request, types.Response]{
 			Kind:       "http",
 			Completion: completion,

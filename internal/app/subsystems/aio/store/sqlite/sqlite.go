@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -23,20 +25,22 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
-		id            TEXT,
-		state         INTEGER DEFAULT 1,
+		id TEXT UNIQUE,
+		sort_id INTEGER PRIMARY KEY AUTOINCREMENT,
+		state INTEGER DEFAULT 1,
 		param_headers BLOB,
-		param_ikey    TEXT,
-		param_data    BLOB,
+		param_ikey TEXT,
+		param_data BLOB,
 		value_headers BLOB,
-		value_ikey    TEXT,
-		value_data    BLOB,
-		timeout       INTEGER,
-		tags          BLOB,
-		created_on    INTEGER,
-		completed_on  INTEGER,
-		PRIMARY KEY(id)
+		value_ikey TEXT,
+		value_data BLOB,
+		timeout INTEGER,
+		tags BLOB,
+		created_on INTEGER,
+		completed_on INTEGER
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_id ON promises(id);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -73,13 +77,16 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
-		id GLOB ? AND state = ?
+		(? IS NULL OR sort_id < ?) AND
+		(state & ? != 0)
 	ORDER BY
-		id`
+		sort_id DESC
+	LIMIT
+		?`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -89,9 +96,12 @@ const (
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
-	UPDATE promises
-	SET state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
-	WHERE id = ? AND state = 1`
+	UPDATE
+		promises
+	SET
+		state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
+	WHERE
+		id = ? AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -138,7 +148,7 @@ const (
 	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM subscriptions WHERE id = ? and promise_id = ?`
+	DELETE FROM subscriptions WHERE id = ? AND promise_id = ?`
 
 	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
 	DELETE FROM subscriptions WHERE promise_id = ?`
@@ -162,14 +172,15 @@ const (
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
 	SET time = ?, attempt = ?
-	WHERE id = ? and promise_id = ?`
+	WHERE id = ? AND promise_id = ?`
 
 	NOTIFICATION_DELETE_STATEMENT = `
-	DELETE FROM notifications WHERE id = ? and promise_id = ?`
+	DELETE FROM notifications WHERE id = ? AND promise_id = ?`
 )
 
 type Config struct {
-	Path string
+	Path      string
+	TxTimeout time.Duration
 }
 
 type SqliteStore struct {
@@ -228,7 +239,10 @@ func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Comp
 func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
-	tx, err := w.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
+	defer cancel()
+
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -429,10 +443,14 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 }
 
 func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
-	util.Assert(cmd.State == promise.Pending, "status must be pending")
+	// convert list of state to bit mask
+	mask := 0
+	for _, state := range cmd.States {
+		mask = mask | int(state)
+	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.Q, cmd.State)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -440,6 +458,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
+	var lastSortId int64
 
 	for rows.Next() {
 		record := &promise.PromiseRecord{}
@@ -456,18 +475,21 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
+			&record.SortId,
 		); err != nil {
 			return nil, err
 		}
 
-		rowsReturned++
 		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
 	}
 
 	return &types.Result{
 		Kind: types.StoreSearchPromises,
 		SearchPromises: &types.QueryPromisesResult{
 			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
 			Records:      records,
 		},
 	}, nil

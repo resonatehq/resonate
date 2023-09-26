@@ -8,7 +8,7 @@ type Coroutine struct {
 	init         func(*Scheduler, *Coroutine)
 	onDone       []func()
 	submission   *types.Submission
-	continuation func(*types.Completion, error)
+	continuation func(int64, *types.Completion, error)
 }
 
 func NewCoroutine(name string, kind string, init func(*Scheduler, *Coroutine)) *Coroutine {
@@ -27,7 +27,7 @@ func (c *Coroutine) Kind() string {
 	return c.kind
 }
 
-func (c *Coroutine) Yield(submission *types.Submission, continuation func(*types.Completion, error)) {
+func (c *Coroutine) Yield(submission *types.Submission, continuation func(int64, *types.Completion, error)) {
 	c.submission = submission
 	c.continuation = continuation
 }
@@ -36,12 +36,12 @@ func (c *Coroutine) OnDone(f func()) {
 	c.onDone = append(c.onDone, f)
 }
 
-func (c *Coroutine) resume(completion *types.Completion, err error) {
+func (c *Coroutine) resume(t int64, completion *types.Completion, err error) {
 	continuation := c.continuation
 	c.continuation = nil
 
 	if continuation != nil {
-		continuation(completion, err)
+		continuation(t, completion, err)
 	}
 }
 

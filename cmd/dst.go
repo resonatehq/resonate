@@ -10,6 +10,7 @@ import (
 	netHttp "net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
@@ -229,21 +230,25 @@ func init() {
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000000}, "aio-size", "size of the completion queue buffered channel")
 	dstRunCmd.Flags().String("aio-store", "sqlite", "promise store type")
 	dstRunCmd.Flags().String("aio-store-sqlite-path", ":memory:", "sqlite database path")
+	dstRunCmd.Flags().Duration("aio-store-sqlite-tx-timeout", 1000*time.Millisecond, "sqlite transaction timeout")
 	dstRunCmd.Flags().String("aio-store-postgres-host", "localhost", "postgres host")
 	dstRunCmd.Flags().String("aio-store-postgres-port", "5432", "postgres port")
 	dstRunCmd.Flags().String("aio-store-postgres-username", "", "postgres username")
 	dstRunCmd.Flags().String("aio-store-postgres-password", "", "postgres password")
 	dstRunCmd.Flags().String("aio-store-postgres-database", "resonate_dst", "postgres database name")
+	dstRunCmd.Flags().Duration("aio-store-postgres-tx-timeout", 1000*time.Millisecond, "postgres transaction timeout")
 	dstRunCmd.Flags().Float32("aio-network-success-rate", 0.5, "simulated success rate of http requests")
 
 	_ = viper.BindPFlag("dst.aio.size", dstRunCmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.kind", dstRunCmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.sqlite.path", dstRunCmd.Flags().Lookup("aio-store-sqlite-path"))
+	_ = viper.BindPFlag("dst.aio.subsystems.store.config.sqlite.txTimeout", dstRunCmd.Flags().Lookup("aio-store-sqlite-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.host", dstRunCmd.Flags().Lookup("aio-store-postgres-host"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.port", dstRunCmd.Flags().Lookup("aio-store-postgres-port"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.username", dstRunCmd.Flags().Lookup("aio-store-postgres-username"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.password", dstRunCmd.Flags().Lookup("aio-store-postgres-password"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.database", dstRunCmd.Flags().Lookup("aio-store-postgres-database"))
+	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.txTimeout", dstRunCmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", dstRunCmd.Flags().Lookup("aio-network-success-rate"))
 
 	// system

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand" // nosemgrep
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
@@ -37,7 +38,7 @@ func TestDST(t *testing.T) {
 
 		// instatiate aio subsystems
 		network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
-		store, err := sqlite.New(&sqlite.Config{Path: ":memory:"})
+		store, err := sqlite.New(&sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
 		if err != nil {
 			t.Fatal(err)
 		}

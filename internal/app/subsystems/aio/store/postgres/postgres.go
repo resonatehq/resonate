@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -24,6 +26,7 @@ const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
 		id            TEXT,
+		sort_id       SERIAL,
 		state         INTEGER DEFAULT 1,
 		param_headers BYTEA,
 		param_ikey    TEXT,
@@ -37,6 +40,8 @@ const (
 		completed_on  BIGINT,
 		PRIMARY KEY(id)
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_sort_id ON promises(sort_id);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -79,13 +84,16 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
-    FROM
-        promises
-    WHERE
-        id LIKE $1 AND state = $2
+		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on, sort_id
+	FROM
+		promises
+	WHERE
+		($1::int IS NULL OR sort_id < $1) AND
+		(state & $2 != 0)
 	ORDER BY
-		id`
+		sort_id DESC
+	LIMIT
+		$3`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -95,9 +103,12 @@ const (
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATMENT = `
-	UPDATE promises
-    SET state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
-    WHERE id = $6 AND state = 1`
+	UPDATE
+		promises
+    SET
+		state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
+    WHERE
+		id = $6 AND state = 1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -144,7 +155,7 @@ const (
 	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
-	DELETE FROM subscriptions WHERE id = $1 and promise_id = $2`
+	DELETE FROM subscriptions WHERE id = $1 AND promise_id = $2`
 
 	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
 	DELETE FROM subscriptions WHERE promise_id = $1`
@@ -168,18 +179,19 @@ const (
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
     SET time = $1, attempt = $2
-    WHERE id = $3 and promise_id = $4`
+    WHERE id = $3 AND promise_id = $4`
 
 	NOTIFICATION_DELETE_STATEMENT = `
-	DELETE FROM notifications WHERE id = $1 and promise_id = $2`
+	DELETE FROM notifications WHERE id = $1 AND promise_id = $2`
 )
 
 type Config struct {
-	Host     string
-	Port     string
-	Username string
-	Password string
-	Database string
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	Database  string
+	TxTimeout time.Duration
 }
 
 type PostgresStore struct {
@@ -254,7 +266,10 @@ func (w *PostgresStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Co
 func (w *PostgresStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
-	tx, err := w.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
+	defer cancel()
+
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -455,10 +470,14 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
-	util.Assert(cmd.State == promise.Pending, "status must be pending")
+	// convert list of state to bit mask
+	mask := 0
+	for _, state := range cmd.States {
+		mask = mask | int(state)
+	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.Q, cmd.State)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -466,6 +485,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
+	var lastSortId int64
 
 	for rows.Next() {
 		record := &promise.PromiseRecord{}
@@ -482,18 +502,21 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
+			&record.SortId,
 		); err != nil {
 			return nil, err
 		}
 
-		rowsReturned++
 		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
 	}
 
 	return &types.Result{
 		Kind: types.StoreSearchPromises,
 		SearchPromises: &types.QueryPromisesResult{
 			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
 			Records:      records,
 		},
 	}, nil

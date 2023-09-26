@@ -35,6 +35,12 @@ func (s *Scheduler) Add(coroutine *Coroutine) {
 func (s *Scheduler) Tick(t int64, batchSize int) {
 	var coroutines []*Coroutine
 
+	// dequeue cqes
+	for _, cqe := range s.aio.Dequeue(batchSize) {
+		cqe.Callback(t, cqe.Completion, cqe.Error)
+	}
+
+	// enqueue cqes
 	for _, coroutine := range s.coroutines {
 		if submission := coroutine.next(); submission != nil {
 			s.aio.Enqueue(&bus.SQE[types.Submission, types.Completion]{
@@ -56,11 +62,6 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	// discard completed coroutines
 	s.coroutines = coroutines
-
-	// callback cqes
-	for _, cqe := range s.aio.Dequeue(batchSize) {
-		cqe.Callback(cqe.Completion, cqe.Error)
-	}
 }
 
 func (s *Scheduler) Done() bool {

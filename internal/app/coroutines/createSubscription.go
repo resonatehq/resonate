@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s)", req.CreateSubscription.Id, req.CreateSubscription.PromiseId), "CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
@@ -40,10 +40,10 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to create subscription", "req", req, "err", err)
-				res(nil, err)
+				res(t, nil, err)
 				return
 			}
 
@@ -53,7 +53,7 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res(&types.Response{
+				res(t, &types.Response{
 					Kind: types.CreateSubscription,
 					CreateSubscription: &types.CreateSubscriptionResponse{
 						Status: types.ResponseCreated,
@@ -83,10 +83,10 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 					},
 				}
 
-				c.Yield(submission, func(completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to read subscription", "req", req, "err", err)
-						res(nil, err)
+						res(t, nil, err)
 						return
 					}
 
@@ -99,11 +99,11 @@ func CreateSubscription(t int64, req *types.Request, res func(*types.Response, e
 						subscription, err := result.Records[0].Subscription()
 						if err != nil {
 							slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-							res(nil, err)
+							res(t, nil, err)
 							return
 						}
 
-						res(&types.Response{
+						res(t, &types.Response{
 							Kind: types.CreateSubscription,
 							CreateSubscription: &types.CreateSubscriptionResponse{
 								Status:       types.ResponseOK,

@@ -53,7 +53,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// generator
 	generator := NewGenerator(r, d.config)
 	generator.AddRequest(generator.GenerateReadPromise)
-	// generator.AddRequest(generator.GenerateSearchPromises)
+	generator.AddRequest(generator.GenerateSearchPromises)
 	generator.AddRequest(generator.GenerateCreatePromise)
 	generator.AddRequest(generator.GenerateCancelPromise)
 	generator.AddRequest(generator.GenerateResolvePromise)
@@ -81,23 +81,18 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// test loop
 	for t := int64(0); t < d.config.Ticks; t++ {
-		for _, req := range generator.Generate(r, t, d.config.Reqs()) {
+		for _, req := range generator.Generate(r, t, d.config.Reqs(), model.cursors) {
 			req := req
+			reqTime := t
 			api.Enqueue(&bus.SQE[types.Request, types.Response]{
 				Submission: req,
-				Callback: func(res *types.Response, err error) {
-					var errMsg string
-					if err != nil {
-						errMsg = err.Error()
-					} else {
-						errMsg = "<nil>"
+				Callback: func(resTime int64, res *types.Response, err error) {
+					modelErr := model.Step(req, res, err)
+					if modelErr != nil {
+						errors = append(errors, modelErr)
 					}
 
-					slog.Info("DST", "t", t, "req", req, "res", res, "err", errMsg)
-
-					if err := model.Step(req, res, err); err != nil {
-						errors = append(errors, err)
-					}
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 		}

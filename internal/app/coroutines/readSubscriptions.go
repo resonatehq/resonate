@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("ReadSubscriptions(promiseId=%s)", req.ReadSubscriptions.PromiseId), "ReadSubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -28,10 +28,10 @@ func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, er
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read subscriptions", "req", req, "err", err)
-				res(nil, err)
+				res(t, nil, err)
 				return
 			}
 
@@ -50,7 +50,7 @@ func ReadSubscriptions(t int64, req *types.Request, res func(*types.Response, er
 				subscriptions = append(subscriptions, subscription)
 			}
 
-			res(&types.Response{
+			res(t, &types.Response{
 				Kind: types.ReadSubscriptions,
 				ReadSubscriptions: &types.ReadSubscriptionsResponse{
 					Status:        types.ResponseOK,

@@ -9,7 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, error)) *scheduler.Coroutine {
+func DeleteSubscription(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine(fmt.Sprintf("DeleteSubscription(id=%s, promiseId=%s)", req.DeleteSubscription.Id, req.DeleteSubscription.PromiseId), "DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &types.Submission{
 			Kind: types.Store,
@@ -28,10 +28,10 @@ func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, e
 			},
 		}
 
-		c.Yield(submission, func(completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to delete subscription", "req", req, "err", err)
-				res(nil, err)
+				res(t, nil, err)
 				return
 			}
 
@@ -48,7 +48,7 @@ func DeleteSubscription(t int64, req *types.Request, res func(*types.Response, e
 				status = types.ResponseNotFound
 			}
 
-			res(&types.Response{
+			res(t, &types.Response{
 				Kind: types.DeleteSubscription,
 				DeleteSubscription: &types.DeleteSubscriptionResponse{
 					Status: status,

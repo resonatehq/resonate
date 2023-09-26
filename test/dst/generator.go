@@ -88,12 +88,23 @@ func (g *Generator) AddRequest(request RequestGenerator) {
 	g.requests = append(g.requests, request)
 }
 
-func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*types.Request {
+func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*types.Request) []*types.Request {
 	reqs := []*types.Request{}
 
 	for i := 0; i < n; i++ {
-		f := g.requests[r.Intn(len(g.requests))]
-		reqs = append(reqs, f(r, t))
+		bound := len(g.requests)
+		if len(cursors) > 0 {
+			bound = bound + 1
+		}
+
+		switch j := r.Intn(bound); j {
+		case len(g.requests):
+			reqs = append(reqs, cursors[r.Intn(len(cursors))])
+		default:
+			f := g.requests[j]
+			reqs = append(reqs, f(r, t))
+		}
+
 	}
 
 	return reqs
@@ -111,13 +122,30 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *types.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request {
-	q := fmt.Sprintf("%05d*", r.Intn(99999))
+	limit := r.Intn(10)
+	states := []promise.State{}
+
+	for i := 0; i < r.Intn(5); i++ {
+		switch r.Intn(5) {
+		case 0:
+			states = append(states, promise.Pending)
+		case 1:
+			states = append(states, promise.Resolved)
+		case 2:
+			states = append(states, promise.Rejected)
+		case 3:
+			states = append(states, promise.Timedout)
+		case 4:
+			states = append(states, promise.Canceled)
+		}
+	}
 
 	return &types.Request{
 		Kind: types.SearchPromises,
 		SearchPromises: &types.SearchPromisesRequest{
-			Q:     q,
-			State: promise.Pending,
+			Q:      "*",
+			States: states,
+			Limit:  limit,
 		},
 	}
 }
