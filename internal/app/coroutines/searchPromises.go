@@ -77,19 +77,25 @@ func SearchPromises(t1 int64, req *types.Request, res func(int64, *types.Respons
 				promises = append(promises, p)
 			}
 
+			// set cursor only if there are more results
+			var cursor *types.Cursor[types.SearchPromisesRequest]
+			if result.RowsReturned == int64(req.SearchPromises.Limit) {
+				cursor = &types.Cursor[types.SearchPromisesRequest]{
+					Next: &types.SearchPromisesRequest{
+						Q:      req.SearchPromises.Q,
+						States: req.SearchPromises.States,
+						Limit:  req.SearchPromises.Limit,
+						SortId: &result.LastSortId,
+					},
+				}
+			}
+
 			res(t2, &types.Response{
 				Kind: types.SearchPromises,
 				SearchPromises: &types.SearchPromisesResponse{
 					Status:   types.ResponseOK,
 					Promises: promises,
-					Cursor: &types.Cursor[types.SearchPromisesRequest]{
-						Next: &types.SearchPromisesRequest{
-							Q:      req.SearchPromises.Q,
-							States: req.SearchPromises.States,
-							Limit:  req.SearchPromises.Limit,
-							SortId: &result.LastSortId,
-						},
-					},
+					Cursor:   cursor,
 				},
 			}, nil)
 		})

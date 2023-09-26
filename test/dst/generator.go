@@ -88,12 +88,23 @@ func (g *Generator) AddRequest(request RequestGenerator) {
 	g.requests = append(g.requests, request)
 }
 
-func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*types.Request {
+func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*types.Request) []*types.Request {
 	reqs := []*types.Request{}
 
 	for i := 0; i < n; i++ {
-		f := g.requests[r.Intn(len(g.requests))]
-		reqs = append(reqs, f(r, t))
+		bound := len(g.requests)
+		if len(cursors) > 0 {
+			bound = bound + 1
+		}
+
+		switch j := r.Intn(bound); j {
+		case len(g.requests):
+			reqs = append(reqs, cursors[r.Intn(len(cursors))])
+		default:
+			f := g.requests[j]
+			reqs = append(reqs, f(r, t))
+		}
+
 	}
 
 	return reqs

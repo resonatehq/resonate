@@ -61,400 +61,6 @@ func (c *testCase) Panic() bool {
 
 var TestCases = []*testCase{
 	{
-		name: "SearchPromises",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "foo",
-					Timeout: 3,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "bar",
-					Timeout: 3,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
-					Id:    "bar",
-					State: 2,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "baz",
-					Timeout: 3,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
-					Id:    "baz",
-					State: 4,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "qux",
-					Timeout: 3,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
-					Id:    "qux",
-					State: 8,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
-					Id:      "quy",
-					Timeout: 3,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
-					Id:    "quy",
-					State: 16,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 3,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Pending,
-					},
-					Limit: 3,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Resolved,
-					},
-					Limit: 3,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Rejected,
-						promise.Timedout,
-						promise.Canceled,
-					},
-					Limit: 3,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Pending,
-						promise.Resolved,
-						promise.Rejected,
-						promise.Timedout,
-						promise.Canceled,
-					},
-					Limit: 3,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Pending,
-						promise.Resolved,
-						promise.Rejected,
-						promise.Timedout,
-						promise.Canceled,
-					},
-					SortId: int64ToPointer(3),
-					Limit:  3,
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
-					RowsReturned: 1,
-					LastSortId:   1,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "foo",
-							State:        1,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{}"),
-						},
-					},
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
-					RowsReturned: 1,
-					LastSortId:   2,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "bar",
-							State:        2,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-					},
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
-					RowsReturned: 3,
-					LastSortId:   3,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "quy",
-							State:        16,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(3),
-							Tags:         []byte("{}"),
-						},
-						{
-							Id:           "qux",
-							State:        8,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-						{
-							Id:           "baz",
-							State:        4,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-					},
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
-					RowsReturned: 3,
-					LastSortId:   3,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "quy",
-							State:        16,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(3),
-							Tags:         []byte("{}"),
-						},
-						{
-							Id:           "qux",
-							State:        8,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-						{
-							Id:           "baz",
-							State:        4,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-					},
-				},
-			},
-			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
-					RowsReturned: 2,
-					LastSortId:   1,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "bar",
-							State:        2,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							ValueHeaders: []byte("{}"),
-							ValueData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							CompletedOn:  int64ToPointer(2),
-							Tags:         []byte("{}"),
-						},
-						{
-							Id:           "foo",
-							State:        1,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							Timeout:      3,
-							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{}"),
-						},
-					},
-				},
-			},
-		},
-	},
-	{
 		name: "CreatePromise",
 		commands: []*types.Command{
 			{
@@ -1461,6 +1067,410 @@ var TestCases = []*testCase{
 				Kind: types.StoreReadPromise,
 				ReadPromise: &types.QueryPromisesResult{
 					RowsReturned: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "SearchPromises",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "foo",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "bar",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "bar",
+					State: 2,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "baz",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "baz",
+					State: 4,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "qux",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "qux",
+					State: 8,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "quy",
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "quy",
+					State: 16,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 3,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q: "*",
+					States: []promise.State{
+						promise.Pending,
+					},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q: "*",
+					States: []promise.State{
+						promise.Resolved,
+					},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q: "*",
+					States: []promise.State{
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q: "*",
+					States: []promise.State{
+						promise.Pending,
+						promise.Resolved,
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q: "*",
+					States: []promise.State{
+						promise.Pending,
+						promise.Resolved,
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					SortId: int64ToPointer(3),
+					Limit:  3,
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 1,
+					LastSortId:   1,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "foo",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{}"),
+							SortId:       1,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 1,
+					LastSortId:   2,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "bar",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       2,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 3,
+					LastSortId:   3,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "quy",
+							State:        16,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(3),
+							Tags:         []byte("{}"),
+							SortId:       5,
+						},
+						{
+							Id:           "qux",
+							State:        8,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       4,
+						},
+						{
+							Id:           "baz",
+							State:        4,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       3,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 3,
+					LastSortId:   3,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "quy",
+							State:        16,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(3),
+							Tags:         []byte("{}"),
+							SortId:       5,
+						},
+						{
+							Id:           "qux",
+							State:        8,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       4,
+						},
+						{
+							Id:           "baz",
+							State:        4,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       3,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 2,
+					LastSortId:   1,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "bar",
+							State:        2,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							ValueHeaders: []byte("{}"),
+							ValueData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       2,
+						},
+						{
+							Id:           "foo",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      3,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{}"),
+							SortId:       1,
+						},
+					},
 				},
 			},
 		},

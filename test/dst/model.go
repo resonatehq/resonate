@@ -10,6 +10,7 @@ import (
 type Model struct {
 	promises  Promises
 	responses map[types.APIKind]ResponseValidator
+	cursors   []*types.Request
 }
 
 func NewModel() *Model {
@@ -21,6 +22,10 @@ func NewModel() *Model {
 
 func (m *Model) AddResponse(kind types.APIKind, response ResponseValidator) {
 	m.responses[kind] = response
+}
+
+func (m *Model) addCursor(next *types.Request) {
+	m.cursors = append(m.cursors, next)
 }
 
 func (m *Model) Step(req *types.Request, res *types.Response, err error) error {
@@ -59,9 +64,20 @@ func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) 
 		states[state] = true
 	}
 
+	if res.SearchPromises.Cursor != nil {
+		m.addCursor(&types.Request{
+			Kind:           types.SearchPromises,
+			SearchPromises: res.SearchPromises.Cursor.Next,
+		})
+	}
+
 	for _, p := range res.SearchPromises.Promises {
 		if _, ok := states[p.State]; !ok {
 			return fmt.Errorf("unexpected state %s, searched for %s", p.State, req.SearchPromises.States)
+		}
+
+		if req.SearchPromises.SortId != nil && *req.SearchPromises.SortId <= p.SortId {
+			return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SearchPromises.SortId, p.SortId)
 		}
 
 		pm := m.promises.Get(p.Id)

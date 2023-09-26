@@ -15,6 +15,7 @@ type Promise struct {
 	CreatedOn   *int64            `json:"createdOn,omitempty"`
 	CompletedOn *int64            `json:"completedOn,omitempty"`
 	Tags        map[string]string `json:"tags"`
+	SortId      int64             `json:"-"` // unexported
 }
 
 func (p *Promise) String() string {

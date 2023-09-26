@@ -2,13 +2,17 @@ package sqlite
 
 import (
 	"testing"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
 )
 
 func TestSqliteStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		store, err := New(&Config{Path: ":memory:"})
+		store, err := New(&Config{
+			Path:      ":memory:",
+			TxTimeout: 250 * time.Millisecond,
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

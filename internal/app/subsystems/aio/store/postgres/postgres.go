@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -66,15 +68,11 @@ const (
 		PRIMARY KEY(id, promise_id)
 	);`
 
-	// DROP_TABLE_STATEMENT = `
-	// DROP TABLE notifications;
-	// DROP TABLE subscriptions;
-	// DROP TABLE timeouts;
-	// DROP TABLE promises;`
-
 	DROP_TABLE_STATEMENT = `
-	DROP DATABASE resonate_test;
-	CREATE DATABASE resonate_test;`
+	DROP TABLE notifications;
+	DROP TABLE subscriptions;
+	DROP TABLE timeouts;
+	DROP TABLE promises;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -188,12 +186,12 @@ const (
 )
 
 type Config struct {
-	Host     string
-	Port     string
-	Username string
-	Password string
-	Database string
-	schema   string
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	Database  string
+	TxTimeout time.Duration
 }
 
 type PostgresStore struct {
@@ -235,16 +233,6 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
-	// schema for unit tests
-	if s.config.schema != "" {
-		q := `
-		CREATE SCHEMA %s;
-		ALTER USER %s SET search_path TO %s;`
-		if _, err := s.db.Exec(fmt.Sprintf(q, pq.QuoteIdentifier(s.config.schema), pq.QuoteIdentifier(s.config.Username), pq.QuoteIdentifier(s.config.schema))); err != nil {
-			return err
-		}
-	}
-
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
@@ -257,6 +245,10 @@ func (s *PostgresStore) Stop() error {
 }
 
 func (s *PostgresStore) Reset() error {
+	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -274,7 +266,10 @@ func (w *PostgresStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Co
 func (w *PostgresStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
-	tx, err := w.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
+	defer cancel()
+
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -507,13 +502,14 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
-			&lastSortId, // keep track of the last sort id
+			&record.SortId,
 		); err != nil {
 			return nil, err
 		}
 
-		rowsReturned++
 		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
 	}
 
 	return &types.Result{

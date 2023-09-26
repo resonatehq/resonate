@@ -1,10 +1,12 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -177,7 +179,8 @@ const (
 )
 
 type Config struct {
-	Path string
+	Path      string
+	TxTimeout time.Duration
 }
 
 type SqliteStore struct {
@@ -236,7 +239,10 @@ func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Comp
 func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
-	tx, err := w.db.Begin()
+	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
+	defer cancel()
+
+	tx, err := w.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -469,13 +475,14 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
-			&lastSortId, // keep track of the last sort id
+			&record.SortId,
 		); err != nil {
 			return nil, err
 		}
 
-		rowsReturned++
 		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
 	}
 
 	return &types.Result{

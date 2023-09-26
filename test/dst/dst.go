@@ -81,7 +81,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// test loop
 	for t := int64(0); t < d.config.Ticks; t++ {
-		for _, req := range generator.Generate(r, t, d.config.Reqs()) {
+		for _, req := range generator.Generate(r, t, d.config.Reqs(), model.cursors) {
 			req := req
 			reqTime := t
 			api.Enqueue(&bus.SQE[types.Request, types.Response]{
