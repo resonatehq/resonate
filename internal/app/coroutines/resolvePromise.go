@@ -30,12 +30,6 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 								Id: req.ResolvePromise.Id,
 							},
 						},
-						{
-							Kind: types.StoreReadSubscriptions,
-							ReadSubscriptions: &types.ReadSubscriptionsCommand{
-								PromiseIds: []string{req.ResolvePromise.Id},
-							},
-						},
 					},
 				},
 			},
@@ -49,11 +43,8 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
-			util.Assert(len(completion.Store.Results) == 2, "completion must contain two results")
 
 			result := completion.Store.Results[0].ReadPromise
-			records := completion.Store.Results[1].ReadSubscriptions.Records
-
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
@@ -73,7 +64,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 
 				if p.State == promise.Pending {
 					if t >= p.Timeout {
-						s.Add(TimeoutPromise(t, p, records, ResolvePromise(t, req, res), func(t int64, err error) {
+						s.Add(TimeoutPromise(t, p, ResolvePromise(t, req, res), func(t int64, err error) {
 							if err != nil {
 								slog.Error("failed to timeout promise", "req", req, "err", err)
 								res(t, nil, err)
@@ -102,55 +93,41 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 							}, nil)
 						}))
 					} else {
-						commands := []*types.Command{
-							{
-								Kind: types.StoreUpdatePromise,
-								UpdatePromise: &types.UpdatePromiseCommand{
-									Id:          req.ResolvePromise.Id,
-									State:       promise.Resolved,
-									Value:       req.ResolvePromise.Value,
-									CompletedOn: t,
-								},
-							},
-							{
-								Kind: types.StoreDeleteTimeout,
-								DeleteTimeout: &types.DeleteTimeoutCommand{
-									Id: req.ResolvePromise.Id,
-								},
-							},
-							{
-								Kind: types.StoreDeleteSubscriptions,
-								DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
-									PromiseId: req.ResolvePromise.Id,
-								},
-							},
-						}
-
-						for _, record := range records {
-							commands = append(commands, &types.Command{
-								Kind: types.StoreCreateNotification,
-								CreateNotification: &types.CreateNotificationCommand{
-									Id:          record.Id,
-									PromiseId:   record.PromiseId,
-									Url:         record.Url,
-									RetryPolicy: record.RetryPolicy,
-									Time:        t,
-								},
-							})
-						}
-
 						submission := &types.Submission{
 							Kind: types.Store,
 							Store: &types.StoreSubmission{
 								Transaction: &types.Transaction{
-									Commands: commands,
+									Commands: []*types.Command{
+										{
+											Kind: types.StoreUpdatePromise,
+											UpdatePromise: &types.UpdatePromiseCommand{
+												Id:          req.ResolvePromise.Id,
+												State:       promise.Resolved,
+												Value:       req.ResolvePromise.Value,
+												CompletedOn: t,
+											},
+										},
+										{
+											Kind: types.StoreCreateNotifications,
+											CreateNotifications: &types.CreateNotificationsCommand{
+												PromiseId: req.ResolvePromise.Id,
+												Time:      t,
+											},
+										},
+										{
+											Kind: types.StoreDeleteSubscriptions,
+											DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+												PromiseId: req.ResolvePromise.Id,
+											},
+										},
+									},
 								},
 							},
 						}
 
 						c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 							if err != nil {
-								slog.Error("failed to update state", "req", req, "err", err)
+								slog.Error("failed to update promise", "req", req, "err", err)
 								res(t, nil, err)
 								return
 							}

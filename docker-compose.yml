@@ -42,6 +42,8 @@ services:
     command:
     - dst
     - run
+    - --aio-store
+    - postgres
     - --aio-store-postgres-host
     - postgres-dst
     - --aio-store-postgres-username
