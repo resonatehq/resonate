@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -84,7 +85,8 @@ const (
 		promises
 	WHERE
 		(? IS NULL OR sort_id < ?) AND
-		(state & ? != 0)
+		state & ? != 0 AND
+		id LIKE ?
 	ORDER BY
 		sort_id DESC
 	LIMIT
@@ -508,6 +510,12 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 }
 
 func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
+	util.Assert(cmd.Q != "", "query cannot be empty")
+	util.Assert(cmd.States != nil, "states cannot be empty")
+
+	// convert query
+	query := strings.ReplaceAll(cmd.Q, "*", "%")
+
 	// convert list of state to bit mask
 	mask := 0
 	for _, state := range cmd.States {
@@ -515,7 +523,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, query, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

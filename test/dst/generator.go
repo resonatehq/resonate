@@ -125,6 +125,14 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request
 	limit := r.Intn(10)
 	states := []promise.State{}
 
+	var query string
+	switch r.Intn(2) {
+	case 0:
+		query = fmt.Sprintf("*%d", r.Intn(10))
+	default:
+		query = fmt.Sprintf("%d*", r.Intn(10))
+	}
+
 	for i := 0; i < r.Intn(5); i++ {
 		switch r.Intn(5) {
 		case 0:
@@ -143,7 +151,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request
 	return &types.Request{
 		Kind: types.SearchPromises,
 		SearchPromises: &types.SearchPromisesRequest{
-			Q:      "*",
+			Q:      query,
 			States: states,
 			Limit:  limit,
 		},
