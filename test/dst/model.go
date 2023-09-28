@@ -2,6 +2,8 @@ package dst
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -59,11 +61,6 @@ func (m *Model) ValidateReadPromise(req *types.Request, res *types.Response) err
 }
 
 func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) error {
-	states := map[promise.State]bool{}
-	for _, state := range req.SearchPromises.States {
-		states[state] = true
-	}
-
 	if res.SearchPromises.Cursor != nil {
 		m.addCursor(&types.Request{
 			Kind:           types.SearchPromises,
@@ -71,7 +68,18 @@ func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) 
 		})
 	}
 
+	regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Q, "*", ".*")))
+
+	states := map[promise.State]bool{}
+	for _, state := range req.SearchPromises.States {
+		states[state] = true
+	}
+
 	for _, p := range res.SearchPromises.Promises {
+		if !regex.MatchString(p.Id) {
+			return fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Q)
+		}
+
 		if _, ok := states[p.State]; !ok {
 			return fmt.Errorf("unexpected state %s, searched for %s", p.State, req.SearchPromises.States)
 		}

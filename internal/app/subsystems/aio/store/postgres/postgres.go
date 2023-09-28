@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -92,11 +93,12 @@ const (
 		promises
 	WHERE
 		($1::int IS NULL OR sort_id < $1) AND
-		(state & $2 != 0)
+		state & $2 != 0 AND
+		id LIKE $3
 	ORDER BY
 		sort_id DESC
 	LIMIT
-		$3`
+		$4`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -533,6 +535,12 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
+	util.Assert(cmd.Q != "", "query cannot be empty")
+	util.Assert(cmd.States != nil, "states cannot be empty")
+
+	// convert query
+	query := strings.ReplaceAll(cmd.Q, "*", "%")
+
 	// convert list of state to bit mask
 	mask := 0
 	for _, state := range cmd.States {
@@ -540,7 +548,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, query, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
