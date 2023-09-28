@@ -8,6 +8,7 @@ type Subscription struct {
 	Url         string       `json:"url"`
 	RetryPolicy *RetryPolicy `json:"retryPolicy"`
 	CreatedOn   int64        `json:"createdOn"`
+	SortId      int64        `json:"-"` // unexported
 }
 
 type RetryPolicy struct {

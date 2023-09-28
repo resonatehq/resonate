@@ -176,7 +176,9 @@ type ReadSubscriptionCommand struct {
 }
 
 type ReadSubscriptionsCommand struct {
-	PromiseIds []string
+	PromiseId string
+	Limit     int
+	SortId    *int64
 }
 
 type CreateSubscriptionCommand struct {
@@ -200,6 +202,7 @@ type DeleteSubscriptionsCommand struct {
 
 type QuerySubscriptionsResult struct {
 	RowsReturned int64
+	LastSortId   int64
 	Records      []*subscription.SubscriptionRecord
 }
 

@@ -89,8 +89,8 @@ func SearchPromises(t int64, req *types.Request, res func(int64, *types.Response
 				Kind: types.SearchPromises,
 				SearchPromises: &types.SearchPromisesResponse{
 					Status:   types.ResponseOK,
-					Promises: promises,
 					Cursor:   cursor,
+					Promises: promises,
 				},
 			}, nil)
 		})

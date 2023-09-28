@@ -8,6 +8,7 @@ type SubscriptionRecord struct {
 	Url         string
 	RetryPolicy []byte
 	CreatedOn   int64
+	SortId      int64
 }
 
 func (r *SubscriptionRecord) Subscription() (*Subscription, error) {
@@ -22,5 +23,6 @@ func (r *SubscriptionRecord) Subscription() (*Subscription, error) {
 		Url:         r.Url,
 		RetryPolicy: retryPolicy,
 		CreatedOn:   r.CreatedOn,
+		SortId:      r.SortId,
 	}, nil
 }

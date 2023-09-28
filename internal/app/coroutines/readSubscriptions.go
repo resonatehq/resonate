@@ -20,7 +20,9 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 						{
 							Kind: types.StoreReadSubscriptions,
 							ReadSubscriptions: &types.ReadSubscriptionsCommand{
-								PromiseIds: []string{req.ReadSubscriptions.PromiseId},
+								PromiseId: req.ReadSubscriptions.PromiseId,
+								Limit:     req.ReadSubscriptions.Limit,
+								SortId:    req.ReadSubscriptions.SortId,
 							},
 						},
 					},
@@ -37,10 +39,10 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
 
-			records := completion.Store.Results[0].ReadSubscriptions.Records
+			result := completion.Store.Results[0].ReadSubscriptions
 			subscriptions := []*subscription.Subscription{}
 
-			for _, record := range records {
+			for _, record := range result.Records {
 				subscription, err := record.Subscription()
 				if err != nil {
 					slog.Warn("failed to parse subscription record", "record", record, "err", err)
@@ -50,10 +52,23 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 				subscriptions = append(subscriptions, subscription)
 			}
 
+			// set cursor only if there are more results
+			var cursor *types.Cursor[types.ReadSubscriptionsRequest]
+			if result.RowsReturned == int64(req.ReadSubscriptions.Limit) {
+				cursor = &types.Cursor[types.ReadSubscriptionsRequest]{
+					Next: &types.ReadSubscriptionsRequest{
+						PromiseId: req.ReadSubscriptions.PromiseId,
+						Limit:     req.ReadSubscriptions.Limit,
+						SortId:    &result.LastSortId,
+					},
+				}
+			}
+
 			res(t, &types.Response{
 				Kind: types.ReadSubscriptions,
 				ReadSubscriptions: &types.ReadSubscriptionsResponse{
 					Status:        types.ResponseOK,
+					Cursor:        cursor,
 					Subscriptions: subscriptions,
 				},
 			}, nil)

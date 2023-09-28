@@ -39,8 +39,8 @@ type ReadPromiseResponse struct {
 
 type SearchPromisesResponse struct {
 	Status   ResponseStatus                 `json:"status"`
-	Promises []*promise.Promise             `json:"promises,omitempty"`
 	Cursor   *Cursor[SearchPromisesRequest] `json:"cursor,omitempty"`
+	Promises []*promise.Promise             `json:"promises,omitempty"`
 }
 
 type CreatePromiseResponse struct {
@@ -69,8 +69,9 @@ type CompletePromiseResponse struct {
 }
 
 type ReadSubscriptionsResponse struct {
-	Status        ResponseStatus               `json:"status"`
-	Subscriptions []*subscription.Subscription `json:"subscriptions,omitempty"`
+	Status        ResponseStatus                    `json:"status"`
+	Cursor        *Cursor[ReadSubscriptionsRequest] `json:"cursor,omitempty"`
+	Subscriptions []*subscription.Subscription      `json:"subscriptions,omitempty"`
 }
 
 type CreateSubscriptionResponse struct {
@@ -92,8 +93,9 @@ func (r *Response) String() string {
 		)
 	case SearchPromises:
 		return fmt.Sprintf(
-			"SearchPromises(status=%d, promises=%s)",
+			"SearchPromises(status=%d, cursor=%s, promises=%s)",
 			r.SearchPromises.Status,
+			r.SearchPromises.Cursor,
 			r.SearchPromises.Promises,
 		)
 	case CreatePromise:

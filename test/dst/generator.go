@@ -261,12 +261,14 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *types.Reques
 }
 
 func (g *Generator) GenerateReadSubscriptions(r *rand.Rand, t int64) *types.Request {
+	limit := r.Intn(10)
 	id := g.idSet[r.Intn(len(g.idSet))]
 
 	return &types.Request{
 		Kind: types.ReadSubscriptions,
 		ReadSubscriptions: &types.ReadSubscriptionsRequest{
 			PromiseId: id,
+			Limit:     limit,
 		},
 	}
 }
