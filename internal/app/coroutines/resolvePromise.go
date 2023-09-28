@@ -127,7 +127,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 
 						c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 							if err != nil {
-								slog.Error("failed to update state", "req", req, "err", err)
+								slog.Error("failed to update promise", "req", req, "err", err)
 								res(t, nil, err)
 								return
 							}
