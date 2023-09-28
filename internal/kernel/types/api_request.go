@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -63,6 +64,8 @@ type CompletePromiseRequest struct {
 
 type ReadSubscriptionsRequest struct {
 	PromiseId string `json:"promiseId"`
+	Limit     int    `json:"limit"`
+	SortId    *int64 `json:"sortId"`
 }
 
 type CreateSubscriptionRequest struct {
@@ -85,11 +88,17 @@ func (r *Request) String() string {
 			r.ReadPromise.Id,
 		)
 	case SearchPromises:
+		sortId := "<nil>"
+		if r.SearchPromises.SortId != nil {
+			sortId = strconv.FormatInt(*r.SearchPromises.SortId, 10)
+		}
+
 		return fmt.Sprintf(
-			"SearchPromises(q=%s, states=%s, limit=%d)",
+			"SearchPromises(q=%s, states=%s, limit=%d, sortId=%s)",
 			r.SearchPromises.Q,
 			r.SearchPromises.States,
 			r.SearchPromises.Limit,
+			sortId,
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
@@ -124,9 +133,16 @@ func (r *Request) String() string {
 			r.CompletePromise.State,
 		)
 	case ReadSubscriptions:
+		sortId := "<nil>"
+		if r.ReadSubscriptions.SortId != nil {
+			sortId = strconv.FormatInt(*r.ReadSubscriptions.SortId, 10)
+		}
+
 		return fmt.Sprintf(
-			"ReadSubscriptions(promiseId=%s)",
+			"ReadSubscriptions(promiseId=%s, limit=%d, sortId=%s)",
 			r.ReadSubscriptions.PromiseId,
+			r.ReadSubscriptions.Limit,
+			sortId,
 		)
 	case CreateSubscription:
 		return fmt.Sprintf(

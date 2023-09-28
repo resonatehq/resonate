@@ -72,3 +72,8 @@ func (c *Cursor[T]) UnmarshalJSON(data []byte) error {
 
 	return c.Decode(tokenString)
 }
+
+func (c *Cursor[T]) String() string {
+	tokenString, _ := c.Encode()
+	return tokenString
+}

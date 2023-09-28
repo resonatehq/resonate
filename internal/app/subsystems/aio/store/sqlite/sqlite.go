@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"os"
 	"time"
 
@@ -40,7 +39,7 @@ const (
 		completed_on INTEGER
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_id ON promises(id);
+	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -51,11 +50,14 @@ const (
 	CREATE TABLE IF NOT EXISTS subscriptions (
 		id           TEXT,
 		promise_id   TEXT,
+		sort_id      INTEGER PRIMARY KEY AUTOINCREMENT,
 		url          TEXT,
 		retry_policy BLOB,
 		created_on   INTEGER,
-		PRIMARY KEY(id, promise_id)
+		UNIQUE(id, promise_id)
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_subscriptions_id ON subscriptions(id);
 
 	CREATE TABLE IF NOT EXISTS notifications (
 		id           TEXT,
@@ -140,13 +142,16 @@ const (
 
 	SUBSCRIPTION_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, promise_id, url, retry_policy, created_on
+		id, promise_id, url, retry_policy, created_on, sort_id
 	FROM
 		subscriptions
 	WHERE
-		promise_id IN (%s)
+		(? IS NULL OR sort_id < ?) AND
+		promise_id = ?
 	ORDER BY
-		id, promise_id`
+		sort_id DESC
+	LIMIT
+		?`
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO subscriptions
@@ -173,7 +178,7 @@ const (
 	FROM
 		notifications
 	ORDER BY
-		time ASC, id, promise_id
+		time ASC, promise_id, id
 	LIMIT ?`
 
 	NOTIFICATION_INSERT_STATEMENT = `
@@ -741,24 +746,8 @@ func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscrip
 }
 
 func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
-	util.Assert(len(cmd.PromiseIds) > 0, "expected a promise id")
-
 	// select
-	var placeholders string
-	promiseIds := make([]interface{}, len(cmd.PromiseIds))
-
-	for i, promiseId := range cmd.PromiseIds {
-		if i == len(cmd.PromiseIds)-1 {
-			placeholders += "?"
-		} else {
-			placeholders += "?,"
-		}
-
-		promiseIds[i] = promiseId
-	}
-
-	stmt := fmt.Sprintf(SUBSCRIPTION_SELECT_ALL_STATEMENT, placeholders)
-	rows, err := tx.Query(stmt, promiseIds...)
+	rows, err := tx.Query(SUBSCRIPTION_SELECT_ALL_STATEMENT, cmd.SortId, cmd.SortId, cmd.PromiseId, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -766,21 +755,24 @@ func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 
 	rowsReturned := int64(0)
 	var records []*subscription.SubscriptionRecord
+	var lastSortId int64
 
 	for rows.Next() {
 		record := &subscription.SubscriptionRecord{}
-		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.CreatedOn); err != nil {
+		if err := rows.Scan(&record.Id, &record.PromiseId, &record.Url, &record.RetryPolicy, &record.CreatedOn, &record.SortId); err != nil {
 			return nil, err
 		}
 
-		rowsReturned++
 		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
 	}
 
 	return &types.Result{
 		Kind: types.StoreReadSubscriptions,
 		ReadSubscriptions: &types.QuerySubscriptionsResult{
 			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
 			Records:      records,
 		},
 	}, nil

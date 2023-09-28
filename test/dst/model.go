@@ -114,6 +114,13 @@ func (m *Model) ValidateCompletePromise(req *types.Request, res *types.Response)
 }
 
 func (m *Model) ValidateReadSubscriptions(req *types.Request, res *types.Response) error {
+	if res.ReadSubscriptions.Cursor != nil {
+		m.addCursor(&types.Request{
+			Kind:              types.ReadSubscriptions,
+			ReadSubscriptions: res.ReadSubscriptions.Cursor.Next,
+		})
+	}
+
 	pm := m.promises.Get(req.ReadSubscriptions.PromiseId)
 	return pm.readSubscriptions(req.ReadSubscriptions, res.ReadSubscriptions)
 }
@@ -325,6 +332,12 @@ func (m *PromiseModel) verifyPromise(promise *promise.Promise) error {
 }
 
 func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, res *types.ReadSubscriptionsResponse) error {
+	for _, s := range res.Subscriptions {
+		if req.SortId != nil && *req.SortId <= s.SortId {
+			return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, s.SortId)
+		}
+	}
+
 	switch res.Status {
 	case types.ResponseOK:
 	default:

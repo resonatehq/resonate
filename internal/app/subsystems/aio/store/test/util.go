@@ -1680,10 +1680,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
 				},
 			},
 		},
@@ -1702,19 +1703,21 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   2,
 				},
 			},
 		},
@@ -1739,16 +1742,17 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
 				},
 			},
 			{
 				Kind: types.StoreDeleteSubscription,
 				DeleteSubscription: &types.DeleteSubscriptionCommand{
-					Id:        "foo",
+					Id:        "a",
 					PromiseId: "foo",
 				},
 			},
@@ -1774,17 +1778,18 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
-					PromiseId:   "bar",
-					Url:         "https://baz.com",
+					Id:          "a",
+					PromiseId:   "foo",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
 				Kind: types.StoreReadSubscription,
 				ReadSubscription: &types.ReadSubscriptionCommand{
-					Id:        "foo",
-					PromiseId: "bar",
+					Id:        "a",
+					PromiseId: "foo",
 				},
 			},
 		},
@@ -1801,10 +1806,11 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*subscription.SubscriptionRecord{
 						{
-							Id:          "foo",
-							PromiseId:   "bar",
-							Url:         "https://baz.com",
+							Id:          "a",
+							PromiseId:   "foo",
+							Url:         "https://foo.com/a",
 							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							CreatedOn:   1,
 						},
 					},
 				},
@@ -1817,38 +1823,73 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "bar",
-					PromiseId:   "bar",
-					Url:         "https://bar.com",
+					Id:          "b",
+					PromiseId:   "foo",
+					Url:         "https://foo.com/b",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
+					CreatedOn:   2,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "baz",
-					PromiseId:   "baz",
-					Url:         "https://baz.com",
+					Id:          "a",
+					PromiseId:   "bar",
+					Url:         "https://bar.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
+					CreatedOn:   3,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "b",
+					PromiseId:   "bar",
+					Url:         "https://bar.com/b",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 4, Attempts: 4},
+					CreatedOn:   4,
 				},
 			},
 			{
 				Kind: types.StoreReadSubscriptions,
 				ReadSubscriptions: &types.ReadSubscriptionsCommand{
-					PromiseIds: []string{"foo", "bar", "baz"},
+					PromiseId: "foo",
+					Limit:     4,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseId: "bar",
+					Limit:     1,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseId: "bar",
+					Limit:     1,
+					SortId:    int64ToPointer(4),
 				},
 			},
 		},
 		expected: []*types.Result{
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.AlterSubscriptionsResult{
@@ -1870,25 +1911,58 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreReadSubscriptions,
 				ReadSubscriptions: &types.QuerySubscriptionsResult{
-					RowsReturned: 3,
+					RowsReturned: 2,
+					LastSortId:   1,
 					Records: []*subscription.SubscriptionRecord{
 						{
-							Id:          "bar",
-							PromiseId:   "bar",
-							Url:         "https://bar.com",
-							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
-						},
-						{
-							Id:          "baz",
-							PromiseId:   "baz",
-							Url:         "https://baz.com",
-							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-						},
-						{
-							Id:          "foo",
+							Id:          "b",
 							PromiseId:   "foo",
-							Url:         "https://foo.com",
+							Url:         "https://foo.com/b",
+							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
+							CreatedOn:   2,
+							SortId:      2,
+						},
+						{
+							Id:          "a",
+							PromiseId:   "foo",
+							Url:         "https://foo.com/a",
 							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							CreatedOn:   1,
+							SortId:      1,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 1,
+					LastSortId:   4,
+					Records: []*subscription.SubscriptionRecord{
+						{
+							Id:          "b",
+							PromiseId:   "bar",
+							Url:         "https://bar.com/b",
+							RetryPolicy: []byte("{\"delay\":4,\"attempts\":4}"),
+							CreatedOn:   4,
+							SortId:      4,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 1,
+					LastSortId:   3,
+					Records: []*subscription.SubscriptionRecord{
+						{
+							Id:          "a",
+							PromiseId:   "bar",
+							Url:         "https://bar.com/a",
+							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
+							CreatedOn:   3,
+							SortId:      3,
 						},
 					},
 				},
@@ -1914,10 +1988,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
@@ -1936,10 +2011,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "bar",
+					Id:          "a",
 					PromiseId:   "bar",
-					Url:         "https://bar.com",
+					Url:         "https://bar.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
+					CreatedOn:   2,
 				},
 			},
 			{
@@ -1958,10 +2034,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "baz",
+					Id:          "a",
 					PromiseId:   "baz",
-					Url:         "https://baz.com",
+					Url:         "https://baz.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
+					CreatedOn:   3,
 				},
 			},
 			{
@@ -1991,7 +2068,22 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreReadSubscriptions,
 				ReadSubscriptions: &types.ReadSubscriptionsCommand{
-					PromiseIds: []string{"foo", "bar", "baz"},
+					PromiseId: "foo",
+					Limit:     3,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseId: "bar",
+					Limit:     3,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseId: "baz",
+					Limit:     3,
 				},
 			},
 			{
@@ -2064,30 +2156,42 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
-							Id:          "bar",
+							Id:          "a",
 							PromiseId:   "bar",
-							Url:         "https://bar.com",
+							Url:         "https://bar.com/a",
 							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 							Time:        2,
 							Attempt:     0,
 						},
 						{
-							Id:          "baz",
+							Id:          "a",
 							PromiseId:   "baz",
-							Url:         "https://baz.com",
+							Url:         "https://baz.com/a",
 							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
 							Time:        2,
 							Attempt:     0,
 						},
 						{
-							Id:          "foo",
+							Id:          "a",
 							PromiseId:   "foo",
-							Url:         "https://foo.com",
+							Url:         "https://foo.com/a",
 							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 							Time:        2,
 							Attempt:     0,
 						},
 					},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 0,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 0,
 				},
 			},
 			{
@@ -2159,28 +2263,31 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "bar",
+					Id:          "b",
 					PromiseId:   "foo",
-					Url:         "https://bar.com",
+					Url:         "https://foo.com/b",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
+					CreatedOn:   2,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "baz",
+					Id:          "c",
 					PromiseId:   "foo",
-					Url:         "https://baz.com",
+					Url:         "https://foo.com/c",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
+					CreatedOn:   3,
 				},
 			},
 			{
@@ -2252,26 +2359,26 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
-							Id:          "bar",
+							Id:          "a",
 							PromiseId:   "foo",
-							Url:         "https://bar.com",
+							Url:         "https://foo.com/a",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							Time:        2,
+							Attempt:     0,
+						},
+						{
+							Id:          "b",
+							PromiseId:   "foo",
+							Url:         "https://foo.com/b",
 							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
 							Time:        2,
 							Attempt:     0,
 						},
 						{
-							Id:          "baz",
+							Id:          "c",
 							PromiseId:   "foo",
-							Url:         "https://baz.com",
+							Url:         "https://foo.com/c",
 							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-							Time:        2,
-							Attempt:     0,
-						},
-						{
-							Id:          "foo",
-							PromiseId:   "foo",
-							Url:         "https://foo.com",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 							Time:        2,
 							Attempt:     0,
 						},
@@ -2299,10 +2406,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
@@ -2327,7 +2435,7 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreUpdateNotification,
 				UpdateNotification: &types.UpdateNotificationCommand{
-					Id:        "foo",
+					Id:        "a",
 					PromiseId: "foo",
 					Time:      4,
 					Attempt:   1,
@@ -2377,9 +2485,9 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*notification.NotificationRecord{
 						{
-							Id:          "foo",
+							Id:          "a",
 							PromiseId:   "foo",
-							Url:         "https://foo.com",
+							Url:         "https://foo.com/a",
 							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
 							Time:        4,
 							Attempt:     1,
@@ -2408,10 +2516,11 @@ var TestCases = []*testCase{
 			{
 				Kind: types.StoreCreateSubscription,
 				CreateSubscription: &types.CreateSubscriptionCommand{
-					Id:          "foo",
+					Id:          "a",
 					PromiseId:   "foo",
-					Url:         "https://foo.com",
+					Url:         "https://foo.com/a",
 					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+					CreatedOn:   1,
 				},
 			},
 			{
@@ -2434,22 +2543,10 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreDeleteSubscriptions,
-				DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
-					PromiseId: "foo",
-				},
-			},
-			{
 				Kind: types.StoreDeleteNotification,
 				DeleteNotification: &types.DeleteNotificationCommand{
-					Id:        "foo",
+					Id:        "a",
 					PromiseId: "foo",
-				},
-			},
-			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
-					PromiseIds: []string{"foo"},
 				},
 			},
 			{
@@ -2485,21 +2582,9 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreDeleteSubscriptions,
-				DeleteSubscriptions: &types.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
 				Kind: types.StoreDeleteNotification,
 				DeleteNotification: &types.AlterNotificationsResult{
 					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
-					RowsReturned: 0,
 				},
 			},
 			{
