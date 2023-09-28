@@ -1690,7 +1690,7 @@ var TestCases = []*testCase{
 		expected: []*types.Result{
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1721,13 +1721,13 @@ var TestCases = []*testCase{
 		expected: []*types.Result{
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1756,13 +1756,13 @@ var TestCases = []*testCase{
 		expected: []*types.Result{
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
 				Kind: types.StoreDeleteSubscription,
-				DeleteSubscription: &types.AlterSubscriptionResult{
+				DeleteSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1791,7 +1791,7 @@ var TestCases = []*testCase{
 		expected: []*types.Result{
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1851,19 +1851,19 @@ var TestCases = []*testCase{
 		expected: []*types.Result{
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
 				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionResult{
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1896,172 +1896,310 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "CreateNotification",
+		name: "TimeoutPromises",
 		commands: []*types.Command{
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "foo",
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
 					Id:          "foo",
 					PromiseId:   "foo",
 					Url:         "https://foo.com",
-					Time:        0,
-					RetryPolicy: []byte("{}"),
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "CreateNotificationTwice",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
-					Id:          "foo",
-					PromiseId:   "foo",
-					Url:         "https://foo.com",
-					Time:        0,
-					RetryPolicy: []byte("{}"),
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
 				},
 			},
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
-					Id:          "foo",
-					PromiseId:   "foo",
-					Url:         "https://foo.com",
-					Time:        1,
-					RetryPolicy: []byte("{}"),
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "bar",
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "UpdateNotification",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
-					Id:          "foo",
-					PromiseId:   "foo",
-					Url:         "https://foo.com",
-					Time:        0,
-					RetryPolicy: []byte("{}"),
-				},
-			},
-			{
-				Kind: types.StoreUpdateNotification,
-				UpdateNotification: &types.UpdateNotificationCommand{
-					Id:        "foo",
-					PromiseId: "foo",
-					Time:      1,
-					Attempt:   1,
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreUpdateNotification,
-				UpdateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "DeleteNotification",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
-					Id:          "foo",
-					PromiseId:   "foo",
-					Url:         "https://foo.com",
-					Time:        0,
-					RetryPolicy: []byte("{}"),
-				},
-			},
-			{
-				Kind: types.StoreDeleteNotification,
-				DeleteNotification: &types.DeleteNotificationCommand{
-					Id:        "foo",
-					PromiseId: "foo",
-				},
-			},
-		},
-		expected: []*types.Result{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: types.StoreDeleteNotification,
-				DeleteNotification: &types.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "ReadNotification",
-		commands: []*types.Command{
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
-					Id:          "foo",
-					PromiseId:   "foo",
-					Url:         "https://foo.com",
-					Time:        0,
-					RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-				},
-			},
-			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
 					Id:          "bar",
 					PromiseId:   "bar",
 					Url:         "https://bar.com",
-					Time:        1,
-					RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
+					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
 				},
 			},
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.CreateNotificationCommand{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "baz",
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
 					Id:          "baz",
 					PromiseId:   "baz",
 					Url:         "https://baz.com",
-					Time:        2,
-					RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
+					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
+				},
+			},
+			{
+				Kind: types.StoreTimeoutCreateNotifications,
+				TimeoutCreateNotifications: &types.TimeoutCreateNotificationsCommand{
+					Time: 2,
+				},
+			},
+			{
+				Kind: types.StoreTimeoutDeleteSubscriptions,
+				TimeoutDeleteSubscriptions: &types.TimeoutDeleteSubscriptionsCommand{
+					Time: 2,
+				},
+			},
+			{
+				Kind: types.StoreTimeoutPromises,
+				TimeoutPromises: &types.TimeoutPromisesCommand{
+					Time: 2,
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.ReadNotificationsCommand{
+					N: 5,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseIds: []string{"foo", "bar", "baz"},
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.SearchPromisesCommand{
+					Q:      "*",
+					States: []promise.State{promise.Timedout},
+					Limit:  5,
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreTimeoutCreateNotifications,
+				TimeoutCreateNotifications: &types.AlterNotificationsResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: types.StoreTimeoutDeleteSubscriptions,
+				TimeoutDeleteSubscriptions: &types.AlterSubscriptionsResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: types.StoreTimeoutPromises,
+				TimeoutPromises: &types.AlterPromisesResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.QueryNotificationsResult{
+					RowsReturned: 3,
+					Records: []*notification.NotificationRecord{
+						{
+							Id:          "bar",
+							PromiseId:   "bar",
+							Url:         "https://bar.com",
+							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
+							Time:        2,
+							Attempt:     0,
+						},
+						{
+							Id:          "baz",
+							PromiseId:   "baz",
+							Url:         "https://baz.com",
+							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
+							Time:        2,
+							Attempt:     0,
+						},
+						{
+							Id:          "foo",
+							PromiseId:   "foo",
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							Time:        2,
+							Attempt:     0,
+						},
+					},
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 0,
+				},
+			},
+			{
+				Kind: types.StoreSearchPromises,
+				SearchPromises: &types.QueryPromisesResult{
+					RowsReturned: 3,
+					LastSortId:   1,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "baz",
+							State:        8,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       3,
+						},
+						{
+							Id:           "bar",
+							State:        8,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       2,
+						},
+						{
+							Id:           "foo",
+							State:        8,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							CompletedOn:  int64ToPointer(2),
+							Tags:         []byte("{}"),
+							SortId:       1,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "CreateNotifications",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "foo",
+					Timeout: 1,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "bar",
+					PromiseId:   "foo",
+					Url:         "https://bar.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "baz",
+					PromiseId:   "foo",
+					Url:         "https://baz.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "foo",
+					State: 2,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.CreateNotificationsCommand{
+					PromiseId: "foo",
+					Time:      2,
 				},
 			},
 			{
@@ -2073,21 +2211,39 @@ var TestCases = []*testCase{
 		},
 		expected: []*types.Result{
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotification,
-				CreateNotification: &types.AlterNotificationsResult{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
 					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.AlterNotificationsResult{
+					RowsAffected: 3,
 				},
 			},
 			{
@@ -2096,30 +2252,260 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
-							Id:          "foo",
-							PromiseId:   "foo",
-							Url:         "https://foo.com",
-							Time:        0,
-							Attempt:     0,
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-						},
-						{
 							Id:          "bar",
-							PromiseId:   "bar",
+							PromiseId:   "foo",
 							Url:         "https://bar.com",
-							Time:        1,
-							Attempt:     0,
 							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
+							Time:        2,
+							Attempt:     0,
 						},
 						{
 							Id:          "baz",
-							PromiseId:   "baz",
+							PromiseId:   "foo",
 							Url:         "https://baz.com",
+							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
 							Time:        2,
 							Attempt:     0,
-							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
+						},
+						{
+							Id:          "foo",
+							PromiseId:   "foo",
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							Time:        2,
+							Attempt:     0,
 						},
 					},
+				},
+			},
+		},
+	},
+	{
+		name: "UpdateNotification",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "foo",
+					Timeout: 1,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "foo",
+					State: 2,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.CreateNotificationsCommand{
+					PromiseId: "foo",
+					Time:      2,
+				},
+			},
+			{
+				Kind: types.StoreUpdateNotification,
+				UpdateNotification: &types.UpdateNotificationCommand{
+					Id:        "foo",
+					PromiseId: "foo",
+					Time:      4,
+					Attempt:   1,
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.ReadNotificationsCommand{
+					N: 1,
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.AlterNotificationsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdateNotification,
+				UpdateNotification: &types.AlterNotificationsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.QueryNotificationsResult{
+					RowsReturned: 1,
+					Records: []*notification.NotificationRecord{
+						{
+							Id:          "foo",
+							PromiseId:   "foo",
+							Url:         "https://foo.com",
+							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
+							Time:        4,
+							Attempt:     1,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "DeleteNotification",
+		commands: []*types.Command{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.CreatePromiseCommand{
+					Id:      "foo",
+					Timeout: 1,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.CreateSubscriptionCommand{
+					Id:          "foo",
+					PromiseId:   "foo",
+					Url:         "https://foo.com",
+					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.UpdatePromiseCommand{
+					Id:    "foo",
+					State: 2,
+					Value: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					CompletedOn: 2,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.CreateNotificationsCommand{
+					PromiseId: "foo",
+					Time:      2,
+				},
+			},
+			{
+				Kind: types.StoreDeleteSubscriptions,
+				DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: types.StoreDeleteNotification,
+				DeleteNotification: &types.DeleteNotificationCommand{
+					Id:        "foo",
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+					PromiseIds: []string{"foo"},
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.ReadNotificationsCommand{
+					N: 1,
+				},
+			},
+		},
+		expected: []*types.Result{
+			{
+				Kind: types.StoreCreatePromise,
+				CreatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateSubscription,
+				CreateSubscription: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreUpdatePromise,
+				UpdatePromise: &types.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreCreateNotifications,
+				CreateNotifications: &types.AlterNotificationsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreDeleteSubscriptions,
+				DeleteSubscriptions: &types.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreDeleteNotification,
+				DeleteNotification: &types.AlterNotificationsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: types.StoreReadSubscriptions,
+				ReadSubscriptions: &types.QuerySubscriptionsResult{
+					RowsReturned: 0,
+				},
+			},
+			{
+				Kind: types.StoreReadNotifications,
+				ReadNotifications: &types.QueryNotificationsResult{
+					RowsReturned: 0,
 				},
 			},
 		},

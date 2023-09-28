@@ -23,9 +23,12 @@ const (
 	StoreDeleteSubscription
 	StoreDeleteSubscriptions
 	StoreReadNotifications
-	StoreCreateNotification
+	StoreCreateNotifications
 	StoreUpdateNotification
 	StoreDeleteNotification
+	StoreTimeoutPromises
+	StoreTimeoutDeleteSubscriptions
+	StoreTimeoutCreateNotifications
 )
 
 type StoreSubmission struct {
@@ -41,44 +44,52 @@ type Transaction struct {
 }
 
 type Command struct {
-	Kind                StoreKind
-	ReadPromise         *ReadPromiseCommand
-	SearchPromises      *SearchPromisesCommand
-	CreatePromise       *CreatePromiseCommand
-	UpdatePromise       *UpdatePromiseCommand
-	ReadTimeouts        *ReadTimeoutsCommand
-	CreateTimeout       *CreateTimeoutCommand
-	DeleteTimeout       *DeleteTimeoutCommand
-	ReadSubscription    *ReadSubscriptionCommand
-	ReadSubscriptions   *ReadSubscriptionsCommand
-	CreateSubscription  *CreateSubscriptionCommand
-	DeleteSubscription  *DeleteSubscriptionCommand
-	DeleteSubscriptions *DeleteSubscriptionsCommand
-	ReadNotifications   *ReadNotificationsCommand
-	CreateNotification  *CreateNotificationCommand
-	UpdateNotification  *UpdateNotificationCommand
-	DeleteNotification  *DeleteNotificationCommand
+	Kind                       StoreKind
+	ReadPromise                *ReadPromiseCommand
+	SearchPromises             *SearchPromisesCommand
+	CreatePromise              *CreatePromiseCommand
+	UpdatePromise              *UpdatePromiseCommand
+	ReadTimeouts               *ReadTimeoutsCommand
+	CreateTimeout              *CreateTimeoutCommand
+	DeleteTimeout              *DeleteTimeoutCommand
+	ReadSubscription           *ReadSubscriptionCommand
+	ReadSubscriptions          *ReadSubscriptionsCommand
+	CreateSubscription         *CreateSubscriptionCommand
+	DeleteSubscription         *DeleteSubscriptionCommand
+	DeleteSubscriptions        *DeleteSubscriptionsCommand
+	ReadNotifications          *ReadNotificationsCommand
+	CreateNotifications        *CreateNotificationsCommand
+	UpdateNotification         *UpdateNotificationCommand
+	DeleteNotification         *DeleteNotificationCommand
+	TimeoutPromises            *TimeoutPromisesCommand
+	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
+	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
 }
 
 type Result struct {
-	Kind                StoreKind
-	ReadPromise         *QueryPromisesResult
-	SearchPromises      *QueryPromisesResult
-	CreatePromise       *AlterPromisesResult
-	UpdatePromise       *AlterPromisesResult
-	ReadTimeouts        *QueryTimeoutsResult
-	CreateTimeout       *AlterTimeoutsResult
-	DeleteTimeout       *AlterTimeoutsResult
-	ReadSubscription    *QuerySubscriptionsResult
-	ReadSubscriptions   *QuerySubscriptionsResult
-	CreateSubscription  *AlterSubscriptionResult
-	DeleteSubscription  *AlterSubscriptionResult
-	DeleteSubscriptions *AlterSubscriptionResult
-	ReadNotifications   *QueryNotificationsResult
-	CreateNotification  *AlterNotificationsResult
-	UpdateNotification  *AlterNotificationsResult
-	DeleteNotification  *AlterNotificationsResult
+	Kind                       StoreKind
+	ReadPromise                *QueryPromisesResult
+	SearchPromises             *QueryPromisesResult
+	CreatePromise              *AlterPromisesResult
+	UpdatePromise              *AlterPromisesResult
+	ReadTimeouts               *QueryTimeoutsResult
+	CreateTimeout              *AlterTimeoutsResult
+	DeleteTimeout              *AlterTimeoutsResult
+	ReadSubscription           *QuerySubscriptionsResult
+	ReadSubscriptions          *QuerySubscriptionsResult
+	CreateSubscription         *AlterSubscriptionsResult
+	DeleteSubscription         *AlterSubscriptionsResult
+	DeleteSubscriptions        *AlterSubscriptionsResult
+	ReadNotifications          *QueryNotificationsResult
+	CreateNotifications        *AlterNotificationsResult
+	UpdateNotification         *AlterNotificationsResult
+	DeleteNotification         *AlterNotificationsResult
+	TimeoutPromises            *AlterPromisesResult
+	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
+	TimeoutCreateNotifications *AlterNotificationsResult
 }
+
+// Promise commands
 
 type ReadPromiseCommand struct {
 	Id string
@@ -107,6 +118,8 @@ type UpdatePromiseCommand struct {
 	CompletedOn int64
 }
 
+// Promise results
+
 type QueryPromisesResult struct {
 	RowsReturned int64
 	LastSortId   int64
@@ -116,6 +129,8 @@ type QueryPromisesResult struct {
 type AlterPromisesResult struct {
 	RowsAffected int64
 }
+
+// Timeout commands
 
 type ReadTimeoutsCommand struct {
 	N int
@@ -130,6 +145,20 @@ type DeleteTimeoutCommand struct {
 	Id string
 }
 
+type TimeoutPromisesCommand struct {
+	Time int64
+}
+
+type TimeoutDeleteSubscriptionsCommand struct {
+	Time int64
+}
+
+type TimeoutCreateNotificationsCommand struct {
+	Time int64
+}
+
+// Timeout results
+
 type QueryTimeoutsResult struct {
 	RowsReturned int64
 	Records      []*timeout.TimeoutRecord
@@ -138,6 +167,8 @@ type QueryTimeoutsResult struct {
 type AlterTimeoutsResult struct {
 	RowsAffected int64
 }
+
+// Subscription commands
 
 type ReadSubscriptionCommand struct {
 	Id        string
@@ -165,25 +196,26 @@ type DeleteSubscriptionsCommand struct {
 	PromiseId string
 }
 
+// Subscription results
+
 type QuerySubscriptionsResult struct {
 	RowsReturned int64
 	Records      []*subscription.SubscriptionRecord
 }
 
-type AlterSubscriptionResult struct {
+type AlterSubscriptionsResult struct {
 	RowsAffected int64
 }
+
+// Notification commands
 
 type ReadNotificationsCommand struct {
 	N int
 }
 
-type CreateNotificationCommand struct {
-	Id          string
-	PromiseId   string
-	Url         string
-	RetryPolicy []byte
-	Time        int64
+type CreateNotificationsCommand struct {
+	PromiseId string
+	Time      int64
 }
 
 type UpdateNotificationCommand struct {
@@ -197,6 +229,8 @@ type DeleteNotificationCommand struct {
 	Id        string
 	PromiseId string
 }
+
+// Notification results
 
 type QueryNotificationsResult struct {
 	RowsReturned int64

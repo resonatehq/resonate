@@ -66,13 +66,6 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 										CreatedOn: t,
 									},
 								},
-								{
-									Kind: types.StoreCreateTimeout,
-									CreateTimeout: &types.CreateTimeoutCommand{
-										Id:   req.CreatePromise.Id,
-										Time: req.CreatePromise.Timeout,
-									},
-								},
 							},
 						},
 					},
@@ -125,7 +118,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 				}
 
 				if p.State == promise.Pending && t >= p.Timeout {
-					s.Add(TimeoutPromise(t, p, nil, CreatePromise(t, req, res), func(t int64, err error) {
+					s.Add(TimeoutPromise(t, p, CreatePromise(t, req, res), func(t int64, err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
 							res(t, nil, err)

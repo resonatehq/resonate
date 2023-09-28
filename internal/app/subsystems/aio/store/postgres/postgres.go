@@ -110,6 +110,14 @@ const (
     WHERE
 		id = $6 AND state = 1`
 
+	PROMISE_UPDATE_TIMEOUT_STATEMENT = `
+		UPDATE
+			promises
+		SET
+			state = 8, completed_on = timeout
+		WHERE
+			state = 1 AND timeout <= $1`
+
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
         id, time
@@ -160,6 +168,12 @@ const (
 	SUBSCRIPTION_DELETE_ALL_STATEMENT = `
 	DELETE FROM subscriptions WHERE promise_id = $1`
 
+	SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT = `
+	DELETE FROM
+		subscriptions
+	WHERE
+		promise_id IN (SELECT id FROM promises WHERE state = 1 AND timeout <= $1)`
+
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
         id, promise_id, url, retry_policy, time, attempt
@@ -171,9 +185,24 @@ const (
 
 	NOTIFICATION_INSERT_STATEMENT = `
 	INSERT INTO notifications
-        (id, promise_id, url, retry_policy, time, attempt)
-    VALUES
-        ($1, $2, $3, $4, $5, 0)
+		(id, promise_id, url, retry_policy, time, attempt)
+	SELECT
+		id, promise_id, url, retry_policy, $1, 0
+	FROM
+		subscriptions
+	WHERE
+		promise_id = $2
+	ON CONFLICT(id, promise_id) DO NOTHING`
+
+	NOTIFICATION_INSERT_TIMEOUT_STATEMENT = `
+	INSERT INTO notifications
+		(id, promise_id, url, retry_policy, time, attempt)
+	SELECT
+		id, promise_id, url, retry_policy, $1, 0
+	FROM
+		subscriptions
+	WHERE
+		promise_id IN (SELECT id FROM promises WHERE state = 1 AND timeout <= $1)
 	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	NOTIFICATION_UPDATE_STATEMENT = `
@@ -302,6 +331,12 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 	}
 	defer promiseUpdateStmt.Close()
 
+	promiseUpdateTimeoutStmt, err := tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer promiseUpdateTimeoutStmt.Close()
+
 	timeoutInsertStmt, err := tx.Prepare(TIMEOUT_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -332,11 +367,23 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 	}
 	defer subscriptionDeleteAllStmt.Close()
 
+	subscriptionDeleteAllTimeoutStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer subscriptionDeleteAllTimeoutStmt.Close()
+
 	notificationInsertStmt, err := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
 	}
 	defer notificationInsertStmt.Close()
+
+	notificationInsertTimeoutStmt, err := tx.Prepare(NOTIFICATION_INSERT_TIMEOUT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer notificationInsertTimeoutStmt.Close()
 
 	notificationUpdateStmt, err := tx.Prepare(NOTIFICATION_UPDATE_STATEMENT)
 	if err != nil {
@@ -373,6 +420,9 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 			case types.StoreUpdatePromise:
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
+			case types.StoreTimeoutPromises:
+				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
+				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
 			// Timeout
 			case types.StoreReadTimeouts:
@@ -401,20 +451,27 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*types.
 			case types.StoreDeleteSubscriptions:
 				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
+			case types.StoreTimeoutDeleteSubscriptions:
+				util.Assert(command.TimeoutDeleteSubscriptions != nil, "command must not be nil")
+				results[i][j], err = w.timeoutDeleteSubscriptions(tx, subscriptionDeleteAllTimeoutStmt, command.TimeoutDeleteSubscriptions)
 
 			// Notification
 			case types.StoreReadNotifications:
 				util.Assert(command.ReadNotifications != nil, "command must not be nil")
 				results[i][j], err = w.readNotifications(tx, command.ReadNotifications)
-			case types.StoreCreateNotification:
-				util.Assert(command.CreateNotification != nil, "command must not be nil")
-				results[i][j], err = w.createNotification(tx, notificationInsertStmt, command.CreateNotification)
+			case types.StoreCreateNotifications:
+				util.Assert(command.CreateNotifications != nil, "command must not be nil")
+				results[i][j], err = w.createNotifications(tx, notificationInsertStmt, command.CreateNotifications)
 			case types.StoreUpdateNotification:
 				util.Assert(command.UpdateNotification != nil, "command must not be nil")
 				results[i][j], err = w.updateNotification(tx, notificationUpdateStmt, command.UpdateNotification)
 			case types.StoreDeleteNotification:
 				util.Assert(command.DeleteNotification != nil, "command must not be nil")
 				results[i][j], err = w.deleteNotification(tx, notificationDeleteStmt, command.DeleteNotification)
+			case types.StoreTimeoutCreateNotifications:
+				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
+				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
+
 			default:
 				panic("invalid command")
 			}
@@ -585,6 +642,28 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 	}, nil
 }
 
+func (w *PostgresStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutPromisesCommand) (*types.Result, error) {
+	util.Assert(cmd.Time >= 0, "time must be non-negative")
+
+	// udpate promises
+	res, err := stmt.Exec(cmd.Time)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Result{
+		Kind: types.StoreTimeoutPromises,
+		TimeoutPromises: &types.AlterPromisesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
 func (w *PostgresStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsCommand) (*types.Result, error) {
 	// select
 	rows, err := tx.Query(TIMEOUT_SELECT_STATEMENT, cmd.N)
@@ -738,7 +817,7 @@ func (w *PostgresStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd
 
 	return &types.Result{
 		Kind: types.StoreCreateSubscription,
-		CreateSubscription: &types.AlterSubscriptionResult{
+		CreateSubscription: &types.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -758,7 +837,7 @@ func (w *PostgresStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd
 
 	return &types.Result{
 		Kind: types.StoreDeleteSubscription,
-		DeleteSubscription: &types.AlterSubscriptionResult{
+		DeleteSubscription: &types.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -778,7 +857,29 @@ func (w *PostgresStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cm
 
 	return &types.Result{
 		Kind: types.StoreDeleteSubscriptions,
-		DeleteSubscriptions: &types.AlterSubscriptionResult{
+		DeleteSubscriptions: &types.AlterSubscriptionsResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) timeoutDeleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutDeleteSubscriptionsCommand) (*types.Result, error) {
+	util.Assert(cmd.Time >= 0, "time must be non-negative")
+
+	// udpate promises
+	res, err := stmt.Exec(cmd.Time)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Result{
+		Kind: types.StoreTimeoutDeleteSubscriptions,
+		TimeoutDeleteSubscriptions: &types.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -814,12 +915,11 @@ func (w *PostgresStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotif
 	}, nil
 }
 
-func (w *PostgresStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationCommand) (*types.Result, error) {
+func (w *PostgresStoreWorker) createNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationsCommand) (*types.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
-	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, cmd.PromiseId, cmd.Url, cmd.RetryPolicy, cmd.Time)
+	res, err := stmt.Exec(cmd.Time, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -830,8 +930,8 @@ func (w *PostgresStoreWorker) createNotification(tx *sql.Tx, stmt *sql.Stmt, cmd
 	}
 
 	return &types.Result{
-		Kind: types.StoreCreateNotification,
-		CreateNotification: &types.AlterNotificationsResult{
+		Kind: types.StoreCreateNotifications,
+		CreateNotifications: &types.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -872,6 +972,28 @@ func (w *PostgresStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd
 	return &types.Result{
 		Kind: types.StoreDeleteNotification,
 		DeleteNotification: &types.AlterNotificationsResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) timeoutCreateNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutCreateNotificationsCommand) (*types.Result, error) {
+	util.Assert(cmd.Time >= 0, "time must be non-negative")
+
+	// udpate promises
+	res, err := stmt.Exec(cmd.Time)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &types.Result{
+		Kind: types.StoreTimeoutCreateNotifications,
+		TimeoutCreateNotifications: &types.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
