@@ -177,8 +177,19 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		promises[i] = protoPromise(promise)
 	}
 
+	cursor := ""
+	if cqe.Completion.SearchPromises.Cursor != nil {
+		var err error
+		cursor, err = cqe.Completion.SearchPromises.Cursor.Encode()
+		if err != nil {
+			return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+		}
+
+	}
+
 	return &grpcApi.SearchPromisesResponse{
 		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
+		Cursor:   cursor,
 		Promises: promises,
 	}, nil
 }

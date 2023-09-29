@@ -60,7 +60,8 @@ message SearchPromisesRequest {
 
 message SearchPromisesResponse {
   Status status = 1;
-  repeated Promise promises = 2;
+  string cursor = 2;
+  repeated Promise promises = 3;
 }
 
 message CreatePromiseRequest {
