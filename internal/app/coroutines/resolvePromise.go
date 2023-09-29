@@ -37,7 +37,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 
 		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
 			if err != nil {
-				slog.Error("failed to read promise or read subscriptions", "req", req, "err", err)
+				slog.Error("failed to read promise", "req", req, "err", err)
 				res(t, nil, err)
 				return
 			}
@@ -159,11 +159,11 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 						})
 					}
 				} else {
-					var status types.ResponseStatus
-					if p.State == promise.Resolved && p.Value.Ikey.Match(req.ResolvePromise.Value.Ikey) {
+					status := types.ResponseForbidden
+					strict := req.ResolvePromise.Strict && p.State != promise.Resolved
+
+					if !strict && p.Value.Ikey.Match(req.ResolvePromise.Value.Ikey) {
 						status = types.ResponseOK
-					} else {
-						status = types.ResponseForbidden
 					}
 
 					res(t, &types.Response{

@@ -110,11 +110,11 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 					return
 				}
 
-				var status types.ResponseStatus
-				if p.Param.Ikey.Match(req.CreatePromise.Param.Ikey) {
+				status := types.ResponseForbidden
+				strict := req.CreatePromise.Strict && p.State != promise.Pending
+
+				if !strict && p.Param.Ikey.Match(req.CreatePromise.Param.Ikey) {
 					status = types.ResponseOK
-				} else {
-					status = types.ResponseForbidden
 				}
 
 				if p.State == promise.Pending && t >= p.Timeout {

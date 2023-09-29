@@ -16,7 +16,6 @@ type Request struct {
 	CancelPromise      *CancelPromiseRequest
 	ResolvePromise     *ResolvePromiseRequest
 	RejectPromise      *RejectPromiseRequest
-	CompletePromise    *CompletePromiseRequest
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
@@ -34,32 +33,29 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id      string        `json:"id"`
-	Param   promise.Value `json:"param,omitempty"`
-	Timeout int64         `json:"timeout"`
-	// Subscriptions []*CreateSubscriptionRequest `json:"subscriptions,omitempty"`
-	Tags map[string]string `json:"tags,omitempty"`
+	Id      string            `json:"id"`
+	Param   promise.Value     `json:"param,omitempty"`
+	Timeout int64             `json:"timeout"`
+	Tags    map[string]string `json:"tags,omitempty"`
+	Strict  bool              `json:"strict"`
 }
 
 type CancelPromiseRequest struct {
-	Id    string        `json:"id"`
-	Value promise.Value `json:"value,omitempty"`
+	Id     string        `json:"id"`
+	Value  promise.Value `json:"value,omitempty"`
+	Strict bool          `json:"strict"`
 }
 
 type ResolvePromiseRequest struct {
-	Id    string        `json:"id"`
-	Value promise.Value `json:"value,omitempty"`
+	Id     string        `json:"id"`
+	Value  promise.Value `json:"value,omitempty"`
+	Strict bool          `json:"strict"`
 }
 
 type RejectPromiseRequest struct {
-	Id    string        `json:"id"`
-	Value promise.Value `json:"value,omitempty"`
-}
-
-type CompletePromiseRequest struct {
-	Id    string        `json:"id"`
-	Value promise.Value `json:"value,omitempty"`
-	State promise.State `json:"state"`
+	Id     string        `json:"id"`
+	Value  promise.Value `json:"value,omitempty"`
+	Strict bool          `json:"strict"`
 }
 
 type ReadSubscriptionsRequest struct {
@@ -102,35 +98,32 @@ func (r *Request) String() string {
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
-			"CreatePromise(id=%s, ikey=%s, timeout=%d)",
+			"CreatePromise(id=%s, ikey=%s, timeout=%d, strict=%t)",
 			r.CreatePromise.Id,
 			r.CreatePromise.Param.Ikey,
 			r.CreatePromise.Timeout,
+			r.CreatePromise.Strict,
 		)
 	case CancelPromise:
 		return fmt.Sprintf(
-			"CancelPromise(id=%s, ikey=%s)",
+			"CancelPromise(id=%s, ikey=%s, strict=%t)",
 			r.CancelPromise.Id,
 			r.CancelPromise.Value.Ikey,
+			r.CancelPromise.Strict,
 		)
 	case ResolvePromise:
 		return fmt.Sprintf(
-			"ResolvePromise(id=%s, ikey=%s)",
+			"ResolvePromise(id=%s, ikey=%s, strict=%t)",
 			r.ResolvePromise.Id,
 			r.ResolvePromise.Value.Ikey,
+			r.ResolvePromise.Strict,
 		)
 	case RejectPromise:
 		return fmt.Sprintf(
-			"RejectPromise(id=%s, ikey=%s)",
+			"RejectPromise(id=%s, ikey=%s, strict=%t)",
 			r.RejectPromise.Id,
 			r.RejectPromise.Value.Ikey,
-		)
-	case CompletePromise:
-		return fmt.Sprintf(
-			"CompletePromise(id=%s, ikey=%s, state=%s)",
-			r.CompletePromise.Id,
-			r.CompletePromise.Value.Ikey,
-			r.CompletePromise.State,
+			r.RejectPromise.Strict,
 		)
 	case ReadSubscriptions:
 		sortId := "<nil>"

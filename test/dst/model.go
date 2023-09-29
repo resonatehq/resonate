@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Model struct {
@@ -116,11 +117,6 @@ func (m *Model) ValidateRejectPromise(req *types.Request, res *types.Response) e
 	return pm.rejectPromise(req.RejectPromise, res.RejectPromise)
 }
 
-func (m *Model) ValidateCompletePromise(req *types.Request, res *types.Response) error {
-	pm := m.promises.Get(req.CompletePromise.Id)
-	return pm.completePromise(req.CompletePromise, res.CompletePromise)
-}
-
 func (m *Model) ValidateReadSubscriptions(req *types.Request, res *types.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&types.Request{
@@ -156,8 +152,9 @@ func (p Promises) Get(id string) *PromiseModel {
 type ResponseValidator func(*types.Request, *types.Response) error
 
 type PromiseModel struct {
-	id      string
-	promise *promise.Promise
+	id            string
+	promise       *promise.Promise
+	subscriptions []*subscription.Subscription
 }
 
 func (m *PromiseModel) readPromise(req *types.ReadPromiseRequest, res *types.ReadPromiseResponse) error {
@@ -200,6 +197,8 @@ func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types
 		if m.promise != nil {
 			if !m.paramIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Param.Ikey, res.Promise.Param.Ikey)
+			} else if req.Strict && m.promise.State != promise.Pending {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -222,8 +221,8 @@ func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Canceled {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Canceled)
+			} else if req.Strict && m.promise.State != promise.Canceled {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -248,8 +247,8 @@ func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *typ
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Resolved {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Resolved)
+			} else if req.Strict && m.promise.State != promise.Resolved {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -274,8 +273,8 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Rejected {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Rejected)
+			} else if req.Strict && m.promise.State != promise.Rejected {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -294,60 +293,37 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) completePromise(req *types.CompletePromiseRequest, res *types.CompletePromiseResponse) error {
-	switch res.Status {
-	case types.ResponseOK:
-		if m.completed() {
-			if !m.valueIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			}
-		}
-	case types.ResponseCreated:
-		if m.completed() {
-			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, req.State)
-		} else if req.State != res.Promise.State {
-			return fmt.Errorf("invalid state %s", res.Promise.State)
-		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
-		if m.promise != nil {
-			return fmt.Errorf("promise exists %s", m.promise)
-		}
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
-	}
+func (m *PromiseModel) verifyPromise(p *promise.Promise) error {
+	if m.promise != nil && p != nil {
+		if m.promise.Id != p.Id ||
+			m.promise.Timeout != p.Timeout ||
+			(m.promise.Param.Ikey != nil && !m.paramIkeyMatch(p)) ||
+			string(m.promise.Param.Data) != string(p.Param.Data) ||
+			(m.completed() && m.promise.Value.Ikey != nil && !m.valueIkeyMatch(p)) ||
+			(m.completed() && string(m.promise.Value.Data) != string(p.Value.Data)) {
 
-	return m.verifyPromise(res.Promise)
-}
-
-func (m *PromiseModel) verifyPromise(promise *promise.Promise) error {
-	if m.promise != nil && promise != nil {
-		if m.promise.Id != promise.Id ||
-			m.promise.Timeout != promise.Timeout ||
-			(m.promise.Param.Ikey != nil && !m.paramIkeyMatch(promise)) ||
-			string(m.promise.Param.Data) != string(promise.Param.Data) ||
-			(m.completed() && m.promise.Value.Ikey != nil && !m.valueIkeyMatch(promise)) ||
-			(m.completed() && string(m.promise.Value.Data) != string(promise.Value.Data)) {
-
-			return fmt.Errorf("promises do not match (%s, %s)", m.promise, promise)
+			return fmt.Errorf("promises do not match (%s, %s)", m.promise, p)
 		}
 	}
 
 	// otherwise set model promise to response promise
-	m.promise = promise
+	m.promise = p
 
 	return nil
 }
 
 func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, res *types.ReadSubscriptionsResponse) error {
-	for _, s := range res.Subscriptions {
-		if req.SortId != nil && *req.SortId <= s.SortId {
-			return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, s.SortId)
-		}
-	}
-
 	switch res.Status {
 	case types.ResponseOK:
+		for _, subscription := range res.Subscriptions {
+			if req.SortId != nil && *req.SortId <= subscription.SortId {
+				return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, subscription.SortId)
+			}
+
+			if err := m.verifySubscription(subscription); err != nil {
+				return err
+			}
+		}
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
@@ -363,15 +339,39 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 
-	return nil
+	return m.verifySubscription(res.Subscription)
 }
 
 func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
 	switch res.Status {
 	case types.ResponseNoContent:
+		for i, subscription := range m.subscriptions {
+			if req.Id == subscription.Id {
+				m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
+				break
+			}
+		}
 	case types.ResponseNotFound:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
+	}
+
+	return nil
+}
+
+func (m *PromiseModel) verifySubscription(subscription *subscription.Subscription) error {
+	found := false
+	for _, s := range m.subscriptions {
+		if s.Id == subscription.Id {
+			// TODO: verify
+
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		m.subscriptions = append(m.subscriptions, subscription)
 	}
 
 	return nil

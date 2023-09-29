@@ -111,47 +111,88 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 	}, nil
 }
 
-// func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
-// 	cq := make(chan *bus.CQE[types.Request, types.Response])
-// 	defer close(cq)
+func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
 
-// 	var state promise.State
-// 	switch req.State {
-// 	case "pending":
-// 		state = promise.Pending
-// 	default:
-// 		return nil, grpcStatus.Error(codes.InvalidArgument, "")
-// 	}
+	var searchPromises *types.SearchPromisesRequest
 
-// 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-// 		Kind: "grpc",
-// 		Submission: &types.Request{
-// 			Kind: types.SearchPromises,
-// 			SearchPromises: &types.SearchPromisesRequest{
-// 				Q:     req.Q,
-// 				State: state,
-// 			},
-// 		},
-// 		Callback: s.sendOrPanic(cq),
-// 	})
+	if req.Cursor != "" {
+		cursor, err := types.NewCursor[types.SearchPromisesRequest](req.Cursor)
+		if err != nil {
+			return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+		}
+		searchPromises = cursor.Next
+	} else {
+		// validate
+		if req.Q == "" {
+			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid query")
+		}
 
-// 	cqe := <-cq
-// 	if cqe.Error != nil {
-// 		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-// 	}
+		var states []promise.State
+		switch req.State {
+		case grpcApi.SearchState_SEARCH_PENDING:
+			states = []promise.State{
+				promise.Pending,
+			}
+		case grpcApi.SearchState_SEARCH_RESOLVED:
+			states = []promise.State{
+				promise.Resolved,
+			}
+		case grpcApi.SearchState_SEARCH_REJECTED:
+			states = []promise.State{
+				promise.Rejected,
+				promise.Canceled,
+				promise.Timedout,
+			}
+		default:
+			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid state")
+		}
 
-// 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
+		searchPromises = &types.SearchPromisesRequest{
+			Q:      req.Q,
+			States: states,
+			Limit:  int(req.Limit),
+		}
+	}
 
-// 	promises := make([]*grpcApi.Promise, len(cqe.Completion.SearchPromises.Promises))
-// 	for i, promise := range cqe.Completion.SearchPromises.Promises {
-// 		promises[i] = protoPromise(promise)
-// 	}
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "grpc",
+		Submission: &types.Request{
+			Kind:           types.SearchPromises,
+			SearchPromises: searchPromises,
+		},
+		Callback: s.sendOrPanic(cq),
+	})
 
-// 	return &grpcApi.SearchPromisesResponse{
-// 		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
-// 		Promises: promises,
-// 	}, nil
-// }
+	cqe := <-cq
+	if cqe.Error != nil {
+		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	}
+
+	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
+
+	promises := make([]*grpcApi.Promise, len(cqe.Completion.SearchPromises.Promises))
+	for i, promise := range cqe.Completion.SearchPromises.Promises {
+		promises[i] = protoPromise(promise)
+	}
+
+	cursor := ""
+	if cqe.Completion.SearchPromises.Cursor != nil {
+		var err error
+		cursor, err = cqe.Completion.SearchPromises.Cursor.Encode()
+		if err != nil {
+			return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+		}
+
+	}
+
+	return &grpcApi.SearchPromisesResponse{
+		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
+		Cursor:   cursor,
+		Promises: promises,
+	}, nil
+}
 
 func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
@@ -187,6 +228,7 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 					Data:    data,
 				},
 				Timeout: req.Timeout,
+				Strict:  req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -238,6 +280,7 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 					Ikey:    ikey,
 					Data:    data,
 				},
+				Strict: req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -289,6 +332,7 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 					Ikey:    ikey,
 					Data:    data,
 				},
+				Strict: req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -340,6 +384,7 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 					Ikey:    ikey,
 					Data:    data,
 				},
+				Strict: req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -355,70 +400,6 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	return &grpcApi.RejectPromiseResponse{
 		Status:  protoStatus(cqe.Completion.RejectPromise.Status),
 		Promise: protoPromise(cqe.Completion.RejectPromise.Promise),
-	}, nil
-}
-
-func (s *server) CompletePromise(ctx context.Context, req *grpcApi.CompletePromiseRequest) (*grpcApi.CompletePromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	var state promise.State
-	switch req.State {
-	case grpcApi.State_RESOLVED:
-		state = promise.Resolved
-	case grpcApi.State_REJECTED:
-		state = promise.Rejected
-	case grpcApi.State_REJECTED_CANCELED:
-		state = promise.Canceled
-	default:
-		return nil, grpcStatus.Error(codes.InvalidArgument, "state must be one of resolved, rejected, or canceled")
-	}
-
-	var headers map[string]string
-	if req.Value != nil && req.Value.Headers != nil {
-		headers = req.Value.Headers
-	} else {
-		headers = map[string]string{}
-	}
-
-	var ikey *promise.Ikey
-	if req.Value != nil && req.Value.Ikey != "" {
-		i := promise.Ikey(req.Value.Ikey)
-		ikey = &i
-	}
-
-	var data []byte
-	if req.Value != nil && req.Value.Data != nil {
-		data = req.Value.Data
-	}
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.CompletePromise,
-			CompletePromise: &types.CompletePromiseRequest{
-				Id: req.Id,
-				Value: promise.Value{
-					Headers: headers,
-					Ikey:    ikey,
-					Data:    data,
-				},
-				State: state,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
-
-	util.Assert(cqe.Completion.CompletePromise != nil, "response must not be nil")
-
-	return &grpcApi.CompletePromiseResponse{
-		Status:  protoStatus(cqe.Completion.CompletePromise.Status),
-		Promise: protoPromise(cqe.Completion.CompletePromise.Promise),
 	}, nil
 }
 

@@ -118,7 +118,7 @@ var dstRunCmd = &cobra.Command{
 
 		// instatiate api/aio
 		api := api.New(config.API.Size, metrics)
-		aio := aio.NewDST()
+		aio := aio.NewDST(r)
 
 		// instatiate aio subsystems
 		network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
