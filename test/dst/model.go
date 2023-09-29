@@ -116,11 +116,6 @@ func (m *Model) ValidateRejectPromise(req *types.Request, res *types.Response) e
 	return pm.rejectPromise(req.RejectPromise, res.RejectPromise)
 }
 
-func (m *Model) ValidateCompletePromise(req *types.Request, res *types.Response) error {
-	pm := m.promises.Get(req.CompletePromise.Id)
-	return pm.completePromise(req.CompletePromise, res.CompletePromise)
-}
-
 func (m *Model) ValidateReadSubscriptions(req *types.Request, res *types.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&types.Request{
@@ -200,6 +195,8 @@ func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types
 		if m.promise != nil {
 			if !m.paramIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Param.Ikey, res.Promise.Param.Ikey)
+			} else if req.Strict && m.promise.State != promise.Pending {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -222,8 +219,8 @@ func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Canceled {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Canceled)
+			} else if req.Strict && m.promise.State != promise.Canceled {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -248,8 +245,8 @@ func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *typ
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Resolved {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Resolved)
+			} else if req.Strict && m.promise.State != promise.Resolved {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
@@ -274,39 +271,13 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 		if m.completed() {
 			if !m.valueIkeyMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			} else if m.promise.State != promise.Rejected {
-				return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Rejected)
+			} else if req.Strict && m.promise.State != promise.Rejected {
+				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
 	case types.ResponseCreated:
 		if m.completed() {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Rejected)
-		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
-		if m.promise != nil {
-			return fmt.Errorf("promise exists %s", m.promise)
-		}
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
-	}
-
-	return m.verifyPromise(res.Promise)
-}
-
-func (m *PromiseModel) completePromise(req *types.CompletePromiseRequest, res *types.CompletePromiseResponse) error {
-	switch res.Status {
-	case types.ResponseOK:
-		if m.completed() {
-			if !m.valueIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
-			}
-		}
-	case types.ResponseCreated:
-		if m.completed() {
-			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, req.State)
-		} else if req.State != res.Promise.State {
-			return fmt.Errorf("invalid state %s", res.Promise.State)
 		}
 	case types.ResponseForbidden:
 	case types.ResponseNotFound:

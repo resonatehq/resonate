@@ -83,7 +83,6 @@ var serveCmd = &cobra.Command{
 		system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
 		system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
 		system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
-		system.AddOnRequest(types.CompletePromise, coroutines.CompletePromise)
 		system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
 		system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
 		system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)

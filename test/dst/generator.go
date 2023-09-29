@@ -165,6 +165,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	timeout := RangeInt63n(r, t, g.ticks)
+	strict := r.Intn(2) == 0
 
 	return &types.Request{
 		Kind: types.CreatePromise,
@@ -176,7 +177,8 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 				Ikey:    ikey,
 				Data:    data,
 			},
-			Tags: tags,
+			Tags:   tags,
+			Strict: strict,
 		},
 	}
 }
@@ -186,6 +188,7 @@ func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *types.Request 
 	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	strict := r.Intn(2) == 0
 
 	return &types.Request{
 		Kind: types.CancelPromise,
@@ -196,6 +199,7 @@ func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *types.Request 
 				Ikey:    ikey,
 				Data:    data,
 			},
+			Strict: strict,
 		},
 	}
 }
@@ -205,6 +209,7 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *types.Request
 	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	strict := r.Intn(2) == 0
 
 	return &types.Request{
 		Kind: types.ResolvePromise,
@@ -215,6 +220,7 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *types.Request
 				Ikey:    ikey,
 				Data:    data,
 			},
+			Strict: strict,
 		},
 	}
 }
@@ -224,6 +230,7 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *types.Request 
 	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	strict := r.Intn(2) == 0
 
 	return &types.Request{
 		Kind: types.RejectPromise,
@@ -234,36 +241,7 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *types.Request 
 				Ikey:    ikey,
 				Data:    data,
 			},
-		},
-	}
-}
-
-func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *types.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-
-	var state promise.State
-	switch r.Intn(3) {
-	case 0:
-		state = promise.Canceled
-	case 1:
-		state = promise.Resolved
-	case 2:
-		state = promise.Rejected
-	}
-
-	return &types.Request{
-		Kind: types.CompletePromise,
-		CompletePromise: &types.CompletePromiseRequest{
-			Id: id,
-			Value: promise.Value{
-				Headers: headers,
-				Ikey:    ikey,
-				Data:    data,
-			},
-			State: state,
+			Strict: strict,
 		},
 	}
 }
