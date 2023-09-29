@@ -2,6 +2,7 @@ package aio
 
 import (
 	"fmt"
+	"math/rand" // nosemgrep
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/types"
@@ -9,14 +10,16 @@ import (
 )
 
 type aioDST struct {
+	r          *rand.Rand
 	sqes       []*bus.SQE[types.Submission, types.Completion]
 	cqes       []*bus.CQE[types.Submission, types.Completion]
 	subsystems map[types.AIOKind]Subsystem
 	done       bool
 }
 
-func NewDST() *aioDST {
+func NewDST(r *rand.Rand) *aioDST {
 	return &aioDST{
+		r:          r,
 		subsystems: map[types.AIOKind]Subsystem{},
 	}
 }
@@ -54,7 +57,8 @@ func (a *aioDST) Done() bool {
 }
 
 func (a *aioDST) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
-	a.sqes = append(a.sqes, sqe)
+	i := a.r.Intn(len(a.sqes) + 1)
+	a.sqes = append(a.sqes[:i], append([]*bus.SQE[types.Submission, types.Completion]{sqe}, a.sqes[i:]...)...)
 }
 
 func (a *aioDST) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {

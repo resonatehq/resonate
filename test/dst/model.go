@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Model struct {
@@ -151,8 +152,9 @@ func (p Promises) Get(id string) *PromiseModel {
 type ResponseValidator func(*types.Request, *types.Response) error
 
 type PromiseModel struct {
-	id      string
-	promise *promise.Promise
+	id            string
+	promise       *promise.Promise
+	subscriptions []*subscription.Subscription
 }
 
 func (m *PromiseModel) readPromise(req *types.ReadPromiseRequest, res *types.ReadPromiseResponse) error {
@@ -291,34 +293,37 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) verifyPromise(promise *promise.Promise) error {
-	if m.promise != nil && promise != nil {
-		if m.promise.Id != promise.Id ||
-			m.promise.Timeout != promise.Timeout ||
-			(m.promise.Param.Ikey != nil && !m.paramIkeyMatch(promise)) ||
-			string(m.promise.Param.Data) != string(promise.Param.Data) ||
-			(m.completed() && m.promise.Value.Ikey != nil && !m.valueIkeyMatch(promise)) ||
-			(m.completed() && string(m.promise.Value.Data) != string(promise.Value.Data)) {
+func (m *PromiseModel) verifyPromise(p *promise.Promise) error {
+	if m.promise != nil && p != nil {
+		if m.promise.Id != p.Id ||
+			m.promise.Timeout != p.Timeout ||
+			(m.promise.Param.Ikey != nil && !m.paramIkeyMatch(p)) ||
+			string(m.promise.Param.Data) != string(p.Param.Data) ||
+			(m.completed() && m.promise.Value.Ikey != nil && !m.valueIkeyMatch(p)) ||
+			(m.completed() && string(m.promise.Value.Data) != string(p.Value.Data)) {
 
-			return fmt.Errorf("promises do not match (%s, %s)", m.promise, promise)
+			return fmt.Errorf("promises do not match (%s, %s)", m.promise, p)
 		}
 	}
 
 	// otherwise set model promise to response promise
-	m.promise = promise
+	m.promise = p
 
 	return nil
 }
 
 func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, res *types.ReadSubscriptionsResponse) error {
-	for _, s := range res.Subscriptions {
-		if req.SortId != nil && *req.SortId <= s.SortId {
-			return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, s.SortId)
-		}
-	}
-
 	switch res.Status {
 	case types.ResponseOK:
+		for _, subscription := range res.Subscriptions {
+			if req.SortId != nil && *req.SortId <= subscription.SortId {
+				return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, subscription.SortId)
+			}
+
+			if err := m.verifySubscription(subscription); err != nil {
+				return err
+			}
+		}
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
@@ -334,15 +339,39 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 
-	return nil
+	return m.verifySubscription(res.Subscription)
 }
 
 func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
 	switch res.Status {
 	case types.ResponseNoContent:
+		for i, subscription := range m.subscriptions {
+			if req.Id == subscription.Id {
+				m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
+				break
+			}
+		}
 	case types.ResponseNotFound:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
+	}
+
+	return nil
+}
+
+func (m *PromiseModel) verifySubscription(subscription *subscription.Subscription) error {
+	found := false
+	for _, s := range m.subscriptions {
+		if s.Id == subscription.Id {
+			// TODO: verify
+
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		m.subscriptions = append(m.subscriptions, subscription)
 	}
 
 	return nil
