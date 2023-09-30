@@ -33,29 +33,33 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id      string            `json:"id"`
-	Param   promise.Value     `json:"param,omitempty"`
-	Timeout int64             `json:"timeout"`
-	Tags    map[string]string `json:"tags,omitempty"`
-	Strict  bool              `json:"strict"`
+	Id            string                  `json:"id"`
+	Param         promise.Value           `json:"param,omitempty"`
+	Timeout       int64                   `json:"timeout"`
+	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Tags          map[string]string       `json:"tags,omitempty"`
+	Strict        bool                    `json:"strict"`
 }
 
 type CancelPromiseRequest struct {
-	Id     string        `json:"id"`
-	Value  promise.Value `json:"value,omitempty"`
-	Strict bool          `json:"strict"`
+	Id            string                  `json:"id"`
+	Value         promise.Value           `json:"value,omitempty"`
+	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict        bool                    `json:"strict"`
 }
 
 type ResolvePromiseRequest struct {
-	Id     string        `json:"id"`
-	Value  promise.Value `json:"value,omitempty"`
-	Strict bool          `json:"strict"`
+	Id            string                  `json:"id"`
+	Value         promise.Value           `json:"value,omitempty"`
+	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict        bool                    `json:"strict"`
 }
 
 type RejectPromiseRequest struct {
-	Id     string        `json:"id"`
-	Value  promise.Value `json:"value,omitempty"`
-	Strict bool          `json:"strict"`
+	Id            string                  `json:"id"`
+	Value         promise.Value           `json:"value,omitempty"`
+	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict        bool                    `json:"strict"`
 }
 
 type ReadSubscriptionsRequest struct {
@@ -98,31 +102,31 @@ func (r *Request) String() string {
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
-			"CreatePromise(id=%s, ikey=%s, timeout=%d, strict=%t)",
+			"CreatePromise(id=%s, idempotencyKey=%s, timeout=%d, strict=%t)",
 			r.CreatePromise.Id,
-			r.CreatePromise.Param.Ikey,
+			r.CreatePromise.IdemptencyKey,
 			r.CreatePromise.Timeout,
 			r.CreatePromise.Strict,
 		)
 	case CancelPromise:
 		return fmt.Sprintf(
-			"CancelPromise(id=%s, ikey=%s, strict=%t)",
+			"CancelPromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.CancelPromise.Id,
-			r.CancelPromise.Value.Ikey,
+			r.CancelPromise.IdemptencyKey,
 			r.CancelPromise.Strict,
 		)
 	case ResolvePromise:
 		return fmt.Sprintf(
-			"ResolvePromise(id=%s, ikey=%s, strict=%t)",
+			"ResolvePromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.ResolvePromise.Id,
-			r.ResolvePromise.Value.Ikey,
+			r.ResolvePromise.IdemptencyKey,
 			r.ResolvePromise.Strict,
 		)
 	case RejectPromise:
 		return fmt.Sprintf(
-			"RejectPromise(id=%s, ikey=%s, strict=%t)",
+			"RejectPromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.RejectPromise.Id,
-			r.RejectPromise.Value.Ikey,
+			r.RejectPromise.IdemptencyKey,
 			r.RejectPromise.Strict,
 		)
 	case ReadSubscriptions:

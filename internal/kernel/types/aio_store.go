@@ -103,19 +103,21 @@ type SearchPromisesCommand struct {
 }
 
 type CreatePromiseCommand struct {
-	Id            string
-	Timeout       int64
-	Param         promise.Value
-	Subscriptions []*CreateSubscriptionCommand
-	Tags          map[string]string
-	CreatedOn     int64
+	Id             string
+	Param          promise.Value
+	Timeout        int64
+	IdempotencyKey *promise.IdempotencyKey
+	Subscriptions  []*CreateSubscriptionCommand
+	Tags           map[string]string
+	CreatedOn      int64
 }
 
 type UpdatePromiseCommand struct {
-	Id          string
-	State       promise.State
-	Value       promise.Value
-	CompletedOn int64
+	Id             string
+	State          promise.State
+	Value          promise.Value
+	IdempotencyKey *promise.IdempotencyKey
+	CompletedOn    int64
 }
 
 // Promise results

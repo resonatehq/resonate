@@ -5,19 +5,19 @@ import (
 )
 
 type PromiseRecord struct {
-	Id           string
-	State        State
-	ParamHeaders []byte
-	ParamIkey    *Ikey
-	ParamData    []byte
-	ValueHeaders []byte
-	ValueIkey    *Ikey
-	ValueData    []byte
-	Timeout      int64
-	CreatedOn    *int64
-	CompletedOn  *int64
-	Tags         []byte
-	SortId       int64
+	Id                        string
+	State                     State
+	ParamHeaders              []byte
+	ParamData                 []byte
+	ValueHeaders              []byte
+	ValueData                 []byte
+	Timeout                   int64
+	IdempotencyKeyForCreate   *IdempotencyKey
+	IdempotencyKeyForComplete *IdempotencyKey
+	CreatedOn                 *int64
+	CompletedOn               *int64
+	Tags                      []byte
+	SortId                    int64
 }
 
 func (r *PromiseRecord) Promise() (*Promise, error) {
@@ -37,15 +37,17 @@ func (r *PromiseRecord) Promise() (*Promise, error) {
 	}
 
 	return &Promise{
-		Id:          r.Id,
-		State:       r.State,
-		Timeout:     r.Timeout,
-		Param:       param,
-		Value:       value,
-		CreatedOn:   r.CreatedOn,
-		CompletedOn: r.CompletedOn,
-		Tags:        tags,
-		SortId:      r.SortId,
+		Id:                        r.Id,
+		State:                     r.State,
+		Param:                     param,
+		Value:                     value,
+		Timeout:                   r.Timeout,
+		IdempotencyKeyForCreate:   r.IdempotencyKeyForCreate,
+		IdempotencyKeyForComplete: r.IdempotencyKeyForComplete,
+		CreatedOn:                 r.CreatedOn,
+		CompletedOn:               r.CompletedOn,
+		Tags:                      tags,
+		SortId:                    r.SortId,
 	}, nil
 }
 
@@ -60,7 +62,6 @@ func (r *PromiseRecord) param() (Value, error) {
 
 	return Value{
 		Headers: headers,
-		Ikey:    r.ParamIkey,
 		Data:    r.ParamData,
 	}, nil
 }
@@ -76,7 +77,6 @@ func (r *PromiseRecord) value() (Value, error) {
 
 	return Value{
 		Headers: headers,
-		Ikey:    r.ValueIkey,
 		Data:    r.ValueData,
 	}, nil
 }

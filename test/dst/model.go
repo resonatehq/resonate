@@ -195,8 +195,8 @@ func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types
 	switch res.Status {
 	case types.ResponseOK:
 		if m.promise != nil {
-			if !m.paramIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Param.Ikey, res.Promise.Param.Ikey)
+			if !m.idempotencyKeyForCreateMatch(res.Promise) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForCreate, res.Promise.IdempotencyKeyForCreate)
 			} else if req.Strict && m.promise.State != promise.Pending {
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
@@ -219,8 +219,8 @@ func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types
 	switch res.Status {
 	case types.ResponseOK:
 		if m.completed() {
-			if !m.valueIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
+			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
 			} else if req.Strict && m.promise.State != promise.Canceled {
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
@@ -245,8 +245,8 @@ func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *typ
 	switch res.Status {
 	case types.ResponseOK:
 		if m.completed() {
-			if !m.valueIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
+			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
 			} else if req.Strict && m.promise.State != promise.Resolved {
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
@@ -271,8 +271,8 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 	switch res.Status {
 	case types.ResponseOK:
 		if m.completed() {
-			if !m.valueIkeyMatch(res.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.Value.Ikey, res.Promise.Value.Ikey)
+			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
 			} else if req.Strict && m.promise.State != promise.Rejected {
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
@@ -297,9 +297,9 @@ func (m *PromiseModel) verifyPromise(p *promise.Promise) error {
 	if m.promise != nil && p != nil {
 		if m.promise.Id != p.Id ||
 			m.promise.Timeout != p.Timeout ||
-			(m.promise.Param.Ikey != nil && !m.paramIkeyMatch(p)) ||
+			(m.promise.IdempotencyKeyForCreate != nil && !m.idempotencyKeyForCreateMatch(p)) ||
 			string(m.promise.Param.Data) != string(p.Param.Data) ||
-			(m.completed() && m.promise.Value.Ikey != nil && !m.valueIkeyMatch(p)) ||
+			(m.completed() && m.promise.IdempotencyKeyForComplete != nil && !m.idempotencyKeyForCompleteMatch(p)) ||
 			(m.completed() && string(m.promise.Value.Data) != string(p.Value.Data)) {
 
 			return fmt.Errorf("promises do not match (%s, %s)", m.promise, p)
@@ -377,12 +377,12 @@ func (m *PromiseModel) verifySubscription(subscription *subscription.Subscriptio
 	return nil
 }
 
-func (m *PromiseModel) paramIkeyMatch(promise *promise.Promise) bool {
-	return m.promise.Param.Ikey != nil && promise.Param.Ikey != nil && *m.promise.Param.Ikey == *promise.Param.Ikey
+func (m *PromiseModel) idempotencyKeyForCreateMatch(promise *promise.Promise) bool {
+	return m.promise.IdempotencyKeyForCreate != nil && promise.IdempotencyKeyForCreate != nil && *m.promise.IdempotencyKeyForCreate == *promise.IdempotencyKeyForCreate
 }
 
-func (m *PromiseModel) valueIkeyMatch(promise *promise.Promise) bool {
-	return m.promise.Value.Ikey != nil && promise.Value.Ikey != nil && *m.promise.Value.Ikey == *promise.Value.Ikey
+func (m *PromiseModel) idempotencyKeyForCompleteMatch(promise *promise.Promise) bool {
+	return m.promise.IdempotencyKeyForComplete != nil && promise.IdempotencyKeyForComplete != nil && *m.promise.IdempotencyKeyForComplete == *promise.IdempotencyKeyForComplete
 }
 
 func (m *PromiseModel) completed() bool {

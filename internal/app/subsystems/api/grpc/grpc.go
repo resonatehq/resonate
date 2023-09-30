@@ -205,9 +205,9 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		headers = map[string]string{}
 	}
 
-	var ikey *promise.Ikey
+	var ikey *promise.IdempotencyKey
 	if req.Param != nil && req.Param.Ikey != "" {
-		i := promise.Ikey(req.Param.Ikey)
+		i := promise.IdempotencyKey(req.Param.Ikey)
 		ikey = &i
 	}
 
@@ -224,11 +224,11 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 				Id: req.Id,
 				Param: promise.Value{
 					Headers: headers,
-					Ikey:    ikey,
 					Data:    data,
 				},
-				Timeout: req.Timeout,
-				Strict:  req.Strict,
+				Timeout:       req.Timeout,
+				IdemptencyKey: ikey,
+				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -258,9 +258,9 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		headers = map[string]string{}
 	}
 
-	var ikey *promise.Ikey
+	var ikey *promise.IdempotencyKey
 	if req.Value != nil && req.Value.Ikey != "" {
-		i := promise.Ikey(req.Value.Ikey)
+		i := promise.IdempotencyKey(req.Value.Ikey)
 		ikey = &i
 	}
 
@@ -277,10 +277,10 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 				Id: req.Id,
 				Value: promise.Value{
 					Headers: headers,
-					Ikey:    ikey,
 					Data:    data,
 				},
-				Strict: req.Strict,
+				IdemptencyKey: ikey,
+				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -310,9 +310,9 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		headers = map[string]string{}
 	}
 
-	var ikey *promise.Ikey
+	var ikey *promise.IdempotencyKey
 	if req.Value != nil && req.Value.Ikey != "" {
-		i := promise.Ikey(req.Value.Ikey)
+		i := promise.IdempotencyKey(req.Value.Ikey)
 		ikey = &i
 	}
 
@@ -329,10 +329,10 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 				Id: req.Id,
 				Value: promise.Value{
 					Headers: headers,
-					Ikey:    ikey,
 					Data:    data,
 				},
-				Strict: req.Strict,
+				IdemptencyKey: ikey,
+				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -362,9 +362,9 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		headers = map[string]string{}
 	}
 
-	var ikey *promise.Ikey
+	var ikey *promise.IdempotencyKey
 	if req.Value != nil && req.Value.Ikey != "" {
-		i := promise.Ikey(req.Value.Ikey)
+		i := promise.IdempotencyKey(req.Value.Ikey)
 		ikey = &i
 	}
 
@@ -381,10 +381,10 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 				Id: req.Id,
 				Value: promise.Value{
 					Headers: headers,
-					Ikey:    ikey,
 					Data:    data,
 				},
-				Strict: req.Strict,
+				IdemptencyKey: ikey,
+				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -426,11 +426,11 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 	}
 
 	var paramIkey, valueIkey string
-	if promise.Param.Ikey != nil {
-		paramIkey = string(*promise.Param.Ikey)
+	if promise.IdempotencyKeyForCreate != nil {
+		paramIkey = string(*promise.IdempotencyKeyForCreate)
 	}
-	if promise.Value.Ikey != nil {
-		valueIkey = string(*promise.Value.Ikey)
+	if promise.IdempotencyKeyForComplete != nil {
+		valueIkey = string(*promise.IdempotencyKeyForComplete)
 	}
 
 	return &grpcApi.Promise{

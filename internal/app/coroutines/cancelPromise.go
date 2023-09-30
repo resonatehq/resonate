@@ -81,13 +81,14 @@ func CancelPromise(t int64, req *types.Request, res func(int64, *types.Response,
 										Param: p.Param,
 										Value: promise.Value{
 											Headers: map[string]string{},
-											Ikey:    nil,
 											Data:    []byte{},
 										},
-										Timeout:     p.Timeout,
-										Tags:        p.Tags,
-										CreatedOn:   p.CreatedOn,
-										CompletedOn: &p.Timeout,
+										Timeout:                   p.Timeout,
+										IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+										IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
+										Tags:                      p.Tags,
+										CreatedOn:                 p.CreatedOn,
+										CompletedOn:               &p.Timeout,
 									},
 								},
 							}, nil)
@@ -101,10 +102,11 @@ func CancelPromise(t int64, req *types.Request, res func(int64, *types.Response,
 										{
 											Kind: types.StoreUpdatePromise,
 											UpdatePromise: &types.UpdatePromiseCommand{
-												Id:          req.CancelPromise.Id,
-												State:       promise.Canceled,
-												Value:       req.CancelPromise.Value,
-												CompletedOn: t,
+												Id:             req.CancelPromise.Id,
+												State:          promise.Canceled,
+												Value:          req.CancelPromise.Value,
+												IdempotencyKey: req.CancelPromise.IdemptencyKey,
+												CompletedOn:    t,
 											},
 										},
 										{
@@ -143,14 +145,16 @@ func CancelPromise(t int64, req *types.Request, res func(int64, *types.Response,
 									CancelPromise: &types.CancelPromiseResponse{
 										Status: types.ResponseCreated,
 										Promise: &promise.Promise{
-											Id:          p.Id,
-											State:       promise.Canceled,
-											Param:       p.Param,
-											Value:       req.CancelPromise.Value,
-											Timeout:     p.Timeout,
-											Tags:        p.Tags,
-											CreatedOn:   p.CreatedOn,
-											CompletedOn: &t,
+											Id:                        p.Id,
+											State:                     promise.Canceled,
+											Param:                     p.Param,
+											Value:                     req.CancelPromise.Value,
+											Timeout:                   p.Timeout,
+											IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+											IdempotencyKeyForComplete: req.CancelPromise.IdemptencyKey,
+											Tags:                      p.Tags,
+											CreatedOn:                 p.CreatedOn,
+											CompletedOn:               &t,
 										},
 									},
 								}, nil)
@@ -163,7 +167,7 @@ func CancelPromise(t int64, req *types.Request, res func(int64, *types.Response,
 					status := types.ResponseForbidden
 					strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
-					if !strict && p.Value.Ikey.Match(req.CancelPromise.Value.Ikey) {
+					if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdemptencyKey) {
 						status = types.ResponseOK
 					}
 

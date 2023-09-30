@@ -24,7 +24,6 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 								State: promise.Timedout,
 								Value: promise.Value{
 									Headers: map[string]string{},
-									Ikey:    nil,
 									Data:    []byte{},
 								},
 								CompletedOn: p.Timeout,
