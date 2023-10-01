@@ -115,7 +115,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 				status := types.ResponseForbidden
 				strict := req.CreatePromise.Strict && p.State != promise.Pending
 
-				if !strict && p.IdempotencyKeyForComplete.Match(req.CreatePromise.IdemptencyKey) {
+				if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdemptencyKey) {
 					status = types.ResponseOK
 				}
 
