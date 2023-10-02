@@ -25,19 +25,19 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
-		id TEXT UNIQUE,
-		sort_id INTEGER PRIMARY KEY AUTOINCREMENT,
-		state INTEGER DEFAULT 1,
-		param_headers BLOB,
-		param_ikey TEXT,
-		param_data BLOB,
-		value_headers BLOB,
-		value_ikey TEXT,
-		value_data BLOB,
-		timeout INTEGER,
-		tags BLOB,
-		created_on INTEGER,
-		completed_on INTEGER
+		id                           TEXT UNIQUE,
+		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+		state                        INTEGER DEFAULT 1,
+		param_headers                BLOB,
+		param_data                   BLOB,
+		value_headers                BLOB,
+		value_data                   BLOB,
+		timeout                      INTEGER,
+		idempotency_key_for_create   TEXT,
+		idempotency_key_for_complete TEXT,
+		tags                         BLOB,
+		created_on                   INTEGER,
+		completed_on                 INTEGER
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
@@ -72,7 +72,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
 	FROM
 		promises
 	WHERE
@@ -80,7 +80,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -94,7 +94,7 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, state, param_headers, param_ikey, param_data, timeout, tags, created_on)
+		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
 		(?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
@@ -103,7 +103,7 @@ const (
 	UPDATE
 		promises
 	SET
-		state = ?, value_headers = ?, value_ikey = ?, value_data = ?, completed_on = ?
+		state = ?, value_headers = ?, value_data = ?, idempotency_key_for_complete = ?, completed_on = ?
 	WHERE
 		id = ? AND state = 1`
 
@@ -478,12 +478,12 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 		&record.Id,
 		&record.State,
 		&record.ParamHeaders,
-		&record.ParamIkey,
 		&record.ParamData,
 		&record.ValueHeaders,
-		&record.ValueIkey,
 		&record.ValueData,
 		&record.Timeout,
+		&record.IdempotencyKeyForCreate,
+		&record.IdempotencyKeyForComplete,
 		&record.Tags,
 		&record.CreatedOn,
 		&record.CompletedOn,
@@ -539,12 +539,12 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 			&record.Id,
 			&record.State,
 			&record.ParamHeaders,
-			&record.ParamIkey,
 			&record.ParamData,
 			&record.ValueHeaders,
-			&record.ValueIkey,
 			&record.ValueData,
 			&record.Timeout,
+			&record.IdempotencyKeyForCreate,
+			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -584,7 +584,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Ikey, cmd.Param.Data, cmd.Timeout, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +613,7 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Ikey, cmd.Value.Data, cmd.CompletedOn, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.IdempotencyKey, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}

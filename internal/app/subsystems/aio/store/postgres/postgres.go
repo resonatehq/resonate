@@ -26,19 +26,19 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS promises (
-		id            TEXT,
-		sort_id       SERIAL,
-		state         INTEGER DEFAULT 1,
-		param_headers BYTEA,
-		param_ikey    TEXT,
-		param_data    BYTEA,
-		value_headers BYTEA,
-		value_ikey    TEXT,
-		value_data    BYTEA,
-		timeout       BIGINT,
-		tags          BYTEA,
-		created_on    BIGINT,
-		completed_on  BIGINT,
+		id                           TEXT,
+		sort_id                      SERIAL,
+		state                        INTEGER DEFAULT 1,
+		param_headers                BYTEA,
+		param_data                   BYTEA,
+		value_headers                BYTEA,
+		value_data                   BYTEA,
+		timeout                      BIGINT,
+		idempotency_key_for_create   TEXT,
+		idempotency_key_for_complete TEXT,
+		tags                         BYTEA,
+		created_on                   BIGINT,
+		completed_on                 BIGINT,
 		PRIMARY KEY(id)
 	);
 
@@ -80,7 +80,7 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-        id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on
+        id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
     FROM
         promises
     WHERE
@@ -88,7 +88,7 @@ const (
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
-		id, state, param_headers, param_ikey, param_data, value_headers, value_ikey, value_data, timeout, tags, created_on, completed_on, sort_id
+		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
 	FROM
 		promises
 	WHERE
@@ -102,7 +102,7 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-	    (id, state, param_headers, param_ikey, param_data, timeout, tags, created_on)
+	    (id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
 	    ($1, $2, $3, $4, $5, $6, $7, $8)
 	ON CONFLICT(id) DO NOTHING`
@@ -111,17 +111,17 @@ const (
 	UPDATE
 		promises
     SET
-		state = $1, value_headers = $2, value_ikey = $3, value_data = $4, completed_on = $5
+		state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $4, completed_on = $5
     WHERE
 		id = $6 AND state = 1`
 
 	PROMISE_UPDATE_TIMEOUT_STATEMENT = `
-		UPDATE
-			promises
-		SET
-			state = 8, completed_on = timeout
-		WHERE
-			state = 1 AND timeout <= $1`
+	UPDATE
+		promises
+	SET
+		state = 8, completed_on = timeout
+	WHERE
+		state = 1 AND timeout <= $1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -503,12 +503,12 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComm
 		&record.Id,
 		&record.State,
 		&record.ParamHeaders,
-		&record.ParamIkey,
 		&record.ParamData,
 		&record.ValueHeaders,
-		&record.ValueIkey,
 		&record.ValueData,
 		&record.Timeout,
+		&record.IdempotencyKeyForCreate,
+		&record.IdempotencyKeyForComplete,
 		&record.Tags,
 		&record.CreatedOn,
 		&record.CompletedOn,
@@ -564,12 +564,12 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromis
 			&record.Id,
 			&record.State,
 			&record.ParamHeaders,
-			&record.ParamIkey,
 			&record.ParamData,
 			&record.ValueHeaders,
-			&record.ValueIkey,
 			&record.ValueData,
 			&record.Timeout,
+			&record.IdempotencyKeyForCreate,
+			&record.IdempotencyKeyForComplete,
 			&record.Tags,
 			&record.CreatedOn,
 			&record.CompletedOn,
@@ -609,7 +609,7 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Ikey, cmd.Param.Data, cmd.Timeout, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -638,7 +638,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 	}
 
 	// update
-	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Ikey, cmd.Value.Data, cmd.CompletedOn, cmd.Id)
+	res, err := stmt.Exec(cmd.State, headers, cmd.Value.Data, cmd.IdempotencyKey, cmd.CompletedOn, cmd.Id)
 	if err != nil {
 		return nil, err
 	}

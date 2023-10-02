@@ -13,7 +13,7 @@ import (
 type Generator struct {
 	ticks      int64
 	idSet      []string
-	ikeySet    []*promise.Ikey
+	ikeySet    []*promise.IdempotencyKey
 	dataSet    [][]byte
 	headersSet []map[string]string
 	tagsSet    []map[string]string
@@ -30,10 +30,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		idSet[i] = strconv.Itoa(i)
 	}
 
-	ikeySet := []*promise.Ikey{}
+	ikeySet := []*promise.IdempotencyKey{}
 	for i := 0; i < config.Ikeys; i++ {
 		s := strconv.Itoa(i)
-		ikey := promise.Ikey(s)
+		ikey := promise.IdempotencyKey(s)
 		ikeySet = append(ikeySet, &ikey, nil) // half of all ikeys are nil
 	}
 
@@ -170,15 +170,15 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 	return &types.Request{
 		Kind: types.CreatePromise,
 		CreatePromise: &types.CreatePromiseRequest{
-			Id:      id,
-			Timeout: timeout,
+			Id: id,
 			Param: promise.Value{
 				Headers: headers,
-				Ikey:    ikey,
 				Data:    data,
 			},
-			Tags:   tags,
-			Strict: strict,
+			Timeout:       timeout,
+			IdemptencyKey: ikey,
+			Tags:          tags,
+			Strict:        strict,
 		},
 	}
 }
@@ -196,10 +196,10 @@ func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *types.Request 
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
-				Ikey:    ikey,
 				Data:    data,
 			},
-			Strict: strict,
+			IdemptencyKey: ikey,
+			Strict:        strict,
 		},
 	}
 }
@@ -217,10 +217,10 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *types.Request
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
-				Ikey:    ikey,
 				Data:    data,
 			},
-			Strict: strict,
+			IdemptencyKey: ikey,
+			Strict:        strict,
 		},
 	}
 }
@@ -238,10 +238,10 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *types.Request 
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
-				Ikey:    ikey,
 				Data:    data,
 			},
-			Strict: strict,
+			IdemptencyKey: ikey,
+			Strict:        strict,
 		},
 	}
 }

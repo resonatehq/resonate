@@ -81,13 +81,14 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 										Param: p.Param,
 										Value: promise.Value{
 											Headers: map[string]string{},
-											Ikey:    nil,
 											Data:    []byte{},
 										},
-										Timeout:     p.Timeout,
-										Tags:        p.Tags,
-										CreatedOn:   p.CreatedOn,
-										CompletedOn: &p.Timeout,
+										Timeout:                   p.Timeout,
+										IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+										IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
+										Tags:                      p.Tags,
+										CreatedOn:                 p.CreatedOn,
+										CompletedOn:               &p.Timeout,
 									},
 								},
 							}, nil)
@@ -101,10 +102,11 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 										{
 											Kind: types.StoreUpdatePromise,
 											UpdatePromise: &types.UpdatePromiseCommand{
-												Id:          req.ResolvePromise.Id,
-												State:       promise.Resolved,
-												Value:       req.ResolvePromise.Value,
-												CompletedOn: t,
+												Id:             req.ResolvePromise.Id,
+												State:          promise.Resolved,
+												Value:          req.ResolvePromise.Value,
+												IdempotencyKey: req.ResolvePromise.IdemptencyKey,
+												CompletedOn:    t,
 											},
 										},
 										{
@@ -143,13 +145,15 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 									ResolvePromise: &types.ResolvePromiseResponse{
 										Status: types.ResponseCreated,
 										Promise: &promise.Promise{
-											Id:          p.Id,
-											State:       promise.Resolved,
-											Param:       p.Param,
-											Value:       req.ResolvePromise.Value,
-											Timeout:     p.Timeout,
-											CreatedOn:   p.CreatedOn,
-											CompletedOn: &t,
+											Id:                        p.Id,
+											State:                     promise.Resolved,
+											Param:                     p.Param,
+											Value:                     req.ResolvePromise.Value,
+											Timeout:                   p.Timeout,
+											IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+											IdempotencyKeyForComplete: req.ResolvePromise.IdemptencyKey,
+											CreatedOn:                 p.CreatedOn,
+											CompletedOn:               &t,
 										},
 									},
 								}, nil)
@@ -162,7 +166,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 					status := types.ResponseForbidden
 					strict := req.ResolvePromise.Strict && p.State != promise.Resolved
 
-					if !strict && p.Value.Ikey.Match(req.ResolvePromise.Value.Ikey) {
+					if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdemptencyKey) {
 						status = types.ResponseOK
 					}
 
