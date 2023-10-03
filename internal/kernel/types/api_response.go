@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"net/http"
 
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -135,22 +134,5 @@ func (r *Response) String() string {
 		)
 	default:
 		return "Response"
-	}
-}
-
-func (s ResponseStatus) HttpStatus() int {
-	switch s {
-	case ResponseOK:
-		return http.StatusOK
-	case ResponseCreated:
-		return http.StatusCreated
-	case ResponseNoContent:
-		return http.StatusNoContent
-	case ResponseForbidden:
-		return http.StatusForbidden
-	case ResponseNotFound:
-		return http.StatusNotFound
-	default:
-		return 0
 	}
 }

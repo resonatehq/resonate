@@ -105,7 +105,7 @@ func RejectPromise(t int64, req *types.Request, res func(int64, *types.Response,
 												Id:             req.RejectPromise.Id,
 												State:          promise.Rejected,
 												Value:          req.RejectPromise.Value,
-												IdempotencyKey: req.RejectPromise.IdemptencyKey,
+												IdempotencyKey: req.RejectPromise.IdempotencyKey,
 												CompletedOn:    t,
 											},
 										},
@@ -151,7 +151,7 @@ func RejectPromise(t int64, req *types.Request, res func(int64, *types.Response,
 											Value:                     req.RejectPromise.Value,
 											Timeout:                   p.Timeout,
 											IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-											IdempotencyKeyForComplete: req.RejectPromise.IdemptencyKey,
+											IdempotencyKeyForComplete: req.RejectPromise.IdempotencyKey,
 											Tags:                      p.Tags,
 											CreatedOn:                 p.CreatedOn,
 											CompletedOn:               &t,
@@ -167,7 +167,7 @@ func RejectPromise(t int64, req *types.Request, res func(int64, *types.Response,
 					status := types.ResponseForbidden
 					strict := req.RejectPromise.Strict && p.State != promise.Rejected
 
-					if !strict && p.IdempotencyKeyForComplete.Match(req.RejectPromise.IdemptencyKey) {
+					if !strict && p.IdempotencyKeyForComplete.Match(req.RejectPromise.IdempotencyKey) {
 						status = types.ResponseOK
 					}
 

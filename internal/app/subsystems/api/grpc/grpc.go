@@ -67,22 +67,6 @@ type server struct {
 	api api.API
 }
 
-func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(int64, *types.Response, error) {
-	return func(t int64, completion *types.Response, err error) {
-		cqe := &bus.CQE[types.Request, types.Response]{
-			Kind:       "grpc",
-			Completion: completion,
-			Error:      err,
-		}
-
-		select {
-		case cq <- cqe:
-		default:
-			panic("response channel must not block")
-		}
-	}
-}
-
 func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
@@ -221,14 +205,14 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		Submission: &types.Request{
 			Kind: types.CreatePromise,
 			CreatePromise: &types.CreatePromiseRequest{
-				Id: req.Id,
+				Id:             req.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         req.Strict,
 				Param: promise.Value{
 					Headers: headers,
 					Data:    data,
 				},
-				Timeout:       req.Timeout,
-				IdemptencyKey: idempotencyKey,
-				Strict:        req.Strict,
+				Timeout: req.Timeout,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -274,13 +258,13 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		Submission: &types.Request{
 			Kind: types.CancelPromise,
 			CancelPromise: &types.CancelPromiseRequest{
-				Id: req.Id,
+				Id:             req.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         req.Strict,
 				Value: promise.Value{
 					Headers: headers,
 					Data:    data,
 				},
-				IdemptencyKey: idempotencyKey,
-				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -326,13 +310,13 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		Submission: &types.Request{
 			Kind: types.ResolvePromise,
 			ResolvePromise: &types.ResolvePromiseRequest{
-				Id: req.Id,
+				Id:             req.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         req.Strict,
 				Value: promise.Value{
 					Headers: headers,
 					Data:    data,
 				},
-				IdemptencyKey: idempotencyKey,
-				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -378,13 +362,13 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		Submission: &types.Request{
 			Kind: types.RejectPromise,
 			RejectPromise: &types.RejectPromiseRequest{
-				Id: req.Id,
+				Id:             req.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         req.Strict,
 				Value: promise.Value{
 					Headers: headers,
 					Data:    data,
 				},
-				IdemptencyKey: idempotencyKey,
-				Strict:        req.Strict,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -401,6 +385,22 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		Status:  protoStatus(cqe.Completion.RejectPromise.Status),
 		Promise: protoPromise(cqe.Completion.RejectPromise.Promise),
 	}, nil
+}
+
+func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(int64, *types.Response, error) {
+	return func(t int64, completion *types.Response, err error) {
+		cqe := &bus.CQE[types.Request, types.Response]{
+			Kind:       "grpc",
+			Completion: completion,
+			Error:      err,
+		}
+
+		select {
+		case cq <- cqe:
+		default:
+			panic("response channel must not block")
+		}
+	}
 }
 
 func protoStatus(status types.ResponseStatus) grpcApi.Status {

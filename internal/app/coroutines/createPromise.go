@@ -62,7 +62,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 										Id:             req.CreatePromise.Id,
 										Param:          req.CreatePromise.Param,
 										Timeout:        req.CreatePromise.Timeout,
-										IdempotencyKey: req.CreatePromise.IdemptencyKey,
+										IdempotencyKey: req.CreatePromise.IdempotencyKey,
 										Tags:           req.CreatePromise.Tags,
 										CreatedOn:      t,
 									},
@@ -94,7 +94,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 									State:                   promise.Pending,
 									Param:                   req.CreatePromise.Param,
 									Timeout:                 req.CreatePromise.Timeout,
-									IdempotencyKeyForCreate: req.CreatePromise.IdemptencyKey,
+									IdempotencyKeyForCreate: req.CreatePromise.IdempotencyKey,
 									Tags:                    req.CreatePromise.Tags,
 									CreatedOn:               &t,
 								},
@@ -115,7 +115,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 				status := types.ResponseForbidden
 				strict := req.CreatePromise.Strict && p.State != promise.Pending
 
-				if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdemptencyKey) {
+				if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
 					status = types.ResponseOK
 				}
 
