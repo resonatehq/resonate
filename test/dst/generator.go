@@ -175,10 +175,10 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request 
 				Headers: headers,
 				Data:    data,
 			},
-			Timeout:       timeout,
-			IdemptencyKey: ikey,
-			Tags:          tags,
-			Strict:        strict,
+			Timeout:        timeout,
+			IdempotencyKey: ikey,
+			Tags:           tags,
+			Strict:         strict,
 		},
 	}
 }
@@ -198,8 +198,8 @@ func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *types.Request 
 				Headers: headers,
 				Data:    data,
 			},
-			IdemptencyKey: ikey,
-			Strict:        strict,
+			IdempotencyKey: ikey,
+			Strict:         strict,
 		},
 	}
 }
@@ -219,8 +219,8 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *types.Request
 				Headers: headers,
 				Data:    data,
 			},
-			IdemptencyKey: ikey,
-			Strict:        strict,
+			IdempotencyKey: ikey,
+			Strict:         strict,
 		},
 	}
 }
@@ -240,8 +240,8 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *types.Request 
 				Headers: headers,
 				Data:    data,
 			},
-			IdemptencyKey: ikey,
-			Strict:        strict,
+			IdempotencyKey: ikey,
+			Strict:         strict,
 		},
 	}
 }

@@ -23,9 +23,10 @@ enum State {
 }
 
 enum SearchState {
-  SEARCH_PENDING = 0;
-  SEARCH_RESOLVED = 1;
-  SEARCH_REJECTED = 2;
+  SEARCH_ALL = 0;
+  SEARCH_PENDING = 1;
+  SEARCH_RESOLVED = 2;
+  SEARCH_REJECTED = 3;
 }
 
 enum Status {
@@ -67,10 +68,10 @@ message SearchPromisesResponse {
 
 message CreatePromiseRequest {
   string id = 1;
-  Value param = 2;
-  int64 timeout = 3;
-  string idempotencyKey = 4;
-  bool strict = 5;
+  string idempotencyKey = 2;
+  bool strict = 3;
+  Value param = 4;
+  int64 timeout = 5;
 }
 
 message CreatePromiseResponse {
@@ -80,9 +81,9 @@ message CreatePromiseResponse {
 
 message CancelPromiseRequest {
   string id = 1;
-  Value value = 2;
-  string idempotencyKey = 3;
-  bool strict = 4;
+  string idempotencyKey = 2;
+  bool strict = 3;
+  Value value = 4;
 }
 
 message CancelPromiseResponse {
@@ -92,9 +93,9 @@ message CancelPromiseResponse {
 
 message ResolvePromiseRequest {
   string id = 1;
-  Value value = 2;
-  string idempotencyKey = 3;
-  bool strict = 4;
+  string idempotencyKey = 2;
+  bool strict = 3;
+  Value value = 4;
 }
 
 message ResolvePromiseResponse {
@@ -104,9 +105,9 @@ message ResolvePromiseResponse {
 
 message RejectPromiseRequest {
   string id = 1;
-  Value value = 2;
-  string idempotencyKey = 3;
-  bool strict = 4;
+  string idempotencyKey = 2;
+  bool strict = 3;
+  Value value = 4;
 }
 
 message RejectPromiseResponse {

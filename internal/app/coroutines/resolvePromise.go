@@ -105,7 +105,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 												Id:             req.ResolvePromise.Id,
 												State:          promise.Resolved,
 												Value:          req.ResolvePromise.Value,
-												IdempotencyKey: req.ResolvePromise.IdemptencyKey,
+												IdempotencyKey: req.ResolvePromise.IdempotencyKey,
 												CompletedOn:    t,
 											},
 										},
@@ -151,7 +151,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 											Value:                     req.ResolvePromise.Value,
 											Timeout:                   p.Timeout,
 											IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-											IdempotencyKeyForComplete: req.ResolvePromise.IdemptencyKey,
+											IdempotencyKeyForComplete: req.ResolvePromise.IdempotencyKey,
 											CreatedOn:                 p.CreatedOn,
 											CompletedOn:               &t,
 										},
@@ -166,7 +166,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 					status := types.ResponseForbidden
 					strict := req.ResolvePromise.Strict && p.State != promise.Resolved
 
-					if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdemptencyKey) {
+					if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdempotencyKey) {
 						status = types.ResponseOK
 					}
 

@@ -11,6 +11,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
+// Read Promise
+
 func (s *server) readPromise(c *gin.Context) {
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
@@ -35,8 +37,10 @@ func (s *server) readPromise(c *gin.Context) {
 	}
 
 	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
-	c.JSON(cqe.Completion.ReadPromise.Status.HttpStatus(), cqe.Completion.ReadPromise.Promise)
+	c.JSON(int(cqe.Completion.ReadPromise.Status), cqe.Completion.ReadPromise.Promise)
 }
+
+// Search Promise
 
 type SearchPromiseParams struct {
 	Q      string `form:"q" json:"q"`
@@ -138,22 +142,41 @@ func (s *server) searchPromises(c *gin.Context) {
 	}
 
 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
-	c.JSON(cqe.Completion.SearchPromises.Status.HttpStatus(), gin.H{
+	c.JSON(int(cqe.Completion.SearchPromises.Status), gin.H{
 		"cursor":   cqe.Completion.SearchPromises.Cursor,
 		"promises": cqe.Completion.SearchPromises.Promises,
 	})
 }
 
+// Create Promise
+
+type createPromiseHeader struct {
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
+}
+
+type createPromiseBody struct {
+	Param   promise.Value     `json:"param"`
+	Timeout int64             `json:"timeout"`
+	Tags    map[string]string `json:"tags"`
+}
+
 func (s *server) createPromise(c *gin.Context) {
-	var createPromise *types.CreatePromiseRequest
-	if err := c.ShouldBindJSON(&createPromise); err != nil {
+	var header createPromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
 
-	createPromise.Id = c.Param("id")
+	var body *createPromiseBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
@@ -161,8 +184,15 @@ func (s *server) createPromise(c *gin.Context) {
 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
 		Kind: "http",
 		Submission: &types.Request{
-			Kind:          types.CreatePromise,
-			CreatePromise: createPromise,
+			Kind: types.CreatePromise,
+			CreatePromise: &types.CreatePromiseRequest{
+				Id:             c.Param("id"),
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Param:          body.Param,
+				Timeout:        body.Timeout,
+				Tags:           body.Tags,
+			},
 		},
 		Callback: s.sendOrPanic(cq),
 	})
@@ -176,89 +206,36 @@ func (s *server) createPromise(c *gin.Context) {
 	}
 
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
-	c.JSON(cqe.Completion.CreatePromise.Status.HttpStatus(), cqe.Completion.CreatePromise.Promise)
+	c.JSON(int(cqe.Completion.CreatePromise.Status), cqe.Completion.CreatePromise.Promise)
 }
 
-func (s *server) resolvePromise(c *gin.Context) {
-	var resolvePromise *types.ResolvePromiseRequest
-	if err := c.ShouldBindJSON(&resolvePromise); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
+// Cancel Promise
 
-	resolvePromise.Id = c.Param("id")
-
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind:           types.ResolvePromise,
-			ResolvePromise: resolvePromise,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": cqe.Error.Error(),
-		})
-		return
-	}
-
-	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
-	c.JSON(cqe.Completion.ResolvePromise.Status.HttpStatus(), cqe.Completion.ResolvePromise.Promise)
+type cancelPromiseHeader struct {
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
 }
 
-func (s *server) rejectPromise(c *gin.Context) {
-	var rejectPromise *types.RejectPromiseRequest
-	if err := c.ShouldBindJSON(&rejectPromise); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	rejectPromise.Id = c.Param("id")
-
-	cq := make(chan *bus.CQE[types.Request, types.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind:          types.RejectPromise,
-			RejectPromise: rejectPromise,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": cqe.Error.Error(),
-		})
-		return
-	}
-
-	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
-	c.JSON(cqe.Completion.RejectPromise.Status.HttpStatus(), cqe.Completion.RejectPromise.Promise)
+type cancelPromiseBody struct {
+	Value promise.Value `json:"value"`
 }
 
 func (s *server) cancelPromise(c *gin.Context) {
-	var cancelPromise *types.CancelPromiseRequest
-	if err := c.ShouldBindJSON(&cancelPromise); err != nil {
+	var header cancelPromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
 		})
 		return
 	}
 
-	cancelPromise.Id = c.Param("id")
+	var body *cancelPromiseBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
 
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
@@ -266,8 +243,13 @@ func (s *server) cancelPromise(c *gin.Context) {
 	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
 		Kind: "http",
 		Submission: &types.Request{
-			Kind:          types.CancelPromise,
-			CancelPromise: cancelPromise,
+			Kind: types.CancelPromise,
+			CancelPromise: &types.CancelPromiseRequest{
+				Id:             c.Param("id"),
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Value:          body.Value,
+			},
 		},
 		Callback: s.sendOrPanic(cq),
 	})
@@ -281,5 +263,119 @@ func (s *server) cancelPromise(c *gin.Context) {
 	}
 
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
-	c.JSON(cqe.Completion.CancelPromise.Status.HttpStatus(), cqe.Completion.CancelPromise.Promise)
+	c.JSON(int(cqe.Completion.CancelPromise.Status), cqe.Completion.CancelPromise.Promise)
+}
+
+// Resolve Promise
+
+type resolvePromiseHeader struct {
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
+}
+
+type resolvePromiseBody struct {
+	Value promise.Value `json:"value"`
+}
+
+func (s *server) resolvePromise(c *gin.Context) {
+	var header resolvePromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var body *resolvePromiseBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
+
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
+		Submission: &types.Request{
+			Kind: types.ResolvePromise,
+			ResolvePromise: &types.ResolvePromiseRequest{
+				Id:             c.Param("id"),
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Value:          body.Value,
+			},
+		},
+		Callback: s.sendOrPanic(cq),
+	})
+
+	cqe := <-cq
+	if cqe.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": cqe.Error.Error(),
+		})
+		return
+	}
+
+	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
+	c.JSON(int(cqe.Completion.ResolvePromise.Status), cqe.Completion.ResolvePromise.Promise)
+}
+
+// Reject Promise
+
+type rejectPromiseHeader struct {
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
+}
+
+type rejectPromiseBody struct {
+	Value promise.Value `json:"value"`
+}
+
+func (s *server) rejectPromise(c *gin.Context) {
+	var header rejectPromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	var body *rejectPromiseBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	cq := make(chan *bus.CQE[types.Request, types.Response])
+	defer close(cq)
+
+	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
+		Kind: "http",
+		Submission: &types.Request{
+			Kind: types.RejectPromise,
+			RejectPromise: &types.RejectPromiseRequest{
+				Id:             c.Param("id"),
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Value:          body.Value,
+			},
+		},
+		Callback: s.sendOrPanic(cq),
+	})
+
+	cqe := <-cq
+	if cqe.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": cqe.Error.Error(),
+		})
+		return
+	}
+
+	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
+	c.JSON(int(cqe.Completion.RejectPromise.Status), cqe.Completion.RejectPromise.Promise)
 }

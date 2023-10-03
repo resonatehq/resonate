@@ -33,33 +33,33 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id            string                  `json:"id"`
-	Param         promise.Value           `json:"param,omitempty"`
-	Timeout       int64                   `json:"timeout"`
-	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Tags          map[string]string       `json:"tags,omitempty"`
-	Strict        bool                    `json:"strict"`
+	Id             string                  `json:"id"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict         bool                    `json:"strict"`
+	Param          promise.Value           `json:"param,omitempty"`
+	Timeout        int64                   `json:"timeout"`
+	Tags           map[string]string       `json:"tags,omitempty"`
 }
 
 type CancelPromiseRequest struct {
-	Id            string                  `json:"id"`
-	Value         promise.Value           `json:"value,omitempty"`
-	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict        bool                    `json:"strict"`
+	Id             string                  `json:"id"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict         bool                    `json:"strict"`
+	Value          promise.Value           `json:"value,omitempty"`
 }
 
 type ResolvePromiseRequest struct {
-	Id            string                  `json:"id"`
-	Value         promise.Value           `json:"value,omitempty"`
-	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict        bool                    `json:"strict"`
+	Id             string                  `json:"id"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict         bool                    `json:"strict"`
+	Value          promise.Value           `json:"value,omitempty"`
 }
 
 type RejectPromiseRequest struct {
-	Id            string                  `json:"id"`
-	Value         promise.Value           `json:"value,omitempty"`
-	IdemptencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict        bool                    `json:"strict"`
+	Id             string                  `json:"id"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Strict         bool                    `json:"strict"`
+	Value          promise.Value           `json:"value,omitempty"`
 }
 
 type ReadSubscriptionsRequest struct {
@@ -104,7 +104,7 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"CreatePromise(id=%s, idempotencyKey=%s, timeout=%d, strict=%t)",
 			r.CreatePromise.Id,
-			r.CreatePromise.IdemptencyKey,
+			r.CreatePromise.IdempotencyKey,
 			r.CreatePromise.Timeout,
 			r.CreatePromise.Strict,
 		)
@@ -112,21 +112,21 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"CancelPromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.CancelPromise.Id,
-			r.CancelPromise.IdemptencyKey,
+			r.CancelPromise.IdempotencyKey,
 			r.CancelPromise.Strict,
 		)
 	case ResolvePromise:
 		return fmt.Sprintf(
 			"ResolvePromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.ResolvePromise.Id,
-			r.ResolvePromise.IdemptencyKey,
+			r.ResolvePromise.IdempotencyKey,
 			r.ResolvePromise.Strict,
 		)
 	case RejectPromise:
 		return fmt.Sprintf(
 			"RejectPromise(id=%s, idempotencyKey=%s, strict=%t)",
 			r.RejectPromise.Id,
-			r.RejectPromise.IdemptencyKey,
+			r.RejectPromise.IdempotencyKey,
 			r.RejectPromise.Strict,
 		)
 	case ReadSubscriptions:
