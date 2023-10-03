@@ -115,6 +115,14 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 
 		var states []promise.State
 		switch req.State {
+		case grpcApi.SearchState_SEARCH_ALL:
+			states = []promise.State{
+				promise.Pending,
+				promise.Resolved,
+				promise.Rejected,
+				promise.Timedout,
+				promise.Canceled,
+			}
 		case grpcApi.SearchState_SEARCH_PENDING:
 			states = []promise.State{
 				promise.Pending,
@@ -126,8 +134,8 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		case grpcApi.SearchState_SEARCH_REJECTED:
 			states = []promise.State{
 				promise.Rejected,
-				promise.Canceled,
 				promise.Timedout,
+				promise.Canceled,
 			}
 		default:
 			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid state")
@@ -182,21 +190,19 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	var headers map[string]string
-	if req.Param != nil && req.Param.Headers != nil {
-		headers = req.Param.Headers
-	} else {
-		headers = map[string]string{}
-	}
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
 		idempotencyKey = &i
 	}
 
+	var headers map[string]string
+	if req.Param != nil {
+		headers = req.Param.Headers
+	}
+
 	var data []byte
-	if req.Param != nil && req.Param.Data != nil {
+	if req.Param != nil {
 		data = req.Param.Data
 	}
 
@@ -235,21 +241,19 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	var headers map[string]string
-	if req.Value != nil && req.Value.Headers != nil {
-		headers = req.Value.Headers
-	} else {
-		headers = map[string]string{}
-	}
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
 		idempotencyKey = &i
 	}
 
+	var headers map[string]string
+	if req.Value != nil {
+		headers = req.Value.Headers
+	}
+
 	var data []byte
-	if req.Value != nil && req.Value.Data != nil {
+	if req.Value != nil {
 		data = req.Value.Data
 	}
 
@@ -287,21 +291,19 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	var headers map[string]string
-	if req.Value != nil && req.Value.Headers != nil {
-		headers = req.Value.Headers
-	} else {
-		headers = map[string]string{}
-	}
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
 		idempotencyKey = &i
 	}
 
+	var headers map[string]string
+	if req.Value != nil {
+		headers = req.Value.Headers
+	}
+
 	var data []byte
-	if req.Value != nil && req.Value.Data != nil {
+	if req.Value != nil {
 		data = req.Value.Data
 	}
 
@@ -339,21 +341,19 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	cq := make(chan *bus.CQE[types.Request, types.Response])
 	defer close(cq)
 
-	var headers map[string]string
-	if req.Value != nil && req.Value.Headers != nil {
-		headers = req.Value.Headers
-	} else {
-		headers = map[string]string{}
-	}
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
 		idempotencyKey = &i
 	}
 
+	var headers map[string]string
+	if req.Value != nil {
+		headers = req.Value.Headers
+	}
+
 	var data []byte
-	if req.Value != nil && req.Value.Data != nil {
+	if req.Value != nil {
 		data = req.Value.Data
 	}
 

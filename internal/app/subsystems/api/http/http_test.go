@@ -8,56 +8,47 @@ import (
 	"testing"
 	"time"
 
-	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/stretchr/testify/assert"
 )
 
-type testAPI struct {
-	t   *testing.T
-	req *types.Request
-	res *types.Response
+type httpTest struct {
+	*test.API
+	subsystem api.Subsystem
+	errors    chan error
+	client    *http.Client
 }
 
-func (a *testAPI) String() string {
-	return "api:test"
-}
-
-func (a *testAPI) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
-	// assert
-	assert.Equal(a.t, a.req, sqe.Submission)
-
-	// immediately call callback
-	go sqe.Callback(0, a.res, nil)
-}
-
-func (a *testAPI) Dequeue(int, <-chan time.Time) []*bus.SQE[types.Request, types.Response] {
-	return nil
-}
-
-func (a *testAPI) Done() bool {
-	return false
-}
-
-func TestHttpServer(t *testing.T) {
-	api := &testAPI{}
-
-	client := &http.Client{
-		Timeout: 1 * time.Second,
-	}
-
-	server := New(api, &Config{
+func setup() *httpTest {
+	api := &test.API{}
+	errors := make(chan error)
+	subsystem := New(api, &Config{
 		Addr:    "127.0.0.1:8888",
 		Timeout: 0,
 	})
 
-	// start the server
-	errors := make(chan error)
-	defer close(errors)
-
-	go server.Start(errors)
+	// start http server
+	go subsystem.Start(errors)
 	time.Sleep(100 * time.Millisecond)
+
+	return &httpTest{
+		API:       api,
+		subsystem: subsystem,
+		errors:    errors,
+		client:    &http.Client{Timeout: 1 * time.Second},
+	}
+}
+
+func (t *httpTest) teardown() error {
+	defer close(t.errors)
+	return t.subsystem.Stop()
+}
+
+func TestHttpServer(t *testing.T) {
+	httpTest := setup()
 
 	for _, tc := range []struct {
 		name    string
@@ -147,7 +138,7 @@ func TestHttpServer(t *testing.T) {
 						promise.Pending,
 					},
 					Limit:  10,
-					SortId: int64ToPointer(100),
+					SortId: test.Int64ToPointer(100),
 				},
 			},
 			res: &types.Response{
@@ -232,6 +223,22 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
+			name:   "SearchPromisesInvalidQuery",
+			path:   "promises?q=",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchPromisesInvalidState",
+			path:   "promises?q=*&state=*",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
 			name:   "CreatePromise",
 			path:   "promises/foo/create",
 			method: "POST",
@@ -250,7 +257,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: types.CreatePromise,
 				CreatePromise: &types.CreatePromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: idempotencyKeyToPointer("bar"),
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Param: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -315,7 +322,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: types.CancelPromise,
 				CancelPromise: &types.CancelPromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: idempotencyKeyToPointer("bar"),
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -376,7 +383,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: types.ResolvePromise,
 				ResolvePromise: &types.ResolvePromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: idempotencyKeyToPointer("bar"),
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -437,7 +444,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: types.RejectPromise,
 				RejectPromise: &types.RejectPromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: idempotencyKeyToPointer("bar"),
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -482,9 +489,7 @@ func TestHttpServer(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			api.t = t
-			api.req = tc.req
-			api.res = tc.res
+			httpTest.Load(t, tc.req, tc.res)
 
 			req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.body))
 			if err != nil {
@@ -497,7 +502,7 @@ func TestHttpServer(t *testing.T) {
 				req.Header.Set(key, val)
 			}
 
-			res, err := client.Do(req)
+			res, err := httpTest.client.Do(req)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -511,7 +516,7 @@ func TestHttpServer(t *testing.T) {
 			assert.Equal(t, tc.status, res.StatusCode, string(body))
 
 			select {
-			case err := <-errors:
+			case err := <-httpTest.errors:
 				t.Fatal(err)
 			default:
 			}
@@ -519,16 +524,7 @@ func TestHttpServer(t *testing.T) {
 	}
 
 	// stop the server
-	if err := server.Stop(); err != nil {
+	if err := httpTest.teardown(); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func idempotencyKeyToPointer(s string) *promise.IdempotencyKey {
-	idempotencyKey := promise.IdempotencyKey(s)
-	return &idempotencyKey
-}
-
-func int64ToPointer(i int64) *int64 {
-	return &i
 }
