@@ -17,7 +17,7 @@ A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise a
 
 1. **Build**
 
-   The resonate server supports `http` and `grpc` protocols and (for the moment only) `sqlite` as a data store.
+   The resonate server supports `http` and `grpc` protocols as well as `sqlite` and `postgres` as a data store.
 
    ```
    # build
@@ -25,20 +25,20 @@ A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise a
 
    # start
    ./resonate serve
-   http server listening on 0.0.0.0:8001
-   grpc server listening on 0.0.0.0:50051
+   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting http server" addr=0.0.0.0:8001
+   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting grpc server" addr=0.0.0.0:50051
+   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting metrics server" addr=:9090
    ```
 2. **Create a Promise**
 
    Create a Durable Promise using a unique identifier and an idempotency key.
 
    ```bash
-   curl -X POST -d '{
+   curl -X POST -H "Idempotency-Key: foo_create" -d '{
      "param": {
-       "ikey": "foo_create",
        "data": "'"$(echo -n 'Durable Promise Created' | base64)"'"
      },
-     "timeout": 2524608000
+     "timeout": 2524608000000
    }' http://localhost:8001/promises/foo/create
    ```
 
@@ -47,18 +47,16 @@ A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise a
    Resolve or reject a Durable Promise using its identifier and an idempotency key.
 
    ```bash
-   curl -X POST -d '{
+   curl -X POST -H "Idempotency-Key: foo_complete" -d '{
      "value": {
-       "ikey": "foo_complete",
        "data": "'"$(echo -n 'Durable Promise Resolved' | base64)"'"
      }
    }' http://localhost:8001/promises/foo/resolve
    ```
 
    ```bash
-   curl -X POST -d '{
+   curl -X POST -H "Idempotency-Key: foo_complete" -d '{
      "value": {
-       "ikey": "foo_complete",
        "data": "'"$(echo -n 'Durable Promise Rejected' | base64)"'"
      }
    }' http://localhost:8001/promises/foo/reject
