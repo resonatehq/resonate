@@ -1,25 +1,25 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("ReadPromise(id=%s)", req.ReadPromise.Id), "ReadPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("ReadPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreReadPromise,
-							ReadPromise: &types.ReadPromiseCommand{
+							Kind: t_aio.ReadPromise,
+							ReadPromise: &t_aio.ReadPromiseCommand{
 								Id: req.ReadPromise.Id,
 							},
 						},
@@ -28,7 +28,7 @@ func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, e
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
 				res(t, nil, err)
@@ -41,10 +41,10 @@ func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, e
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(t, &types.Response{
-					Kind: types.ReadPromise,
-					ReadPromise: &types.ReadPromiseResponse{
-						Status: types.ResponseNotFound,
+				res(t, &t_api.Response{
+					Kind: t_api.ReadPromise,
+					ReadPromise: &t_api.ReadPromiseResponse{
+						Status: t_api.ResponseNotFound,
 					},
 				}, nil)
 			} else {
@@ -63,10 +63,10 @@ func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, e
 							return
 						}
 
-						res(t, &types.Response{
-							Kind: types.ReadPromise,
-							ReadPromise: &types.ReadPromiseResponse{
-								Status: types.ResponseOK,
+						res(t, &t_api.Response{
+							Kind: t_api.ReadPromise,
+							ReadPromise: &t_api.ReadPromiseResponse{
+								Status: t_api.ResponseOK,
 								Promise: &promise.Promise{
 									Id:    p.Id,
 									State: promise.Timedout,
@@ -86,10 +86,10 @@ func ReadPromise(t int64, req *types.Request, res func(int64, *types.Response, e
 						}, nil)
 					}))
 				} else {
-					res(t, &types.Response{
-						Kind: types.ReadPromise,
-						ReadPromise: &types.ReadPromiseResponse{
-							Status:  types.ResponseOK,
+					res(t, &t_api.Response{
+						Kind: t_api.ReadPromise,
+						ReadPromise: &t_api.ReadPromiseResponse{
+							Status:  t_api.ResponseOK,
 							Promise: p,
 						},
 					}, nil)

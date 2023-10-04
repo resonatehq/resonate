@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/pkg/promise"
 
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -69,8 +69,8 @@ func TestReadPromise(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.ReadPromiseRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -78,16 +78,16 @@ func TestReadPromise(t *testing.T) {
 			grpcReq: &grpcApi.ReadPromiseRequest{
 				Id: "foo",
 			},
-			req: &types.Request{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "foo",
 				},
 			},
-			res: &types.Response{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseResponse{
-					Status:  types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseResponse{
+					Status:  t_api.ResponseOK,
 					Promise: nil,
 				},
 			},
@@ -98,16 +98,16 @@ func TestReadPromise(t *testing.T) {
 			grpcReq: &grpcApi.ReadPromiseRequest{
 				Id: "bar",
 			},
-			req: &types.Request{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "bar",
 				},
 			},
-			res: &types.Response{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseResponse{
-					Status:  types.ResponseNotFound,
+			res: &t_api.Response{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseResponse{
+					Status:  t_api.ResponseNotFound,
 					Promise: nil,
 				},
 			},
@@ -149,8 +149,8 @@ func TestSearchPromises(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.SearchPromisesRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -159,9 +159,9 @@ func TestSearchPromises(t *testing.T) {
 				Q:     "*",
 				Limit: 10,
 			},
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -173,10 +173,10 @@ func TestSearchPromises(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -188,9 +188,9 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
 			},
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -199,10 +199,10 @@ func TestSearchPromises(t *testing.T) {
 					SortId: test.Int64ToPointer(100),
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -215,19 +215,19 @@ func TestSearchPromises(t *testing.T) {
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_PENDING,
 			},
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -240,19 +240,19 @@ func TestSearchPromises(t *testing.T) {
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_RESOLVED,
 			},
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -265,9 +265,9 @@ func TestSearchPromises(t *testing.T) {
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_REJECTED,
 			},
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Rejected,
@@ -276,10 +276,10 @@ func TestSearchPromises(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -323,8 +323,8 @@ func TestCreatePromise(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.CreatePromiseRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -339,9 +339,9 @@ func TestCreatePromise(t *testing.T) {
 				},
 				Timeout: 1,
 			},
-			req: &types.Request{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -352,10 +352,10 @@ func TestCreatePromise(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &types.Response{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -367,9 +367,9 @@ func TestCreatePromise(t *testing.T) {
 				Id:      "foo",
 				Timeout: 1,
 			},
-			req: &types.Request{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -380,10 +380,10 @@ func TestCreatePromise(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &types.Response{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -425,8 +425,8 @@ func TestCancelPromise(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.CancelPromiseRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -440,9 +440,9 @@ func TestCancelPromise(t *testing.T) {
 					Data:    []byte("cancel"),
 				},
 			},
-			req: &types.Request{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -452,10 +452,10 @@ func TestCancelPromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -466,9 +466,9 @@ func TestCancelPromise(t *testing.T) {
 			grpcReq: &grpcApi.CancelPromiseRequest{
 				Id: "foo",
 			},
-			req: &types.Request{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -478,10 +478,10 @@ func TestCancelPromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -523,8 +523,8 @@ func TestResolvePromise(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.ResolvePromiseRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -538,9 +538,9 @@ func TestResolvePromise(t *testing.T) {
 					Data:    []byte("cancel"),
 				},
 			},
-			req: &types.Request{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -550,10 +550,10 @@ func TestResolvePromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -564,9 +564,9 @@ func TestResolvePromise(t *testing.T) {
 			grpcReq: &grpcApi.ResolvePromiseRequest{
 				Id: "foo",
 			},
-			req: &types.Request{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -576,10 +576,10 @@ func TestResolvePromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -621,8 +621,8 @@ func TestRejectPromise(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		grpcReq *grpcApi.RejectPromiseRequest
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  grpcApi.Status
 	}{
 		{
@@ -636,9 +636,9 @@ func TestRejectPromise(t *testing.T) {
 					Data:    []byte("cancel"),
 				},
 			},
-			req: &types.Request{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -648,10 +648,10 @@ func TestRejectPromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -662,9 +662,9 @@ func TestRejectPromise(t *testing.T) {
 			grpcReq: &grpcApi.RejectPromiseRequest{
 				Id: "foo",
 			},
-			req: &types.Request{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -674,10 +674,10 @@ func TestRejectPromise(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},

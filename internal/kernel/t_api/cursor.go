@@ -1,4 +1,4 @@
-package types
+package t_api
 
 import (
 	"encoding/json"

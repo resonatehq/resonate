@@ -1,4 +1,4 @@
-package types
+package t_api
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 )
 
 type Response struct {
-	Kind               APIKind
+	Kind               Kind
 	ReadPromise        *ReadPromiseResponse
 	SearchPromises     *SearchPromisesResponse
 	CreatePromise      *CreatePromiseResponse

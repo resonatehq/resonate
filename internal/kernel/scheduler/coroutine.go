@@ -1,33 +1,25 @@
 package scheduler
 
-import "github.com/resonatehq/resonate/internal/kernel/types"
+import (
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+)
 
 type Coroutine struct {
 	name         string
-	kind         string
 	init         func(*Scheduler, *Coroutine)
 	onDone       []func()
-	submission   *types.Submission
-	continuation func(int64, *types.Completion, error)
+	submission   *t_aio.Submission
+	continuation func(int64, *t_aio.Completion, error)
 }
 
-func NewCoroutine(name string, kind string, init func(*Scheduler, *Coroutine)) *Coroutine {
+func NewCoroutine(name string, init func(*Scheduler, *Coroutine)) *Coroutine {
 	return &Coroutine{
 		name: name,
-		kind: kind,
 		init: init,
 	}
 }
 
-func (c *Coroutine) String() string {
-	return c.name
-}
-
-func (c *Coroutine) Kind() string {
-	return c.kind
-}
-
-func (c *Coroutine) Yield(submission *types.Submission, continuation func(int64, *types.Completion, error)) {
+func (c *Coroutine) Yield(submission *t_aio.Submission, continuation func(int64, *t_aio.Completion, error)) {
 	c.submission = submission
 	c.continuation = continuation
 }
@@ -36,7 +28,7 @@ func (c *Coroutine) OnDone(f func()) {
 	c.onDone = append(c.onDone, f)
 }
 
-func (c *Coroutine) resume(t int64, completion *types.Completion, err error) {
+func (c *Coroutine) resume(t int64, completion *t_aio.Completion, err error) {
 	continuation := c.continuation
 	c.continuation = nil
 
@@ -45,7 +37,7 @@ func (c *Coroutine) resume(t int64, completion *types.Completion, err error) {
 	}
 }
 
-func (c *Coroutine) next() *types.Submission {
+func (c *Coroutine) next() *t_aio.Submission {
 	submission := c.submission
 	c.submission = nil
 

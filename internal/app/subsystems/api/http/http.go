@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
 type Config struct {
@@ -66,10 +66,10 @@ type server struct {
 	api api.API
 }
 
-func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(int64, *types.Response, error) {
-	return func(t int64, completion *types.Response, err error) {
-		cqe := &bus.CQE[types.Request, types.Response]{
-			Kind:       "http",
+func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(int64, *t_api.Response, error) {
+	return func(t int64, completion *t_api.Response, err error) {
+		cqe := &bus.CQE[t_api.Request, t_api.Response]{
+			Tags:       "http",
 			Completion: completion,
 			Error:      err,
 		}

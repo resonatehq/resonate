@@ -1,25 +1,24 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
 func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res func(int64, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromise(id=%s)", p.Id), "TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+	return scheduler.NewCoroutine("TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreUpdatePromise,
-							UpdatePromise: &types.UpdatePromiseCommand{
+							Kind: t_aio.UpdatePromise,
+							UpdatePromise: &t_aio.UpdatePromiseCommand{
 								Id:    p.Id,
 								State: promise.Timedout,
 								Value: promise.Value{
@@ -30,15 +29,15 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 							},
 						},
 						{
-							Kind: types.StoreCreateNotifications,
-							CreateNotifications: &types.CreateNotificationsCommand{
+							Kind: t_aio.CreateNotifications,
+							CreateNotifications: &t_aio.CreateNotificationsCommand{
 								PromiseId: p.Id,
 								Time:      t,
 							},
 						},
 						{
-							Kind: types.StoreDeleteSubscriptions,
-							DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+							Kind: t_aio.DeleteSubscriptions,
+							DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
 								PromiseId: p.Id,
 							},
 						},
@@ -47,7 +46,7 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to update promise", "id", p.Id, "err", err)
 				res(t, err)

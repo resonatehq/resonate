@@ -5,7 +5,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -17,8 +17,8 @@ import (
 type testCase struct {
 	name     string
 	panic    bool
-	commands []*types.Command
-	expected []*types.Result
+	commands []*t_aio.Command
+	expected []*t_aio.Result
 }
 
 func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
@@ -32,12 +32,12 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 			}()
 		}
 
-		sqes := []*bus.SQE[types.Submission, types.Completion]{
+		sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{
 			{
-				Submission: &types.Submission{
-					Kind: types.Store,
-					Store: &types.StoreSubmission{
-						Transaction: &types.Transaction{
+				Submission: &t_aio.Submission{
+					Kind: t_aio.Store,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
 							Commands: c.commands,
 						},
 					},
@@ -62,10 +62,10 @@ func (c *testCase) Panic() bool {
 var TestCases = []*testCase{
 	{
 		name: "CreatePromise",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -77,22 +77,22 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:           "foo",
@@ -109,10 +109,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreatePromiseWithIdKey",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "bar",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -125,22 +125,22 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "bar",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                      "bar",
@@ -158,10 +158,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreatePromiseWithIdKeyAndParam",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "baz",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -174,22 +174,22 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "baz",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                      "baz",
@@ -207,10 +207,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreatePromiseWithIdKeyAndParamAndHeaders",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "baz",
 					Param: promise.Value{
 						Headers: map[string]string{
@@ -227,22 +227,22 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "baz",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                      "baz",
@@ -260,10 +260,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreatePromiseWithIdKeyAndParamAndHeadersAndTags",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "baz",
 					Param: promise.Value{
 						Headers: map[string]string{
@@ -284,22 +284,22 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "baz",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                      "baz",
@@ -317,10 +317,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreatePromiseTwice",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -331,8 +331,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -343,16 +343,16 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 0,
 				},
 			},
@@ -360,10 +360,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromise",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -375,8 +375,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -387,14 +387,14 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -406,8 +406,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -418,28 +418,28 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "bar",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:           "foo",
@@ -456,20 +456,20 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:           "bar",
@@ -489,10 +489,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromiseWithIdKey",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -504,8 +504,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -517,14 +517,14 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -536,8 +536,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -549,28 +549,28 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "bar",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "foo",
@@ -588,20 +588,20 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "bar",
@@ -622,10 +622,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromiseWithIdKeyAndValue",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -637,8 +637,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -650,14 +650,14 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -669,8 +669,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -682,28 +682,28 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "bar",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "foo",
@@ -721,20 +721,20 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "bar",
@@ -755,10 +755,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromiseWithIdKeyAndValueAndHeaders",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -770,8 +770,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -787,14 +787,14 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -806,8 +806,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -823,28 +823,28 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "bar",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "foo",
@@ -862,20 +862,20 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					Records: []*promise.PromiseRecord{{
 						Id:                        "bar",
@@ -896,10 +896,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromiseTwice",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "foo",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -910,8 +910,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -922,8 +922,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -934,8 +934,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id: "bar",
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -946,8 +946,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -958,8 +958,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -970,40 +970,40 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 0,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1011,10 +1011,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdatePromiseBeforeCreatePromise",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -1025,8 +1025,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 4,
 					Value: promise.Value{
@@ -1037,16 +1037,16 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 0,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1054,18 +1054,18 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "ReadPromiseThatDoesNotExist",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.ReadPromiseCommand{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
 					Id: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreReadPromise,
-				ReadPromise: &types.QueryPromisesResult{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
 					RowsReturned: 0,
 				},
 			},
@@ -1073,10 +1073,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "SearchPromisesById",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo.a",
 					Timeout: 2,
 					Param: promise.Value{
@@ -1088,8 +1088,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo.b",
 					Timeout: 2,
 					Param: promise.Value{
@@ -1101,8 +1101,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "a.bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -1114,8 +1114,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "b.bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -1127,8 +1127,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "foo.*",
 					States: []promise.State{
 						promise.Pending,
@@ -1137,8 +1137,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*.bar",
 					States: []promise.State{
 						promise.Pending,
@@ -1147,8 +1147,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -1157,8 +1157,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -1168,34 +1168,34 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 2,
 					LastSortId:   1,
 					Records: []*promise.PromiseRecord{
@@ -1223,8 +1223,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 2,
 					LastSortId:   3,
 					Records: []*promise.PromiseRecord{
@@ -1252,8 +1252,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 2,
 					LastSortId:   3,
 					Records: []*promise.PromiseRecord{
@@ -1281,8 +1281,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 2,
 					LastSortId:   1,
 					Records: []*promise.PromiseRecord{
@@ -1313,10 +1313,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "SearchPromisesByState",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 3,
 					Param: promise.Value{
@@ -1328,8 +1328,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 3,
 					Param: promise.Value{
@@ -1341,8 +1341,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "bar",
 					State: 2,
 					Value: promise.Value{
@@ -1353,8 +1353,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "baz",
 					Timeout: 3,
 					Param: promise.Value{
@@ -1366,8 +1366,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "baz",
 					State: 4,
 					Value: promise.Value{
@@ -1378,8 +1378,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "qux",
 					Timeout: 3,
 					Param: promise.Value{
@@ -1391,8 +1391,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "qux",
 					State: 8,
 					Value: promise.Value{
@@ -1403,8 +1403,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "quy",
 					Timeout: 3,
 					Param: promise.Value{
@@ -1416,8 +1416,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "quy",
 					State: 16,
 					Value: promise.Value{
@@ -1428,8 +1428,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -1438,8 +1438,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Resolved,
@@ -1448,8 +1448,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Rejected,
@@ -1460,8 +1460,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -1474,8 +1474,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -1489,64 +1489,64 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					LastSortId:   1,
 					Records: []*promise.PromiseRecord{
@@ -1564,8 +1564,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 1,
 					LastSortId:   2,
 					Records: []*promise.PromiseRecord{
@@ -1586,8 +1586,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 3,
 					LastSortId:   3,
 					Records: []*promise.PromiseRecord{
@@ -1634,8 +1634,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 3,
 					LastSortId:   3,
 					Records: []*promise.PromiseRecord{
@@ -1682,8 +1682,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 2,
 					LastSortId:   1,
 					Records: []*promise.PromiseRecord{
@@ -1717,19 +1717,19 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreateTimeout",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "foo",
 					Time: 0,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1737,32 +1737,32 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreateTimeoutTwice",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "foo",
 					Time: 0,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "foo",
 					Time: 1,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1770,70 +1770,70 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "ReadNTimeout",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "foo",
 					Time: 0,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "bar",
 					Time: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "baz",
 					Time: 2,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "qux",
 					Time: 3,
 				},
 			},
 			{
-				Kind: types.StoreReadTimeouts,
-				ReadTimeouts: &types.ReadTimeoutsCommand{
+				Kind: t_aio.ReadTimeouts,
+				ReadTimeouts: &t_aio.ReadTimeoutsCommand{
 					N: 3,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadTimeouts,
-				ReadTimeouts: &types.QueryTimeoutsResult{
+				Kind: t_aio.ReadTimeouts,
+				ReadTimeouts: &t_aio.QueryTimeoutsResult{
 					RowsReturned: 3,
 					Records: []*timeout.TimeoutRecord{
 						{Id: "foo", Time: 0},
@@ -1846,18 +1846,18 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "ReadNTimeoutNoResults",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreReadTimeouts,
-				ReadTimeouts: &types.ReadTimeoutsCommand{
+				Kind: t_aio.ReadTimeouts,
+				ReadTimeouts: &t_aio.ReadTimeoutsCommand{
 					N: 3,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreReadTimeouts,
-				ReadTimeouts: &types.QueryTimeoutsResult{
+				Kind: t_aio.ReadTimeouts,
+				ReadTimeouts: &t_aio.QueryTimeoutsResult{
 					RowsReturned: 0,
 				},
 			},
@@ -1865,31 +1865,31 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "DeleteTimeout",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.CreateTimeoutCommand{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.CreateTimeoutCommand{
 					Id:   "foo",
 					Time: 0,
 				},
 			},
 			{
-				Kind: types.StoreDeleteTimeout,
-				DeleteTimeout: &types.DeleteTimeoutCommand{
+				Kind: t_aio.DeleteTimeout,
+				DeleteTimeout: &t_aio.DeleteTimeoutCommand{
 					Id: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateTimeout,
-				CreateTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.CreateTimeout,
+				CreateTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreDeleteTimeout,
-				DeleteTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.DeleteTimeout,
+				DeleteTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1897,18 +1897,18 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "DeleteTimeoutThatDoesNotExist",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreDeleteTimeout,
-				DeleteTimeout: &types.DeleteTimeoutCommand{
+				Kind: t_aio.DeleteTimeout,
+				DeleteTimeout: &t_aio.DeleteTimeoutCommand{
 					Id: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreDeleteTimeout,
-				DeleteTimeout: &types.AlterTimeoutsResult{
+				Kind: t_aio.DeleteTimeout,
+				DeleteTimeout: &t_aio.AlterTimeoutsResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1916,10 +1916,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreateSubscription",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -1928,10 +1928,10 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -1939,10 +1939,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreateSubscriptionTwice",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -1951,8 +1951,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -1961,16 +1961,16 @@ var TestCases = []*testCase{
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 0,
 				},
 			},
@@ -1978,10 +1978,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "DeleteSubscription",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -1990,23 +1990,23 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreDeleteSubscription,
-				DeleteSubscription: &types.DeleteSubscriptionCommand{
+				Kind: t_aio.DeleteSubscription,
+				DeleteSubscription: &t_aio.DeleteSubscriptionCommand{
 					Id:        "a",
 					PromiseId: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreDeleteSubscription,
-				DeleteSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.DeleteSubscription,
+				DeleteSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
@@ -2014,10 +2014,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "ReadSubscription",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2026,23 +2026,23 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadSubscription,
-				ReadSubscription: &types.ReadSubscriptionCommand{
+				Kind: t_aio.ReadSubscription,
+				ReadSubscription: &t_aio.ReadSubscriptionCommand{
 					Id:        "a",
 					PromiseId: "foo",
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscription,
-				ReadSubscription: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscription,
+				ReadSubscription: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 1,
 					Records: []*subscription.SubscriptionRecord{
 						{
@@ -2059,10 +2059,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "ReadSubscriptions",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2071,8 +2071,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "b",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/b",
@@ -2081,8 +2081,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "bar",
 					Url:         "https://bar.com/a",
@@ -2091,8 +2091,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "b",
 					PromiseId:   "bar",
 					Url:         "https://bar.com/b",
@@ -2101,56 +2101,56 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "foo",
 					Limit:     4,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "bar",
 					Limit:     1,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "bar",
 					Limit:     1,
 					SortId:    int64ToPointer(4),
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 2,
 					LastSortId:   1,
 					Records: []*subscription.SubscriptionRecord{
@@ -2174,8 +2174,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 1,
 					LastSortId:   4,
 					Records: []*subscription.SubscriptionRecord{
@@ -2191,8 +2191,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 1,
 					LastSortId:   3,
 					Records: []*subscription.SubscriptionRecord{
@@ -2211,10 +2211,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "TimeoutPromises",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 2,
 					Param: promise.Value{
@@ -2226,8 +2226,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2236,8 +2236,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
 					Timeout: 2,
 					Param: promise.Value{
@@ -2249,8 +2249,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "bar",
 					Url:         "https://bar.com/a",
@@ -2259,8 +2259,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "baz",
 					Timeout: 2,
 					Param: promise.Value{
@@ -2272,8 +2272,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "baz",
 					Url:         "https://baz.com/a",
@@ -2282,117 +2282,117 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreTimeoutCreateNotifications,
-				TimeoutCreateNotifications: &types.TimeoutCreateNotificationsCommand{
+				Kind: t_aio.TimeoutCreateNotifications,
+				TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
 					Time: 2,
 				},
 			},
 			{
-				Kind: types.StoreTimeoutDeleteSubscriptions,
-				TimeoutDeleteSubscriptions: &types.TimeoutDeleteSubscriptionsCommand{
+				Kind: t_aio.TimeoutDeleteSubscriptions,
+				TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
 					Time: 2,
 				},
 			},
 			{
-				Kind: types.StoreTimeoutPromises,
-				TimeoutPromises: &types.TimeoutPromisesCommand{
+				Kind: t_aio.TimeoutPromises,
+				TimeoutPromises: &t_aio.TimeoutPromisesCommand{
 					Time: 2,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.ReadNotificationsCommand{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.ReadNotificationsCommand{
 					N: 5,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "foo",
 					Limit:     3,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "bar",
 					Limit:     3,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsCommand{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 					PromiseId: "baz",
 					Limit:     3,
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.SearchPromisesCommand{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
 					Q:      "*",
 					States: []promise.State{promise.Timedout},
 					Limit:  5,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreTimeoutCreateNotifications,
-				TimeoutCreateNotifications: &types.AlterNotificationsResult{
+				Kind: t_aio.TimeoutCreateNotifications,
+				TimeoutCreateNotifications: &t_aio.AlterNotificationsResult{
 					RowsAffected: 3,
 				},
 			},
 			{
-				Kind: types.StoreTimeoutDeleteSubscriptions,
-				TimeoutDeleteSubscriptions: &types.AlterSubscriptionsResult{
+				Kind: t_aio.TimeoutDeleteSubscriptions,
+				TimeoutDeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 3,
 				},
 			},
 			{
-				Kind: types.StoreTimeoutPromises,
-				TimeoutPromises: &types.AlterPromisesResult{
+				Kind: t_aio.TimeoutPromises,
+				TimeoutPromises: &t_aio.AlterPromisesResult{
 					RowsAffected: 3,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.QueryNotificationsResult{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.QueryNotificationsResult{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
@@ -2423,26 +2423,26 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 0,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 0,
 				},
 			},
 			{
-				Kind: types.StoreReadSubscriptions,
-				ReadSubscriptions: &types.QuerySubscriptionsResult{
+				Kind: t_aio.ReadSubscriptions,
+				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 					RowsReturned: 0,
 				},
 			},
 			{
-				Kind: types.StoreSearchPromises,
-				SearchPromises: &types.QueryPromisesResult{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
 					RowsReturned: 3,
 					LastSortId:   1,
 					Records: []*promise.PromiseRecord{
@@ -2486,10 +2486,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "CreateNotifications",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -2501,8 +2501,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2511,8 +2511,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "b",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/b",
@@ -2521,8 +2521,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "c",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/c",
@@ -2531,8 +2531,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -2543,59 +2543,59 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.CreateNotificationsCommand{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.CreateNotificationsCommand{
 					PromiseId: "foo",
 					Time:      2,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.ReadNotificationsCommand{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.ReadNotificationsCommand{
 					N: 3,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.AlterNotificationsResult{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.AlterNotificationsResult{
 					RowsAffected: 3,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.QueryNotificationsResult{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.QueryNotificationsResult{
 					RowsReturned: 3,
 					Records: []*notification.NotificationRecord{
 						{
@@ -2629,10 +2629,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "UpdateNotification",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -2644,8 +2644,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2654,8 +2654,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -2666,15 +2666,15 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.CreateNotificationsCommand{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.CreateNotificationsCommand{
 					PromiseId: "foo",
 					Time:      2,
 				},
 			},
 			{
-				Kind: types.StoreUpdateNotification,
-				UpdateNotification: &types.UpdateNotificationCommand{
+				Kind: t_aio.UpdateNotification,
+				UpdateNotification: &t_aio.UpdateNotificationCommand{
 					Id:        "a",
 					PromiseId: "foo",
 					Time:      4,
@@ -2682,46 +2682,46 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.ReadNotificationsCommand{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.ReadNotificationsCommand{
 					N: 1,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.AlterNotificationsResult{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.AlterNotificationsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdateNotification,
-				UpdateNotification: &types.AlterNotificationsResult{
+				Kind: t_aio.UpdateNotification,
+				UpdateNotification: &t_aio.AlterNotificationsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.QueryNotificationsResult{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.QueryNotificationsResult{
 					RowsReturned: 1,
 					Records: []*notification.NotificationRecord{
 						{
@@ -2739,10 +2739,10 @@ var TestCases = []*testCase{
 	},
 	{
 		name: "DeleteNotification",
-		commands: []*types.Command{
+		commands: []*t_aio.Command{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.CreatePromiseCommand{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
 					Timeout: 1,
 					Param: promise.Value{
@@ -2754,8 +2754,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.CreateSubscriptionCommand{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
 					Id:          "a",
 					PromiseId:   "foo",
 					Url:         "https://foo.com/a",
@@ -2764,8 +2764,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.UpdatePromiseCommand{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "foo",
 					State: 2,
 					Value: promise.Value{
@@ -2776,60 +2776,60 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.CreateNotificationsCommand{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.CreateNotificationsCommand{
 					PromiseId: "foo",
 					Time:      2,
 				},
 			},
 			{
-				Kind: types.StoreDeleteNotification,
-				DeleteNotification: &types.DeleteNotificationCommand{
+				Kind: t_aio.DeleteNotification,
+				DeleteNotification: &t_aio.DeleteNotificationCommand{
 					Id:        "a",
 					PromiseId: "foo",
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.ReadNotificationsCommand{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.ReadNotificationsCommand{
 					N: 1,
 				},
 			},
 		},
-		expected: []*types.Result{
+		expected: []*t_aio.Result{
 			{
-				Kind: types.StoreCreatePromise,
-				CreatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateSubscription,
-				CreateSubscription: &types.AlterSubscriptionsResult{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreUpdatePromise,
-				UpdatePromise: &types.AlterPromisesResult{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreCreateNotifications,
-				CreateNotifications: &types.AlterNotificationsResult{
+				Kind: t_aio.CreateNotifications,
+				CreateNotifications: &t_aio.AlterNotificationsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreDeleteNotification,
-				DeleteNotification: &types.AlterNotificationsResult{
+				Kind: t_aio.DeleteNotification,
+				DeleteNotification: &t_aio.AlterNotificationsResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: types.StoreReadNotifications,
-				ReadNotifications: &types.QueryNotificationsResult{
+				Kind: t_aio.ReadNotifications,
+				ReadNotifications: &t_aio.QueryNotificationsResult{
 					RowsReturned: 0,
 				},
 			},
@@ -2838,19 +2838,19 @@ var TestCases = []*testCase{
 	{
 		name:     "PanicsWhenNoCommands",
 		panic:    true,
-		commands: []*types.Command{},
+		commands: []*t_aio.Command{},
 	},
 	{
 		name:     "PanicsWhenInvalidCommand",
 		panic:    true,
-		commands: []*types.Command{{}},
+		commands: []*t_aio.Command{{}},
 	},
 	{
 		name:  "PanicsWhenUpdatePromiseCommandInvalidState",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreUpdatePromise,
-			UpdatePromise: &types.UpdatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.UpdatePromise,
+			UpdatePromise: &t_aio.UpdatePromiseCommand{
 				Id:    "foo",
 				State: 1,
 				Value: promise.Value{
@@ -2862,9 +2862,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenUpdatePromiseCommandInvalidState",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreUpdatePromise,
-			UpdatePromise: &types.UpdatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.UpdatePromise,
+			UpdatePromise: &t_aio.UpdatePromiseCommand{
 				Id:    "foo",
 				State: 32,
 				Value: promise.Value{
@@ -2876,9 +2876,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenCreatePromiseParamHeadersNil",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreCreatePromise,
-			CreatePromise: &types.CreatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.CreatePromise,
+			CreatePromise: &t_aio.CreatePromiseCommand{
 				Id: "foo",
 				Param: promise.Value{
 					Headers: nil,
@@ -2891,9 +2891,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenCreatePromiseParamDataNil",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreCreatePromise,
-			CreatePromise: &types.CreatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.CreatePromise,
+			CreatePromise: &t_aio.CreatePromiseCommand{
 				Id: "foo",
 				Param: promise.Value{
 					Headers: map[string]string{},
@@ -2906,9 +2906,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenCreatePromiseTagsNil",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreCreatePromise,
-			CreatePromise: &types.CreatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.CreatePromise,
+			CreatePromise: &t_aio.CreatePromiseCommand{
 				Id: "foo",
 				Param: promise.Value{
 					Headers: map[string]string{},
@@ -2921,9 +2921,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenUpdatePromiseValueHeadersNil",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreUpdatePromise,
-			UpdatePromise: &types.UpdatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.UpdatePromise,
+			UpdatePromise: &t_aio.UpdatePromiseCommand{
 				Id:    "foo",
 				State: promise.Resolved,
 				Value: promise.Value{
@@ -2936,9 +2936,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenUpdatePromiseValueDataNil",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreUpdatePromise,
-			UpdatePromise: &types.UpdatePromiseCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.UpdatePromise,
+			UpdatePromise: &t_aio.UpdatePromiseCommand{
 				Id:    "foo",
 				State: promise.Resolved,
 				Value: promise.Value{
@@ -2951,9 +2951,9 @@ var TestCases = []*testCase{
 	{
 		name:  "PanicsWhenCreateTimeoutCommandNegativeTime",
 		panic: true,
-		commands: []*types.Command{{
-			Kind: types.StoreCreateTimeout,
-			CreateTimeout: &types.CreateTimeoutCommand{
+		commands: []*t_aio.Command{{
+			Kind: t_aio.CreateTimeout,
+			CreateTimeout: &t_aio.CreateTimeoutCommand{
 				Id:   "foo",
 				Time: -1,
 			},

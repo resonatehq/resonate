@@ -2,17 +2,17 @@ package store
 
 import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Store interface {
-	Execute([]*types.Transaction) ([][]*types.Result, error)
+	Execute([]*t_aio.Transaction) ([][]*t_aio.Result, error)
 }
 
-func Process(store Store, sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
-	var cqes []*bus.CQE[types.Submission, types.Completion]
-	var transactions []*types.Transaction
+func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	var cqes []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	var transactions []*t_aio.Transaction
 
 	for _, sqe := range sqes {
 		util.Assert(sqe.Submission.Store != nil, "submission must not be nil")
@@ -25,17 +25,17 @@ func Process(store Store, sqes []*bus.SQE[types.Submission, types.Completion]) [
 	}
 
 	for i, sqe := range sqes {
-		cqe := &bus.CQE[types.Submission, types.Completion]{
-			Kind:     sqe.Kind,
+		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Tags:     sqe.Tags,
 			Callback: sqe.Callback,
 		}
 
 		if err != nil {
 			cqe.Error = err
 		} else {
-			cqe.Completion = &types.Completion{
-				Kind: types.Store,
-				Store: &types.StoreCompletion{
+			cqe.Completion = &t_aio.Completion{
+				Kind: t_aio.Store,
+				Store: &t_aio.StoreCompletion{
 					Results: results[i],
 				},
 			}

@@ -4,23 +4,24 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 type AIO interface {
 	String() string
-	Enqueue(*bus.SQE[types.Submission, types.Completion])
-	Dequeue(int) []*bus.CQE[types.Submission, types.Completion]
+	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
+	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 	Done() bool
 	Flush(int64)
 }
 
 type aio struct {
-	cq         chan *bus.CQE[types.Submission, types.Completion]
-	subsystems map[types.AIOKind]*subsystemWrapper
+	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
+	subsystems map[t_aio.Kind]*subsystemWrapper
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
@@ -28,29 +29,29 @@ type aio struct {
 
 type subsystemWrapper struct {
 	Subsystem
-	sq      chan<- *bus.SQE[types.Submission, types.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	workers []*workerWrapper
 }
 
 type workerWrapper struct {
 	Worker
-	sq      <-chan *bus.SQE[types.Submission, types.Completion]
-	cq      chan<- *bus.CQE[types.Submission, types.Completion]
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	cq      chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
 	max     int
 	flushCh chan int64
 }
 
 func New(size int, metrics *metrics.Metrics) *aio {
 	return &aio{
-		cq:         make(chan *bus.CQE[types.Submission, types.Completion], size),
-		subsystems: map[types.AIOKind]*subsystemWrapper{},
+		cq:         make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], size),
+		subsystems: map[t_aio.Kind]*subsystemWrapper{},
 		errors:     make(chan error),
 		metrics:    metrics,
 	}
 }
 
-func (a *aio) AddSubsystem(kind types.AIOKind, subsystem Subsystem, size int, max int, n int) {
-	sq := make(chan *bus.SQE[types.Submission, types.Completion], size)
+func (a *aio) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, size int, max int, n int) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], size)
 	workers := make([]*workerWrapper, n)
 
 	for i := 0; i < n; i++ {
@@ -106,12 +107,12 @@ func (a *aio) Errors() <-chan error {
 	return a.errors
 }
 
-func (a *aio) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
+func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	if subsystem, ok := a.subsystems[sqe.Submission.Kind]; ok {
 		select {
 		case subsystem.sq <- sqe:
 			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
-			a.metrics.AioInFlight.WithLabelValues(sqe.Kind).Inc()
+			a.metrics.AioInFlight.WithLabelValues(sqe.Tags).Inc()
 		default:
 			sqe.Callback(0, nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
 		}
@@ -120,8 +121,8 @@ func (a *aio) Enqueue(sqe *bus.SQE[types.Submission, types.Completion]) {
 	}
 }
 
-func (a *aio) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
-	cqes := []*bus.CQE[types.Submission, types.Completion]{}
+func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := []*bus.CQE[t_aio.Submission, t_aio.Completion]{}
 
 	// collects n entries or until the channel is
 	// exhausted, whichever happens first
@@ -140,8 +141,8 @@ func (a *aio) Dequeue(n int) []*bus.CQE[types.Submission, types.Completion] {
 			}
 
 			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
-			a.metrics.AioTotal.WithLabelValues(cqe.Kind, status).Inc()
-			a.metrics.AioInFlight.WithLabelValues(cqe.Kind).Dec()
+			a.metrics.AioTotal.WithLabelValues(cqe.Tags, status).Inc()
+			a.metrics.AioInFlight.WithLabelValues(cqe.Tags).Dec()
 
 			cqes = append(cqes, cqe)
 		default:
@@ -193,8 +194,8 @@ func (w *workerWrapper) flush(t int64) {
 	}
 }
 
-func (w *workerWrapper) collect() ([]*bus.SQE[types.Submission, types.Completion], bool) {
-	sqes := []*bus.SQE[types.Submission, types.Completion]{}
+func (w *workerWrapper) collect() ([]*bus.SQE[t_aio.Submission, t_aio.Completion], bool) {
+	sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
 
 	for i := 0; i < w.max; i++ {
 		select {

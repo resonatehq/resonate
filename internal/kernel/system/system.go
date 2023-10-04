@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -37,7 +37,7 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[types.APIKind]func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine
+	onRequest map[t_api.Kind]func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine
 	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine
 	ticks     int64
 }
@@ -49,7 +49,7 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[types.APIKind]func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine{},
+		onRequest: map[t_api.Kind]func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine{},
 		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine{},
 	}
 }
@@ -93,7 +93,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	s.scheduler.Tick(t, s.config.CompletionBatchSize)
 }
 
-func (s *System) AddOnRequest(kind types.APIKind, constructor func(int64, *types.Request, func(int64, *types.Response, error)) *scheduler.Coroutine) {
+func (s *System) AddOnRequest(kind t_api.Kind, constructor func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine) {
 	s.onRequest[kind] = constructor
 }
 

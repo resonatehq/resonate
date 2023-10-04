@@ -1,4 +1,4 @@
-package types
+package t_aio
 
 type EchoSubmission struct {
 	Data string

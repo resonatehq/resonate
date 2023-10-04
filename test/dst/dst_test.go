@@ -12,7 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
@@ -44,8 +44,8 @@ func TestDST(t *testing.T) {
 		}
 
 		// add api subsystems
-		aio.AddSubsystem(types.Network, network)
-		aio.AddSubsystem(types.Store, store)
+		aio.AddSubsystem(t_aio.Network, network)
+		aio.AddSubsystem(t_aio.Store, store)
 
 		// instantiate system
 		system := system.New(api, aio, config, metrics)
@@ -59,15 +59,15 @@ func TestDST(t *testing.T) {
 		}
 
 		dst := New(&Config{
-			Ticks:   1000,
-			Reqs:    func() int { return 100 },
-			Ids:     100,
-			Ikeys:   100,
-			Data:    100,
-			Headers: 100,
-			Tags:    100,
-			Urls:    100,
-			Retries: 100,
+			Ticks:           1000,
+			Reqs:            func() int { return 100 },
+			Ids:             100,
+			IdempotencyKeys: 100,
+			Headers:         100,
+			Data:            100,
+			Tags:            100,
+			Urls:            100,
+			Retries:         100,
 		})
 
 		t.Run(fmt.Sprintf("i=%d, dst=%s", i, dst), func(t *testing.T) {

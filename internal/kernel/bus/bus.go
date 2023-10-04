@@ -1,26 +1,27 @@
 package bus
 
 import (
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
-type Submission interface {
-	types.Submission | types.Request
+type Input interface {
+	t_aio.Submission | t_api.Request
 }
 
-type Completion interface {
-	types.Completion | types.Response
+type Output interface {
+	t_aio.Completion | t_api.Response
 }
 
-type SQE[S Submission, C Completion] struct {
-	Kind       string
-	Submission *S
-	Callback   func(int64, *C, error)
+type SQE[I Input, O Output] struct {
+	Tags       string
+	Submission *I
+	Callback   func(int64, *O, error)
 }
 
-type CQE[S Submission, C Completion] struct {
-	Kind       string
-	Completion *C
-	Callback   func(int64, *C, error)
+type CQE[I Input, O Output] struct {
+	Tags       string
+	Completion *O
+	Callback   func(int64, *O, error)
 	Error      error
 }

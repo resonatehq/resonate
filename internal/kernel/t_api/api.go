@@ -1,10 +1,10 @@
-package types
+package t_api
 
-type APIKind int
+type Kind int
 
 const (
 	// Promise
-	ReadPromise APIKind = iota
+	ReadPromise Kind = iota
 	SearchPromises
 	CreatePromise
 	CancelPromise

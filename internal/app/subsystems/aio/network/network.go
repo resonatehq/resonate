@@ -7,7 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -53,16 +53,16 @@ func (n *Network) NewWorker(int) aio.Worker {
 	}
 }
 
-func (d *NetworkDevice) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
-	cqes := make([]*bus.CQE[types.Submission, types.Completion], len(sqes))
+func (d *NetworkDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
 		util.Assert(sqe.Submission.Network != nil, "submission must not be nil")
 
 		switch sqe.Submission.Network.Kind {
-		case types.Http:
-			cqe := &bus.CQE[types.Submission, types.Completion]{
-				Kind:     sqe.Kind,
+		case t_aio.Http:
+			cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+				Tags:     sqe.Tags,
 				Callback: sqe.Callback,
 			}
 
@@ -70,10 +70,10 @@ func (d *NetworkDevice) Process(sqes []*bus.SQE[types.Submission, types.Completi
 			if err != nil {
 				cqe.Error = err
 			} else {
-				cqe.Completion = &types.Completion{
-					Kind: types.Network,
-					Network: &types.NetworkCompletion{
-						Kind: types.Http,
+				cqe.Completion = &t_aio.Completion{
+					Kind: t_aio.Network,
+					Network: &t_aio.NetworkCompletion{
+						Kind: t_aio.Http,
 						Http: res,
 					},
 				}
@@ -88,7 +88,7 @@ func (d *NetworkDevice) Process(sqes []*bus.SQE[types.Submission, types.Completi
 	return cqes
 }
 
-func (d *NetworkDevice) httpRequest(r *types.HttpRequest) (*http.Response, error) {
+func (d *NetworkDevice) httpRequest(r *t_aio.HttpRequest) (*http.Response, error) {
 	req, err := http.NewRequest(r.Method, r.Url, bytes.NewBuffer(r.Body))
 	if err != nil {
 		return nil, err
