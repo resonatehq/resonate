@@ -51,7 +51,6 @@ func TestDST(t *testing.T) {
 		// instantiate system
 		system := system.New(api, aio, config, metrics)
 		system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-		system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 		system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 		system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
 		system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
@@ -61,6 +60,7 @@ func TestDST(t *testing.T) {
 		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 
 		if i > 0 {
+			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnTick(2, coroutines.TimeoutPromises)
 			system.AddOnTick(10, coroutines.NotifySubscriptions)
 		}
