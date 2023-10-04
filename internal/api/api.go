@@ -3,22 +3,23 @@ package api
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
 type API interface {
 	String() string
-	Enqueue(*bus.SQE[types.Request, types.Response])
-	Dequeue(int, <-chan time.Time) []*bus.SQE[types.Request, types.Response]
+	Enqueue(*bus.SQE[t_api.Request, t_api.Response])
+	Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response]
 	Done() bool
 }
 
 type api struct {
-	sq         chan *bus.SQE[types.Request, types.Response]
+	sq         chan *bus.SQE[t_api.Request, t_api.Response]
 	subsystems []Subsystem
 	done       bool
 	errors     chan error
@@ -27,7 +28,7 @@ type api struct {
 
 func New(size int, metrics *metrics.Metrics) *api {
 	return &api{
-		sq:      make(chan *bus.SQE[types.Request, types.Response], size),
+		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
 		errors:  make(chan error),
 		metrics: metrics,
 	}
@@ -67,54 +68,56 @@ func (a *api) Errors() <-chan error {
 	return a.errors
 }
 
-func (a *api) Enqueue(sqe *bus.SQE[types.Request, types.Response]) {
+func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
+	tags := strings.Split(sqe.Tags, ",")
+
 	// replace sqe.Callback with a callback that wraps the original
 	// function and emits metrics
 	callback := sqe.Callback
-	sqe.Callback = func(t int64, res *types.Response, err error) {
+	sqe.Callback = func(t int64, res *t_api.Response, err error) {
 		var status int
 
 		if err != nil {
 			status = 500
 		} else {
 			switch res.Kind {
-			case types.ReadPromise:
+			case t_api.ReadPromise:
 				status = int(res.ReadPromise.Status)
-			case types.SearchPromises:
+			case t_api.SearchPromises:
 				status = int(res.SearchPromises.Status)
-			case types.CreatePromise:
+			case t_api.CreatePromise:
 				status = int(res.CreatePromise.Status)
-			case types.CancelPromise:
+			case t_api.CancelPromise:
 				status = int(res.CancelPromise.Status)
-			case types.ResolvePromise:
+			case t_api.ResolvePromise:
 				status = int(res.ResolvePromise.Status)
-			case types.RejectPromise:
+			case t_api.RejectPromise:
 				status = int(res.RejectPromise.Status)
-			case types.ReadSubscriptions:
+			case t_api.ReadSubscriptions:
 				status = int(res.ReadSubscriptions.Status)
-			case types.CreateSubscription:
+			case t_api.CreateSubscription:
 				status = int(res.CreateSubscription.Status)
-			case types.DeleteSubscription:
+			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
 			}
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(sqe.Kind, strconv.Itoa(status)).Inc()
-		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Dec()
+		a.metrics.ApiTotal.WithLabelValues(append(tags, strconv.Itoa(status))...).Inc()
+		a.metrics.ApiInFlight.WithLabelValues(tags...).Dec()
 
 		callback(t, res, err)
 	}
 
 	select {
 	case a.sq <- sqe:
-		a.metrics.ApiInFlight.WithLabelValues(sqe.Kind).Inc()
+		a.metrics.ApiInFlight.WithLabelValues(tags...).Inc()
 	default:
 		sqe.Callback(0, nil, fmt.Errorf("api submission queue full"))
 	}
 }
 
-func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[types.Request, types.Response] {
-	sqes := []*bus.SQE[types.Request, types.Response]{}
+func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response] {
+	sqes := []*bus.SQE[t_api.Request, t_api.Response]{}
 
 	if timeoutCh != nil {
 		// collects n entries or until a timeout occurs,

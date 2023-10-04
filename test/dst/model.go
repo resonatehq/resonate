@@ -5,33 +5,33 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Model struct {
 	promises  Promises
-	responses map[types.APIKind]ResponseValidator
-	cursors   []*types.Request
+	responses map[t_api.Kind]ResponseValidator
+	cursors   []*t_api.Request
 }
 
 func NewModel() *Model {
 	return &Model{
 		promises:  map[string]*PromiseModel{},
-		responses: map[types.APIKind]ResponseValidator{},
+		responses: map[t_api.Kind]ResponseValidator{},
 	}
 }
 
-func (m *Model) AddResponse(kind types.APIKind, response ResponseValidator) {
+func (m *Model) AddResponse(kind t_api.Kind, response ResponseValidator) {
 	m.responses[kind] = response
 }
 
-func (m *Model) addCursor(next *types.Request) {
+func (m *Model) addCursor(next *t_api.Request) {
 	m.cursors = append(m.cursors, next)
 }
 
-func (m *Model) Step(req *types.Request, res *types.Response, err error) error {
+func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		switch err.Error() {
 		case "api submission queue full":
@@ -56,15 +56,15 @@ func (m *Model) Step(req *types.Request, res *types.Response, err error) error {
 	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
 }
 
-func (m *Model) ValidateReadPromise(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 	return pm.readPromise(req.ReadPromise, res.ReadPromise)
 }
 
-func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) error {
 	if res.SearchPromises.Cursor != nil {
-		m.addCursor(&types.Request{
-			Kind:           types.SearchPromises,
+		m.addCursor(&t_api.Request{
+			Kind:           t_api.SearchPromises,
 			SearchPromises: res.SearchPromises.Cursor.Next,
 		})
 	}
@@ -97,30 +97,30 @@ func (m *Model) ValidateSearchPromises(req *types.Request, res *types.Response) 
 	return nil
 }
 
-func (m *Model) ValidatCreatePromise(req *types.Request, res *types.Response) error {
+func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 	return pm.createPromise(req.CreatePromise, res.CreatePromise)
 }
 
-func (m *Model) ValidateCancelPromise(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CancelPromise.Id)
 	return pm.cancelPromise(req.CancelPromise, res.CancelPromise)
 }
 
-func (m *Model) ValidateResolvePromise(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ResolvePromise.Id)
 	return pm.resolvePromise(req.ResolvePromise, res.ResolvePromise)
 }
 
-func (m *Model) ValidateRejectPromise(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.RejectPromise.Id)
 	return pm.rejectPromise(req.RejectPromise, res.RejectPromise)
 }
 
-func (m *Model) ValidateReadSubscriptions(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
-		m.addCursor(&types.Request{
-			Kind:              types.ReadSubscriptions,
+		m.addCursor(&t_api.Request{
+			Kind:              t_api.ReadSubscriptions,
 			ReadSubscriptions: res.ReadSubscriptions.Cursor.Next,
 		})
 	}
@@ -129,12 +129,12 @@ func (m *Model) ValidateReadSubscriptions(req *types.Request, res *types.Respons
 	return pm.readSubscriptions(req.ReadSubscriptions, res.ReadSubscriptions)
 }
 
-func (m *Model) ValidateCreateSubscription(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreateSubscription.PromiseId)
 	return pm.createSubscription(req.CreateSubscription, res.CreateSubscription)
 }
 
-func (m *Model) ValidateDeleteSubscription(req *types.Request, res *types.Response) error {
+func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	return pm.deleteSubscription(req.DeleteSubscription, res.DeleteSubscription)
 }
@@ -149,7 +149,7 @@ func (p Promises) Get(id string) *PromiseModel {
 	return p[id]
 }
 
-type ResponseValidator func(*types.Request, *types.Response) error
+type ResponseValidator func(*t_api.Request, *t_api.Response) error
 
 type PromiseModel struct {
 	id            string
@@ -157,17 +157,17 @@ type PromiseModel struct {
 	subscriptions []*subscription.Subscription
 }
 
-func (m *PromiseModel) readPromise(req *types.ReadPromiseRequest, res *types.ReadPromiseResponse) error {
+func (m *PromiseModel) readPromise(req *t_api.ReadPromiseRequest, res *t_api.ReadPromiseResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.completed() && res.Promise.State == promise.Pending {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, res.Promise.State)
 		}
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		return fmt.Errorf("invalid response '%d' for read promise request", res.Status)
-	case types.ResponseForbidden:
+	case t_api.ResponseForbidden:
 		return fmt.Errorf("invalid response '%d' for read promise request", res.Status)
-	case types.ResponseNotFound:
+	case t_api.ResponseNotFound:
 		if m.promise != nil {
 			return fmt.Errorf("promise exists %s", m.promise)
 		}
@@ -178,9 +178,9 @@ func (m *PromiseModel) readPromise(req *types.ReadPromiseRequest, res *types.Rea
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) searchPromise(req *types.SearchPromisesRequest, res *types.SearchPromisesResponse, p *promise.Promise) error {
+func (m *PromiseModel) searchPromise(req *t_api.SearchPromisesRequest, res *t_api.SearchPromisesResponse, p *promise.Promise) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.completed() && p.State == promise.Pending {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, p.State)
 		}
@@ -191,9 +191,9 @@ func (m *PromiseModel) searchPromise(req *types.SearchPromisesRequest, res *type
 	return m.verifyPromise(p)
 }
 
-func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types.CreatePromiseResponse) error {
+func (m *PromiseModel) createPromise(req *t_api.CreatePromiseRequest, res *t_api.CreatePromiseResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.promise != nil {
 			if !m.idempotencyKeyForCreateMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForCreate, res.Promise.IdempotencyKeyForCreate)
@@ -201,12 +201,12 @@ func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		if m.promise != nil {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Pending)
 		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
+	case t_api.ResponseForbidden:
+	case t_api.ResponseNotFound:
 		return fmt.Errorf("invalid response '%d' for create promise request", res.Status)
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
@@ -215,9 +215,9 @@ func (m *PromiseModel) createPromise(req *types.CreatePromiseRequest, res *types
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types.CancelPromiseResponse) error {
+func (m *PromiseModel) cancelPromise(req *t_api.CancelPromiseRequest, res *t_api.CancelPromiseResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.completed() {
 			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
@@ -225,12 +225,12 @@ func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		if m.completed() {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Canceled)
 		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
+	case t_api.ResponseForbidden:
+	case t_api.ResponseNotFound:
 		if m.promise != nil {
 			return fmt.Errorf("promise exists %s", m.promise)
 		}
@@ -241,9 +241,9 @@ func (m *PromiseModel) cancelPromise(req *types.CancelPromiseRequest, res *types
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *types.ResolvePromiseResponse) error {
+func (m *PromiseModel) resolvePromise(req *t_api.ResolvePromiseRequest, res *t_api.ResolvePromiseResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.completed() {
 			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
@@ -251,12 +251,12 @@ func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *typ
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		if m.completed() {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Resolved)
 		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
+	case t_api.ResponseForbidden:
+	case t_api.ResponseNotFound:
 		if m.promise != nil {
 			return fmt.Errorf("promise exists %s", m.promise)
 		}
@@ -267,9 +267,9 @@ func (m *PromiseModel) resolvePromise(req *types.ResolvePromiseRequest, res *typ
 	return m.verifyPromise(res.Promise)
 }
 
-func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types.RejectPromiseResponse) error {
+func (m *PromiseModel) rejectPromise(req *t_api.RejectPromiseRequest, res *t_api.RejectPromiseResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		if m.completed() {
 			if !m.idempotencyKeyForCompleteMatch(res.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", m.promise.IdempotencyKeyForComplete, res.Promise.IdempotencyKeyForComplete)
@@ -277,12 +277,12 @@ func (m *PromiseModel) rejectPromise(req *types.RejectPromiseRequest, res *types
 				return fmt.Errorf("unexpected state %s when strict true", m.promise.State)
 			}
 		}
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		if m.completed() {
 			return fmt.Errorf("invalid state transition (%s -> %s)", m.promise.State, promise.Rejected)
 		}
-	case types.ResponseForbidden:
-	case types.ResponseNotFound:
+	case t_api.ResponseForbidden:
+	case t_api.ResponseNotFound:
 		if m.promise != nil {
 			return fmt.Errorf("promise exists %s", m.promise)
 		}
@@ -312,9 +312,9 @@ func (m *PromiseModel) verifyPromise(p *promise.Promise) error {
 	return nil
 }
 
-func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, res *types.ReadSubscriptionsResponse) error {
+func (m *PromiseModel) readSubscriptions(req *t_api.ReadSubscriptionsRequest, res *t_api.ReadSubscriptionsResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		for _, subscription := range res.Subscriptions {
 			if req.SortId != nil && *req.SortId <= subscription.SortId {
 				return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SortId, subscription.SortId)
@@ -331,10 +331,10 @@ func (m *PromiseModel) readSubscriptions(req *types.ReadSubscriptionsRequest, re
 	return nil
 }
 
-func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, res *types.CreateSubscriptionResponse) error {
+func (m *PromiseModel) createSubscription(req *t_api.CreateSubscriptionRequest, res *t_api.CreateSubscriptionResponse) error {
 	switch res.Status {
-	case types.ResponseOK:
-	case types.ResponseCreated:
+	case t_api.ResponseOK:
+	case t_api.ResponseCreated:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
@@ -342,16 +342,16 @@ func (m *PromiseModel) createSubscription(req *types.CreateSubscriptionRequest, 
 	return m.verifySubscription(res.Subscription)
 }
 
-func (m *PromiseModel) deleteSubscription(req *types.DeleteSubscriptionRequest, res *types.DeleteSubscriptionResponse) error {
+func (m *PromiseModel) deleteSubscription(req *t_api.DeleteSubscriptionRequest, res *t_api.DeleteSubscriptionResponse) error {
 	switch res.Status {
-	case types.ResponseNoContent:
+	case t_api.ResponseNoContent:
 		for i, subscription := range m.subscriptions {
 			if req.Id == subscription.Id {
 				m.subscriptions = append(m.subscriptions[:i], m.subscriptions[i+1:]...)
 				break
 			}
 		}
-	case types.ResponseNotFound:
+	case t_api.ResponseNotFound:
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}

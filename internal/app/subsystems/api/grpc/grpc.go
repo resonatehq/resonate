@@ -9,7 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc"
@@ -68,14 +68,14 @@ type server struct {
 }
 
 func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.ReadPromise,
-			ReadPromise: &types.ReadPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind: t_api.ReadPromise,
+			ReadPromise: &t_api.ReadPromiseRequest{
 				Id: req.Id,
 			},
 		},
@@ -96,13 +96,13 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 }
 
 func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	var searchPromises *types.SearchPromisesRequest
+	var searchPromises *t_api.SearchPromisesRequest
 
 	if req.Cursor != "" {
-		cursor, err := types.NewCursor[types.SearchPromisesRequest](req.Cursor)
+		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](req.Cursor)
 		if err != nil {
 			return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
 		}
@@ -141,17 +141,17 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid state")
 		}
 
-		searchPromises = &types.SearchPromisesRequest{
+		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      req.Q,
 			States: states,
 			Limit:  int(req.Limit),
 		}
 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind:           types.SearchPromises,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind:           t_api.SearchPromises,
 			SearchPromises: searchPromises,
 		},
 		Callback: s.sendOrPanic(cq),
@@ -187,7 +187,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 }
 
 func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
 	var idempotencyKey *promise.IdempotencyKey
@@ -206,11 +206,11 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		data = req.Param.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.CreatePromise,
-			CreatePromise: &types.CreatePromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind: t_api.CreatePromise,
+			CreatePromise: &t_api.CreatePromiseRequest{
 				Id:             req.Id,
 				IdempotencyKey: idempotencyKey,
 				Strict:         req.Strict,
@@ -238,7 +238,7 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 }
 
 func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRequest) (*grpcApi.CancelPromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
 	var idempotencyKey *promise.IdempotencyKey
@@ -257,11 +257,11 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.CancelPromise,
-			CancelPromise: &types.CancelPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind: t_api.CancelPromise,
+			CancelPromise: &t_api.CancelPromiseRequest{
 				Id:             req.Id,
 				IdempotencyKey: idempotencyKey,
 				Strict:         req.Strict,
@@ -288,7 +288,7 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 }
 
 func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromiseRequest) (*grpcApi.ResolvePromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
 	var idempotencyKey *promise.IdempotencyKey
@@ -307,11 +307,11 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.ResolvePromise,
-			ResolvePromise: &types.ResolvePromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind: t_api.ResolvePromise,
+			ResolvePromise: &t_api.ResolvePromiseRequest{
 				Id:             req.Id,
 				IdempotencyKey: idempotencyKey,
 				Strict:         req.Strict,
@@ -338,7 +338,7 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 }
 
 func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
 	var idempotencyKey *promise.IdempotencyKey
@@ -357,11 +357,11 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "grpc",
-		Submission: &types.Request{
-			Kind: types.RejectPromise,
-			RejectPromise: &types.RejectPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "grpc",
+		Submission: &t_api.Request{
+			Kind: t_api.RejectPromise,
+			RejectPromise: &t_api.RejectPromiseRequest{
 				Id:             req.Id,
 				IdempotencyKey: idempotencyKey,
 				Strict:         req.Strict,
@@ -387,10 +387,10 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}, nil
 }
 
-func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) func(int64, *types.Response, error) {
-	return func(t int64, completion *types.Response, err error) {
-		cqe := &bus.CQE[types.Request, types.Response]{
-			Kind:       "grpc",
+func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(int64, *t_api.Response, error) {
+	return func(t int64, completion *t_api.Response, err error) {
+		cqe := &bus.CQE[t_api.Request, t_api.Response]{
+			Tags:       "grpc",
 			Completion: completion,
 			Error:      err,
 		}
@@ -403,17 +403,17 @@ func (s *server) sendOrPanic(cq chan *bus.CQE[types.Request, types.Response]) fu
 	}
 }
 
-func protoStatus(status types.ResponseStatus) grpcApi.Status {
+func protoStatus(status t_api.ResponseStatus) grpcApi.Status {
 	switch status {
-	case types.ResponseOK:
+	case t_api.ResponseOK:
 		return grpcApi.Status_OK
-	case types.ResponseCreated:
+	case t_api.ResponseCreated:
 		return grpcApi.Status_CREATED
-	case types.ResponseNoContent:
+	case t_api.ResponseNoContent:
 		return grpcApi.Status_NOCONTENT
-	case types.ResponseForbidden:
+	case t_api.ResponseForbidden:
 		return grpcApi.Status_FORBIDDEN
-	case types.ResponseNotFound:
+	case t_api.ResponseNotFound:
 		return grpcApi.Status_NOTFOUND
 	default:
 		return grpcApi.Status_UNKNOWN

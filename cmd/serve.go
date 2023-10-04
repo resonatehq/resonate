@@ -18,7 +18,8 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -62,8 +63,8 @@ var serveCmd = &cobra.Command{
 		api.AddSubsystem(grpc)
 
 		// add api subsystems
-		aio.AddSubsystem(types.Network, network, config.AIO.Subsystems.Network.Size, config.AIO.Subsystems.Network.BatchSize, config.AIO.Subsystems.Network.Workers)
-		aio.AddSubsystem(types.Store, store, config.AIO.Subsystems.Store.Size, config.AIO.Subsystems.Store.BatchSize, config.AIO.Subsystems.Store.Workers)
+		aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Size, config.AIO.Subsystems.Network.BatchSize, config.AIO.Subsystems.Network.Workers)
+		aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Size, config.AIO.Subsystems.Store.BatchSize, config.AIO.Subsystems.Store.Workers)
 
 		// start api/aio
 		if err := api.Start(); err != nil {
@@ -77,15 +78,15 @@ var serveCmd = &cobra.Command{
 
 		// instantiate system
 		system := system.New(api, aio, config.System, metrics)
-		system.AddOnRequest(types.ReadPromise, coroutines.ReadPromise)
-		system.AddOnRequest(types.SearchPromises, coroutines.SearchPromises)
-		system.AddOnRequest(types.CreatePromise, coroutines.CreatePromise)
-		system.AddOnRequest(types.ResolvePromise, coroutines.ResolvePromise)
-		system.AddOnRequest(types.RejectPromise, coroutines.RejectPromise)
-		system.AddOnRequest(types.CancelPromise, coroutines.CancelPromise)
-		system.AddOnRequest(types.ReadSubscriptions, coroutines.ReadSubscriptions)
-		system.AddOnRequest(types.CreateSubscription, coroutines.CreateSubscription)
-		system.AddOnRequest(types.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
+		system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
+		system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+		system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
+		system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
+		system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
+		system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
+		system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
+		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 		system.AddOnTick(2, coroutines.TimeoutPromises)
 		system.AddOnTick(1, coroutines.NotifySubscriptions)
 

@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,11 +20,11 @@ func TestNetworkHttpRequest(t *testing.T) {
 
 	testCases := []struct {
 		name string
-		req  *types.HttpRequest
+		req  *t_aio.HttpRequest
 	}{
 		{
 			name: "get",
-			req: &types.HttpRequest{
+			req: &t_aio.HttpRequest{
 				Headers: map[string]string{
 					"a": "a",
 					"b": "b",
@@ -36,7 +36,7 @@ func TestNetworkHttpRequest(t *testing.T) {
 		},
 		{
 			name: "put",
-			req: &types.HttpRequest{
+			req: &t_aio.HttpRequest{
 				Headers: map[string]string{
 					"a": "a",
 					"b": "b",
@@ -49,7 +49,7 @@ func TestNetworkHttpRequest(t *testing.T) {
 		},
 		{
 			name: "post",
-			req: &types.HttpRequest{
+			req: &t_aio.HttpRequest{
 				Headers: map[string]string{
 					"a": "a",
 					"b": "b",
@@ -62,7 +62,7 @@ func TestNetworkHttpRequest(t *testing.T) {
 		},
 		{
 			name: "delete",
-			req: &types.HttpRequest{
+			req: &t_aio.HttpRequest{
 				Headers: map[string]string{
 					"a": "a",
 					"b": "b",
@@ -77,11 +77,11 @@ func TestNetworkHttpRequest(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			sqe := &bus.SQE[types.Submission, types.Completion]{
-				Submission: &types.Submission{
-					Kind: types.Network,
-					Network: &types.NetworkSubmission{
-						Kind: types.Http,
+			sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
+				Submission: &t_aio.Submission{
+					Kind: t_aio.Network,
+					Network: &t_aio.NetworkSubmission{
+						Kind: t_aio.Http,
 						Http: tc.req,
 					},
 				},
@@ -89,7 +89,7 @@ func TestNetworkHttpRequest(t *testing.T) {
 
 			config := &Config{Timeout: 0}
 			worker := New(config).NewWorker(0)
-			cqes := worker.Process([]*bus.SQE[types.Submission, types.Completion]{sqe})
+			cqes := worker.Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
 
 			res := cqes[0].Completion.Network.Http
 			assert.Equal(t, http.StatusOK, res.StatusCode)

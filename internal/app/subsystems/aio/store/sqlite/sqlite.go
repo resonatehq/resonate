@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
@@ -271,11 +271,11 @@ func (s *SqliteStore) NewWorker(int) aio.Worker {
 	return &SqliteStoreWorker{s}
 }
 
-func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
+func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	return store.Process(w, sqes)
 }
 
-func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*types.Result, error) {
+func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
 	util.Assert(len(transactions) > 0, "expected a transaction")
 
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
@@ -301,7 +301,7 @@ func (w *SqliteStoreWorker) Execute(transactions []*types.Transaction) ([][]*typ
 	return results, nil
 }
 
-func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Transaction) ([][]*types.Result, error) {
+func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
 	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -380,78 +380,78 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 	}
 	defer notificationDeleteStmt.Close()
 
-	results := make([][]*types.Result, len(transactions))
+	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
 		util.Assert(len(transaction.Commands) > 0, "expected a command")
-		results[i] = make([]*types.Result, len(transaction.Commands))
+		results[i] = make([]*t_aio.Result, len(transaction.Commands))
 
 		for j, command := range transaction.Commands {
 			var err error
 
 			switch command.Kind {
 			// Promise
-			case types.StoreReadPromise:
+			case t_aio.ReadPromise:
 				util.Assert(command.ReadPromise != nil, "command must not be nil")
 				results[i][j], err = w.readPromise(tx, command.ReadPromise)
-			case types.StoreSearchPromises:
+			case t_aio.SearchPromises:
 				util.Assert(command.SearchPromises != nil, "command must not be nil")
 				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
-			case types.StoreCreatePromise:
+			case t_aio.CreatePromise:
 				util.Assert(command.CreatePromise != nil, "command must not be nil")
 				results[i][j], err = w.createPromise(tx, promiseInsertStmt, command.CreatePromise)
-			case types.StoreUpdatePromise:
+			case t_aio.UpdatePromise:
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
-			case types.StoreTimeoutPromises:
+			case t_aio.TimeoutPromises:
 				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
 				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
 			// Timeout
-			case types.StoreReadTimeouts:
+			case t_aio.ReadTimeouts:
 				util.Assert(command.ReadTimeouts != nil, "command must not be nil")
 				results[i][j], err = w.readTimeouts(tx, command.ReadTimeouts)
-			case types.StoreCreateTimeout:
+			case t_aio.CreateTimeout:
 				util.Assert(command.CreateTimeout != nil, "command must not be nil")
 				results[i][j], err = w.createTimeout(tx, timeoutInsertStmt, command.CreateTimeout)
-			case types.StoreDeleteTimeout:
+			case t_aio.DeleteTimeout:
 				util.Assert(command.DeleteTimeout != nil, "command must not be nil")
 				results[i][j], err = w.deleteTimeout(tx, timeoutDeleteStmt, command.DeleteTimeout)
 
 			// Subscription
-			case types.StoreReadSubscription:
+			case t_aio.ReadSubscription:
 				util.Assert(command.ReadSubscription != nil, "command must not be nil")
 				results[i][j], err = w.readSubscription(tx, command.ReadSubscription)
-			case types.StoreReadSubscriptions:
+			case t_aio.ReadSubscriptions:
 				util.Assert(command.ReadSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.readSubscriptions(tx, command.ReadSubscriptions)
-			case types.StoreCreateSubscription:
+			case t_aio.CreateSubscription:
 				util.Assert(command.CreateSubscription != nil, "command must not be nil")
 				results[i][j], err = w.createSubscription(tx, subscriptionInsertStmt, command.CreateSubscription)
-			case types.StoreDeleteSubscription:
+			case t_aio.DeleteSubscription:
 				util.Assert(command.DeleteSubscription != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscription(tx, subscriptionDeleteStmt, command.DeleteSubscription)
-			case types.StoreDeleteSubscriptions:
+			case t_aio.DeleteSubscriptions:
 				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
-			case types.StoreTimeoutDeleteSubscriptions:
+			case t_aio.TimeoutDeleteSubscriptions:
 				util.Assert(command.TimeoutDeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.timeoutDeleteSubscriptions(tx, subscriptionDeleteAllTimeoutStmt, command.TimeoutDeleteSubscriptions)
 
 			// Notification
-			case types.StoreReadNotifications:
+			case t_aio.ReadNotifications:
 				util.Assert(command.ReadNotifications != nil, "command must not be nil")
 				results[i][j], err = w.readNotifications(tx, command.ReadNotifications)
-			case types.StoreCreateNotifications:
+			case t_aio.CreateNotifications:
 				util.Assert(command.CreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.createNotifications(tx, notificationInsertStmt, command.CreateNotifications)
-			case types.StoreUpdateNotification:
+			case t_aio.UpdateNotification:
 				util.Assert(command.UpdateNotification != nil, "command must not be nil")
 				results[i][j], err = w.updateNotification(tx, notificationUpdateStmt, command.UpdateNotification)
-			case types.StoreDeleteNotification:
+			case t_aio.DeleteNotification:
 				util.Assert(command.DeleteNotification != nil, "command must not be nil")
 				results[i][j], err = w.deleteNotification(tx, notificationDeleteStmt, command.DeleteNotification)
-			case types.StoreTimeoutCreateNotifications:
+			case t_aio.TimeoutCreateNotifications:
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
 
@@ -468,7 +468,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*types.Tr
 	return results, nil
 }
 
-func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseCommand) (*t_aio.Result, error) {
 	// select
 	row := tx.QueryRow(PROMISE_SELECT_STATEMENT, cmd.Id)
 	record := &promise.PromiseRecord{}
@@ -500,16 +500,16 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *types.ReadPromiseComman
 		records = append(records, record)
 	}
 
-	return &types.Result{
-		Kind: types.StoreReadPromise,
-		ReadPromise: &types.QueryPromisesResult{
+	return &t_aio.Result{
+		Kind: t_aio.ReadPromise,
+		ReadPromise: &t_aio.QueryPromisesResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromisesCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Q != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
 
@@ -558,9 +558,9 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 		rowsReturned++
 	}
 
-	return &types.Result{
-		Kind: types.StoreSearchPromises,
-		SearchPromises: &types.QueryPromisesResult{
+	return &t_aio.Result{
+		Kind: t_aio.SearchPromises,
+		SearchPromises: &t_aio.QueryPromisesResult{
 			RowsReturned: rowsReturned,
 			LastSortId:   lastSortId,
 			Records:      records,
@@ -568,7 +568,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *types.SearchPromises
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreatePromiseCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -594,15 +594,15 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreCreatePromise,
-		CreatePromise: &types.AlterPromisesResult{
+	return &t_aio.Result{
+		Kind: t_aio.CreatePromise,
+		CreatePromise: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdatePromiseCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdatePromiseCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.State.In(promise.Resolved|promise.Rejected|promise.Canceled|promise.Timedout), "state must be canceled, resolved, rejected, or timedout")
 	util.Assert(cmd.Value.Headers != nil, "value headers must not be nil")
 	util.Assert(cmd.Value.Data != nil, "value data must not be nil")
@@ -623,15 +623,15 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreUpdatePromise,
-		UpdatePromise: &types.AlterPromisesResult{
+	return &t_aio.Result{
+		Kind: t_aio.UpdatePromise,
+		UpdatePromise: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutPromisesCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutPromisesCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// udpate promises
@@ -645,15 +645,15 @@ func (w *SqliteStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *typ
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreTimeoutPromises,
-		TimeoutPromises: &types.AlterPromisesResult{
+	return &t_aio.Result{
+		Kind: t_aio.TimeoutPromises,
+		TimeoutPromises: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *t_aio.ReadTimeoutsCommand) (*t_aio.Result, error) {
 	// select
 	rows, err := tx.Query(TIMEOUT_SELECT_STATEMENT, cmd.N)
 	if err != nil {
@@ -674,16 +674,16 @@ func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *types.ReadTimeoutsComm
 		records = append(records, record)
 	}
 
-	return &types.Result{
-		Kind: types.StoreReadTimeouts,
-		ReadTimeouts: &types.QueryTimeoutsResult{
+	return &t_aio.Result{
+		Kind: t_aio.ReadTimeouts,
+		ReadTimeouts: &t_aio.QueryTimeoutsResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateTimeoutCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTimeoutCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// insert
@@ -697,15 +697,15 @@ func (w *SqliteStoreWorker) createTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreCreateTimeout,
-		CreateTimeout: &types.AlterTimeoutsResult{
+	return &t_aio.Result{
+		Kind: t_aio.CreateTimeout,
+		CreateTimeout: &t_aio.AlterTimeoutsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteTimeoutCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteTimeoutCommand) (*t_aio.Result, error) {
 	// insert
 	res, err := stmt.Exec(cmd.Id)
 	if err != nil {
@@ -717,15 +717,15 @@ func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *types
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreDeleteTimeout,
-		DeleteTimeout: &types.AlterTimeoutsResult{
+	return &t_aio.Result{
+		Kind: t_aio.DeleteTimeout,
+		DeleteTimeout: &t_aio.AlterTimeoutsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscriptionCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *t_aio.ReadSubscriptionCommand) (*t_aio.Result, error) {
 	// select
 	row := tx.QueryRow(SUBSCRIPTION_SELECT_STATEMENT, cmd.Id, cmd.PromiseId)
 	record := &subscription.SubscriptionRecord{}
@@ -744,16 +744,16 @@ func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *types.ReadSubscrip
 		records = append(records, record)
 	}
 
-	return &types.Result{
-		Kind: types.StoreReadSubscription,
-		ReadSubscription: &types.QuerySubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.ReadSubscription,
+		ReadSubscription: &t_aio.QuerySubscriptionsResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscriptionsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *t_aio.ReadSubscriptionsCommand) (*t_aio.Result, error) {
 	// select
 	rows, err := tx.Query(SUBSCRIPTION_SELECT_ALL_STATEMENT, cmd.SortId, cmd.SortId, cmd.PromiseId, cmd.Limit)
 	if err != nil {
@@ -776,9 +776,9 @@ func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 		rowsReturned++
 	}
 
-	return &types.Result{
-		Kind: types.StoreReadSubscriptions,
-		ReadSubscriptions: &types.QuerySubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.ReadSubscriptions,
+		ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
 			RowsReturned: rowsReturned,
 			LastSortId:   lastSortId,
 			Records:      records,
@@ -786,7 +786,7 @@ func (w *SqliteStoreWorker) readSubscriptions(tx *sql.Tx, cmd *types.ReadSubscri
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateSubscriptionCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateSubscriptionCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.RetryPolicy != nil, "retry policy must not be nil")
 
 	retryPolicy, err := json.Marshal(cmd.RetryPolicy)
@@ -805,15 +805,15 @@ func (w *SqliteStoreWorker) createSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreCreateSubscription,
-		CreateSubscription: &types.AlterSubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.CreateSubscription,
+		CreateSubscription: &t_aio.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteSubscriptionCommand) (*t_aio.Result, error) {
 	// delete
 	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
@@ -825,15 +825,15 @@ func (w *SqliteStoreWorker) deleteSubscription(tx *sql.Tx, stmt *sql.Stmt, cmd *
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreDeleteSubscription,
-		DeleteSubscription: &types.AlterSubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.DeleteSubscription,
+		DeleteSubscription: &t_aio.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteSubscriptionsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteSubscriptionsCommand) (*t_aio.Result, error) {
 	// delete
 	res, err := stmt.Exec(cmd.PromiseId)
 	if err != nil {
@@ -845,15 +845,15 @@ func (w *SqliteStoreWorker) deleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd 
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreDeleteSubscriptions,
-		DeleteSubscriptions: &types.AlterSubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.DeleteSubscriptions,
+		DeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) timeoutDeleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutDeleteSubscriptionsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) timeoutDeleteSubscriptions(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutDeleteSubscriptionsCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// udpate promises
@@ -867,15 +867,15 @@ func (w *SqliteStoreWorker) timeoutDeleteSubscriptions(tx *sql.Tx, stmt *sql.Stm
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreTimeoutDeleteSubscriptions,
-		TimeoutDeleteSubscriptions: &types.AlterSubscriptionsResult{
+	return &t_aio.Result{
+		Kind: t_aio.TimeoutDeleteSubscriptions,
+		TimeoutDeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotificationsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *t_aio.ReadNotificationsCommand) (*t_aio.Result, error) {
 	// select
 	rows, err := tx.Query(NOTIFICATION_SELECT_STATEMENT, cmd.N)
 	if err != nil {
@@ -896,16 +896,16 @@ func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *types.ReadNotific
 		records = append(records, record)
 	}
 
-	return &types.Result{
-		Kind: types.StoreReadNotifications,
-		ReadNotifications: &types.QueryNotificationsResult{
+	return &t_aio.Result{
+		Kind: t_aio.ReadNotifications,
+		ReadNotifications: &t_aio.QueryNotificationsResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *types.CreateNotificationsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) createNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateNotificationsCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// insert
@@ -919,15 +919,15 @@ func (w *SqliteStoreWorker) createNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd 
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreCreateNotifications,
-		CreateNotifications: &types.AlterNotificationsResult{
+	return &t_aio.Result{
+		Kind: t_aio.CreateNotifications,
+		CreateNotifications: &t_aio.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.UpdateNotificationCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateNotificationCommand) (*t_aio.Result, error) {
 	// update
 	res, err := stmt.Exec(cmd.Time, cmd.Attempt, cmd.Id, cmd.PromiseId)
 	if err != nil {
@@ -939,15 +939,15 @@ func (w *SqliteStoreWorker) updateNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreUpdateNotification,
-		UpdateNotification: &types.AlterNotificationsResult{
+	return &t_aio.Result{
+		Kind: t_aio.UpdateNotification,
+		UpdateNotification: &t_aio.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *types.DeleteNotificationCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteNotificationCommand) (*t_aio.Result, error) {
 	// insert
 	res, err := stmt.Exec(cmd.Id, cmd.PromiseId)
 	if err != nil {
@@ -959,15 +959,15 @@ func (w *SqliteStoreWorker) deleteNotification(tx *sql.Tx, stmt *sql.Stmt, cmd *
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreDeleteNotification,
-		DeleteNotification: &types.AlterNotificationsResult{
+	return &t_aio.Result{
+		Kind: t_aio.DeleteNotification,
+		DeleteNotification: &t_aio.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
 }
 
-func (w *SqliteStoreWorker) timeoutCreateNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *types.TimeoutCreateNotificationsCommand) (*types.Result, error) {
+func (w *SqliteStoreWorker) timeoutCreateNotifications(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutCreateNotificationsCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Time >= 0, "time must be non-negative")
 
 	// udpate promises
@@ -981,9 +981,9 @@ func (w *SqliteStoreWorker) timeoutCreateNotifications(tx *sql.Tx, stmt *sql.Stm
 		return nil, err
 	}
 
-	return &types.Result{
-		Kind: types.StoreTimeoutCreateNotifications,
-		TimeoutCreateNotifications: &types.AlterNotificationsResult{
+	return &t_aio.Result{
+		Kind: t_aio.TimeoutCreateNotifications,
+		TimeoutCreateNotifications: &t_aio.AlterNotificationsResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

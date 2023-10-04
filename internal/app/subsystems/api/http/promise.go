@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -14,14 +14,14 @@ import (
 // Read Promise
 
 func (s *server) readPromise(c *gin.Context) {
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind: types.ReadPromise,
-			ReadPromise: &types.ReadPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind: t_api.ReadPromise,
+			ReadPromise: &t_api.ReadPromiseRequest{
 				Id: c.Param("id"),
 			},
 		},
@@ -51,7 +51,7 @@ type SearchPromiseParams struct {
 
 func (s *server) searchPromises(c *gin.Context) {
 	var params SearchPromiseParams
-	var searchPromises *types.SearchPromisesRequest
+	var searchPromises *t_api.SearchPromisesRequest
 
 	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -61,7 +61,7 @@ func (s *server) searchPromises(c *gin.Context) {
 	}
 
 	if params.Cursor != "" {
-		cursor, err := types.NewCursor[types.SearchPromisesRequest](params.Cursor)
+		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](params.Cursor)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -114,20 +114,20 @@ func (s *server) searchPromises(c *gin.Context) {
 			limit = 100
 		}
 
-		searchPromises = &types.SearchPromisesRequest{
+		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      params.Q,
 			States: states,
 			Limit:  limit,
 		}
 	}
 
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind:           types.SearchPromises,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind:           t_api.SearchPromises,
 			SearchPromises: searchPromises,
 		},
 		Callback: s.sendOrPanic(cq),
@@ -178,14 +178,14 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind: types.CreatePromise,
-			CreatePromise: &types.CreatePromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind: t_api.CreatePromise,
+			CreatePromise: &t_api.CreatePromiseRequest{
 				Id:             c.Param("id"),
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
@@ -237,14 +237,14 @@ func (s *server) cancelPromise(c *gin.Context) {
 		return
 	}
 
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind: types.CancelPromise,
-			CancelPromise: &types.CancelPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind: t_api.CancelPromise,
+			CancelPromise: &t_api.CancelPromiseRequest{
 				Id:             c.Param("id"),
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
@@ -294,14 +294,14 @@ func (s *server) resolvePromise(c *gin.Context) {
 		return
 	}
 
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind: types.ResolvePromise,
-			ResolvePromise: &types.ResolvePromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind: t_api.ResolvePromise,
+			ResolvePromise: &t_api.ResolvePromiseRequest{
 				Id:             c.Param("id"),
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
@@ -351,14 +351,14 @@ func (s *server) rejectPromise(c *gin.Context) {
 		return
 	}
 
-	cq := make(chan *bus.CQE[types.Request, types.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.api.Enqueue(&bus.SQE[types.Request, types.Response]{
-		Kind: "http",
-		Submission: &types.Request{
-			Kind: types.RejectPromise,
-			RejectPromise: &types.RejectPromiseRequest{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Tags: "http",
+		Submission: &t_api.Request{
+			Kind: t_api.RejectPromise,
+			RejectPromise: &t_api.RejectPromiseRequest{
 				Id:             c.Param("id"),
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,

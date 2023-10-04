@@ -1,24 +1,24 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func DeleteSubscription(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("DeleteSubscription(id=%s, promiseId=%s)", req.DeleteSubscription.Id, req.DeleteSubscription.PromiseId), "DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+func DeleteSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreDeleteSubscription,
-							DeleteSubscription: &types.DeleteSubscriptionCommand{
+							Kind: t_aio.DeleteSubscription,
+							DeleteSubscription: &t_aio.DeleteSubscriptionCommand{
 								Id:        req.DeleteSubscription.Id,
 								PromiseId: req.DeleteSubscription.PromiseId,
 							},
@@ -28,7 +28,7 @@ func DeleteSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to delete subscription", "req", req, "err", err)
 				res(t, nil, err)
@@ -40,17 +40,17 @@ func DeleteSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 			result := completion.Store.Results[0].DeleteSubscription
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-			var status types.ResponseStatus
+			var status t_api.ResponseStatus
 
 			if result.RowsAffected == 1 {
-				status = types.ResponseNoContent
+				status = t_api.ResponseNoContent
 			} else {
-				status = types.ResponseNotFound
+				status = t_api.ResponseNotFound
 			}
 
-			res(t, &types.Response{
-				Kind: types.DeleteSubscription,
-				DeleteSubscription: &types.DeleteSubscriptionResponse{
+			res(t, &t_api.Response{
+				Kind: t_api.DeleteSubscription,
+				DeleteSubscription: &t_api.DeleteSubscriptionResponse{
 					Status: status,
 				},
 			}, nil)

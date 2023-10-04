@@ -1,4 +1,4 @@
-package types
+package t_aio
 
 import (
 	"github.com/resonatehq/resonate/pkg/notification"
@@ -10,25 +10,25 @@ import (
 type StoreKind int
 
 const (
-	StoreReadPromise StoreKind = iota
-	StoreSearchPromises
-	StoreCreatePromise
-	StoreUpdatePromise
-	StoreReadTimeouts
-	StoreCreateTimeout
-	StoreDeleteTimeout
-	StoreReadSubscription
-	StoreReadSubscriptions
-	StoreCreateSubscription
-	StoreDeleteSubscription
-	StoreDeleteSubscriptions
-	StoreReadNotifications
-	StoreCreateNotifications
-	StoreUpdateNotification
-	StoreDeleteNotification
-	StoreTimeoutPromises
-	StoreTimeoutDeleteSubscriptions
-	StoreTimeoutCreateNotifications
+	ReadPromise StoreKind = iota
+	SearchPromises
+	CreatePromise
+	UpdatePromise
+	ReadTimeouts
+	CreateTimeout
+	DeleteTimeout
+	ReadSubscription
+	ReadSubscriptions
+	CreateSubscription
+	DeleteSubscription
+	DeleteSubscriptions
+	ReadNotifications
+	CreateNotifications
+	UpdateNotification
+	DeleteNotification
+	TimeoutPromises
+	TimeoutDeleteSubscriptions
+	TimeoutCreateNotifications
 )
 
 type StoreSubmission struct {

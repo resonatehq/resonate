@@ -5,24 +5,24 @@ import (
 	"math/rand" // nosemgrep
 	"strconv"
 
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Generator struct {
-	ticks      int64
-	idSet      []string
-	ikeySet    []*promise.IdempotencyKey
-	dataSet    [][]byte
-	headersSet []map[string]string
-	tagsSet    []map[string]string
-	urlSet     []string
-	retrySet   []int
-	requests   []RequestGenerator
+	ticks            int64
+	idSet            []string
+	idemotencyKeySet []*promise.IdempotencyKey
+	headersSet       []map[string]string
+	dataSet          [][]byte
+	tagsSet          []map[string]string
+	urlSet           []string
+	retrySet         []int
+	requests         []RequestGenerator
 }
 
-type RequestGenerator func(*rand.Rand, int64) *types.Request
+type RequestGenerator func(*rand.Rand, int64) *t_api.Request
 
 func NewGenerator(r *rand.Rand, config *Config) *Generator {
 	idSet := make([]string, config.Ids)
@@ -30,16 +30,11 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		idSet[i] = strconv.Itoa(i)
 	}
 
-	ikeySet := []*promise.IdempotencyKey{}
-	for i := 0; i < config.Ikeys; i++ {
+	idempotencyKeySet := []*promise.IdempotencyKey{}
+	for i := 0; i < config.IdempotencyKeys; i++ {
 		s := strconv.Itoa(i)
-		ikey := promise.IdempotencyKey(s)
-		ikeySet = append(ikeySet, &ikey, nil) // half of all ikeys are nil
-	}
-
-	dataSet := [][]byte{}
-	for i := 0; i < config.Data; i++ {
-		dataSet = append(dataSet, []byte(strconv.Itoa(i)), nil) // half of all values are nil
+		idempotencyKey := promise.IdempotencyKey(s)
+		idempotencyKeySet = append(idempotencyKeySet, &idempotencyKey, nil) // half of all idempotencyKeys are nil
 	}
 
 	headersSet := []map[string]string{}
@@ -50,6 +45,11 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		}
 
 		headersSet = append(headersSet, headers, nil) // half of all headers are nil
+	}
+
+	dataSet := [][]byte{}
+	for i := 0; i < config.Data; i++ {
+		dataSet = append(dataSet, []byte(strconv.Itoa(i)), nil) // half of all values are nil
 	}
 
 	tagsSet := []map[string]string{}
@@ -73,14 +73,14 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 	}
 
 	return &Generator{
-		ticks:      config.Ticks,
-		idSet:      idSet,
-		ikeySet:    ikeySet,
-		dataSet:    dataSet,
-		headersSet: headersSet,
-		tagsSet:    tagsSet,
-		urlSet:     urlSet,
-		retrySet:   retrySet,
+		ticks:            config.Ticks,
+		idSet:            idSet,
+		idemotencyKeySet: idempotencyKeySet,
+		headersSet:       headersSet,
+		dataSet:          dataSet,
+		tagsSet:          tagsSet,
+		urlSet:           urlSet,
+		retrySet:         retrySet,
 	}
 }
 
@@ -88,8 +88,8 @@ func (g *Generator) AddRequest(request RequestGenerator) {
 	g.requests = append(g.requests, request)
 }
 
-func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*types.Request) []*types.Request {
-	reqs := []*types.Request{}
+func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*t_api.Request) []*t_api.Request {
+	reqs := []*t_api.Request{}
 
 	for i := 0; i < n; i++ {
 		bound := len(g.requests)
@@ -110,18 +110,18 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*types.Requ
 	return reqs
 }
 
-func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
-	return &types.Request{
-		Kind: types.ReadPromise,
-		ReadPromise: &types.ReadPromiseRequest{
+	return &t_api.Request{
+		Kind: t_api.ReadPromise,
+		ReadPromise: &t_api.ReadPromiseRequest{
 			Id: id,
 		},
 	}
 }
 
-func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request {
 	limit := r.Intn(10)
 	states := []promise.State{}
 
@@ -148,9 +148,9 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request
 		}
 	}
 
-	return &types.Request{
-		Kind: types.SearchPromises,
-		SearchPromises: &types.SearchPromisesRequest{
+	return &t_api.Request{
+		Kind: t_api.SearchPromises,
+		SearchPromises: &t_api.SearchPromisesRequest{
 			Q:      query,
 			States: states,
 			Limit:  limit,
@@ -158,117 +158,117 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *types.Request
 	}
 }
 
-func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	timeout := RangeInt63n(r, t, g.ticks)
 	strict := r.Intn(2) == 0
 
-	return &types.Request{
-		Kind: types.CreatePromise,
-		CreatePromise: &types.CreatePromiseRequest{
+	return &t_api.Request{
+		Kind: t_api.CreatePromise,
+		CreatePromise: &t_api.CreatePromiseRequest{
 			Id: id,
 			Param: promise.Value{
 				Headers: headers,
 				Data:    data,
 			},
 			Timeout:        timeout,
-			IdempotencyKey: ikey,
+			IdempotencyKey: idempotencyKey,
 			Tags:           tags,
 			Strict:         strict,
 		},
 	}
 }
 
-func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
 
-	return &types.Request{
-		Kind: types.CancelPromise,
-		CancelPromise: &types.CancelPromiseRequest{
+	return &t_api.Request{
+		Kind: t_api.CancelPromise,
+		CancelPromise: &t_api.CancelPromiseRequest{
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
 				Data:    data,
 			},
-			IdempotencyKey: ikey,
+			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
 		},
 	}
 }
 
-func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
 
-	return &types.Request{
-		Kind: types.ResolvePromise,
-		ResolvePromise: &types.ResolvePromiseRequest{
+	return &t_api.Request{
+		Kind: t_api.ResolvePromise,
+		ResolvePromise: &t_api.ResolvePromiseRequest{
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
 				Data:    data,
 			},
-			IdempotencyKey: ikey,
+			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
 		},
 	}
 }
 
-func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	ikey := g.ikeySet[r.Intn(len(g.ikeySet))]
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
 
-	return &types.Request{
-		Kind: types.RejectPromise,
-		RejectPromise: &types.RejectPromiseRequest{
+	return &t_api.Request{
+		Kind: t_api.RejectPromise,
+		RejectPromise: &t_api.RejectPromiseRequest{
 			Id: id,
 			Value: promise.Value{
 				Headers: headers,
 				Data:    data,
 			},
-			IdempotencyKey: ikey,
+			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
 		},
 	}
 }
 
-func (g *Generator) GenerateReadSubscriptions(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateReadSubscriptions(r *rand.Rand, t int64) *t_api.Request {
 	limit := r.Intn(10)
 	id := g.idSet[r.Intn(len(g.idSet))]
 
-	return &types.Request{
-		Kind: types.ReadSubscriptions,
-		ReadSubscriptions: &types.ReadSubscriptionsRequest{
+	return &t_api.Request{
+		Kind: t_api.ReadSubscriptions,
+		ReadSubscriptions: &t_api.ReadSubscriptionsRequest{
 			PromiseId: id,
 			Limit:     limit,
 		},
 	}
 }
 
-func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
 	url := g.urlSet[r.Intn(len(g.urlSet))]
 	delay := g.retrySet[r.Intn(len(g.retrySet))]
 	attempts := RangeIntn(r, 1, 4)
 
-	return &types.Request{
-		Kind: types.CreateSubscription,
-		CreateSubscription: &types.CreateSubscriptionRequest{
+	return &t_api.Request{
+		Kind: t_api.CreateSubscription,
+		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        id,
 			PromiseId: promiseId,
 			Url:       url,
@@ -280,13 +280,13 @@ func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *types.Req
 	}
 }
 
-func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *types.Request {
+func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
 
-	return &types.Request{
-		Kind: types.DeleteSubscription,
-		DeleteSubscription: &types.DeleteSubscriptionRequest{
+	return &t_api.Request{
+		Kind: t_api.DeleteSubscription,
+		DeleteSubscription: &t_api.DeleteSubscriptionRequest{
 			Id:        id,
 			PromiseId: promiseId,
 		},

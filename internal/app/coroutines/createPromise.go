@@ -1,17 +1,17 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("CreatePromise(id=%s)", req.CreatePromise.Id), "CreatePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func CreatePromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("CreatePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
 		}
@@ -22,14 +22,14 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 			req.CreatePromise.Tags = map[string]string{}
 		}
 
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreReadPromise,
-							ReadPromise: &types.ReadPromiseCommand{
+							Kind: t_aio.ReadPromise,
+							ReadPromise: &t_aio.ReadPromiseCommand{
 								Id: req.CreatePromise.Id,
 							},
 						},
@@ -38,7 +38,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
 				res(t, nil, err)
@@ -51,14 +51,14 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				submission := &types.Submission{
-					Kind: types.Store,
-					Store: &types.StoreSubmission{
-						Transaction: &types.Transaction{
-							Commands: []*types.Command{
+				submission := &t_aio.Submission{
+					Kind: t_aio.Store,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
+							Commands: []*t_aio.Command{
 								{
-									Kind: types.StoreCreatePromise,
-									CreatePromise: &types.CreatePromiseCommand{
+									Kind: t_aio.CreatePromise,
+									CreatePromise: &t_aio.CreatePromiseCommand{
 										Id:             req.CreatePromise.Id,
 										Param:          req.CreatePromise.Param,
 										Timeout:        req.CreatePromise.Timeout,
@@ -72,7 +72,7 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 					},
 				}
 
-				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
 						res(t, nil, err)
@@ -85,10 +85,10 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 					util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 					if result.RowsAffected == 1 {
-						res(t, &types.Response{
-							Kind: types.CreatePromise,
-							CreatePromise: &types.CreatePromiseResponse{
-								Status: types.ResponseCreated,
+						res(t, &t_api.Response{
+							Kind: t_api.CreatePromise,
+							CreatePromise: &t_api.CreatePromiseResponse{
+								Status: t_api.ResponseCreated,
 								Promise: &promise.Promise{
 									Id:                      req.CreatePromise.Id,
 									State:                   promise.Pending,
@@ -112,11 +112,11 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 					return
 				}
 
-				status := types.ResponseForbidden
+				status := t_api.ResponseForbidden
 				strict := req.CreatePromise.Strict && p.State != promise.Pending
 
 				if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
-					status = types.ResponseOK
+					status = t_api.ResponseOK
 				}
 
 				if p.State == promise.Pending && t >= p.Timeout {
@@ -127,9 +127,9 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 							return
 						}
 
-						res(t, &types.Response{
-							Kind: types.CreatePromise,
-							CreatePromise: &types.CreatePromiseResponse{
+						res(t, &t_api.Response{
+							Kind: t_api.CreatePromise,
+							CreatePromise: &t_api.CreatePromiseResponse{
 								Status: status,
 								Promise: &promise.Promise{
 									Id:    p.Id,
@@ -150,9 +150,9 @@ func CreatePromise(t int64, req *types.Request, res func(int64, *types.Response,
 						}, nil)
 					}))
 				} else {
-					res(t, &types.Response{
-						Kind: types.CreatePromise,
-						CreatePromise: &types.CreatePromiseResponse{
+					res(t, &t_api.Response{
+						Kind: t_api.CreatePromise,
+						CreatePromise: &t_api.CreatePromiseResponse{
 							Status:  status,
 							Promise: p,
 						},

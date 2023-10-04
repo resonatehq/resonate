@@ -1,17 +1,17 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s)", req.CreateSubscription.Id, req.CreateSubscription.PromiseId), "CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
 			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
@@ -20,14 +20,14 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 			}
 		}
 
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreCreateSubscription,
-							CreateSubscription: &types.CreateSubscriptionCommand{
+							Kind: t_aio.CreateSubscription,
+							CreateSubscription: &t_aio.CreateSubscriptionCommand{
 								Id:          req.CreateSubscription.Id,
 								PromiseId:   req.CreateSubscription.PromiseId,
 								Url:         req.CreateSubscription.Url,
@@ -40,7 +40,7 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to create subscription", "req", req, "err", err)
 				res(t, nil, err)
@@ -53,10 +53,10 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res(t, &types.Response{
-					Kind: types.CreateSubscription,
-					CreateSubscription: &types.CreateSubscriptionResponse{
-						Status: types.ResponseCreated,
+				res(t, &t_api.Response{
+					Kind: t_api.CreateSubscription,
+					CreateSubscription: &t_api.CreateSubscriptionResponse{
+						Status: t_api.ResponseCreated,
 						Subscription: &subscription.Subscription{
 							Id:          req.CreateSubscription.Id,
 							PromiseId:   req.CreateSubscription.PromiseId,
@@ -66,14 +66,14 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 					},
 				}, nil)
 			} else {
-				submission := &types.Submission{
-					Kind: types.Store,
-					Store: &types.StoreSubmission{
-						Transaction: &types.Transaction{
-							Commands: []*types.Command{
+				submission := &t_aio.Submission{
+					Kind: t_aio.Store,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
+							Commands: []*t_aio.Command{
 								{
-									Kind: types.StoreReadSubscription,
-									ReadSubscription: &types.ReadSubscriptionCommand{
+									Kind: t_aio.ReadSubscription,
+									ReadSubscription: &t_aio.ReadSubscriptionCommand{
 										Id:        req.CreateSubscription.Id,
 										PromiseId: req.CreateSubscription.PromiseId,
 									},
@@ -83,7 +83,7 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 					},
 				}
 
-				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to read subscription", "req", req, "err", err)
 						res(t, nil, err)
@@ -103,10 +103,10 @@ func CreateSubscription(t int64, req *types.Request, res func(int64, *types.Resp
 							return
 						}
 
-						res(t, &types.Response{
-							Kind: types.CreateSubscription,
-							CreateSubscription: &types.CreateSubscriptionResponse{
-								Status:       types.ResponseOK,
+						res(t, &t_api.Response{
+							Kind: t_api.CreateSubscription,
+							CreateSubscription: &t_api.CreateSubscriptionResponse{
+								Status:       t_api.ResponseOK,
 								Subscription: subscription,
 							},
 						}, nil)

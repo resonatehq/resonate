@@ -1,43 +1,43 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func SearchPromises(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("SearchPromises(q=%s)", req.SearchPromises.Q), "SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+func SearchPromises(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreTimeoutCreateNotifications,
-							TimeoutCreateNotifications: &types.TimeoutCreateNotificationsCommand{
+							Kind: t_aio.TimeoutCreateNotifications,
+							TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
 								Time: t,
 							},
 						},
 						{
-							Kind: types.StoreTimeoutDeleteSubscriptions,
-							TimeoutDeleteSubscriptions: &types.TimeoutDeleteSubscriptionsCommand{
+							Kind: t_aio.TimeoutDeleteSubscriptions,
+							TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
 								Time: t,
 							},
 						},
 						{
-							Kind: types.StoreTimeoutPromises,
-							TimeoutPromises: &types.TimeoutPromisesCommand{
+							Kind: t_aio.TimeoutPromises,
+							TimeoutPromises: &t_aio.TimeoutPromisesCommand{
 								Time: t,
 							},
 						},
 						{
-							Kind: types.StoreSearchPromises,
-							SearchPromises: &types.SearchPromisesCommand{
+							Kind: t_aio.SearchPromises,
+							SearchPromises: &t_aio.SearchPromisesCommand{
 								Q:      req.SearchPromises.Q,
 								States: req.SearchPromises.States,
 								Limit:  req.SearchPromises.Limit,
@@ -49,7 +49,7 @@ func SearchPromises(t int64, req *types.Request, res func(int64, *types.Response
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to search promises", "req", req, "err", err)
 				res(t, nil, err)
@@ -73,10 +73,10 @@ func SearchPromises(t int64, req *types.Request, res func(int64, *types.Response
 			}
 
 			// set cursor only if there are more results
-			var cursor *types.Cursor[types.SearchPromisesRequest]
+			var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
 			if result.RowsReturned == int64(req.SearchPromises.Limit) {
-				cursor = &types.Cursor[types.SearchPromisesRequest]{
-					Next: &types.SearchPromisesRequest{
+				cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
+					Next: &t_api.SearchPromisesRequest{
 						Q:      req.SearchPromises.Q,
 						States: req.SearchPromises.States,
 						Limit:  req.SearchPromises.Limit,
@@ -85,10 +85,10 @@ func SearchPromises(t int64, req *types.Request, res func(int64, *types.Response
 				}
 			}
 
-			res(t, &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res(t, &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   cursor,
 					Promises: promises,
 				},

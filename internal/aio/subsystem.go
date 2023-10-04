@@ -2,7 +2,7 @@ package aio
 
 import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 )
 
 type Subsystem interface {
@@ -14,5 +14,5 @@ type Subsystem interface {
 }
 
 type Worker interface {
-	Process([]*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion]
+	Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 }

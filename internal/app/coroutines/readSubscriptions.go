@@ -1,25 +1,25 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("ReadSubscriptions(promiseId=%s)", req.ReadSubscriptions.PromiseId), "ReadSubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+func ReadSubscriptions(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("ReadSubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreReadSubscriptions,
-							ReadSubscriptions: &types.ReadSubscriptionsCommand{
+							Kind: t_aio.ReadSubscriptions,
+							ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
 								PromiseId: req.ReadSubscriptions.PromiseId,
 								Limit:     req.ReadSubscriptions.Limit,
 								SortId:    req.ReadSubscriptions.SortId,
@@ -30,7 +30,7 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read subscriptions", "req", req, "err", err)
 				res(t, nil, err)
@@ -53,10 +53,10 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 			}
 
 			// set cursor only if there are more results
-			var cursor *types.Cursor[types.ReadSubscriptionsRequest]
+			var cursor *t_api.Cursor[t_api.ReadSubscriptionsRequest]
 			if result.RowsReturned == int64(req.ReadSubscriptions.Limit) {
-				cursor = &types.Cursor[types.ReadSubscriptionsRequest]{
-					Next: &types.ReadSubscriptionsRequest{
+				cursor = &t_api.Cursor[t_api.ReadSubscriptionsRequest]{
+					Next: &t_api.ReadSubscriptionsRequest{
 						PromiseId: req.ReadSubscriptions.PromiseId,
 						Limit:     req.ReadSubscriptions.Limit,
 						SortId:    &result.LastSortId,
@@ -64,10 +64,10 @@ func ReadSubscriptions(t int64, req *types.Request, res func(int64, *types.Respo
 				}
 			}
 
-			res(t, &types.Response{
-				Kind: types.ReadSubscriptions,
-				ReadSubscriptions: &types.ReadSubscriptionsResponse{
-					Status:        types.ResponseOK,
+			res(t, &t_api.Response{
+				Kind: t_api.ReadSubscriptions,
+				ReadSubscriptions: &t_api.ReadSubscriptionsResponse{
+					Status:        t_api.ResponseOK,
 					Cursor:        cursor,
 					Subscriptions: subscriptions,
 				},

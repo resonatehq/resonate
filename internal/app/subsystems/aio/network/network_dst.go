@@ -6,7 +6,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -50,16 +50,16 @@ func (n *NetworkDST) NewWorker(int) aio.Worker {
 	return &NetworkDSTDevice{n}
 }
 
-func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
-	cqes := make([]*bus.CQE[types.Submission, types.Completion], len(sqes))
+func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
 		util.Assert(sqe.Submission.Network != nil, "submission must not be nil")
 
 		switch sqe.Submission.Network.Kind {
-		case types.Http:
-			cqe := &bus.CQE[types.Submission, types.Completion]{
-				Kind:     sqe.Kind,
+		case t_aio.Http:
+			cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+				Tags:     sqe.Tags,
 				Callback: sqe.Callback,
 			}
 
@@ -75,10 +75,10 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[types.Submission, types.Compl
 				}
 			}
 
-			cqe.Completion = &types.Completion{
-				Kind: types.Network,
-				Network: &types.NetworkCompletion{
-					Kind: types.Http,
+			cqe.Completion = &t_aio.Completion{
+				Kind: t_aio.Network,
+				Network: &t_aio.NetworkCompletion{
+					Kind: t_aio.Http,
 					Http: res,
 				},
 			}

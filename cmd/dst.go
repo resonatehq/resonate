@@ -17,7 +17,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
@@ -29,15 +29,15 @@ var (
 	seed int64
 
 	// run command
-	ticks       int64
-	reqsPerTick = rangeIntFlag{Min: 1, Max: 1000}
-	ids         = rangeIntFlag{Min: 1, Max: 1000}
-	ikeys       = rangeIntFlag{Min: 1, Max: 1000}
-	data        = rangeIntFlag{Min: 1, Max: 1000}
-	headers     = rangeIntFlag{Min: 1, Max: 1000}
-	tags        = rangeIntFlag{Min: 1, Max: 1000}
-	urls        = rangeIntFlag{Min: 1, Max: 1000}
-	retries     = rangeIntFlag{Min: 1, Max: 1000}
+	ticks           int64
+	reqsPerTick     = rangeIntFlag{Min: 1, Max: 1000}
+	ids             = rangeIntFlag{Min: 1, Max: 1000}
+	idempotencyKeys = rangeIntFlag{Min: 1, Max: 1000}
+	headers         = rangeIntFlag{Min: 1, Max: 1000}
+	data            = rangeIntFlag{Min: 1, Max: 1000}
+	tags            = rangeIntFlag{Min: 1, Max: 1000}
+	urls            = rangeIntFlag{Min: 1, Max: 1000}
+	retries         = rangeIntFlag{Min: 1, Max: 1000}
 
 	// issue command
 	store  string
@@ -128,8 +128,8 @@ var dstRunCmd = &cobra.Command{
 		}
 
 		// add api subsystems
-		aio.AddSubsystem(types.Network, network)
-		aio.AddSubsystem(types.Store, store)
+		aio.AddSubsystem(t_aio.Network, network)
+		aio.AddSubsystem(t_aio.Store, store)
 
 		// start api/aio
 		if err := api.Start(); err != nil {
@@ -147,13 +147,13 @@ var dstRunCmd = &cobra.Command{
 			Reqs: func() int {
 				return reqsPerTick.Resolve(r)
 			},
-			Ids:     ids.Resolve(r),
-			Ikeys:   ikeys.Resolve(r),
-			Data:    data.Resolve(r),
-			Headers: headers.Resolve(r),
-			Tags:    tags.Resolve(r),
-			Urls:    urls.Resolve(r),
-			Retries: retries.Resolve(r),
+			Ids:             ids.Resolve(r),
+			IdempotencyKeys: idempotencyKeys.Resolve(r),
+			Headers:         headers.Resolve(r),
+			Data:            data.Resolve(r),
+			Tags:            tags.Resolve(r),
+			Urls:            urls.Resolve(r),
+			Retries:         retries.Resolve(r),
 		})
 
 		slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
@@ -215,9 +215,9 @@ func init() {
 	// dst related values
 	dstRunCmd.Flags().Var(&reqsPerTick, "reqs-per-tick", "number of requests per tick")
 	dstRunCmd.Flags().Var(&ids, "ids", "number promise ids")
-	dstRunCmd.Flags().Var(&ikeys, "ikeys", "number promise idempotency keys")
-	dstRunCmd.Flags().Var(&data, "data", "number promise data byte arrays")
+	dstRunCmd.Flags().Var(&idempotencyKeys, "idempotency-keys", "number promise idempotency keys")
 	dstRunCmd.Flags().Var(&headers, "headers", "number promise headers")
+	dstRunCmd.Flags().Var(&data, "data", "number promise data byte arrays")
 	dstRunCmd.Flags().Var(&tags, "tags", "number promise tags")
 	dstRunCmd.Flags().Var(&urls, "urls", "number subscription urls")
 	dstRunCmd.Flags().Var(&retries, "retries", "number subscription retries")

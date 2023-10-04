@@ -9,7 +9,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
 )
@@ -31,15 +31,15 @@ func (i inflight) remove(id string) {
 }
 
 func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscriptions(t=%d)", t), "NotifySubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+	return scheduler.NewCoroutine("NotifySubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreReadNotifications,
-							ReadNotifications: &types.ReadNotificationsCommand{
+							Kind: t_aio.ReadNotifications,
+							ReadNotifications: &t_aio.ReadNotificationsCommand{
 								N: config.NotificationCacheSize,
 							},
 						},
@@ -48,7 +48,7 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read notifications", "err", err)
 				return
@@ -73,18 +73,18 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 }
 
 func notifySubscription(notification *notification.Notification) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("NotifySubscription(id=%s, promiseId=%s)", notification.Id, notification.PromiseId), "NotifySubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+	return scheduler.NewCoroutine("NotifySubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// handle inflight cache
 		inflights.add(id(notification))
 		c.OnDone(func() { inflights.remove(id(notification)) })
 
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							ReadPromise: &types.ReadPromiseCommand{
+							ReadPromise: &t_aio.ReadPromiseCommand{
 								Id: notification.PromiseId,
 							},
 						},
@@ -93,7 +93,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "id", notification.PromiseId, "err", err)
 				return
@@ -125,10 +125,11 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				return
 			}
 
-			submission := &types.Submission{
-				Kind: types.Network,
-				Network: &types.NetworkSubmission{
-					Http: &types.HttpRequest{
+			submission := &t_aio.Submission{
+				Kind: t_aio.Network,
+				Network: &t_aio.NetworkSubmission{
+					Kind: t_aio.Http,
+					Http: &t_aio.HttpRequest{
 						Method: "POST",
 						Url:    notification.Url,
 						Body:   body,
@@ -136,16 +137,16 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				},
 			}
 
-			c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+			c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 				if err != nil {
 					slog.Warn("failed to send notification", "promise", promise, "url", notification.Url)
 				}
 
-				var command *types.Command
+				var command *t_aio.Command
 				if (err != nil || !isSuccessful(completion.Network.Http)) && notification.Attempt < notification.RetryPolicy.Attempts {
-					command = &types.Command{
-						Kind: types.StoreUpdateNotification,
-						UpdateNotification: &types.UpdateNotificationCommand{
+					command = &t_aio.Command{
+						Kind: t_aio.UpdateNotification,
+						UpdateNotification: &t_aio.UpdateNotificationCommand{
 							Id:        notification.Id,
 							PromiseId: notification.PromiseId,
 							Time:      backoff(notification.RetryPolicy.Delay, notification.Attempt),
@@ -153,25 +154,25 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 						},
 					}
 				} else {
-					command = &types.Command{
-						Kind: types.StoreDeleteNotification,
-						DeleteNotification: &types.DeleteNotificationCommand{
+					command = &t_aio.Command{
+						Kind: t_aio.DeleteNotification,
+						DeleteNotification: &t_aio.DeleteNotificationCommand{
 							Id:        notification.Id,
 							PromiseId: notification.PromiseId,
 						},
 					}
 				}
 
-				submission := &types.Submission{
-					Kind: types.Store,
-					Store: &types.StoreSubmission{
-						Transaction: &types.Transaction{
-							Commands: []*types.Command{command},
+				submission := &t_aio.Submission{
+					Kind: t_aio.Store,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
+							Commands: []*t_aio.Command{command},
 						},
 					},
 				}
 
-				c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+				c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 					if err != nil {
 						slog.Warn("failed to update notification", "notification", notification)
 					}
@@ -182,14 +183,14 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 }
 
 func abort(c *scheduler.Coroutine, notification *notification.Notification) {
-	submission := &types.Submission{
-		Kind: types.Store,
-		Store: &types.StoreSubmission{
-			Transaction: &types.Transaction{
-				Commands: []*types.Command{
+	submission := &t_aio.Submission{
+		Kind: t_aio.Store,
+		Store: &t_aio.StoreSubmission{
+			Transaction: &t_aio.Transaction{
+				Commands: []*t_aio.Command{
 					{
-						Kind: types.StoreDeleteNotification,
-						DeleteNotification: &types.DeleteNotificationCommand{
+						Kind: t_aio.DeleteNotification,
+						DeleteNotification: &t_aio.DeleteNotificationCommand{
 							Id:        notification.Id,
 							PromiseId: notification.PromiseId,
 						},
@@ -199,7 +200,7 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 		},
 	}
 
-	c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+	c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 		if err != nil {
 			slog.Warn("failed to delete notification", "notification", notification)
 		}

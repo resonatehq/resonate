@@ -1,37 +1,36 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("TimeoutPromises(t=%d)", t), "TimeoutPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+	return scheduler.NewCoroutine("TimeoutPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreTimeoutCreateNotifications,
-							TimeoutCreateNotifications: &types.TimeoutCreateNotificationsCommand{
+							Kind: t_aio.TimeoutCreateNotifications,
+							TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
 								Time: t,
 							},
 						},
 						{
-							Kind: types.StoreTimeoutDeleteSubscriptions,
-							TimeoutDeleteSubscriptions: &types.TimeoutDeleteSubscriptionsCommand{
+							Kind: t_aio.TimeoutDeleteSubscriptions,
+							TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
 								Time: t,
 							},
 						},
 						{
-							Kind: types.StoreTimeoutPromises,
-							TimeoutPromises: &types.TimeoutPromisesCommand{
+							Kind: t_aio.TimeoutPromises,
+							TimeoutPromises: &t_aio.TimeoutPromisesCommand{
 								Time: t,
 							},
 						},
@@ -40,7 +39,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read timeouts", "err", err)
 				return

@@ -1,17 +1,17 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine(fmt.Sprintf("ResolvePromise(id=%s)", req.ResolvePromise.Id), "ResolvePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func ResolvePromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+	return scheduler.NewCoroutine("ResolvePromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.ResolvePromise.Value.Headers == nil {
 			req.ResolvePromise.Value.Headers = map[string]string{}
 		}
@@ -19,14 +19,14 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 			req.ResolvePromise.Value.Data = []byte{}
 		}
 
-		submission := &types.Submission{
-			Kind: types.Store,
-			Store: &types.StoreSubmission{
-				Transaction: &types.Transaction{
-					Commands: []*types.Command{
+		submission := &t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
 						{
-							Kind: types.StoreReadPromise,
-							ReadPromise: &types.ReadPromiseCommand{
+							Kind: t_aio.ReadPromise,
+							ReadPromise: &t_aio.ReadPromiseCommand{
 								Id: req.ResolvePromise.Id,
 							},
 						},
@@ -35,7 +35,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
 				res(t, nil, err)
@@ -48,10 +48,10 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(t, &types.Response{
-					Kind: types.ResolvePromise,
-					ResolvePromise: &types.ResolvePromiseResponse{
-						Status: types.ResponseNotFound,
+				res(t, &t_api.Response{
+					Kind: t_api.ResolvePromise,
+					ResolvePromise: &t_api.ResolvePromiseResponse{
+						Status: t_api.ResponseNotFound,
 					},
 				}, nil)
 			} else {
@@ -71,10 +71,10 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 								return
 							}
 
-							res(t, &types.Response{
-								Kind: types.ResolvePromise,
-								ResolvePromise: &types.ResolvePromiseResponse{
-									Status: types.ResponseForbidden,
+							res(t, &t_api.Response{
+								Kind: t_api.ResolvePromise,
+								ResolvePromise: &t_api.ResolvePromiseResponse{
+									Status: t_api.ResponseForbidden,
 									Promise: &promise.Promise{
 										Id:    p.Id,
 										State: promise.Timedout,
@@ -94,14 +94,14 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 							}, nil)
 						}))
 					} else {
-						submission := &types.Submission{
-							Kind: types.Store,
-							Store: &types.StoreSubmission{
-								Transaction: &types.Transaction{
-									Commands: []*types.Command{
+						submission := &t_aio.Submission{
+							Kind: t_aio.Store,
+							Store: &t_aio.StoreSubmission{
+								Transaction: &t_aio.Transaction{
+									Commands: []*t_aio.Command{
 										{
-											Kind: types.StoreUpdatePromise,
-											UpdatePromise: &types.UpdatePromiseCommand{
+											Kind: t_aio.UpdatePromise,
+											UpdatePromise: &t_aio.UpdatePromiseCommand{
 												Id:             req.ResolvePromise.Id,
 												State:          promise.Resolved,
 												Value:          req.ResolvePromise.Value,
@@ -110,15 +110,15 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 											},
 										},
 										{
-											Kind: types.StoreCreateNotifications,
-											CreateNotifications: &types.CreateNotificationsCommand{
+											Kind: t_aio.CreateNotifications,
+											CreateNotifications: &t_aio.CreateNotificationsCommand{
 												PromiseId: req.ResolvePromise.Id,
 												Time:      t,
 											},
 										},
 										{
-											Kind: types.StoreDeleteSubscriptions,
-											DeleteSubscriptions: &types.DeleteSubscriptionsCommand{
+											Kind: t_aio.DeleteSubscriptions,
+											DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
 												PromiseId: req.ResolvePromise.Id,
 											},
 										},
@@ -127,7 +127,7 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 							},
 						}
 
-						c.Yield(submission, func(t int64, completion *types.Completion, err error) {
+						c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
 							if err != nil {
 								slog.Error("failed to update promise", "req", req, "err", err)
 								res(t, nil, err)
@@ -140,10 +140,10 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 							util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 							if result.RowsAffected == 1 {
-								res(t, &types.Response{
-									Kind: types.ResolvePromise,
-									ResolvePromise: &types.ResolvePromiseResponse{
-										Status: types.ResponseCreated,
+								res(t, &t_api.Response{
+									Kind: t_api.ResolvePromise,
+									ResolvePromise: &t_api.ResolvePromiseResponse{
+										Status: t_api.ResponseCreated,
 										Promise: &promise.Promise{
 											Id:                        p.Id,
 											State:                     promise.Resolved,
@@ -163,16 +163,16 @@ func ResolvePromise(t int64, req *types.Request, res func(int64, *types.Response
 						})
 					}
 				} else {
-					status := types.ResponseForbidden
+					status := t_api.ResponseForbidden
 					strict := req.ResolvePromise.Strict && p.State != promise.Resolved
 
 					if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdempotencyKey) {
-						status = types.ResponseOK
+						status = t_api.ResponseOK
 					}
 
-					res(t, &types.Response{
-						Kind: types.ResolvePromise,
-						ResolvePromise: &types.ResolvePromiseResponse{
+					res(t, &t_api.Response{
+						Kind: t_api.ResolvePromise,
+						ResolvePromise: &t_api.ResolvePromiseResponse{
 							Status:  status,
 							Promise: p,
 						},

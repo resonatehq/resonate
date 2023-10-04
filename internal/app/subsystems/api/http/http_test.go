@@ -10,7 +10,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/stretchr/testify/assert"
 )
@@ -56,24 +56,24 @@ func TestHttpServer(t *testing.T) {
 		method  string
 		headers map[string]string
 		body    []byte
-		req     *types.Request
-		res     *types.Response
+		req     *t_api.Request
+		res     *t_api.Response
 		status  int
 	}{
 		{
 			name:   "ReadPromise",
 			path:   "promises/foo",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "foo",
 				},
 			},
-			res: &types.Response{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseResponse{
-					Status:  types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseResponse{
+					Status:  t_api.ResponseOK,
 					Promise: nil,
 				},
 			},
@@ -83,16 +83,16 @@ func TestHttpServer(t *testing.T) {
 			name:   "ReadPromiseNotFound",
 			path:   "promises/bar",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "bar",
 				},
 			},
-			res: &types.Response{
-				Kind: types.ReadPromise,
-				ReadPromise: &types.ReadPromiseResponse{
-					Status:  types.ResponseNotFound,
+			res: &t_api.Response{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseResponse{
+					Status:  t_api.ResponseNotFound,
 					Promise: nil,
 				},
 			},
@@ -102,9 +102,9 @@ func TestHttpServer(t *testing.T) {
 			name:   "SearchPromises",
 			path:   "promises?q=*&limit=10",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -116,10 +116,10 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -130,9 +130,9 @@ func TestHttpServer(t *testing.T) {
 			name:   "SearchPromisesCursor",
 			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
@@ -141,10 +141,10 @@ func TestHttpServer(t *testing.T) {
 					SortId: test.Int64ToPointer(100),
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -155,19 +155,19 @@ func TestHttpServer(t *testing.T) {
 			name:   "SearchPromisesPending",
 			path:   "promises?q=*&state=pending",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -178,19 +178,19 @@ func TestHttpServer(t *testing.T) {
 			name:   "SearchPromisesResolved",
 			path:   "promises?q=*&state=resolved",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -201,9 +201,9 @@ func TestHttpServer(t *testing.T) {
 			name:   "SearchPromisesRejected",
 			path:   "promises?q=*&state=rejected",
 			method: "GET",
-			req: &types.Request{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesRequest{
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
 					Q: "*",
 					States: []promise.State{
 						promise.Rejected,
@@ -212,10 +212,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.SearchPromises,
-				SearchPromises: &types.SearchPromisesResponse{
-					Status:   types.ResponseOK,
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.ResponseOK,
 					Cursor:   nil,
 					Promises: nil,
 				},
@@ -253,9 +253,9 @@ func TestHttpServer(t *testing.T) {
 				},
 				"timeout": 1
 			}`),
-			req: &types.Request{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -266,10 +266,10 @@ func TestHttpServer(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &types.Response{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -282,9 +282,9 @@ func TestHttpServer(t *testing.T) {
 			body: []byte(`{
 				"timeout": 1
 			}`),
-			req: &types.Request{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -295,10 +295,10 @@ func TestHttpServer(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &types.Response{
-				Kind: types.CreatePromise,
-				CreatePromise: &types.CreatePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -318,9 +318,9 @@ func TestHttpServer(t *testing.T) {
 					"data": "Y2FuY2Vs"
 				}
 			}`),
-			req: &types.Request{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -330,10 +330,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -344,9 +344,9 @@ func TestHttpServer(t *testing.T) {
 			path:   "promises/foo/cancel",
 			method: "POST",
 			body:   []byte(`{}`),
-			req: &types.Request{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -356,10 +356,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.CancelPromise,
-				CancelPromise: &types.CancelPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -379,9 +379,9 @@ func TestHttpServer(t *testing.T) {
 					"data": "cmVzb2x2ZQ=="
 				}
 			}`),
-			req: &types.Request{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -391,10 +391,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -405,9 +405,9 @@ func TestHttpServer(t *testing.T) {
 			path:   "promises/foo/resolve",
 			method: "POST",
 			body:   []byte(`{}`),
-			req: &types.Request{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -417,10 +417,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.ResolvePromise,
-				ResolvePromise: &types.ResolvePromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -440,9 +440,9 @@ func TestHttpServer(t *testing.T) {
 					"data": "cmVqZWN0"
 				}
 			}`),
-			req: &types.Request{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
@@ -452,10 +452,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},
@@ -466,9 +466,9 @@ func TestHttpServer(t *testing.T) {
 			path:   "promises/foo/reject",
 			method: "POST",
 			body:   []byte(`{}`),
-			req: &types.Request{
-				Kind: types.RejectPromise,
-				RejectPromise: &types.RejectPromiseRequest{
+			req: &t_api.Request{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
@@ -478,10 +478,10 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &types.Response{
-				Kind: types.ResolvePromise,
-				RejectPromise: &types.RejectPromiseResponse{
-					Status:  types.ResponseCreated,
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				RejectPromise: &t_api.RejectPromiseResponse{
+					Status:  t_api.ResponseCreated,
 					Promise: nil,
 				},
 			},

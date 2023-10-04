@@ -1,6 +1,8 @@
-package types
+package t_aio
 
-import "net/http"
+import (
+	"net/http"
+)
 
 type NetworkKind int
 

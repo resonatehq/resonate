@@ -3,7 +3,7 @@ package echo
 import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/types"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 )
 
 type Echo struct{}
@@ -34,14 +34,14 @@ func (e *Echo) NewWorker(int) aio.Worker {
 	return &EchoDevice{}
 }
 
-func (d *EchoDevice) Process(sqes []*bus.SQE[types.Submission, types.Completion]) []*bus.CQE[types.Submission, types.Completion] {
-	cqes := make([]*bus.CQE[types.Submission, types.Completion], len(sqes))
+func (d *EchoDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
-		cqes[i] = &bus.CQE[types.Submission, types.Completion]{
-			Kind: sqe.Kind,
-			Completion: &types.Completion{
-				Echo: &types.EchoCompletion{
+		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Tags: sqe.Tags,
+			Completion: &t_aio.Completion{
+				Echo: &t_aio.EchoCompletion{
 					Data: sqe.Submission.Echo.Data,
 				},
 			},
