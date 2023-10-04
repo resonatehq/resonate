@@ -34,30 +34,45 @@ func New(config *Config) *DST {
 	}
 }
 
-func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System) []error {
+func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System, reqs []t_api.Kind) []error {
 	// generator
 	generator := NewGenerator(r, d.config)
-	generator.AddRequest(generator.GenerateReadPromise)
-	// generator.AddRequest(generator.GenerateSearchPromises)
-	generator.AddRequest(generator.GenerateCreatePromise)
-	generator.AddRequest(generator.GenerateCancelPromise)
-	generator.AddRequest(generator.GenerateResolvePromise)
-	// generator.AddRequest(generator.GenerateRejectPromise)
-	// generator.AddRequest(generator.GenerateReadSubscriptions)
-	// generator.AddRequest(generator.GenerateCreateSubscription)
-	// generator.AddRequest(generator.GenerateDeleteSubscription)
 
 	// model
 	model := NewModel()
-	model.AddResponse(t_api.ReadPromise, model.ValidateReadPromise)
-	model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
-	model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
-	model.AddResponse(t_api.CancelPromise, model.ValidateCancelPromise)
-	model.AddResponse(t_api.ResolvePromise, model.ValidateResolvePromise)
-	model.AddResponse(t_api.RejectPromise, model.ValidateRejectPromise)
-	model.AddResponse(t_api.ReadSubscriptions, model.ValidateReadSubscriptions)
-	model.AddResponse(t_api.CreateSubscription, model.ValidateCreateSubscription)
-	model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+
+	// add req/res
+	for _, req := range reqs {
+		switch req {
+		case t_api.ReadPromise:
+			generator.AddRequest(generator.GenerateReadPromise)
+			model.AddResponse(t_api.ReadPromise, model.ValidateReadPromise)
+		case t_api.SearchPromises:
+			generator.AddRequest(generator.GenerateSearchPromises)
+			model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
+		case t_api.CreatePromise:
+			generator.AddRequest(generator.GenerateCreatePromise)
+			model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
+		case t_api.CancelPromise:
+			generator.AddRequest(generator.GenerateCancelPromise)
+			model.AddResponse(t_api.CancelPromise, model.ValidateCancelPromise)
+		case t_api.ResolvePromise:
+			generator.AddRequest(generator.GenerateResolvePromise)
+			model.AddResponse(t_api.ResolvePromise, model.ValidateResolvePromise)
+		case t_api.RejectPromise:
+			generator.AddRequest(generator.GenerateRejectPromise)
+			model.AddResponse(t_api.RejectPromise, model.ValidateRejectPromise)
+		case t_api.ReadSubscriptions:
+			generator.AddRequest(generator.GenerateReadSubscriptions)
+			model.AddResponse(t_api.ReadSubscriptions, model.ValidateReadSubscriptions)
+		case t_api.CreateSubscription:
+			generator.AddRequest(generator.GenerateCreateSubscription)
+			model.AddResponse(t_api.CreateSubscription, model.ValidateCreateSubscription)
+		case t_api.DeleteSubscription:
+			generator.AddRequest(generator.GenerateDeleteSubscription)
+			model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+		}
+	}
 
 	// errors
 	var errors []error

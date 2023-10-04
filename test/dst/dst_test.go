@@ -51,16 +51,39 @@ func TestDST(t *testing.T) {
 		// instantiate system
 		system := system.New(api, aio, config, metrics)
 		system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-		// system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
+		system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 		system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 		system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
 		system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
 		system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
-		// system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-		// system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-		// system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
+		system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
+		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 
-		if i > 0 {
+		var reqs []t_api.Kind
+		if i == 0 {
+			// promises only
+			reqs = []t_api.Kind{
+				t_api.ReadPromise,
+				t_api.CreatePromise,
+				t_api.CancelPromise,
+				t_api.ResolvePromise,
+				t_api.RejectPromise,
+			}
+
+		} else {
+			reqs = []t_api.Kind{
+				t_api.ReadPromise,
+				t_api.SearchPromises,
+				t_api.CreatePromise,
+				t_api.CancelPromise,
+				t_api.ResolvePromise,
+				t_api.RejectPromise,
+				t_api.ReadSubscriptions,
+				t_api.CreateSubscription,
+				t_api.DeleteSubscription,
+			}
+
 			system.AddOnTick(2, coroutines.TimeoutPromises)
 			system.AddOnTick(10, coroutines.NotifySubscriptions)
 		}
@@ -86,7 +109,7 @@ func TestDST(t *testing.T) {
 		})
 
 		t.Run(fmt.Sprintf("i=%d, dst=%s", i, dst), func(t *testing.T) {
-			if errors := dst.Run(r, api, aio, system); len(errors) > 0 {
+			if errors := dst.Run(r, api, aio, system, reqs); len(errors) > 0 {
 				t.Fatal(errors[0])
 			}
 		})

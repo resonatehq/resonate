@@ -155,6 +155,18 @@ var dstRunCmd = &cobra.Command{
 		system.AddOnTick(2, coroutines.TimeoutPromises)
 		system.AddOnTick(10, coroutines.NotifySubscriptions)
 
+		reqs := []t_api.Kind{
+			t_api.ReadPromise,
+			t_api.SearchPromises,
+			t_api.CreatePromise,
+			t_api.CancelPromise,
+			t_api.ResolvePromise,
+			t_api.RejectPromise,
+			t_api.ReadSubscriptions,
+			t_api.CreateSubscription,
+			t_api.DeleteSubscription,
+		}
+
 		dst := dst.New(&dst.Config{
 			Ticks: ticks,
 			Reqs: func() int {
@@ -170,7 +182,7 @@ var dstRunCmd = &cobra.Command{
 		})
 
 		slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
-		if errors := dst.Run(r, api, aio, system); len(errors) > 0 {
+		if errors := dst.Run(r, api, aio, system, reqs); len(errors) > 0 {
 			return errors[0]
 		}
 
