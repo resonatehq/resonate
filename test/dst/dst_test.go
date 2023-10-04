@@ -97,7 +97,7 @@ func TestDST(t *testing.T) {
 		}
 
 		dst := New(&Config{
-			Ticks:           2000,
+			Ticks:           4000,
 			Reqs:            func() int { return 100 },
 			Ids:             100,
 			IdempotencyKeys: 100,
