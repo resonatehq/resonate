@@ -387,8 +387,8 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}, nil
 }
 
-func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(int64, *t_api.Response, error) {
-	return func(t int64, completion *t_api.Response, err error) {
+func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
+	return func(completion *t_api.Response, err error) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
 			Tags:       "grpc",
 			Completion: completion,

@@ -83,13 +83,13 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			reqTime := t
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
-				Callback: func(resTime int64, res *t_api.Response, err error) {
+				Callback: func(res *t_api.Response, err error) {
 					modelErr := model.Step(req, res, err)
 					if modelErr != nil {
 						errors = append(errors, modelErr)
 					}
 
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 		}

@@ -30,7 +30,7 @@ func (i inflight) remove(id string) {
 	delete(i, id)
 }
 
-func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
+func NotifySubscriptions(config *system.Config) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("NotifySubscriptions", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -48,7 +48,7 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read notifications", "err", err)
 				return
@@ -64,7 +64,7 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine {
 					continue
 				}
 
-				if t >= record.Time && !inflights.get(id(notification)) {
+				if s.Time() >= record.Time && !inflights.get(id(notification)) {
 					s.Add(notifySubscription(notification))
 				}
 			}
@@ -93,7 +93,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "id", notification.PromiseId, "err", err)
 				return
@@ -137,7 +137,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				},
 			}
 
-			c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+			c.Yield(submission, func(completion *t_aio.Completion, err error) {
 				if err != nil {
 					slog.Warn("failed to send notification", "promise", promise, "url", notification.Url)
 				}
@@ -172,7 +172,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 					},
 				}
 
-				c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+				c.Yield(submission, func(completion *t_aio.Completion, err error) {
 					if err != nil {
 						slog.Warn("failed to update notification", "notification", notification)
 					}
@@ -200,7 +200,7 @@ func abort(c *scheduler.Coroutine, notification *notification.Notification) {
 		},
 	}
 
-	c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+	c.Yield(submission, func(completion *t_aio.Completion, err error) {
 		if err != nil {
 			slog.Warn("failed to delete notification", "notification", notification)
 		}

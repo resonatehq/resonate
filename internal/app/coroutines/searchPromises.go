@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func SearchPromises(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -20,19 +20,19 @@ func SearchPromises(t int64, req *t_api.Request, res func(int64, *t_api.Response
 						{
 							Kind: t_aio.TimeoutCreateNotifications,
 							TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutDeleteSubscriptions,
 							TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutPromises,
 							TimeoutPromises: &t_aio.TimeoutPromisesCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 						{
@@ -49,10 +49,10 @@ func SearchPromises(t int64, req *t_api.Request, res func(int64, *t_api.Response
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to search promises", "req", req, "err", err)
-				res(t, nil, err)
+				res(nil, err)
 				return
 			}
 
@@ -85,7 +85,7 @@ func SearchPromises(t int64, req *t_api.Request, res func(int64, *t_api.Response
 				}
 			}
 
-			res(t, &t_api.Response{
+			res(&t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
 					Status:   t_api.ResponseOK,

@@ -30,7 +30,7 @@ func (a *API) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	assert.Equal(a.t, a.req, sqe.Submission)
 
 	// immediately call callback
-	go sqe.Callback(0, a.res, nil)
+	go sqe.Callback(a.res, nil)
 }
 
 func (a *API) Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response] {

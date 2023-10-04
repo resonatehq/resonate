@@ -16,12 +16,12 @@ type Output interface {
 type SQE[I Input, O Output] struct {
 	Tags       string
 	Submission *I
-	Callback   func(int64, *O, error)
+	Callback   func(*O, error)
 }
 
 type CQE[I Input, O Output] struct {
 	Tags       string
 	Completion *O
-	Callback   func(int64, *O, error)
+	Callback   func(*O, error)
 	Error      error
 }

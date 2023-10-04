@@ -9,7 +9,7 @@ type Coroutine struct {
 	init         func(*Scheduler, *Coroutine)
 	onDone       []func()
 	submission   *t_aio.Submission
-	continuation func(int64, *t_aio.Completion, error)
+	continuation func(*t_aio.Completion, error)
 }
 
 func NewCoroutine(name string, init func(*Scheduler, *Coroutine)) *Coroutine {
@@ -19,7 +19,7 @@ func NewCoroutine(name string, init func(*Scheduler, *Coroutine)) *Coroutine {
 	}
 }
 
-func (c *Coroutine) Yield(submission *t_aio.Submission, continuation func(int64, *t_aio.Completion, error)) {
+func (c *Coroutine) Yield(submission *t_aio.Submission, continuation func(*t_aio.Completion, error)) {
 	c.submission = submission
 	c.continuation = continuation
 }
@@ -28,12 +28,16 @@ func (c *Coroutine) OnDone(f func()) {
 	c.onDone = append(c.onDone, f)
 }
 
-func (c *Coroutine) resume(t int64, completion *t_aio.Completion, err error) {
+func (c *Coroutine) initialized() bool {
+	return c.submission != nil || c.continuation != nil
+}
+
+func (c *Coroutine) resume(completion *t_aio.Completion, err error) {
 	continuation := c.continuation
 	c.continuation = nil
 
 	if continuation != nil {
-		continuation(t, completion, err)
+		continuation(completion, err)
 	}
 }
 
