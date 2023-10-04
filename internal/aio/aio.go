@@ -3,6 +3,7 @@ package aio
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
@@ -112,7 +113,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 		select {
 		case subsystem.sq <- sqe:
 			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
-			a.metrics.AioInFlight.WithLabelValues(sqe.Tags).Inc()
+			a.metrics.AioInFlight.WithLabelValues(strings.Split(sqe.Tags, ",")...).Inc()
 		default:
 			sqe.Callback(0, nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
 		}
@@ -140,10 +141,11 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 				status = "success"
 			}
 
-			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
-			a.metrics.AioTotal.WithLabelValues(cqe.Tags, status).Inc()
-			a.metrics.AioInFlight.WithLabelValues(cqe.Tags).Dec()
+			tags := strings.Split(cqe.Tags, ",")
+			a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
+			a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
 
+			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
 			cqes = append(cqes, cqe)
 		default:
 			return cqes
