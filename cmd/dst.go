@@ -252,12 +252,10 @@ func init() {
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", dstRunCmd.Flags().Lookup("aio-network-success-rate"))
 
 	// system
-	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-timeout-cache-size", "max number of timeouts to keep in cache")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-submission-batch-size", "size of the completion queue buffered channel")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-completion-batch-size", "max number of completions to process on each tick")
 
-	_ = viper.BindPFlag("dst.system.timeoutCacheSize", dstRunCmd.Flags().Lookup("system-timeout-cache-size"))
 	_ = viper.BindPFlag("dst.system.notificationCacheSize", dstRunCmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", dstRunCmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", dstRunCmd.Flags().Lookup("system-completion-batch-size"))

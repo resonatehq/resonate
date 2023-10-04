@@ -212,12 +212,10 @@ func init() {
 	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", serveCmd.Flags().Lookup("aio-network-timeout"))
 
 	// system
-	serveCmd.Flags().Int("system-timeout-cache-size", 100, "max number of timeouts to keep in cache")
 	serveCmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	serveCmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	serveCmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
 
-	_ = viper.BindPFlag("system.timeoutCacheSize", serveCmd.Flags().Lookup("system-timeout-cache-size"))
 	_ = viper.BindPFlag("system.notificationCacheSize", serveCmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", serveCmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", serveCmd.Flags().Lookup("system-completion-batch-size"))

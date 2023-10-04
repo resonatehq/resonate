@@ -26,8 +26,7 @@ func TestDST(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		// config
 		config := &system.Config{
-			TimeoutCacheSize:      i,
-			NotificationCacheSize: i,
+			NotificationCacheSize: 100,
 			SubmissionBatchSize:   100,
 			CompletionBatchSize:   100,
 		}

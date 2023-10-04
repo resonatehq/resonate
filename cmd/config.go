@@ -115,7 +115,6 @@ type SystemConfigDST struct {
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 	return &system.Config{
-		TimeoutCacheSize:      c.TimeoutCacheSize.Resolve(r),
 		NotificationCacheSize: c.NotificationCacheSize.Resolve(r),
 		SubmissionBatchSize:   c.SubmissionBatchSize.Resolve(r),
 		CompletionBatchSize:   c.CompletionBatchSize.Resolve(r),

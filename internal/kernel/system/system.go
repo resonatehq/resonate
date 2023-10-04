@@ -15,7 +15,6 @@ import (
 )
 
 type Config struct {
-	TimeoutCacheSize      int
 	NotificationCacheSize int
 	SubmissionBatchSize   int
 	CompletionBatchSize   int
@@ -23,8 +22,7 @@ type Config struct {
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(tcs=%d, ncs=%d, sbs=%d, cbs=%d)",
-		c.TimeoutCacheSize,
+		"Config(ncs=%d, sbs=%d, cbs=%d)",
 		c.NotificationCacheSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
