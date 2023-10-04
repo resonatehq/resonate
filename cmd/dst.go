@@ -15,9 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
@@ -141,6 +143,17 @@ var dstRunCmd = &cobra.Command{
 
 		// instantiate system
 		system := system.New(api, aio, config.System, metrics)
+		system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
+		system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
+		system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+		system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
+		system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
+		system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
+		system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
+		system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
+		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnTick(2, coroutines.TimeoutPromises)
+		system.AddOnTick(10, coroutines.NotifySubscriptions)
 
 		dst := dst.New(&dst.Config{
 			Ticks: ticks,

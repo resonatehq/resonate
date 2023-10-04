@@ -7,7 +7,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -36,19 +35,6 @@ func New(config *Config) *DST {
 }
 
 func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System) []error {
-	// system
-	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
-	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
-	system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
-	system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
-	system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
-	system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-	system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
-	system.AddOnTick(2, coroutines.TimeoutPromises)
-	system.AddOnTick(10, coroutines.NotifySubscriptions)
-
 	// generator
 	generator := NewGenerator(r, d.config)
 	generator.AddRequest(generator.GenerateReadPromise)
