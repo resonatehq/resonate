@@ -29,7 +29,6 @@ func (s *Scheduler) Add(coroutine *Coroutine) {
 	s.metrics.CoroutinesTotal.WithLabelValues(coroutine.name).Inc()
 	s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Inc()
 
-	// coroutine.init(s, coroutine)
 	s.coroutines = append(s.coroutines, coroutine)
 }
 
@@ -44,8 +43,9 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	// enqueue cqes
 	for _, coroutine := range s.coroutines {
-		if !coroutine.initialized() {
+		if !coroutine.initialized {
 			coroutine.init(s, coroutine)
+			coroutine.initialized = true
 		}
 		if submission := coroutine.next(); submission != nil {
 			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{

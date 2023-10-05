@@ -10,6 +10,7 @@ type Coroutine struct {
 	onDone       []func()
 	submission   *t_aio.Submission
 	continuation func(*t_aio.Completion, error)
+	initialized  bool
 }
 
 func NewCoroutine(name string, init func(*Scheduler, *Coroutine)) *Coroutine {
@@ -26,10 +27,6 @@ func (c *Coroutine) Yield(submission *t_aio.Submission, continuation func(*t_aio
 
 func (c *Coroutine) OnDone(f func()) {
 	c.onDone = append(c.onDone, f)
-}
-
-func (c *Coroutine) initialized() bool {
-	return c.submission != nil || c.continuation != nil
 }
 
 func (c *Coroutine) resume(completion *t_aio.Completion, err error) {
