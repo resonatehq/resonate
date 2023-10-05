@@ -182,8 +182,8 @@ var dstRunCmd = &cobra.Command{
 		})
 
 		slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
-		if errors := dst.Run(r, api, aio, system, reqs); len(errors) > 0 {
-			return errors[0]
+		if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
+			return errs[0]
 		}
 
 		// reset store

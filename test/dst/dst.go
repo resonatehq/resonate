@@ -81,6 +81,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	for t := int64(0); t < d.config.Ticks; t++ {
 		for _, req := range generator.Generate(r, t, d.config.Reqs(), model.cursors) {
 			req := req
+			reqTime := t
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
@@ -89,7 +90,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 						errors = append(errors, modelErr)
 					}
 
-					slog.Info("DST", "t", t, "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 		}
