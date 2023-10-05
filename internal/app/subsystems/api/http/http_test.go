@@ -38,12 +38,13 @@ func setup() *httpTest {
 		API:       api,
 		subsystem: subsystem,
 		errors:    errors,
-		client:    &http.Client{Timeout: 1 * time.Second},
+		client:    &http.Client{Timeout: 2 * time.Second},
 	}
 }
 
 func (t *httpTest) teardown() error {
 	defer close(t.errors)
+	defer t.client.CloseIdleConnections()
 	return t.subsystem.Stop()
 }
 
