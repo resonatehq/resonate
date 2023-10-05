@@ -57,20 +57,20 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
 	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 	system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
-	// system.AddOnTick(2, coroutines.TimeoutPromises)
-	// system.AddOnTick(10, coroutines.NotifySubscriptions)
+	system.AddOnTick(2, coroutines.TimeoutPromises)
+	system.AddOnTick(10, coroutines.NotifySubscriptions)
 
 	// specify reqs to enable
 	reqs := []t_api.Kind{
 		t_api.ReadPromise,
-		// t_api.SearchPromises,
+		t_api.SearchPromises,
 		t_api.CreatePromise,
 		t_api.CancelPromise,
 		t_api.ResolvePromise,
 		t_api.RejectPromise,
-		// t_api.ReadSubscriptions,
-		// t_api.CreateSubscription,
-		// t_api.DeleteSubscription,
+		t_api.ReadSubscriptions,
+		t_api.CreateSubscription,
+		t_api.DeleteSubscription,
 	}
 
 	// start api/aio
