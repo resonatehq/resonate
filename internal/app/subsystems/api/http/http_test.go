@@ -170,7 +170,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesPending",
-			path:   "promises?q=*&state=pending",
+			path:   "promises?q=*&state=pending&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -179,6 +179,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -193,7 +194,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesResolved",
-			path:   "promises?q=*&state=resolved",
+			path:   "promises?q=*&state=resolved&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -202,6 +203,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -216,7 +218,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesRejected",
-			path:   "promises?q=*&state=rejected",
+			path:   "promises?q=*&state=rejected&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -227,6 +229,7 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{

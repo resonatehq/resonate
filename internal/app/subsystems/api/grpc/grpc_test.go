@@ -230,6 +230,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_PENDING,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -238,6 +239,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -255,6 +257,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_RESOLVED,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -263,6 +266,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -280,6 +284,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_REJECTED,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -290,6 +295,7 @@ func TestSearchPromises(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
