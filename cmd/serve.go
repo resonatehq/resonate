@@ -131,9 +131,8 @@ var serveCmd = &cobra.Command{
 				slog.Error("aio error recieved, shutting down", "error", err)
 			}
 
-			// shutdown api/aio
-			api.Shutdown()
-			aio.Shutdown()
+			// shutdown system
+			system.Shutdown()
 
 			// shutdown metrics server
 			if err := metricsServer.Close(); err != nil {

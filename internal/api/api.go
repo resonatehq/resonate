@@ -15,6 +15,7 @@ type API interface {
 	String() string
 	Enqueue(*bus.SQE[t_api.Request, t_api.Response])
 	Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response]
+	Shutdown()
 	Done() bool
 }
 
@@ -47,6 +48,8 @@ func (a *api) Start() error {
 }
 
 func (a *api) Stop() error {
+	defer close(a.sq)
+
 	for _, subsystem := range a.subsystems {
 		if err := subsystem.Stop(); err != nil {
 			return err
@@ -57,11 +60,11 @@ func (a *api) Stop() error {
 }
 
 func (a *api) Shutdown() {
-	close(a.sq)
+	a.done = true
 }
 
 func (a *api) Done() bool {
-	return a.done
+	return a.done && len(a.sq) == 0
 }
 
 func (a *api) Errors() <-chan error {
@@ -99,6 +102,8 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.CreateSubscription.Status)
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
+			default:
+				status = 200
 			}
 		}
 
@@ -106,6 +111,13 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		a.metrics.ApiInFlight.WithLabelValues(tags...).Dec()
 
 		callback(res, err)
+	}
+
+	// we must wait to close the channel because even in a select
+	// sending to a closed channel will panic
+	if a.done {
+		sqe.Callback(nil, fmt.Errorf("system is shutting down"))
+		return
 	}
 
 	select {

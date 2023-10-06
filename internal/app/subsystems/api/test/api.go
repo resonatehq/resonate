@@ -37,6 +37,8 @@ func (a *API) Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Res
 	return nil
 }
 
+func (a *API) Shutdown() {}
+
 func (a *API) Done() bool {
 	return false
 }

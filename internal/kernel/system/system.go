@@ -66,6 +66,11 @@ func (s *System) Loop() error {
 func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	defer s.housekeeping(t)
 
+	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
+	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
+
+	// fmt.Println("Tick", t)
+
 	if !s.api.Done() {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize, timeoutCh) {
@@ -91,6 +96,11 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	s.scheduler.Tick(t, s.config.CompletionBatchSize)
 }
 
+func (s *System) Shutdown() {
+	s.api.Shutdown()
+	s.aio.Shutdown()
+}
+
 func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine) {
 	s.onRequest[kind] = constructor
 }
@@ -100,10 +110,6 @@ func (s *System) AddOnTick(n int, constructor func(*Config) *scheduler.Coroutine
 	s.onTick[n] = append(s.onTick[n], constructor)
 }
 
-func (s *System) housekeeping(int64) {
-	s.ticks++
-}
-
 func (s *System) String() string {
 	return fmt.Sprintf(
 		"System(api=%s, aio=%s, config=%s)",
@@ -111,4 +117,8 @@ func (s *System) String() string {
 		s.aio,
 		s.config,
 	)
+}
+
+func (s *System) housekeeping(int64) {
+	s.ticks++
 }

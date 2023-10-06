@@ -19,6 +19,7 @@ type Request struct {
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
+	Echo               *EchoRequest
 }
 
 type ReadPromiseRequest struct {
@@ -78,6 +79,10 @@ type CreateSubscriptionRequest struct {
 type DeleteSubscriptionRequest struct {
 	Id        string `json:"id"`
 	PromiseId string `json:"promiseId"`
+}
+
+type EchoRequest struct {
+	Data string `json:"data"`
 }
 
 func (r *Request) String() string {
@@ -153,6 +158,11 @@ func (r *Request) String() string {
 			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
+		)
+	case Echo:
+		return fmt.Sprintf(
+			"Echo(data=%s)",
+			r.Echo.Data,
 		)
 	default:
 		return "Request"

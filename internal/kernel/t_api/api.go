@@ -15,4 +15,7 @@ const (
 	ReadSubscriptions
 	CreateSubscription
 	DeleteSubscription
+
+	// Echo
+	Echo
 )

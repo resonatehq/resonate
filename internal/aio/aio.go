@@ -16,8 +16,9 @@ type AIO interface {
 	String() string
 	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
 	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	Done() bool
 	Flush(int64)
+	Shutdown()
+	Done() bool
 }
 
 type aio struct {
