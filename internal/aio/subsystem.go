@@ -13,6 +13,12 @@ type Subsystem interface {
 	Reset() error
 }
 
+type SubsystemConfig struct {
+	Size      int
+	Workers   int
+	BatchSize int
+}
+
 type Worker interface {
 	Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 }

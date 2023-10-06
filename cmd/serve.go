@@ -36,7 +36,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		// logger
-		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: config.Logs.Level}))
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: config.Log.Level}))
 		slog.SetDefault(logger)
 
 		// instantiate metrics
@@ -63,8 +63,8 @@ var serveCmd = &cobra.Command{
 		api.AddSubsystem(grpc)
 
 		// add api subsystems
-		aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Size, config.AIO.Subsystems.Network.BatchSize, config.AIO.Subsystems.Network.Workers)
-		aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Size, config.AIO.Subsystems.Store.BatchSize, config.AIO.Subsystems.Store.Workers)
+		aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Subsystem)
+		aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
 
 		// start api/aio
 		if err := api.Start(); err != nil {
@@ -131,9 +131,8 @@ var serveCmd = &cobra.Command{
 				slog.Error("aio error recieved, shutting down", "error", err)
 			}
 
-			// shutdown api/aio
-			api.Shutdown()
-			aio.Shutdown()
+			// shutdown system
+			system.Shutdown()
 
 			// shutdown metrics server
 			if err := metricsServer.Close(); err != nil {
@@ -194,9 +193,9 @@ func init() {
 
 	_ = viper.BindPFlag("aio.size", serveCmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", serveCmd.Flags().Lookup("aio-store"))
-	_ = viper.BindPFlag("aio.subsystems.store.size", serveCmd.Flags().Lookup("aio-store-size"))
-	_ = viper.BindPFlag("aio.subsystems.store.workers", serveCmd.Flags().Lookup("aio-store-workers"))
-	_ = viper.BindPFlag("aio.subsystems.store.batchSize", serveCmd.Flags().Lookup("aio-store-batch-size"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", serveCmd.Flags().Lookup("aio-store-size"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.workers", serveCmd.Flags().Lookup("aio-store-workers"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.batchSize", serveCmd.Flags().Lookup("aio-store-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.path", serveCmd.Flags().Lookup("aio-store-sqlite-path"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.txTimeout", serveCmd.Flags().Lookup("aio-store-sqlite-tx-timeout"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.host", serveCmd.Flags().Lookup("aio-store-postgres-host"))
@@ -206,18 +205,16 @@ func init() {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.txTimeout", serveCmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
-	_ = viper.BindPFlag("aio.subsystems.network.size", serveCmd.Flags().Lookup("aio-network-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.workers", serveCmd.Flags().Lookup("aio-network-workers"))
-	_ = viper.BindPFlag("aio.subsystems.network.batchSize", serveCmd.Flags().Lookup("aio-network-batch-size"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.size", serveCmd.Flags().Lookup("aio-network-size"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.workers", serveCmd.Flags().Lookup("aio-network-workers"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.batchSize", serveCmd.Flags().Lookup("aio-network-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", serveCmd.Flags().Lookup("aio-network-timeout"))
 
 	// system
-	serveCmd.Flags().Int("system-timeout-cache-size", 100, "max number of timeouts to keep in cache")
 	serveCmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	serveCmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	serveCmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
 
-	_ = viper.BindPFlag("system.timeoutCacheSize", serveCmd.Flags().Lookup("system-timeout-cache-size"))
 	_ = viper.BindPFlag("system.notificationCacheSize", serveCmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", serveCmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", serveCmd.Flags().Lookup("system-completion-batch-size"))

@@ -1,6 +1,8 @@
 package t_aio
 
 import (
+	"fmt"
+
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -31,12 +33,65 @@ const (
 	TimeoutCreateNotifications
 )
 
+func (k StoreKind) String() string {
+	switch k {
+	case ReadPromise:
+		return "ReadPromise"
+	case SearchPromises:
+		return "SearchPromises"
+	case CreatePromise:
+		return "CreatePromise"
+	case UpdatePromise:
+		return "UpdatePromise"
+	case ReadTimeouts:
+		return "ReadTimeouts"
+	case CreateTimeout:
+		return "CreateTimeout"
+	case DeleteTimeout:
+		return "DeleteTimeout"
+	case ReadSubscription:
+		return "ReadSubscription"
+	case ReadSubscriptions:
+		return "ReadSubscriptions"
+	case CreateSubscription:
+		return "CreateSubscription"
+	case DeleteSubscription:
+		return "DeleteSubscription"
+	case DeleteSubscriptions:
+		return "DeleteSubscriptions"
+	case ReadNotifications:
+		return "ReadNotifications"
+	case CreateNotifications:
+		return "CreateNotifications"
+	case UpdateNotification:
+		return "UpdateNotification"
+	case DeleteNotification:
+		return "DeleteNotification"
+	case TimeoutPromises:
+		return "TimeoutPromises"
+	case TimeoutDeleteSubscriptions:
+		return "TimeoutDeleteSubscriptions"
+	case TimeoutCreateNotifications:
+		return "TimeoutCreateNotifications"
+	default:
+		panic("invalid store kind")
+	}
+}
+
 type StoreSubmission struct {
 	Transaction *Transaction
 }
 
+func (s *StoreSubmission) String() string {
+	return fmt.Sprintf("Store(transaction=Transaction(commands=%s))", s.Transaction.Commands)
+}
+
 type StoreCompletion struct {
 	Results []*Result
+}
+
+func (c *StoreCompletion) String() string {
+	return fmt.Sprintf("Store(results=%s)", c.Results)
 }
 
 type Transaction struct {
@@ -66,6 +121,10 @@ type Command struct {
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
 }
 
+func (c *Command) String() string {
+	return c.Kind.String()
+}
+
 type Result struct {
 	Kind                       StoreKind
 	ReadPromise                *QueryPromisesResult
@@ -87,6 +146,10 @@ type Result struct {
 	TimeoutPromises            *AlterPromisesResult
 	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
+}
+
+func (r *Result) String() string {
+	return r.Kind.String()
 }
 
 // Promise commands

@@ -7,7 +7,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -35,46 +34,48 @@ func New(config *Config) *DST {
 	}
 }
 
-func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System) []error {
-	// system
-	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
-	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
-	system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
-	system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
-	system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
-	system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-	system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
-	system.AddOnTick(2, coroutines.TimeoutPromises)
-	system.AddOnTick(10, coroutines.NotifySubscriptions)
-
+func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System, reqs []t_api.Kind) []error {
 	// generator
 	generator := NewGenerator(r, d.config)
-	generator.AddRequest(generator.GenerateReadPromise)
-	generator.AddRequest(generator.GenerateSearchPromises)
-	generator.AddRequest(generator.GenerateCreatePromise)
-	generator.AddRequest(generator.GenerateCancelPromise)
-	generator.AddRequest(generator.GenerateResolvePromise)
-	generator.AddRequest(generator.GenerateRejectPromise)
-	generator.AddRequest(generator.GenerateReadSubscriptions)
-	generator.AddRequest(generator.GenerateCreateSubscription)
-	generator.AddRequest(generator.GenerateDeleteSubscription)
 
 	// model
 	model := NewModel()
-	model.AddResponse(t_api.ReadPromise, model.ValidateReadPromise)
-	model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
-	model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
-	model.AddResponse(t_api.CancelPromise, model.ValidateCancelPromise)
-	model.AddResponse(t_api.ResolvePromise, model.ValidateResolvePromise)
-	model.AddResponse(t_api.RejectPromise, model.ValidateRejectPromise)
-	model.AddResponse(t_api.ReadSubscriptions, model.ValidateReadSubscriptions)
-	model.AddResponse(t_api.CreateSubscription, model.ValidateCreateSubscription)
-	model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+
+	// add req/res
+	for _, req := range reqs {
+		switch req {
+		case t_api.ReadPromise:
+			generator.AddRequest(generator.GenerateReadPromise)
+			model.AddResponse(t_api.ReadPromise, model.ValidateReadPromise)
+		case t_api.SearchPromises:
+			generator.AddRequest(generator.GenerateSearchPromises)
+			model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
+		case t_api.CreatePromise:
+			generator.AddRequest(generator.GenerateCreatePromise)
+			model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
+		case t_api.CancelPromise:
+			generator.AddRequest(generator.GenerateCancelPromise)
+			model.AddResponse(t_api.CancelPromise, model.ValidateCancelPromise)
+		case t_api.ResolvePromise:
+			generator.AddRequest(generator.GenerateResolvePromise)
+			model.AddResponse(t_api.ResolvePromise, model.ValidateResolvePromise)
+		case t_api.RejectPromise:
+			generator.AddRequest(generator.GenerateRejectPromise)
+			model.AddResponse(t_api.RejectPromise, model.ValidateRejectPromise)
+		case t_api.ReadSubscriptions:
+			generator.AddRequest(generator.GenerateReadSubscriptions)
+			model.AddResponse(t_api.ReadSubscriptions, model.ValidateReadSubscriptions)
+		case t_api.CreateSubscription:
+			generator.AddRequest(generator.GenerateCreateSubscription)
+			model.AddResponse(t_api.CreateSubscription, model.ValidateCreateSubscription)
+		case t_api.DeleteSubscription:
+			generator.AddRequest(generator.GenerateDeleteSubscription)
+			model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+		}
+	}
 
 	// errors
-	var errors []error
+	var errs []error
 
 	// test loop
 	for t := int64(0); t < d.config.Ticks; t++ {
@@ -82,26 +83,27 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			req := req
 			reqTime := t
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+				Tags:       "dst",
 				Submission: req,
-				Callback: func(resTime int64, res *t_api.Response, err error) {
+				Callback: func(res *t_api.Response, err error) {
 					modelErr := model.Step(req, res, err)
 					if modelErr != nil {
-						errors = append(errors, modelErr)
+						errs = append(errs, modelErr)
 					}
 
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 		}
 
 		system.Tick(t, nil)
 
-		if len(errors) > 0 {
+		if len(errs) > 0 {
 			break
 		}
 	}
 
-	return errors
+	return errs
 }
 
 func (d *DST) String() string {

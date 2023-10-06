@@ -9,7 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
+func TimeoutPromises(config *system.Config) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("TimeoutPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -19,19 +19,19 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 						{
 							Kind: t_aio.TimeoutCreateNotifications,
 							TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutDeleteSubscriptions,
 							TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutPromises,
 							TimeoutPromises: &t_aio.TimeoutPromisesCommand{
-								Time: t,
+								Time: s.Time(),
 							},
 						},
 					},
@@ -39,7 +39,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine {
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read timeouts", "err", err)
 				return

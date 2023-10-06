@@ -122,7 +122,7 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request {
-	limit := r.Intn(10)
+	limit := RangeIntn(r, 1, 11)
 	states := []promise.State{}
 
 	var query string

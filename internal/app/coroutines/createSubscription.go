@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
@@ -20,6 +20,7 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 			}
 		}
 
+		createdOn := s.Time()
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -32,7 +33,7 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 								PromiseId:   req.CreateSubscription.PromiseId,
 								Url:         req.CreateSubscription.Url,
 								RetryPolicy: req.CreateSubscription.RetryPolicy,
-								CreatedOn:   t,
+								CreatedOn:   createdOn,
 							},
 						},
 					},
@@ -40,10 +41,10 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to create subscription", "req", req, "err", err)
-				res(t, nil, err)
+				res(nil, err)
 				return
 			}
 
@@ -53,7 +54,7 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res(t, &t_api.Response{
+				res(&t_api.Response{
 					Kind: t_api.CreateSubscription,
 					CreateSubscription: &t_api.CreateSubscriptionResponse{
 						Status: t_api.ResponseCreated,
@@ -62,6 +63,7 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 							PromiseId:   req.CreateSubscription.PromiseId,
 							Url:         req.CreateSubscription.Url,
 							RetryPolicy: req.CreateSubscription.RetryPolicy,
+							CreatedOn:   createdOn,
 						},
 					},
 				}, nil)
@@ -83,10 +85,10 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 					},
 				}
 
-				c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+				c.Yield(submission, func(completion *t_aio.Completion, err error) {
 					if err != nil {
 						slog.Error("failed to read subscription", "req", req, "err", err)
-						res(t, nil, err)
+						res(nil, err)
 						return
 					}
 
@@ -99,11 +101,11 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 						subscription, err := result.Records[0].Subscription()
 						if err != nil {
 							slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-							res(t, nil, err)
+							res(nil, err)
 							return
 						}
 
-						res(t, &t_api.Response{
+						res(&t_api.Response{
 							Kind: t_api.CreateSubscription,
 							CreateSubscription: &t_api.CreateSubscriptionResponse{
 								Status:       t_api.ResponseOK,
@@ -111,7 +113,7 @@ func CreateSubscription(t int64, req *t_api.Request, res func(int64, *t_api.Resp
 							},
 						}, nil)
 					} else {
-						s.Add(CreateSubscription(t, req, res))
+						s.Add(CreateSubscription(req, res))
 					}
 				})
 			}

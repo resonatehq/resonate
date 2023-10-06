@@ -16,14 +16,13 @@ type AIO interface {
 	String() string
 	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
 	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	Done() bool
 	Flush(int64)
+	Shutdown()
 }
 
 type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]*subsystemWrapper
-	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
 }
@@ -36,10 +35,10 @@ type subsystemWrapper struct {
 
 type workerWrapper struct {
 	Worker
-	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	cq      chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
-	max     int
-	flushCh chan int64
+	sq        <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	cq        chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	flushCh   chan int64
+	batchSize int
 }
 
 func New(size int, metrics *metrics.Metrics) *aio {
@@ -51,17 +50,17 @@ func New(size int, metrics *metrics.Metrics) *aio {
 	}
 }
 
-func (a *aio) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, size int, max int, n int) {
-	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], size)
-	workers := make([]*workerWrapper, n)
+func (a *aio) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*workerWrapper, config.Workers)
 
-	for i := 0; i < n; i++ {
+	for i := 0; i < config.Workers; i++ {
 		workers[i] = &workerWrapper{
-			Worker:  subsystem.NewWorker(i),
-			sq:      sq,
-			cq:      a.cq,
-			max:     max,
-			flushCh: make(chan int64, 1),
+			Worker:    subsystem.NewWorker(i),
+			sq:        sq,
+			cq:        a.cq,
+			flushCh:   make(chan int64, 1),
+			batchSize: config.BatchSize,
 		}
 	}
 
@@ -86,6 +85,8 @@ func (a *aio) Start() error {
 }
 
 func (a *aio) Stop() error {
+	defer close(a.cq)
+
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
 			return err
@@ -94,15 +95,10 @@ func (a *aio) Stop() error {
 		close(subsystem.sq)
 	}
 
-	close(a.cq)
 	return nil
 }
 
 func (a *aio) Shutdown() {}
-
-func (a *aio) Done() bool {
-	return a.done
-}
 
 func (a *aio) Errors() <-chan error {
 	return a.errors
@@ -112,10 +108,10 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	if subsystem, ok := a.subsystems[sqe.Submission.Kind]; ok {
 		select {
 		case subsystem.sq <- sqe:
-			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
+			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(strings.Split(sqe.Tags, ",")...).Inc()
 		default:
-			sqe.Callback(0, nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
+			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
 		}
 	} else {
 		panic("invalid aio submission")
@@ -145,7 +141,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 			a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
 			a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
 
-			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
+			slog.Debug("aio:dequeue", "cqe", cqe)
 			cqes = append(cqes, cqe)
 		default:
 			return cqes
@@ -199,7 +195,7 @@ func (w *workerWrapper) flush(t int64) {
 func (w *workerWrapper) collect() ([]*bus.SQE[t_aio.Submission, t_aio.Completion], bool) {
 	sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
 
-	for i := 0; i < w.max; i++ {
+	for i := 0; i < w.batchSize; i++ {
 		select {
 		case sqe, ok := <-w.sq:
 			if !ok {

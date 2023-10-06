@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+func RejectPromise(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("RejectPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
@@ -35,10 +35,10 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
-				res(t, nil, err)
+				res(nil, err)
 				return
 			}
 
@@ -48,7 +48,7 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(t, &t_api.Response{
+				res(&t_api.Response{
 					Kind: t_api.RejectPromise,
 					RejectPromise: &t_api.RejectPromiseResponse{
 						Status: t_api.ResponseNotFound,
@@ -58,20 +58,20 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 				p, err := result.Records[0].Promise()
 				if err != nil {
 					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-					res(t, nil, err)
+					res(nil, err)
 					return
 				}
 
 				if p.State == promise.Pending {
-					if t >= p.Timeout {
-						s.Add(TimeoutPromise(t, p, RejectPromise(t, req, res), func(t int64, err error) {
+					if s.Time() >= p.Timeout {
+						s.Add(TimeoutPromise(p, RejectPromise(req, res), func(err error) {
 							if err != nil {
 								slog.Error("failed to timeout promise", "req", req, "err", err)
-								res(t, nil, err)
+								res(nil, err)
 								return
 							}
 
-							res(t, &t_api.Response{
+							res(&t_api.Response{
 								Kind: t_api.RejectPromise,
 								RejectPromise: &t_api.RejectPromiseResponse{
 									Status: t_api.ResponseForbidden,
@@ -94,6 +94,7 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 							}, nil)
 						}))
 					} else {
+						completedOn := s.Time()
 						submission := &t_aio.Submission{
 							Kind: t_aio.Store,
 							Store: &t_aio.StoreSubmission{
@@ -106,14 +107,14 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 												State:          promise.Rejected,
 												Value:          req.RejectPromise.Value,
 												IdempotencyKey: req.RejectPromise.IdempotencyKey,
-												CompletedOn:    t,
+												CompletedOn:    completedOn,
 											},
 										},
 										{
 											Kind: t_aio.CreateNotifications,
 											CreateNotifications: &t_aio.CreateNotificationsCommand{
 												PromiseId: req.RejectPromise.Id,
-												Time:      t,
+												Time:      completedOn,
 											},
 										},
 										{
@@ -127,10 +128,10 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 							},
 						}
 
-						c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+						c.Yield(submission, func(completion *t_aio.Completion, err error) {
 							if err != nil {
 								slog.Error("failed to update promise", "req", req, "err", err)
-								res(t, nil, err)
+								res(nil, err)
 								return
 							}
 
@@ -140,7 +141,7 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 							util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 							if result.RowsAffected == 1 {
-								res(t, &t_api.Response{
+								res(&t_api.Response{
 									Kind: t_api.RejectPromise,
 									RejectPromise: &t_api.RejectPromiseResponse{
 										Status: t_api.ResponseCreated,
@@ -154,12 +155,12 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 											IdempotencyKeyForComplete: req.RejectPromise.IdempotencyKey,
 											Tags:                      p.Tags,
 											CreatedOn:                 p.CreatedOn,
-											CompletedOn:               &t,
+											CompletedOn:               &completedOn,
 										},
 									},
 								}, nil)
 							} else {
-								s.Add(RejectPromise(t, req, res))
+								s.Add(RejectPromise(req, res))
 							}
 						})
 					}
@@ -171,7 +172,7 @@ func RejectPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response,
 						status = t_api.ResponseOK
 					}
 
-					res(t, &t_api.Response{
+					res(&t_api.Response{
 						Kind: t_api.RejectPromise,
 						RejectPromise: &t_api.RejectPromiseResponse{
 							Status:  status,

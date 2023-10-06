@@ -87,8 +87,11 @@ func TestReadPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status:  t_api.ResponseOK,
-					Promise: nil,
+					Status: t_api.ResponseOK,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Pending,
+					},
 				},
 			},
 			status: 200,
@@ -178,7 +181,7 @@ func TestSearchPromises(t *testing.T) {
 				SearchPromises: &t_api.SearchPromisesResponse{
 					Status:   t_api.ResponseOK,
 					Cursor:   nil,
-					Promises: nil,
+					Promises: []*promise.Promise{},
 				},
 			},
 			status: 200,
@@ -202,9 +205,22 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
-					Cursor:   nil,
-					Promises: nil,
+					Status: t_api.ResponseOK,
+					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
+						Next: &t_api.SearchPromisesRequest{
+							Q: "*",
+							States: []promise.State{
+								promise.Pending,
+								promise.Resolved,
+								promise.Rejected,
+								promise.Timedout,
+								promise.Canceled,
+							},
+							Limit:  10,
+							SortId: test.Int64ToPointer(10),
+						},
+					},
+					Promises: []*promise.Promise{},
 				},
 			},
 			status: 200,
@@ -214,6 +230,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_PENDING,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -222,6 +239,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -229,7 +247,7 @@ func TestSearchPromises(t *testing.T) {
 				SearchPromises: &t_api.SearchPromisesResponse{
 					Status:   t_api.ResponseOK,
 					Cursor:   nil,
-					Promises: nil,
+					Promises: []*promise.Promise{},
 				},
 			},
 			status: 200,
@@ -239,6 +257,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_RESOLVED,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -247,6 +266,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -254,7 +274,7 @@ func TestSearchPromises(t *testing.T) {
 				SearchPromises: &t_api.SearchPromisesResponse{
 					Status:   t_api.ResponseOK,
 					Cursor:   nil,
-					Promises: nil,
+					Promises: []*promise.Promise{},
 				},
 			},
 			status: 200,
@@ -264,6 +284,7 @@ func TestSearchPromises(t *testing.T) {
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Q:     "*",
 				State: grpcApi.SearchState_SEARCH_REJECTED,
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -274,6 +295,7 @@ func TestSearchPromises(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -281,7 +303,7 @@ func TestSearchPromises(t *testing.T) {
 				SearchPromises: &t_api.SearchPromisesResponse{
 					Status:   t_api.ResponseOK,
 					Cursor:   nil,
-					Promises: nil,
+					Promises: []*promise.Promise{},
 				},
 			},
 			status: 200,
@@ -355,8 +377,11 @@ func TestCreatePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Pending,
+					},
 				},
 			},
 			status: 201,
@@ -383,8 +408,11 @@ func TestCreatePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Pending,
+					},
 				},
 			},
 			status: 201,
@@ -455,8 +483,11 @@ func TestCancelPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Canceled,
+					},
 				},
 			},
 			status: 201,
@@ -481,8 +512,11 @@ func TestCancelPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Canceled,
+					},
 				},
 			},
 			status: 201,
@@ -553,8 +587,11 @@ func TestResolvePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Resolved,
+					},
 				},
 			},
 			status: 201,
@@ -579,8 +616,11 @@ func TestResolvePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Resolved,
+					},
 				},
 			},
 			status: 201,
@@ -651,8 +691,11 @@ func TestRejectPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Rejected,
+					},
 				},
 			},
 			status: 201,
@@ -677,8 +720,11 @@ func TestRejectPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status:  t_api.ResponseCreated,
-					Promise: nil,
+					Status: t_api.ResponseCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Rejected,
+					},
 				},
 			},
 			status: 201,

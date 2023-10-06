@@ -9,7 +9,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res func(int64, error)) *scheduler.Coroutine {
+func TimeoutPromise(p *promise.Promise, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -32,7 +32,7 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 							Kind: t_aio.CreateNotifications,
 							CreateNotifications: &t_aio.CreateNotificationsCommand{
 								PromiseId: p.Id,
-								Time:      t,
+								Time:      s.Time(),
 							},
 						},
 						{
@@ -46,10 +46,10 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to update promise", "id", p.Id, "err", err)
-				res(t, err)
+				res(err)
 				return
 			}
 
@@ -59,7 +59,7 @@ func TimeoutPromise(t int64, p *promise.Promise, retry *scheduler.Coroutine, res
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res(t, nil)
+				res(nil)
 			} else {
 				s.Add(retry)
 			}

@@ -18,6 +18,7 @@ type Response struct {
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
+	Echo               *EchoResponse
 }
 
 type ResponseStatus int
@@ -76,6 +77,10 @@ type DeleteSubscriptionResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 
+type EchoResponse struct {
+	Data string `json:"data"`
+}
+
 func (r *Response) String() string {
 	switch r.Kind {
 	case ReadPromise:
@@ -131,6 +136,11 @@ func (r *Response) String() string {
 		return fmt.Sprintf(
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
+		)
+	case Echo:
+		return fmt.Sprintf(
+			"Echo(data=%s)",
+			r.Echo.Data,
 		)
 	default:
 		return "Response"

@@ -23,7 +23,7 @@ type Config struct {
 	AIO     *AIOConfig
 	System  *system.Config
 	Metrics *MetricsConfig
-	Logs    *LogsConfig
+	Log     *LogConfig
 }
 
 type APIConfig struct {
@@ -48,9 +48,7 @@ type AIOSubsystems struct {
 }
 
 type AIOSubsystemConfig[T any] struct {
-	Size      int
-	Workers   int
-	BatchSize int
+	Subsystem *aio.SubsystemConfig
 	Config    *T
 }
 
@@ -58,7 +56,7 @@ type MetricsConfig struct {
 	Port int
 }
 
-type LogsConfig struct {
+type LogConfig struct {
 	Level slog.Level
 }
 
@@ -73,7 +71,7 @@ func (c *ConfigDST) Resolve(r *rand.Rand) *Config {
 		API:    c.DST.API.Resolve(r),
 		AIO:    c.DST.AIO.Resolve(r),
 		System: c.DST.System.Resolve(r),
-		Logs:   c.DST.Logs,
+		Log:    c.DST.Log,
 	}
 }
 
@@ -81,7 +79,7 @@ type configDST struct {
 	API    *APIConfigDST
 	AIO    *AIOConfigDST
 	System *SystemConfigDST
-	Logs   *LogsConfig
+	Log    *LogConfig
 }
 
 type APIConfigDST struct {
@@ -115,7 +113,6 @@ type SystemConfigDST struct {
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 	return &system.Config{
-		TimeoutCacheSize:      c.TimeoutCacheSize.Resolve(r),
 		NotificationCacheSize: c.NotificationCacheSize.Resolve(r),
 		SubmissionBatchSize:   c.SubmissionBatchSize.Resolve(r),
 		CompletionBatchSize:   c.CompletionBatchSize.Resolve(r),
@@ -168,7 +165,7 @@ func NewStore(config *AIOSubsystemConfig[StoreConfig]) (aio.Subsystem, error) {
 	case Sqlite:
 		return sqlite.New(config.Config.Sqlite)
 	case Postgres:
-		return postgres.New(config.Config.Postgres, config.Workers)
+		return postgres.New(config.Config.Postgres, config.Subsystem.Workers)
 	default:
 		return nil, fmt.Errorf("unsupported store '%s'", config.Config.Kind)
 	}

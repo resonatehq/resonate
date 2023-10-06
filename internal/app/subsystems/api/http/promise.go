@@ -110,7 +110,7 @@ func (s *server) searchPromises(c *gin.Context) {
 		}
 
 		limit := params.Limit
-		if params.Limit < 0 || params.Limit > 100 {
+		if limit <= 0 || limit > 100 {
 			limit = 100
 		}
 

@@ -15,9 +15,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
@@ -100,7 +102,7 @@ var dstRunCmd = &cobra.Command{
 
 		// logger
 		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: config.Logs.Level,
+			Level: config.Log.Level,
 			ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
 				// suppress time attr
 				if attr.Key == "time" {
@@ -141,6 +143,29 @@ var dstRunCmd = &cobra.Command{
 
 		// instantiate system
 		system := system.New(api, aio, config.System, metrics)
+		system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
+		system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
+		system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+		system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
+		system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
+		system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
+		system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
+		system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
+		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnTick(2, coroutines.TimeoutPromises)
+		system.AddOnTick(10, coroutines.NotifySubscriptions)
+
+		reqs := []t_api.Kind{
+			t_api.ReadPromise,
+			t_api.SearchPromises,
+			t_api.CreatePromise,
+			t_api.CancelPromise,
+			t_api.ResolvePromise,
+			t_api.RejectPromise,
+			t_api.ReadSubscriptions,
+			t_api.CreateSubscription,
+			t_api.DeleteSubscription,
+		}
 
 		dst := dst.New(&dst.Config{
 			Ticks: ticks,
@@ -157,8 +182,8 @@ var dstRunCmd = &cobra.Command{
 		})
 
 		slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
-		if errors := dst.Run(r, api, aio, system); len(errors) > 0 {
-			return errors[0]
+		if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
+			return errs[0]
 		}
 
 		// reset store
@@ -252,12 +277,10 @@ func init() {
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", dstRunCmd.Flags().Lookup("aio-network-success-rate"))
 
 	// system
-	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-timeout-cache-size", "max number of timeouts to keep in cache")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-submission-batch-size", "size of the completion queue buffered channel")
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000}, "system-completion-batch-size", "max number of completions to process on each tick")
 
-	_ = viper.BindPFlag("dst.system.timeoutCacheSize", dstRunCmd.Flags().Lookup("system-timeout-cache-size"))
 	_ = viper.BindPFlag("dst.system.notificationCacheSize", dstRunCmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", dstRunCmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", dstRunCmd.Flags().Lookup("system-completion-batch-size"))

@@ -2,6 +2,7 @@ package aio
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand" // nosemgrep
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -58,6 +59,8 @@ func (a *aioDST) Done() bool {
 }
 
 func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
+	slog.Debug("aio:enqueue", "sqe", sqe)
+
 	i := a.r.Intn(len(a.sqes) + 1)
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
 }
@@ -65,6 +68,10 @@ func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := a.cqes[:min(n, len(a.cqes))]
 	a.cqes = a.cqes[min(n, len(a.cqes)):]
+
+	for _, cqe := range cqes {
+		slog.Debug("aio:dequeue", "cqe", cqe)
+	}
 
 	return cqes
 }

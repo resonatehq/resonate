@@ -2013,6 +2013,73 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "DeleteSubscriptions",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
+					Id:          "a",
+					PromiseId:   "foo",
+					Url:         "https://foo.com/a",
+					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
+					Id:          "b",
+					PromiseId:   "foo",
+					Url:         "https://foo.com/b",
+					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.CreateSubscriptionCommand{
+					Id:          "c",
+					PromiseId:   "foo",
+					Url:         "https://foo.com/c",
+					RetryPolicy: &subscription.RetryPolicy{},
+					CreatedOn:   1,
+				},
+			},
+			{
+				Kind: t_aio.DeleteSubscriptions,
+				DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
+					PromiseId: "foo",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSubscription,
+				CreateSubscription: &t_aio.AlterSubscriptionsResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.DeleteSubscriptions,
+				DeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
+					RowsAffected: 3,
+				},
+			},
+		},
+	},
+	{
 		name: "ReadSubscription",
 		commands: []*t_aio.Command{
 			{

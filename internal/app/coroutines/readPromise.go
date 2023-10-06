@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, error)) *scheduler.Coroutine {
+func ReadPromise(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("ReadPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
@@ -28,10 +28,10 @@ func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, e
 			},
 		}
 
-		c.Yield(submission, func(t int64, completion *t_aio.Completion, err error) {
+		c.Yield(submission, func(completion *t_aio.Completion, err error) {
 			if err != nil {
 				slog.Error("failed to read promise", "req", req, "err", err)
-				res(t, nil, err)
+				res(nil, err)
 				return
 			}
 
@@ -41,7 +41,7 @@ func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, e
 			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 			if result.RowsReturned == 0 {
-				res(t, &t_api.Response{
+				res(&t_api.Response{
 					Kind: t_api.ReadPromise,
 					ReadPromise: &t_api.ReadPromiseResponse{
 						Status: t_api.ResponseNotFound,
@@ -51,19 +51,19 @@ func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, e
 				p, err := result.Records[0].Promise()
 				if err != nil {
 					slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-					res(t, nil, err)
+					res(nil, err)
 					return
 				}
 
-				if p.State == promise.Pending && t >= p.Timeout {
-					s.Add(TimeoutPromise(t, p, ReadPromise(t, req, res), func(t int64, err error) {
+				if p.State == promise.Pending && s.Time() >= p.Timeout {
+					s.Add(TimeoutPromise(p, ReadPromise(req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(t, nil, err)
+							res(nil, err)
 							return
 						}
 
-						res(t, &t_api.Response{
+						res(&t_api.Response{
 							Kind: t_api.ReadPromise,
 							ReadPromise: &t_api.ReadPromiseResponse{
 								Status: t_api.ResponseOK,
@@ -86,7 +86,7 @@ func ReadPromise(t int64, req *t_api.Request, res func(int64, *t_api.Response, e
 						}, nil)
 					}))
 				} else {
-					res(t, &t_api.Response{
+					res(&t_api.Response{
 						Kind: t_api.ReadPromise,
 						ReadPromise: &t_api.ReadPromiseResponse{
 							Status:  t_api.ResponseOK,

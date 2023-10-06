@@ -2,7 +2,6 @@ package system
 
 import (
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -15,7 +14,6 @@ import (
 )
 
 type Config struct {
-	TimeoutCacheSize      int
 	NotificationCacheSize int
 	SubmissionBatchSize   int
 	CompletionBatchSize   int
@@ -23,8 +21,7 @@ type Config struct {
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(tcs=%d, ncs=%d, sbs=%d, cbs=%d)",
-		c.TimeoutCacheSize,
+		"Config(ncs=%d, sbs=%d, cbs=%d)",
 		c.NotificationCacheSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
@@ -37,8 +34,8 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[t_api.Kind]func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine
-	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine
+	onRequest map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine
+	onTick    map[int][]func(*Config) *scheduler.Coroutine
 	ticks     int64
 }
 
@@ -49,8 +46,8 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[t_api.Kind]func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine{},
-		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine{},
+		onRequest: map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine{},
+		onTick:    map[int][]func(*Config) *scheduler.Coroutine{},
 	}
 }
 
@@ -68,12 +65,14 @@ func (s *System) Loop() error {
 func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	defer s.housekeeping(t)
 
+	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
+	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
+
 	if !s.api.Done() {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize, timeoutCh) {
 			if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-				slog.Debug("api:dequeue", "sqe", sqe.Submission)
-				s.scheduler.Add(coroutine(t, sqe.Submission, sqe.Callback))
+				s.scheduler.Add(coroutine(sqe.Submission, sqe.Callback))
 			} else {
 				panic("invalid api request")
 			}
@@ -83,7 +82,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		for _, coroutines := range util.OrderedRangeKV(s.onTick) {
 			if s.ticks%int64(coroutines.Key) == 0 {
 				for _, coroutine := range coroutines.Value {
-					s.scheduler.Add(coroutine(t, s.config))
+					s.scheduler.Add(coroutine(s.config))
 				}
 			}
 		}
@@ -93,17 +92,18 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	s.scheduler.Tick(t, s.config.CompletionBatchSize)
 }
 
-func (s *System) AddOnRequest(kind t_api.Kind, constructor func(int64, *t_api.Request, func(int64, *t_api.Response, error)) *scheduler.Coroutine) {
+func (s *System) Shutdown() {
+	s.api.Shutdown()
+	s.aio.Shutdown()
+}
+
+func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine) {
 	s.onRequest[kind] = constructor
 }
 
-func (s *System) AddOnTick(n int, constructor func(int64, *Config) *scheduler.Coroutine) {
+func (s *System) AddOnTick(n int, constructor func(*Config) *scheduler.Coroutine) {
 	util.Assert(n > 0, "n must be greater than 0")
 	s.onTick[n] = append(s.onTick[n], constructor)
-}
-
-func (s *System) housekeeping(int64) {
-	s.ticks++
 }
 
 func (s *System) String() string {
@@ -113,4 +113,8 @@ func (s *System) String() string {
 		s.aio,
 		s.config,
 	)
+}
+
+func (s *System) housekeeping(int64) {
+	s.ticks++
 }
