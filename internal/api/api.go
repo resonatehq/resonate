@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -122,6 +124,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 
 	select {
 	case a.sq <- sqe:
+		slog.Debug("api:enqueue", "sqe", sqe)
 		a.metrics.ApiInFlight.WithLabelValues(tags...).Inc()
 	default:
 		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
@@ -138,9 +141,10 @@ func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[t_api.Reques
 			select {
 			case sqe, ok := <-a.sq:
 				if !ok {
-					a.done = true
 					return sqes
 				}
+
+				slog.Debug("api:dequeue", "sqe", sqe)
 				sqes = append(sqes, sqe)
 			case <-timeoutCh:
 				return sqes
@@ -153,9 +157,10 @@ func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[t_api.Reques
 			select {
 			case sqe, ok := <-a.sq:
 				if !ok {
-					a.done = true
 					return sqes
 				}
+
+				slog.Debug("api:dequeue", "sqe", sqe)
 				sqes = append(sqes, sqe)
 			default:
 				return sqes

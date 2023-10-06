@@ -2,7 +2,6 @@ package system
 
 import (
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -69,13 +68,10 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
-	// fmt.Println("Tick", t)
-
 	if !s.api.Done() {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize, timeoutCh) {
 			if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-				slog.Debug("api:dequeue", "sqe", sqe.Submission)
 				s.scheduler.Add(coroutine(sqe.Submission, sqe.Callback))
 			} else {
 				panic("invalid api request")

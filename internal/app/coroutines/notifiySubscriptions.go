@@ -84,6 +84,7 @@ func notifySubscription(notification *notification.Notification) *scheduler.Coro
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
+							Kind: t_aio.ReadPromise,
 							ReadPromise: &t_aio.ReadPromiseCommand{
 								Id: notification.PromiseId,
 							},

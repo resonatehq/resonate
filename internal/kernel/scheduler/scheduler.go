@@ -58,6 +58,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 		if !coroutine.done() {
 			coroutines = append(coroutines, coroutine)
 		} else {
+			slog.Debug("scheduler:rmv", "coroutine", coroutine.name)
 			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Dec()
 		}
 	}

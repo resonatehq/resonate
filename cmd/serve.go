@@ -36,7 +36,7 @@ var serveCmd = &cobra.Command{
 		}
 
 		// logger
-		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: config.Logs.Level}))
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: config.Log.Level}))
 		slog.SetDefault(logger)
 
 		// instantiate metrics

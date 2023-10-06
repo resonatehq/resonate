@@ -18,13 +18,11 @@ type AIO interface {
 	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 	Flush(int64)
 	Shutdown()
-	Done() bool
 }
 
 type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]*subsystemWrapper
-	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
 }
@@ -87,6 +85,8 @@ func (a *aio) Start() error {
 }
 
 func (a *aio) Stop() error {
+	defer close(a.cq)
+
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		if err := subsystem.Stop(); err != nil {
 			return err
@@ -95,15 +95,10 @@ func (a *aio) Stop() error {
 		close(subsystem.sq)
 	}
 
-	close(a.cq)
 	return nil
 }
 
 func (a *aio) Shutdown() {}
-
-func (a *aio) Done() bool {
-	return a.done
-}
 
 func (a *aio) Errors() <-chan error {
 	return a.errors
@@ -113,7 +108,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	if subsystem, ok := a.subsystems[sqe.Submission.Kind]; ok {
 		select {
 		case subsystem.sq <- sqe:
-			slog.Debug("aio:enqueue", "sqe", sqe.Submission)
+			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(strings.Split(sqe.Tags, ",")...).Inc()
 		default:
 			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
@@ -146,7 +141,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 			a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
 			a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
 
-			slog.Debug("aio:dequeue", "cqe", cqe.Completion)
+			slog.Debug("aio:dequeue", "cqe", cqe)
 			cqes = append(cqes, cqe)
 		default:
 			return cqes

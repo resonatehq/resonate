@@ -102,7 +102,7 @@ var dstRunCmd = &cobra.Command{
 
 		// logger
 		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: config.Logs.Level,
+			Level: config.Log.Level,
 			ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
 				// suppress time attr
 				if attr.Key == "time" {

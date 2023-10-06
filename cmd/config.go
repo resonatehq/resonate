@@ -23,7 +23,7 @@ type Config struct {
 	AIO     *AIOConfig
 	System  *system.Config
 	Metrics *MetricsConfig
-	Logs    *LogsConfig
+	Log     *LogConfig
 }
 
 type APIConfig struct {
@@ -58,7 +58,7 @@ type MetricsConfig struct {
 	Port int
 }
 
-type LogsConfig struct {
+type LogConfig struct {
 	Level slog.Level
 }
 
@@ -73,7 +73,7 @@ func (c *ConfigDST) Resolve(r *rand.Rand) *Config {
 		API:    c.DST.API.Resolve(r),
 		AIO:    c.DST.AIO.Resolve(r),
 		System: c.DST.System.Resolve(r),
-		Logs:   c.DST.Logs,
+		Log:    c.DST.Log,
 	}
 }
 
@@ -81,7 +81,7 @@ type configDST struct {
 	API    *APIConfigDST
 	AIO    *AIOConfigDST
 	System *SystemConfigDST
-	Logs   *LogsConfig
+	Log    *LogConfig
 }
 
 type APIConfigDST struct {

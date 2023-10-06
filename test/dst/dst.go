@@ -75,7 +75,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	}
 
 	// errors
-	var errors []error
+	var errs []error
 
 	// test loop
 	for t := int64(0); t < d.config.Ticks; t++ {
@@ -83,11 +83,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			req := req
 			reqTime := t
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+				Tags:       "dst",
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
 					modelErr := model.Step(req, res, err)
 					if modelErr != nil {
-						errors = append(errors, modelErr)
+						errs = append(errs, modelErr)
 					}
 
 					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "req", req, "res", res, "err", err, "ok", modelErr == nil)
@@ -97,12 +98,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 
 		system.Tick(t, nil)
 
-		if len(errors) > 0 {
+		if len(errs) > 0 {
 			break
 		}
 	}
 
-	return errors
+	return errs
 }
 
 func (d *DST) String() string {
