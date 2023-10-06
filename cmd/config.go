@@ -48,9 +48,7 @@ type AIOSubsystems struct {
 }
 
 type AIOSubsystemConfig[T any] struct {
-	Size      int
-	Workers   int
-	BatchSize int
+	Subsystem *aio.SubsystemConfig
 	Config    *T
 }
 
@@ -167,7 +165,7 @@ func NewStore(config *AIOSubsystemConfig[StoreConfig]) (aio.Subsystem, error) {
 	case Sqlite:
 		return sqlite.New(config.Config.Sqlite)
 	case Postgres:
-		return postgres.New(config.Config.Postgres, config.Workers)
+		return postgres.New(config.Config.Postgres, config.Subsystem.Workers)
 	default:
 		return nil, fmt.Errorf("unsupported store '%s'", config.Config.Kind)
 	}

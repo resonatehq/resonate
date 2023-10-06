@@ -20,9 +20,15 @@ import (
 func TestSystemLoop(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
+	subsystemConfig := &aio.SubsystemConfig{
+		Size:      100,
+		Workers:   1,
+		BatchSize: 1,
+	}
+
 	api := api.New(100, metrics)
 	aio := aio.New(100, metrics)
-	aio.AddSubsystem(t_aio.Echo, echo.New(), 100, 1, 1)
+	aio.AddSubsystem(t_aio.Echo, echo.New(), subsystemConfig)
 
 	if err := api.Start(); err != nil {
 		t.Fatal(err)

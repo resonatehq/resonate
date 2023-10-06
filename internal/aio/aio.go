@@ -35,10 +35,10 @@ type subsystemWrapper struct {
 
 type workerWrapper struct {
 	Worker
-	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	cq      chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
-	max     int
-	flushCh chan int64
+	sq        <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	cq        chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	flushCh   chan int64
+	batchSize int
 }
 
 func New(size int, metrics *metrics.Metrics) *aio {
@@ -50,17 +50,17 @@ func New(size int, metrics *metrics.Metrics) *aio {
 	}
 }
 
-func (a *aio) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, size int, max int, n int) {
-	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], size)
-	workers := make([]*workerWrapper, n)
+func (a *aio) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*workerWrapper, config.Workers)
 
-	for i := 0; i < n; i++ {
+	for i := 0; i < config.Workers; i++ {
 		workers[i] = &workerWrapper{
-			Worker:  subsystem.NewWorker(i),
-			sq:      sq,
-			cq:      a.cq,
-			max:     max,
-			flushCh: make(chan int64, 1),
+			Worker:    subsystem.NewWorker(i),
+			sq:        sq,
+			cq:        a.cq,
+			flushCh:   make(chan int64, 1),
+			batchSize: config.BatchSize,
 		}
 	}
 
@@ -195,7 +195,7 @@ func (w *workerWrapper) flush(t int64) {
 func (w *workerWrapper) collect() ([]*bus.SQE[t_aio.Submission, t_aio.Completion], bool) {
 	sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
 
-	for i := 0; i < w.max; i++ {
+	for i := 0; i < w.batchSize; i++ {
 		select {
 		case sqe, ok := <-w.sq:
 			if !ok {

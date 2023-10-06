@@ -63,8 +63,8 @@ var serveCmd = &cobra.Command{
 		api.AddSubsystem(grpc)
 
 		// add api subsystems
-		aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Size, config.AIO.Subsystems.Network.BatchSize, config.AIO.Subsystems.Network.Workers)
-		aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Size, config.AIO.Subsystems.Store.BatchSize, config.AIO.Subsystems.Store.Workers)
+		aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Subsystem)
+		aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
 
 		// start api/aio
 		if err := api.Start(); err != nil {
@@ -193,9 +193,9 @@ func init() {
 
 	_ = viper.BindPFlag("aio.size", serveCmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", serveCmd.Flags().Lookup("aio-store"))
-	_ = viper.BindPFlag("aio.subsystems.store.size", serveCmd.Flags().Lookup("aio-store-size"))
-	_ = viper.BindPFlag("aio.subsystems.store.workers", serveCmd.Flags().Lookup("aio-store-workers"))
-	_ = viper.BindPFlag("aio.subsystems.store.batchSize", serveCmd.Flags().Lookup("aio-store-batch-size"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", serveCmd.Flags().Lookup("aio-store-size"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.workers", serveCmd.Flags().Lookup("aio-store-workers"))
+	_ = viper.BindPFlag("aio.subsystems.store.subsystem.batchSize", serveCmd.Flags().Lookup("aio-store-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.path", serveCmd.Flags().Lookup("aio-store-sqlite-path"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.txTimeout", serveCmd.Flags().Lookup("aio-store-sqlite-tx-timeout"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.host", serveCmd.Flags().Lookup("aio-store-postgres-host"))
@@ -205,9 +205,9 @@ func init() {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.txTimeout", serveCmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
-	_ = viper.BindPFlag("aio.subsystems.network.size", serveCmd.Flags().Lookup("aio-network-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.workers", serveCmd.Flags().Lookup("aio-network-workers"))
-	_ = viper.BindPFlag("aio.subsystems.network.batchSize", serveCmd.Flags().Lookup("aio-network-batch-size"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.size", serveCmd.Flags().Lookup("aio-network-size"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.workers", serveCmd.Flags().Lookup("aio-network-workers"))
+	_ = viper.BindPFlag("aio.subsystems.network.subsystem.batchSize", serveCmd.Flags().Lookup("aio-network-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", serveCmd.Flags().Lookup("aio-network-timeout"))
 
 	// system
