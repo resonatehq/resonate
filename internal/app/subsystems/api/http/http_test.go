@@ -27,7 +27,7 @@ func setup() *httpTest {
 	errors := make(chan error)
 	subsystem := New(api, &Config{
 		Addr:    "127.0.0.1:8888",
-		Timeout: 0,
+		Timeout: 1 * time.Second,
 	})
 
 	// start http server
@@ -38,7 +38,7 @@ func setup() *httpTest {
 		API:       api,
 		subsystem: subsystem,
 		errors:    errors,
-		client:    &http.Client{Timeout: 2 * time.Second},
+		client:    &http.Client{Timeout: 1 * time.Second},
 	}
 }
 
