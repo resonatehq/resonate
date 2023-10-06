@@ -12,6 +12,9 @@ import (
 
 func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
 	return scheduler.NewCoroutine("SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+		util.Assert(req.SearchPromises.Q != "", "query must not be empty")
+		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
+
 		submission := &t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{

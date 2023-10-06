@@ -141,10 +141,15 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid state")
 		}
 
+		limit := int(req.Limit)
+		if limit <= 0 || limit > 100 {
+			limit = 100
+		}
+
 		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      req.Q,
 			States: states,
-			Limit:  int(req.Limit),
+			Limit:  limit,
 		}
 	}
 
