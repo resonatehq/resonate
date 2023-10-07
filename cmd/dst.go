@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
@@ -118,9 +119,18 @@ var dstRunCmd = &cobra.Command{
 		reg := prometheus.NewRegistry()
 		metrics := metrics.New(reg)
 
+		mux := netHttp.NewServeMux()
+		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+		metricsServer := &netHttp.Server{
+			Addr:    ":9090",
+			Handler: mux,
+		}
+
+		go metricsServer.ListenAndServe() // nolint: errcheck
+
 		// instatiate api/aio
 		api := api.New(config.API.Size, metrics)
-		aio := aio.NewDST(r)
+		aio := aio.NewDST(r, metrics)
 
 		// instatiate aio subsystems
 		network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))

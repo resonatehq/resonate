@@ -33,7 +33,7 @@ func TestDST(t *testing.T) {
 
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	aio := aio.NewDST(r)
+	aio := aio.NewDST(r, metrics)
 
 	// instatiate aio subsystems
 	network := network.NewDST(&network.ConfigDST{P: 0.5}, r)

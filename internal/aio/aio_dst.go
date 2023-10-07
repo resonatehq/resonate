@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/util"
@@ -16,13 +18,14 @@ type aioDST struct {
 	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
 	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]Subsystem
-	done       bool
+	metrics    *metrics.Metrics
 }
 
-func NewDST(r *rand.Rand) *aioDST {
+func NewDST(r *rand.Rand, metrics *metrics.Metrics) *aioDST {
 	return &aioDST{
 		r:          r,
 		subsystems: map[t_aio.Kind]Subsystem{},
+		metrics:    metrics,
 	}
 }
 
@@ -50,16 +53,11 @@ func (a *aioDST) Stop() error {
 	return nil
 }
 
-func (a *aioDST) Shutdown() {
-	a.done = true
-}
-
-func (a *aioDST) Done() bool {
-	return a.done
-}
+func (a *aioDST) Shutdown() {}
 
 func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	slog.Debug("aio:enqueue", "sqe", sqe)
+	a.metrics.AioInFlight.WithLabelValues(strings.Split(sqe.Tags, ",")...).Inc()
 
 	i := a.r.Intn(len(a.sqes) + 1)
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
@@ -71,6 +69,17 @@ func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 
 	for _, cqe := range cqes {
 		slog.Debug("aio:dequeue", "cqe", cqe)
+
+		var status string
+		if cqe.Error != nil {
+			status = "failure"
+		} else {
+			status = "success"
+		}
+
+		tags := strings.Split(cqe.Tags, ",")
+		a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
+		a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
 	}
 
 	return cqes
