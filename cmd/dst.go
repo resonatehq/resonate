@@ -264,6 +264,7 @@ func init() {
 	// aio
 	dstRunCmd.Flags().Var(&rangeIntFlag{Min: 1, Max: 1000000}, "aio-size", "size of the completion queue buffered channel")
 	dstRunCmd.Flags().String("aio-store", "sqlite", "promise store type")
+	dstRunCmd.Flags().Int("aio-store-workers", 1, "number of concurrent connections to the store")
 	dstRunCmd.Flags().String("aio-store-sqlite-path", ":memory:", "sqlite database path")
 	dstRunCmd.Flags().Duration("aio-store-sqlite-tx-timeout", 2*time.Second, "sqlite transaction timeout")
 	dstRunCmd.Flags().String("aio-store-postgres-host", "localhost", "postgres host")
@@ -276,6 +277,7 @@ func init() {
 
 	_ = viper.BindPFlag("dst.aio.size", dstRunCmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.kind", dstRunCmd.Flags().Lookup("aio-store"))
+	_ = viper.BindPFlag("dst.aio.subsystems.store.subsystem.workers", dstRunCmd.Flags().Lookup("aio-store-workers"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.sqlite.path", dstRunCmd.Flags().Lookup("aio-store-sqlite-path"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.sqlite.txTimeout", dstRunCmd.Flags().Lookup("aio-store-sqlite-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.host", dstRunCmd.Flags().Lookup("aio-store-postgres-host"))
