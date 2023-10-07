@@ -24,8 +24,13 @@ type Http struct {
 }
 
 func New(api api.API, config *Config) api.Subsystem {
-	r := gin.Default()
+	gin.SetMode(gin.ReleaseMode)
+
+	r := gin.New()
 	s := &server{api: api}
+
+	// Middleware
+	r.Use(s.log)
 
 	// Promise API
 	r.GET("/promises", s.searchPromises)
@@ -64,6 +69,11 @@ func (h *Http) String() string {
 
 type server struct {
 	api api.API
+}
+
+func (s *server) log(c *gin.Context) {
+	c.Next()
+	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
 }
 
 func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {

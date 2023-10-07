@@ -29,7 +29,7 @@ type Grpc struct {
 func New(api api.API, config *Config) api.Subsystem {
 	s := &server{api: api}
 
-	server := grpc.NewServer() // nosemgrep
+	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
 
 	return &Grpc{
@@ -65,6 +65,13 @@ func (g *Grpc) String() string {
 type server struct {
 	grpcApi.UnimplementedPromiseServiceServer
 	api api.API
+}
+
+func (s *server) log(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	res, err := handler(ctx, req)
+
+	slog.Debug("grpc", "method", info.FullMethod, "error", err)
+	return res, err
 }
 
 func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
