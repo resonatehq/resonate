@@ -75,6 +75,7 @@ func (a *api) Errors() <-chan error {
 
 func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	tags := strings.Split(sqe.Tags, ",")
+	a.metrics.ApiInFlight.WithLabelValues(tags...).Inc()
 
 	// replace sqe.Callback with a callback that wraps the original
 	// function and emits metrics
@@ -125,7 +126,6 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	select {
 	case a.sq <- sqe:
 		slog.Debug("api:enqueue", "sqe", sqe)
-		a.metrics.ApiInFlight.WithLabelValues(tags...).Inc()
 	default:
 		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
 	}
