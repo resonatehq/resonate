@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"net/http"
 	"time"
 
@@ -9,8 +10,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/api"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
 type Config struct {
@@ -27,7 +26,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
-	s := &server{api: api}
+	s := &server{service: &service.Service{Api: api, ServerProtocol: "http"}}
 
 	// Middleware
 	r.Use(s.log)
@@ -68,26 +67,10 @@ func (h *Http) String() string {
 }
 
 type server struct {
-	api api.API
+	service *service.Service
 }
 
 func (s *server) log(c *gin.Context) {
 	c.Next()
 	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
-}
-
-func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
-	return func(completion *t_api.Response, err error) {
-		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			Tags:       "http",
-			Completion: completion,
-			Error:      err,
-		}
-
-		select {
-		case cq <- cqe:
-		default:
-			panic("response channel must not block")
-		}
-	}
 }
