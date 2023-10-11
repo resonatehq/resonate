@@ -25,7 +25,7 @@ type Grpc struct {
 }
 
 func New(api api.API, config *Config) api.Subsystem {
-	s := &server{service: &service.Service{Api: api}}
+	s := &server{service: &service.Service{Api: api, ServerProtocol: "grpc"}}
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
