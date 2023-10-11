@@ -26,7 +26,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
-	s := &server{service: &service.Service{Api: api, ServerProtocol: "http"}}
+	s := &server{service: service.New(api, "http")}
 
 	// Middleware
 	r.Use(s.log)

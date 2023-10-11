@@ -12,12 +12,19 @@ import (
 func (e *ValidationError) Error() string { return e.msg }
 
 type Service struct {
-	Api            api.API
-	ServerProtocol string
+	api            api.API
+	serverProtocol string
+}
+
+func New(api api.API, serverProtocol string) *Service {
+	return &Service{
+		api: api,
+		serverProtocol: serverProtocol,
+	}
 }
 
 func (s *Service) protocol() string {
-	return s.ServerProtocol
+	return s.serverProtocol
 }
 
 // Read Promise
@@ -26,7 +33,7 @@ func (s *Service) ReadPromise(id string) (*t_api.ReadPromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
@@ -106,7 +113,7 @@ func (s *Service) SearchPromises(params *SearchPromiseParams) (*t_api.SearchProm
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind:           t_api.SearchPromises,
@@ -130,7 +137,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
@@ -161,7 +168,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind: t_api.CancelPromise,
@@ -190,7 +197,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind: t_api.ResolvePromise,
@@ -219,7 +226,7 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
-	s.Api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Tags: s.protocol(),
 		Submission: &t_api.Request{
 			Kind: t_api.RejectPromise,
