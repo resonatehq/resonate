@@ -9,31 +9,48 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
+type S interface {
+	Add(coroutine *Coroutine[*t_aio.Completion, *t_aio.Submission])
+	Time() int64
+}
+
 type Scheduler struct {
 	aio        aio.AIO
 	time       int64
 	metrics    *metrics.Metrics
-	coroutines []*Coroutine
+	coroutines []*suspendableCoroutine
+}
+
+type suspendableCoroutine struct {
+	*Coroutine[*t_aio.Completion, *t_aio.Submission]
+	next      *t_aio.Completion
+	error     error
+	suspended bool
 }
 
 func NewScheduler(aio aio.AIO, metrics *metrics.Metrics) *Scheduler {
 	return &Scheduler{
-		aio:        aio,
-		metrics:    metrics,
-		coroutines: []*Coroutine{},
+		aio:     aio,
+		metrics: metrics,
 	}
 }
 
-func (s *Scheduler) Add(coroutine *Coroutine) {
+func (s *Scheduler) Add(coroutine *Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 	slog.Debug("scheduler:add", "coroutine", coroutine.name)
 	s.metrics.CoroutinesTotal.WithLabelValues(coroutine.name).Inc()
 	s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Inc()
 
-	s.coroutines = append(s.coroutines, coroutine)
+	// add reference to scheduler
+	coroutine.Scheduler = s
+
+	// wrap in suspendable coroutine
+	s.coroutines = append(s.coroutines, &suspendableCoroutine{
+		Coroutine: coroutine,
+	})
 }
 
 func (s *Scheduler) Tick(t int64, batchSize int) {
-	var coroutines []*Coroutine
+	coroutines := []*suspendableCoroutine{}
 	s.time = t
 
 	// dequeue cqes
@@ -41,23 +58,33 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 		cqe.Callback(cqe.Completion, cqe.Error)
 	}
 
-	// enqueue cqes
+	// enqueue sqes
 	for _, coroutine := range s.coroutines {
-		if !coroutine.initialized {
-			coroutine.init(s, coroutine)
-			coroutine.initialized = true
-		}
-		if submission := coroutine.next(); submission != nil {
-			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{
-				Tags:       submission.Kind.String(),
-				Submission: submission,
-				Callback:   coroutine.resume,
-			})
+		if coroutine.suspended {
+			continue
 		}
 
-		if !coroutine.done() {
+		if submission := coroutine.Resume(coroutine.next, coroutine.error); !submission.Done {
+			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{
+				Tags:       submission.Value.Kind.String(),
+				Submission: submission.Value,
+				Callback: func(completion *t_aio.Completion, err error) {
+					// unsuspend
+					coroutine.next = completion
+					coroutine.error = err
+					coroutine.suspended = false
+				},
+			})
+
+			// suspend
+			coroutine.suspended = true
 			coroutines = append(coroutines, coroutine)
 		} else {
+			// call onDone functions
+			for _, f := range coroutine.onDone {
+				f()
+			}
+
 			slog.Debug("scheduler:rmv", "coroutine", coroutine.name)
 			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Dec()
 		}
@@ -66,7 +93,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 	// flush
 	s.aio.Flush(t)
 
-	// discard completed coroutines
+	// discard done coroutines
 	s.coroutines = coroutines
 }
 

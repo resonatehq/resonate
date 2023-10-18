@@ -9,9 +9,9 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func DeleteSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine("DeleteSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &t_aio.Submission{
+func DeleteSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine("DeleteSubscription", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
@@ -26,34 +26,32 @@ func DeleteSubscription(req *t_api.Request, res func(*t_api.Response, error)) *s
 					},
 				},
 			},
+		})
+
+		if err != nil {
+			slog.Error("failed to delete subscription", "req", req, "err", err)
+			res(nil, err)
+			return
 		}
 
-		c.Yield(submission, func(completion *t_aio.Completion, err error) {
-			if err != nil {
-				slog.Error("failed to delete subscription", "req", req, "err", err)
-				res(nil, err)
-				return
-			}
+		util.Assert(completion.Store != nil, "completion must not be nil")
 
-			util.Assert(completion.Store != nil, "completion must not be nil")
+		result := completion.Store.Results[0].DeleteSubscription
+		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-			result := completion.Store.Results[0].DeleteSubscription
-			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+		var status t_api.ResponseStatus
 
-			var status t_api.ResponseStatus
+		if result.RowsAffected == 1 {
+			status = t_api.ResponseNoContent
+		} else {
+			status = t_api.ResponseNotFound
+		}
 
-			if result.RowsAffected == 1 {
-				status = t_api.ResponseNoContent
-			} else {
-				status = t_api.ResponseNotFound
-			}
-
-			res(&t_api.Response{
-				Kind: t_api.DeleteSubscription,
-				DeleteSubscription: &t_api.DeleteSubscriptionResponse{
-					Status: status,
-				},
-			}, nil)
-		})
+		res(&t_api.Response{
+			Kind: t_api.DeleteSubscription,
+			DeleteSubscription: &t_api.DeleteSubscriptionResponse{
+				Status: status,
+			},
+		}, nil)
 	})
 }
