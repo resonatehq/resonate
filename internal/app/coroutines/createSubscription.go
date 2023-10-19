@@ -10,8 +10,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine("CreateSubscription", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine("CreateSubscription", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
 			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
@@ -20,8 +20,8 @@ func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *s
 			}
 		}
 
-		createdOn := s.Time()
-		submission := &t_aio.Submission{
+		createdOn := c.Time()
+		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
@@ -39,84 +39,80 @@ func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *s
 					},
 				},
 			},
+		})
+
+		if err != nil {
+			slog.Error("failed to create subscription", "req", req, "err", err)
+			res(nil, err)
+			return
 		}
 
-		c.Yield(submission, func(completion *t_aio.Completion, err error) {
+		util.Assert(completion.Store != nil, "completion must not be nil")
+
+		result := completion.Store.Results[0].CreateSubscription
+		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
+		if result.RowsAffected == 1 {
+			res(&t_api.Response{
+				Kind: t_api.CreateSubscription,
+				CreateSubscription: &t_api.CreateSubscriptionResponse{
+					Status: t_api.ResponseCreated,
+					Subscription: &subscription.Subscription{
+						Id:          req.CreateSubscription.Id,
+						PromiseId:   req.CreateSubscription.PromiseId,
+						Url:         req.CreateSubscription.Url,
+						RetryPolicy: req.CreateSubscription.RetryPolicy,
+						CreatedOn:   createdOn,
+					},
+				},
+			}, nil)
+		} else {
+			completion, err := c.Yield(&t_aio.Submission{
+				Kind: t_aio.Store,
+				Store: &t_aio.StoreSubmission{
+					Transaction: &t_aio.Transaction{
+						Commands: []*t_aio.Command{
+							{
+								Kind: t_aio.ReadSubscription,
+								ReadSubscription: &t_aio.ReadSubscriptionCommand{
+									Id:        req.CreateSubscription.Id,
+									PromiseId: req.CreateSubscription.PromiseId,
+								},
+							},
+						},
+					},
+				},
+			})
+
 			if err != nil {
-				slog.Error("failed to create subscription", "req", req, "err", err)
+				slog.Error("failed to read subscription", "req", req, "err", err)
 				res(nil, err)
 				return
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
 
-			result := completion.Store.Results[0].CreateSubscription
-			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+			result := completion.Store.Results[0].ReadSubscription
+			util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
-			if result.RowsAffected == 1 {
+			if result.RowsReturned == 1 {
+				subscription, err := result.Records[0].Subscription()
+				if err != nil {
+					slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
+					res(nil, err)
+					return
+				}
+
 				res(&t_api.Response{
 					Kind: t_api.CreateSubscription,
 					CreateSubscription: &t_api.CreateSubscriptionResponse{
-						Status: t_api.ResponseCreated,
-						Subscription: &subscription.Subscription{
-							Id:          req.CreateSubscription.Id,
-							PromiseId:   req.CreateSubscription.PromiseId,
-							Url:         req.CreateSubscription.Url,
-							RetryPolicy: req.CreateSubscription.RetryPolicy,
-							CreatedOn:   createdOn,
-						},
+						Status:       t_api.ResponseOK,
+						Subscription: subscription,
 					},
 				}, nil)
 			} else {
-				submission := &t_aio.Submission{
-					Kind: t_aio.Store,
-					Store: &t_aio.StoreSubmission{
-						Transaction: &t_aio.Transaction{
-							Commands: []*t_aio.Command{
-								{
-									Kind: t_aio.ReadSubscription,
-									ReadSubscription: &t_aio.ReadSubscriptionCommand{
-										Id:        req.CreateSubscription.Id,
-										PromiseId: req.CreateSubscription.PromiseId,
-									},
-								},
-							},
-						},
-					},
-				}
-
-				c.Yield(submission, func(completion *t_aio.Completion, err error) {
-					if err != nil {
-						slog.Error("failed to read subscription", "req", req, "err", err)
-						res(nil, err)
-						return
-					}
-
-					util.Assert(completion.Store != nil, "completion must not be nil")
-
-					result := completion.Store.Results[0].ReadSubscription
-					util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
-
-					if result.RowsReturned == 1 {
-						subscription, err := result.Records[0].Subscription()
-						if err != nil {
-							slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-							res(nil, err)
-							return
-						}
-
-						res(&t_api.Response{
-							Kind: t_api.CreateSubscription,
-							CreateSubscription: &t_api.CreateSubscriptionResponse{
-								Status:       t_api.ResponseOK,
-								Subscription: subscription,
-							},
-						}, nil)
-					} else {
-						s.Add(CreateSubscription(req, res))
-					}
-				})
+				c.Scheduler.Add(CreateSubscription(req, res))
 			}
-		})
+		}
 	})
 }

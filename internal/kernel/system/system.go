@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
@@ -34,8 +35,8 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine
-	onTick    map[int][]func(*Config) *scheduler.Coroutine
+	onRequest map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
+	onTick    map[int][]func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
 	ticks     int64
 }
 
@@ -46,8 +47,8 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine{},
-		onTick:    map[int][]func(*Config) *scheduler.Coroutine{},
+		onRequest: map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
+		onTick:    map[int][]func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
 	}
 }
 
@@ -97,11 +98,11 @@ func (s *System) Shutdown() {
 	s.aio.Shutdown()
 }
 
-func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine) {
+func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 	s.onRequest[kind] = constructor
 }
 
-func (s *System) AddOnTick(n int, constructor func(*Config) *scheduler.Coroutine) {
+func (s *System) AddOnTick(n int, constructor func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 	util.Assert(n > 0, "n must be greater than 0")
 	s.onTick[n] = append(s.onTick[n], constructor)
 }

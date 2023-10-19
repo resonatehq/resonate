@@ -9,9 +9,9 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromise(p *promise.Promise, retry *scheduler.Coroutine, res func(error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine("TimeoutPromise", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
-		submission := &t_aio.Submission{
+func TimeoutPromise(p *promise.Promise, retry *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission], res func(error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine("TimeoutPromise", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
@@ -32,7 +32,7 @@ func TimeoutPromise(p *promise.Promise, retry *scheduler.Coroutine, res func(err
 							Kind: t_aio.CreateNotifications,
 							CreateNotifications: &t_aio.CreateNotificationsCommand{
 								PromiseId: p.Id,
-								Time:      s.Time(),
+								Time:      c.Time(),
 							},
 						},
 						{
@@ -44,25 +44,23 @@ func TimeoutPromise(p *promise.Promise, retry *scheduler.Coroutine, res func(err
 					},
 				},
 			},
+		})
+
+		if err != nil {
+			slog.Error("failed to update promise", "id", p.Id, "err", err)
+			res(err)
+			return
 		}
 
-		c.Yield(submission, func(completion *t_aio.Completion, err error) {
-			if err != nil {
-				slog.Error("failed to update promise", "id", p.Id, "err", err)
-				res(err)
-				return
-			}
+		util.Assert(completion.Store != nil, "completion must not be nil")
 
-			util.Assert(completion.Store != nil, "completion must not be nil")
+		result := completion.Store.Results[0].UpdatePromise
+		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-			result := completion.Store.Results[0].UpdatePromise
-			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
-
-			if result.RowsAffected == 1 {
-				res(nil)
-			} else {
-				s.Add(retry)
-			}
-		})
+		if result.RowsAffected == 1 {
+			res(nil)
+		} else {
+			c.Scheduler.Add(retry)
+		}
 	})
 }

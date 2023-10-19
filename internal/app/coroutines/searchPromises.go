@@ -10,12 +10,12 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine {
-	return scheduler.NewCoroutine("SearchPromises", func(s *scheduler.Scheduler, c *scheduler.Coroutine) {
+func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine("SearchPromises", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		util.Assert(req.SearchPromises.Q != "", "query must not be empty")
 		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
 
-		submission := &t_aio.Submission{
+		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
@@ -23,19 +23,19 @@ func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *sched
 						{
 							Kind: t_aio.TimeoutCreateNotifications,
 							TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
-								Time: s.Time(),
+								Time: c.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutDeleteSubscriptions,
 							TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
-								Time: s.Time(),
+								Time: c.Time(),
 							},
 						},
 						{
 							Kind: t_aio.TimeoutPromises,
 							TimeoutPromises: &t_aio.TimeoutPromisesCommand{
-								Time: s.Time(),
+								Time: c.Time(),
 							},
 						},
 						{
@@ -50,52 +50,50 @@ func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *sched
 					},
 				},
 			},
+		})
+
+		if err != nil {
+			slog.Error("failed to search promises", "req", req, "err", err)
+			res(nil, err)
+			return
 		}
 
-		c.Yield(submission, func(completion *t_aio.Completion, err error) {
+		util.Assert(completion.Store != nil, "completion must not be nil")
+		util.Assert(len(completion.Store.Results) == 4, "must have four results")
+
+		result := completion.Store.Results[3].SearchPromises
+		promises := []*promise.Promise{}
+
+		for _, record := range result.Records {
+			promise, err := record.Promise()
 			if err != nil {
-				slog.Error("failed to search promises", "req", req, "err", err)
-				res(nil, err)
-				return
+				slog.Warn("failed to parse promise record", "record", record, "err", err)
+				continue
 			}
 
-			util.Assert(completion.Store != nil, "completion must not be nil")
-			util.Assert(len(completion.Store.Results) == 4, "must have four results")
+			promises = append(promises, promise)
+		}
 
-			result := completion.Store.Results[3].SearchPromises
-			promises := []*promise.Promise{}
-
-			for _, record := range result.Records {
-				promise, err := record.Promise()
-				if err != nil {
-					slog.Warn("failed to parse promise record", "record", record, "err", err)
-					continue
-				}
-
-				promises = append(promises, promise)
-			}
-
-			// set cursor only if there are more results
-			var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
-			if result.RowsReturned == int64(req.SearchPromises.Limit) {
-				cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
-					Next: &t_api.SearchPromisesRequest{
-						Q:      req.SearchPromises.Q,
-						States: req.SearchPromises.States,
-						Limit:  req.SearchPromises.Limit,
-						SortId: &result.LastSortId,
-					},
-				}
-			}
-
-			res(&t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
-					Cursor:   cursor,
-					Promises: promises,
+		// set cursor only if there are more results
+		var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
+		if result.RowsReturned == int64(req.SearchPromises.Limit) {
+			cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
+				Next: &t_api.SearchPromisesRequest{
+					Q:      req.SearchPromises.Q,
+					States: req.SearchPromises.States,
+					Limit:  req.SearchPromises.Limit,
+					SortId: &result.LastSortId,
 				},
-			}, nil)
-		})
+			}
+		}
+
+		res(&t_api.Response{
+			Kind: t_api.SearchPromises,
+			SearchPromises: &t_api.SearchPromisesResponse{
+				Status:   t_api.ResponseOK,
+				Cursor:   cursor,
+				Promises: promises,
+			},
+		}, nil)
 	})
 }
