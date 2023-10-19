@@ -2,15 +2,13 @@ package grpc
 
 import (
 	"context"
-	"net"
-
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"log/slog"
+	"net"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,7 +25,7 @@ type Grpc struct {
 }
 
 func New(api api.API, config *Config) api.Subsystem {
-	s := &server{api: api}
+	s := &server{service: service.New(api, "grpc")}
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
@@ -64,7 +62,7 @@ func (g *Grpc) String() string {
 
 type server struct {
 	grpcApi.UnimplementedPromiseServiceServer
-	api api.API
+	service *service.Service
 }
 
 func (s *server) log(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
@@ -75,133 +73,55 @@ func (s *server) log(ctx context.Context, req interface{}, info *grpc.UnaryServe
 }
 
 func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
-
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind: t_api.ReadPromise,
-			ReadPromise: &t_api.ReadPromiseRequest{
-				Id: req.Id,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	resp, err := s.service.ReadPromise(req.Id)
+	if err != nil {
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
 	}
 
-	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
-
 	return &grpcApi.ReadPromiseResponse{
-		Status:  protoStatus(cqe.Completion.ReadPromise.Status),
-		Promise: protoPromise(cqe.Completion.ReadPromise.Promise),
+		Status:  protoStatus(resp.Status),
+		Promise: protoPromise(resp.Promise),
 	}, nil
 }
 
 func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
-
-	var searchPromises *t_api.SearchPromisesRequest
-
-	if req.Cursor != "" {
-		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](req.Cursor)
-		if err != nil {
-			return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
-		}
-		searchPromises = cursor.Next
-	} else {
-		// validate
-		if req.Q == "" {
-			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid query")
-		}
-
-		var states []promise.State
-		switch req.State {
-		case grpcApi.SearchState_SEARCH_ALL:
-			states = []promise.State{
-				promise.Pending,
-				promise.Resolved,
-				promise.Rejected,
-				promise.Timedout,
-				promise.Canceled,
-			}
-		case grpcApi.SearchState_SEARCH_PENDING:
-			states = []promise.State{
-				promise.Pending,
-			}
-		case grpcApi.SearchState_SEARCH_RESOLVED:
-			states = []promise.State{
-				promise.Resolved,
-			}
-		case grpcApi.SearchState_SEARCH_REJECTED:
-			states = []promise.State{
-				promise.Rejected,
-				promise.Timedout,
-				promise.Canceled,
-			}
-		default:
-			return nil, grpcStatus.Error(codes.InvalidArgument, "invalid state")
-		}
-
-		limit := int(req.Limit)
-		if limit <= 0 || limit > 100 {
-			limit = 100
-		}
-
-		searchPromises = &t_api.SearchPromisesRequest{
-			Q:      req.Q,
-			States: states,
-			Limit:  limit,
+	params := &service.SearchPromiseParams{
+		Q:      req.Q,
+		State:  searchState(req.State),
+		Limit:  int(req.Limit),
+		Cursor: req.Cursor,
+	}
+	resp, err := s.service.SearchPromises(params)
+	if err != nil {
+		if verr, ok := err.(*service.ValidationError); ok {
+			return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
+		} else {
+			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind:           t_api.SearchPromises,
-			SearchPromises: searchPromises,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
-	}
-
-	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
-
-	promises := make([]*grpcApi.Promise, len(cqe.Completion.SearchPromises.Promises))
-	for i, promise := range cqe.Completion.SearchPromises.Promises {
+	promises := make([]*grpcApi.Promise, len(resp.Promises))
+	for i, promise := range resp.Promises {
 		promises[i] = protoPromise(promise)
 	}
 
 	cursor := ""
-	if cqe.Completion.SearchPromises.Cursor != nil {
+	if resp.Cursor != nil {
 		var err error
-		cursor, err = cqe.Completion.SearchPromises.Cursor.Encode()
+		cursor, err = resp.Cursor.Encode()
 		if err != nil {
-			return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
-
 	}
 
 	return &grpcApi.SearchPromisesResponse{
-		Status:   protoStatus(cqe.Completion.SearchPromises.Status),
+		Status:   protoStatus(resp.Status),
 		Cursor:   cursor,
 		Promises: promises,
 	}, nil
 }
 
 func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
@@ -218,41 +138,31 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		data = req.Param.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind: t_api.CreatePromise,
-			CreatePromise: &t_api.CreatePromiseRequest{
-				Id:             req.Id,
-				IdempotencyKey: idempotencyKey,
-				Strict:         req.Strict,
-				Param: promise.Value{
-					Headers: headers,
-					Data:    data,
-				},
-				Timeout: req.Timeout,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	header := &service.CreatePromiseHeader{
+		Strict:         req.Strict,
+		IdempotencyKey: idempotencyKey,
 	}
 
-	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
+	body := &service.CreatePromiseBody{
+		Param: promise.Value{
+			Headers: headers,
+			Data:    data,
+		},
+		Timeout: req.Timeout,
+	}
+
+	resp, err := s.service.CreatePromise(req.Id, header, body)
+	if err != nil {
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
+	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Status:  protoStatus(cqe.Completion.CreatePromise.Status),
-		Promise: protoPromise(cqe.Completion.CreatePromise.Promise),
+		Status:  protoStatus(resp.Status),
+		Promise: protoPromise(resp.Promise),
 	}, nil
 }
 
 func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRequest) (*grpcApi.CancelPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
@@ -269,40 +179,29 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind: t_api.CancelPromise,
-			CancelPromise: &t_api.CancelPromiseRequest{
-				Id:             req.Id,
-				IdempotencyKey: idempotencyKey,
-				Strict:         req.Strict,
-				Value: promise.Value{
-					Headers: headers,
-					Data:    data,
-				},
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	header := &service.CancelPromiseHeader{
+		Strict:         req.Strict,
+		IdempotencyKey: idempotencyKey,
 	}
 
-	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
+	body := &service.CancelPromiseBody{
+		Value: promise.Value{
+			Headers: headers,
+			Data:    data,
+		},
+	}
+	resp, err := s.service.CancelPromise(req.Id, header, body)
+	if err != nil {
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
+	}
 
 	return &grpcApi.CancelPromiseResponse{
-		Status:  protoStatus(cqe.Completion.CancelPromise.Status),
-		Promise: protoPromise(cqe.Completion.CancelPromise.Promise),
+		Status:  protoStatus(resp.Status),
+		Promise: protoPromise(resp.Promise),
 	}, nil
 }
 
 func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromiseRequest) (*grpcApi.ResolvePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
@@ -319,39 +218,30 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind: t_api.ResolvePromise,
-			ResolvePromise: &t_api.ResolvePromiseRequest{
-				Id:             req.Id,
-				IdempotencyKey: idempotencyKey,
-				Strict:         req.Strict,
-				Value: promise.Value{
-					Headers: headers,
-					Data:    data,
-				},
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	header := &service.ResolvePromiseHeader{
+		Strict:         req.Strict,
+		IdempotencyKey: idempotencyKey,
 	}
 
-	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
+	body := &service.ResolvePromiseBody{
+		Value: promise.Value{
+			Headers: headers,
+			Data:    data,
+		},
+	}
+
+	resp, err := s.service.ResolvePromise(req.Id, header, body)
+	if err != nil {
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
+	}
 
 	return &grpcApi.ResolvePromiseResponse{
-		Status:  protoStatus(cqe.Completion.ResolvePromise.Status),
-		Promise: protoPromise(cqe.Completion.ResolvePromise.Promise),
+		Status:  protoStatus(resp.Status),
+		Promise: protoPromise(resp.Promise),
 	}, nil
 }
 
 func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
 
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
@@ -369,50 +259,27 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		data = req.Value.Data
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: "grpc",
-		Submission: &t_api.Request{
-			Kind: t_api.RejectPromise,
-			RejectPromise: &t_api.RejectPromiseRequest{
-				Id:             req.Id,
-				IdempotencyKey: idempotencyKey,
-				Strict:         req.Strict,
-				Value: promise.Value{
-					Headers: headers,
-					Data:    data,
-				},
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		return nil, grpcStatus.Error(codes.Internal, cqe.Error.Error())
+	header := &service.RejectPromiseHeader{
+		Strict:         req.Strict,
+		IdempotencyKey: idempotencyKey,
 	}
 
-	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
+	body := &service.RejectPromiseBody{
+		Value: promise.Value{
+			Headers: headers,
+			Data:    data,
+		},
+	}
+
+	resp, err := s.service.RejectPromise(req.Id, header, body)
+	if err != nil {
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
+	}
 
 	return &grpcApi.RejectPromiseResponse{
-		Status:  protoStatus(cqe.Completion.RejectPromise.Status),
-		Promise: protoPromise(cqe.Completion.RejectPromise.Promise),
+		Status:  protoStatus(resp.Status),
+		Promise: protoPromise(resp.Promise),
 	}, nil
-}
-
-func (s *server) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
-	return func(completion *t_api.Response, err error) {
-		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			Tags:       "grpc",
-			Completion: completion,
-			Error:      err,
-		}
-
-		select {
-		case cq <- cqe:
-		default:
-			panic("response channel must not block")
-		}
-	}
 }
 
 func protoStatus(status t_api.ResponseStatus) grpcApi.Status {
@@ -474,6 +341,21 @@ func protoState(state promise.State) grpcApi.State {
 		return grpcApi.State_REJECTED_TIMEDOUT
 	case promise.Canceled:
 		return grpcApi.State_REJECTED_CANCELED
+	default:
+		panic("invalid state")
+	}
+}
+
+func searchState(searchState grpcApi.SearchState) string {
+	switch searchState {
+	case grpcApi.SearchState_SEARCH_ALL:
+		return ""
+	case grpcApi.SearchState_SEARCH_RESOLVED:
+		return "resolved"
+	case grpcApi.SearchState_SEARCH_REJECTED:
+		return "rejected"
+	case grpcApi.SearchState_SEARCH_PENDING:
+		return "pending"
 	default:
 		panic("invalid state")
 	}
