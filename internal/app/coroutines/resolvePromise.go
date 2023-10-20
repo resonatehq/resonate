@@ -3,6 +3,7 @@ package coroutines
 import (
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -10,8 +11,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func ResolvePromise(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("ResolvePromise", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		if req.ResolvePromise.Value.Headers == nil {
 			req.ResolvePromise.Value.Headers = map[string]string{}
 		}
@@ -63,7 +64,7 @@ func ResolvePromise(req *t_api.Request, res func(*t_api.Response, error)) *sched
 
 			if p.State == promise.Pending {
 				if c.Time() >= p.Timeout {
-					c.Scheduler.Add(TimeoutPromise(p, ResolvePromise(req, res), func(err error) {
+					c.Scheduler.Add(TimeoutPromise(metadata, p, ResolvePromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
 							res(nil, err)
@@ -157,7 +158,7 @@ func ResolvePromise(req *t_api.Request, res func(*t_api.Response, error)) *sched
 							},
 						}, nil)
 					} else {
-						c.Scheduler.Add(ResolvePromise(req, res))
+						c.Scheduler.Add(ResolvePromise(metadata, req, res))
 					}
 				}
 			} else {

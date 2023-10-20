@@ -1,16 +1,21 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func TimeoutPromises(config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("TimeoutPromises", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	metadata := metadata.New(fmt.Sprintf("tick:%d:timeout", t))
+	metadata.Tags.Set("name", "timeout-promises")
+
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{

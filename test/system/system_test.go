@@ -1,6 +1,7 @@
 package system
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -52,8 +54,12 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		data := strconv.Itoa(i)
 
+		metadata := metadata.New(fmt.Sprintf("a.%d", i))
+		metadata.Tags.Set("name", "echo")
+		metadata.Tags.Set("api", "test")
+
 		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-			Tags: "test",
+			Metadata: metadata,
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
 				Echo: &t_api.EchoRequest{
@@ -74,8 +80,12 @@ func TestSystemLoop(t *testing.T) {
 
 	// all requests made after shutdown should fail
 	for i := 0; i < 5; i++ {
+		metadata := metadata.New(fmt.Sprintf("a.%d", i))
+		metadata.Tags.Set("name", "echo")
+		metadata.Tags.Set("api", "test")
+
 		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-			Tags: "test",
+			Metadata: metadata,
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
 				Echo: &t_api.EchoRequest{

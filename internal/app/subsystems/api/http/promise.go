@@ -1,8 +1,9 @@
 package http
 
 import (
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"net/http"
+
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -10,7 +11,15 @@ import (
 // Read Promise
 
 func (s *server) readPromise(c *gin.Context) {
-	resp, err := s.service.ReadPromise(c.Param("id"))
+	var header service.Header
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	resp, err := s.service.ReadPromise(c.Param("id"), &header)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": err.Error(),
@@ -24,8 +33,15 @@ func (s *server) readPromise(c *gin.Context) {
 // Search Promise
 
 func (s *server) searchPromises(c *gin.Context) {
-	var params service.SearchPromiseParams
+	var header service.Header
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
 
+	var params service.SearchPromiseParams
 	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": err.Error(),
@@ -33,7 +49,7 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
-	resp, err := s.service.SearchPromises(&params)
+	resp, err := s.service.SearchPromises(&header, &params)
 
 	if err != nil {
 		if verr, ok := err.(*service.ValidationError); ok {

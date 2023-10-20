@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
@@ -75,6 +77,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	}
 
 	// errors
+	var i int64
 	var errs []error
 
 	// test loop
@@ -82,8 +85,13 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		for _, req := range generator.Generate(r, t, d.config.Reqs(), model.cursors) {
 			req := req
 			reqTime := t
+
+			metadata := metadata.New(strconv.FormatInt(i, 10))
+			metadata.Tags.Set("name", req.Kind.String())
+			metadata.Tags.Set("api", "dst")
+
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-				Tags:       "dst",
+				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
 					modelErr := model.Step(req, res, err)
@@ -91,9 +99,11 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 						errs = append(errs, modelErr)
 					}
 
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
+
+			i++
 		}
 
 		system.Tick(t, nil)

@@ -2,9 +2,10 @@ package grpc
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"log/slog"
 	"net"
+
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
@@ -73,7 +74,11 @@ func (s *server) log(ctx context.Context, req interface{}, info *grpc.UnaryServe
 }
 
 func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
-	resp, err := s.service.ReadPromise(req.Id)
+	header := &service.Header{
+		RequestId: req.RequestId,
+	}
+
+	resp, err := s.service.ReadPromise(req.Id, header)
 	if err != nil {
 		return nil, grpcStatus.Error(codes.Internal, err.Error())
 	}
@@ -85,13 +90,18 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 }
 
 func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
+	header := &service.Header{
+		RequestId: req.RequestId,
+	}
+
 	params := &service.SearchPromiseParams{
 		Q:      req.Q,
 		State:  searchState(req.State),
 		Limit:  int(req.Limit),
 		Cursor: req.Cursor,
 	}
-	resp, err := s.service.SearchPromises(params)
+
+	resp, err := s.service.SearchPromises(header, params)
 	if err != nil {
 		if verr, ok := err.(*service.ValidationError); ok {
 			return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
@@ -139,6 +149,7 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	}
 
 	header := &service.CreatePromiseHeader{
+		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -180,6 +191,7 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	}
 
 	header := &service.CancelPromiseHeader{
+		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -219,6 +231,7 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 	}
 
 	header := &service.ResolvePromiseHeader{
+		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -242,7 +255,6 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 }
 
 func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
-
 	var idempotencyKey *promise.IdempotencyKey
 	if req.IdempotencyKey != "" {
 		i := promise.IdempotencyKey(req.IdempotencyKey)
@@ -260,6 +272,7 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}
 
 	header := &service.RejectPromiseHeader{
+		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}

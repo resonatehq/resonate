@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
-	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -57,7 +56,7 @@ func (a *aioDST) Shutdown() {}
 
 func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	slog.Debug("aio:enqueue", "sqe", sqe)
-	a.metrics.AioInFlight.WithLabelValues(strings.Split(sqe.Tags, ",")...).Inc()
+	a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
 
 	i := a.r.Intn(len(a.sqes) + 1)
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
@@ -77,7 +76,7 @@ func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 			status = "success"
 		}
 
-		tags := strings.Split(cqe.Tags, ",")
+		tags := cqe.Metadata.Tags.Split("aio")
 		a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
 		a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
 	}

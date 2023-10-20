@@ -2,9 +2,10 @@ package service
 
 import (
 	"fmt"
+	"testing"
+
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"testing"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -75,7 +76,7 @@ func TestReadPromise(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			serviceTest.Load(t, tc.req, tc.res)
 
-			res, err := serviceTest.service.ReadPromise(tc.id)
+			res, err := serviceTest.service.ReadPromise(tc.id, &Header{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -244,7 +245,7 @@ func TestSearchPromises(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			serviceTest.Load(t, tc.req, tc.res)
-			res, err := serviceTest.service.SearchPromises(tc.serviceReq)
+			res, err := serviceTest.service.SearchPromises(&Header{}, tc.serviceReq)
 			if err != nil {
 				fmt.Println("we are here bro", res.Status)
 				t.Fatal(err)

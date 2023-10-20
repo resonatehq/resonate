@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/metrics"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -35,8 +36,8 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
-	onTick    map[int][]func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
+	onRequest map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
+	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
 	ticks     int64
 }
 
@@ -47,8 +48,8 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[t_api.Kind]func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
-		onTick:    map[int][]func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
+		onRequest: map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
+		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
 	}
 }
 
@@ -73,7 +74,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		// add request coroutines
 		for _, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize, timeoutCh) {
 			if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-				s.scheduler.Add(coroutine(sqe.Submission, sqe.Callback))
+				s.scheduler.Add(coroutine(sqe.Metadata, sqe.Submission, sqe.Callback))
 			} else {
 				panic("invalid api request")
 			}
@@ -83,7 +84,7 @@ func (s *System) Tick(t int64, timeoutCh <-chan time.Time) {
 		for _, coroutines := range util.OrderedRangeKV(s.onTick) {
 			if s.ticks%int64(coroutines.Key) == 0 {
 				for _, coroutine := range coroutines.Value {
-					s.scheduler.Add(coroutine(s.config))
+					s.scheduler.Add(coroutine(t, s.config))
 				}
 			}
 		}
@@ -98,12 +99,12 @@ func (s *System) Shutdown() {
 	s.aio.Shutdown()
 }
 
-func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 	s.onRequest[kind] = constructor
 }
 
-func (s *System) AddOnTick(n int, constructor func(*Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-	util.Assert(n > 0, "n must be greater than 0")
+func (s *System) AddOnTick(n int, constructor func(int64, *Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+	util.Assert(n > 0, "n must be greater than zero")
 	s.onTick[n] = append(s.onTick[n], constructor)
 }
 

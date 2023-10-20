@@ -1,40 +1,51 @@
 package service
 
 import (
+	"strings"
+
+	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"strings"
 )
 
 func (e *ValidationError) Error() string { return e.msg }
 
 type Service struct {
-	api            api.API
-	serverProtocol string
+	api      api.API
+	protocol string
 }
 
-func New(api api.API, serverProtocol string) *Service {
+func New(api api.API, protocol string) *Service {
 	return &Service{
-		api: api,
-		serverProtocol: serverProtocol,
+		api:      api,
+		protocol: protocol,
 	}
 }
 
-func (s *Service) protocol() string {
-	return s.serverProtocol
+func (s *Service) metadata(id string, name string) *metadata.Metadata {
+	if id == "" {
+		id = uuid.New().String()
+	}
+
+	metadata := metadata.New(id)
+	metadata.Tags.Set("name", name)
+	metadata.Tags.Set("api", s.protocol)
+
+	return metadata
 }
 
 // Read Promise
 
-func (s *Service) ReadPromise(id string) (*t_api.ReadPromiseResponse, error) {
+func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "read-promise"),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
 			ReadPromise: &t_api.ReadPromiseRequest{
@@ -56,7 +67,7 @@ func (s *Service) ReadPromise(id string) (*t_api.ReadPromiseResponse, error) {
 
 // Search Promise
 
-func (s *Service) SearchPromises(params *SearchPromiseParams) (*t_api.SearchPromisesResponse, error) {
+func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*t_api.SearchPromisesResponse, error) {
 	var searchPromises *t_api.SearchPromisesRequest
 	if params.Cursor != "" {
 		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](params.Cursor)
@@ -114,7 +125,7 @@ func (s *Service) SearchPromises(params *SearchPromiseParams) (*t_api.SearchProm
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "search-promises"),
 		Submission: &t_api.Request{
 			Kind:           t_api.SearchPromises,
 			SearchPromises: searchPromises,
@@ -138,7 +149,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "create-promise"),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
 			CreatePromise: &t_api.CreatePromiseRequest{
@@ -169,7 +180,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "cancel-promise"),
 		Submission: &t_api.Request{
 			Kind: t_api.CancelPromise,
 			CancelPromise: &t_api.CancelPromiseRequest{
@@ -198,7 +209,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "resolve-promise"),
 		Submission: &t_api.Request{
 			Kind: t_api.ResolvePromise,
 			ResolvePromise: &t_api.ResolvePromiseRequest{
@@ -227,7 +238,7 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Tags: s.protocol(),
+		Metadata: s.metadata(header.RequestId, "reject-promise"),
 		Submission: &t_api.Request{
 			Kind: t_api.RejectPromise,
 			RejectPromise: &t_api.RejectPromiseRequest{
@@ -252,7 +263,7 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
 	return func(completion *t_api.Response, err error) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			Tags:       s.protocol(),
+			// Tags:       s.protocol(),
 			Completion: completion,
 			Error:      err,
 		}
