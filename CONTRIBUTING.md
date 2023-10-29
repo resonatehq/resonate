@@ -7,9 +7,9 @@ and scalable distributed systems. To get started, follow these simple steps:
 
 We follow the fork and branch workflow. There will be three Git repositories involved:
 
-1.  *upstream* - the resonate repository on GitHub.
+1.  *upstream* - the [resonate](https://github.com/resonatehq/resonate) repository on GitHub.
 2.  *origin* - your GitHub fork of `upstream`. 
-3.  *local* - your local clone of `origin`
+3.  *local* - your local clone of `origin`. 
 
 These steps are only needed once and not for subsequent changes you might want to make:
 
@@ -85,7 +85,7 @@ project.
     git push origin --delete awesome_branch
     ```
 
-8. Delete the branch from `local`
+8. Delete the branch from `local`:
 
     ```
     git switch main
