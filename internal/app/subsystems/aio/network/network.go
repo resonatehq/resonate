@@ -62,7 +62,7 @@ func (d *NetworkDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completi
 		switch sqe.Submission.Network.Kind {
 		case t_aio.Http:
 			cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-				Tags:     sqe.Tags,
+				Metadata: sqe.Metadata,
 				Callback: sqe.Callback,
 			}
 

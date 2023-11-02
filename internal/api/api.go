@@ -3,7 +3,6 @@ package api
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"log/slog"
@@ -11,7 +10,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 type API interface {
@@ -75,7 +73,7 @@ func (a *api) Errors() <-chan error {
 }
 
 func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
-	tags := strings.Split(sqe.Tags, ",")
+	tags := sqe.Metadata.Tags.Split("api")
 	a.metrics.ApiInFlight.WithLabelValues(tags...).Inc()
 
 	// replace sqe.Callback with a callback that wraps the original
@@ -133,7 +131,6 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 }
 
 func (a *api) Dequeue(n int, timeoutCh <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response] {
-	util.Assert(n > 0, "submission batch size must be greater than 0")
 	sqes := []*bus.SQE[t_api.Request, t_api.Response]{}
 
 	if timeoutCh != nil {

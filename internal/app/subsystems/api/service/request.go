@@ -6,6 +6,10 @@ type ValidationError struct {
 	msg string // description of error
 }
 
+type Header struct {
+	RequestId string `header:"request-id"`
+}
+
 type SearchPromiseParams struct {
 	Q      string `form:"q" json:"q"`
 	State  string `form:"state" json:"state"`
@@ -14,6 +18,7 @@ type SearchPromiseParams struct {
 }
 
 type CreatePromiseHeader struct {
+	RequestId      string                  `header:"request-id"`
 	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
 	Strict         bool                    `header:"strict"`
 }
@@ -25,6 +30,7 @@ type CreatePromiseBody struct {
 }
 
 type CancelPromiseHeader struct {
+	RequestId      string                  `header:"request-id"`
 	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
 	Strict         bool                    `header:"strict"`
 }
@@ -34,6 +40,7 @@ type CancelPromiseBody struct {
 }
 
 type ResolvePromiseHeader struct {
+	RequestId      string                  `header:"request-id"`
 	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
 	Strict         bool                    `header:"strict"`
 }
@@ -43,6 +50,7 @@ type ResolvePromiseBody struct {
 }
 
 type RejectPromiseHeader struct {
+	RequestId      string                  `header:"request-id"`
 	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
 	Strict         bool                    `header:"strict"`
 }

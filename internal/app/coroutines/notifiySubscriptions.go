@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -30,8 +31,11 @@ func (i inflight) remove(id string) {
 	delete(i, id)
 }
 
-func NotifySubscriptions(config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("NotifySubscriptions", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	metadata := metadata.New(fmt.Sprintf("tick:%d:notify", t))
+	metadata.Tags.Set("name", "notify-subscriptions")
+
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -64,14 +68,17 @@ func NotifySubscriptions(config *system.Config) *scheduler.Coroutine[*t_aio.Comp
 			}
 
 			if c.Time() >= record.Time && !inflights.get(id(notification)) {
-				c.Scheduler.Add(notifySubscription(notification))
+				c.Scheduler.Add(notifySubscription(metadata.TransactionId, notification))
 			}
 		}
 	})
 }
 
-func notifySubscription(notification *notification.Notification) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("NotifySubscription", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func notifySubscription(tid string, notification *notification.Notification) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	metadata := metadata.New(tid)
+	metadata.Tags.Set("name", "notify-subscription")
+
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		// handle inflight cache
 		inflights.add(id(notification))
 		c.OnDone(func() { inflights.remove(id(notification)) })

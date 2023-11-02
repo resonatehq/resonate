@@ -3,6 +3,7 @@ package coroutines
 import (
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -10,8 +11,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("CreateSubscription", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
 			req.CreateSubscription.RetryPolicy = &subscription.RetryPolicy{
@@ -111,7 +112,7 @@ func CreateSubscription(req *t_api.Request, res func(*t_api.Response, error)) *s
 					},
 				}, nil)
 			} else {
-				c.Scheduler.Add(CreateSubscription(req, res))
+				c.Scheduler.Add(CreateSubscription(metadata, req, res))
 			}
 		}
 	})

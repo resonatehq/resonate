@@ -36,9 +36,9 @@ func NewScheduler(aio aio.AIO, metrics *metrics.Metrics) *Scheduler {
 }
 
 func (s *Scheduler) Add(coroutine *Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-	slog.Debug("scheduler:add", "coroutine", coroutine.name)
-	s.metrics.CoroutinesTotal.WithLabelValues(coroutine.name).Inc()
-	s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Inc()
+	slog.Debug("scheduler:add", "coroutine", coroutine)
+	s.metrics.CoroutinesTotal.WithLabelValues(coroutine.metadata.Tags.Get("name")).Inc()
+	s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.metadata.Tags.Get("name")).Inc()
 
 	// add reference to scheduler
 	coroutine.Scheduler = s
@@ -58,16 +58,21 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 	}
 
 	// enqueue sqes
-	for _, coroutine := range s.runnable {
-		coroutine := coroutine // bind to local variable for callback
+	n := len(s.runnable)
+	for i := 0; i < n; i++ {
+		coroutine := s.runnable[i] // bind to local variable for callback
 
-		if submission := coroutine.Resume(coroutine.next, coroutine.error); !submission.Done {
+		if submission, done := coroutine.Resume(coroutine.next, coroutine.error); !done {
 			// suspend
 			s.suspended = append(s.suspended, coroutine.Coroutine)
 
+			// metadata
+			metadata := coroutine.metadata
+			metadata.Tags.Set("aio", submission.Kind.String())
+
 			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{
-				Tags:       submission.Value.Kind.String(),
-				Submission: submission.Value,
+				Metadata:   metadata,
+				Submission: submission,
 				Callback: func(completion *t_aio.Completion, err error) {
 					// unsuspend
 					s.runnable = append(s.runnable, &runnableCoroutine{
@@ -85,8 +90,8 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 				},
 			})
 		} else {
-			slog.Debug("scheduler:rmv", "coroutine", coroutine.name)
-			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.name).Dec()
+			slog.Debug("scheduler:rmv", "coroutine", coroutine)
+			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.metadata.Tags.Get("name")).Dec()
 
 			// call onDone functions
 			for _, f := range coroutine.onDone {
@@ -98,8 +103,8 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 	// flush
 	s.aio.Flush(t)
 
-	// clear runnable
-	s.runnable = nil
+	// clear runnable (new coroutines may have been appended)
+	s.runnable = s.runnable[n:]
 }
 
 func (s *Scheduler) Time() int64 {

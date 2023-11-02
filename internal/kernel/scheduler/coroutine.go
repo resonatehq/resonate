@@ -1,16 +1,28 @@
 package scheduler
 
+import (
+	"fmt"
+
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
+)
+
 type Coroutine[I, O any] struct {
-	name string
-	f    func(*Coroutine[I, O])
-	c_i  chan *WrapI[I]
-	c_o  chan *WrapO[O]
+	f   func(*Coroutine[I, O])
+	c_i chan *WrapI[I]
+	c_o chan *WrapO[O]
 
 	// lifecycle
 	onDone []func()
 
+	// metadata
+	metadata *metadata.Metadata
+
 	// scheduler
 	Scheduler S
+}
+
+func (c *Coroutine[I, O]) String() string {
+	return fmt.Sprintf("Coroutine(metadata=%s)", c.metadata)
 }
 
 type WrapI[I any] struct {
@@ -23,12 +35,12 @@ type WrapO[O any] struct {
 	Done  bool
 }
 
-func NewCoroutine[I, O any](name string, f func(*Coroutine[I, O])) *Coroutine[I, O] {
+func NewCoroutine[I, O any](metadata *metadata.Metadata, f func(*Coroutine[I, O])) *Coroutine[I, O] {
 	c := &Coroutine[I, O]{
-		f:    f,
-		c_i:  make(chan *WrapI[I]),
-		c_o:  make(chan *WrapO[O]),
-		name: name,
+		f:        f,
+		c_i:      make(chan *WrapI[I]),
+		c_o:      make(chan *WrapO[O]),
+		metadata: metadata,
 	}
 
 	go func() {
@@ -49,14 +61,16 @@ func (c *Coroutine[I, O]) OnDone(f func()) {
 
 func (c *Coroutine[I, O]) Yield(o O) (I, error) {
 	c.c_o <- &WrapO[O]{Value: o, Done: false}
-	i := <-c.c_i
 
+	i := <-c.c_i
 	return i.Value, i.Error
 }
 
-func (c *Coroutine[I, O]) Resume(i I, e error) *WrapO[O] {
+func (c *Coroutine[I, O]) Resume(i I, e error) (O, bool) {
 	c.c_i <- &WrapI[I]{Value: i, Error: e}
-	return <-c.c_o
+
+	o := <-c.c_o
+	return o.Value, o.Done
 }
 
 func (c *Coroutine[I, O]) Time() int64 {

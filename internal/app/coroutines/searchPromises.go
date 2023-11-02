@@ -3,6 +3,7 @@ package coroutines
 import (
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -10,8 +11,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func SearchPromises(req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine("SearchPromises", func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		util.Assert(req.SearchPromises.Q != "", "query must not be empty")
 		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
 

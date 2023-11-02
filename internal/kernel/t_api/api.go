@@ -19,3 +19,28 @@ const (
 	// Echo
 	Echo
 )
+
+func (k Kind) String() string {
+	switch k {
+	case ReadPromise:
+		return "read-promise"
+	case SearchPromises:
+		return "search-promises"
+	case CreatePromise:
+		return "create-promise"
+	case CancelPromise:
+		return "cancel-promise"
+	case ResolvePromise:
+		return "resolve-promise"
+	case RejectPromise:
+		return "reject-promise"
+	case ReadSubscriptions:
+		return "read-subscriptions"
+	case CreateSubscription:
+		return "create-subscription"
+	case DeleteSubscription:
+		return "delete-subscription"
+	default:
+		panic("invalid api")
+	}
+}
