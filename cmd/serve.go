@@ -95,7 +95,7 @@ var serveCmd = &cobra.Command{
 		mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
 		metricsServer := &netHttp.Server{
-			Addr:    fmt.Sprintf(":%d", config.Metrics.Port),
+			Addr:    fmt.Sprintf("0.0.0.0:%d", config.Metrics.Port),
 			Handler: mux,
 		}
 
