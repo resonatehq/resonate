@@ -2,9 +2,11 @@ package grpc
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"fmt"
 	"log/slog"
 	"net"
+
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
@@ -16,7 +18,7 @@ import (
 )
 
 type Config struct {
-	Addr string
+	Port int
 }
 
 type Grpc struct {
@@ -37,15 +39,17 @@ func New(api api.API, config *Config) api.Subsystem {
 }
 
 func (g *Grpc) Start(errors chan<- error) {
+	addr := fmt.Sprintf("0.0.0.0:%d", g.config.Port)
+
 	// Create a listener on a specific port
-	listen, err := net.Listen("tcp", g.config.Addr)
+	listen, err := net.Listen("tcp", addr)
 	if err != nil {
 		errors <- err
 		return
 	}
 
 	// Start the gRPC server
-	slog.Info("starting grpc server", "addr", g.config.Addr)
+	slog.Info("starting grpc server", "addr", addr)
 	if err := g.server.Serve(listen); err != nil {
 		errors <- err
 	}

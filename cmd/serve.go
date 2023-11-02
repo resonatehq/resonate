@@ -163,14 +163,14 @@ var serveCmd = &cobra.Command{
 func init() {
 	// api
 	serveCmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
-	serveCmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
+	serveCmd.Flags().String("api-http-port", "8001", "http server port")
 	serveCmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
-	serveCmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
+	serveCmd.Flags().String("api-grpc-port", "50051", "grpc server port")
 
 	_ = viper.BindPFlag("api.size", serveCmd.Flags().Lookup("api-size"))
-	_ = viper.BindPFlag("api.subsystems.http.addr", serveCmd.Flags().Lookup("api-http-addr"))
+	_ = viper.BindPFlag("api.subsystems.http.port", serveCmd.Flags().Lookup("api-http-port"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", serveCmd.Flags().Lookup("api-http-timeout"))
-	_ = viper.BindPFlag("api.subsystems.grpc.addr", serveCmd.Flags().Lookup("api-grpc-addr"))
+	_ = viper.BindPFlag("api.subsystems.grpc.port", serveCmd.Flags().Lookup("api-grpc-port"))
 
 	// aio
 	serveCmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")

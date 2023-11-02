@@ -2,9 +2,11 @@ package http
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"log/slog"
 
@@ -13,7 +15,7 @@ import (
 )
 
 type Config struct {
-	Addr    string
+	Port    int
 	Timeout time.Duration
 }
 
@@ -42,14 +44,14 @@ func New(api api.API, config *Config) api.Subsystem {
 	return &Http{
 		config: config,
 		server: &http.Server{
-			Addr:    config.Addr,
+			Addr:    fmt.Sprintf("0.0.0.0:%d", config.Port),
 			Handler: r,
 		},
 	}
 }
 
 func (h *Http) Start(errors chan<- error) {
-	slog.Info("starting http server", "addr", h.config.Addr)
+	slog.Info("starting http server", "addr", h.server.Addr)
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		errors <- err
 	}

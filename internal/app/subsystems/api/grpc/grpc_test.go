@@ -29,7 +29,7 @@ func setup() (*grpcTest, error) {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem := New(api, &Config{
-		Addr: "127.0.0.1:5555",
+		Port: 5555,
 	})
 
 	// start grpc server
