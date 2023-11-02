@@ -1,8 +1,12 @@
 name: Harness
 
 on:
-  schedule:
-  - cron: '0 */4 * * *'  # every 4 hours
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
 
 permissions:
   contents: read

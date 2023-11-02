@@ -94,6 +94,8 @@ func (c *Client) Create(op store.Operation) store.Operation {
 	defer res.Body.Close()
 
 	end.EndTime = time.Now()
+
+	// TODO: validate before saying OK -
 	end.Status = store.Ok
 
 	return end
