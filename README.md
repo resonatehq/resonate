@@ -1,3 +1,7 @@
+<p align="center">
+    <img height="300"src="./docs/img/echo.png">
+</p>
+
 # Resonate
 
 [![ci](https://github.com/resonatehq/resonate/actions/workflows/ci.yaml/badge.svg)](https://github.com/resonatehq/resonate/actions/workflows/ci.yaml)
