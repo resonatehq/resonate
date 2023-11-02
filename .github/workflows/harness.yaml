@@ -28,23 +28,6 @@ jobs:
     - name: Build resonate
       run: go build -o resonate
 
-    - name: Upload resonate binary
-      uses: actions/upload-artifact@v3
-      with:
-        name: resonate
-        path: resonate
-
-  harness-sqlite:
-    runs-on: ubuntu-latest
-    needs: [build]
-    timeout-minutes: 90
-
-    steps:
-    - name: Download resonate binary
-      uses: actions/download-artifact@v3
-      with:
-        name: resonate
-
     - name: Run harness 
       run: |
         chmod +x resonate
