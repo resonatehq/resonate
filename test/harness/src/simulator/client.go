@@ -76,6 +76,8 @@ func (c *Client) Create(op store.Operation) store.Operation {
 		panic(err)
 	}
 
+	end.StartTime = time.Now()
+
 	r, err := http.NewRequest(http.MethodPost, c.Conn+"promises/foo/create", bytes.NewBuffer(bs))
 	if err != nil {
 		panic(err)
