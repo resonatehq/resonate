@@ -53,8 +53,12 @@ jobs:
         version: v1.54
         args: --verbose --timeout=3m
 
+    - name: Build resonate
+      run: go build -o resonate
+
     - name: Run go test and generate coverage report
       run: |
+        chmod +x resonate
         go test -v -coverprofile=coverage.out -coverpkg=./... ./...
 
     - name: Upload coverage report to Codecov
