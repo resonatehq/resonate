@@ -16,7 +16,7 @@ type Promise struct {
 	IdempotencyKeyForComplete *IdempotencyKey   `json:"idempotencyKeyForComplete,omitempty"`
 	CreatedOn                 *int64            `json:"createdOn,omitempty"`
 	CompletedOn               *int64            `json:"completedOn,omitempty"`
-	Tags                      map[string]string `json:"tags"`
+	Tags                      map[string]string `json:"tags,omitempty"`
 	SortId                    int64             `json:"-"` // unexported
 }
 
