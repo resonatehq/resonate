@@ -1,11 +1,11 @@
-FROM golang:1.21 AS builder
+FROM cgr.dev/chainguard/go AS builder
 
 WORKDIR /app
 COPY . .
 
 RUN go build -o resonate .
 
-FROM golang:1.21
+FROM cgr.dev/chainguard/glibc-dynamic
 
 WORKDIR /app
 COPY --from=builder /app/resonate .
