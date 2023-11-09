@@ -41,8 +41,7 @@ func (s *Service) metadata(id string, name string) *metadata.Metadata {
 // Read Promise
 
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "read-promise"),
@@ -121,8 +120,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		}
 	}
 
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "search-promises"),
@@ -145,8 +143,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 // Create Promise
 
 func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *CreatePromiseBody) (*t_api.CreatePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "create-promise"),
@@ -176,8 +173,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 // Cancel Promise
 
 func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *CancelPromiseBody) (*t_api.CancelPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "cancel-promise"),
@@ -205,8 +201,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 // Resolve Promise
 
 func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *ResolvePromiseBody) (*t_api.ResolvePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "resolve-promise"),
@@ -234,8 +229,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 // Reject Promise
 
 func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *RejectPromiseBody) (*t_api.RejectPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
-	defer close(cq)
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "reject-promise"),
@@ -270,6 +264,7 @@ func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) f
 
 		select {
 		case cq <- cqe:
+			close(cq) // prevent further writes
 		default:
 			panic("response channel must not block")
 		}
