@@ -2,7 +2,6 @@ package service
 
 import (
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
@@ -55,8 +54,6 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 		},
 		Callback: s.sendOrPanic(cq),
 	})
-
-	time.Sleep(20 * time.Second)
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -166,8 +163,6 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 		},
 		Callback: s.sendOrPanic(cq),
 	})
-
-	time.Sleep(20 * time.Second)
 
 	cqe := <-cq
 	if cqe.Error != nil {
