@@ -2,6 +2,7 @@ package service
 
 import (
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
@@ -41,7 +42,7 @@ func (s *Service) metadata(id string, name string) *metadata.Metadata {
 // Read Promise
 
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -54,6 +55,8 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 		},
 		Callback: s.sendOrPanic(cq),
 	})
+
+	time.Sleep(20 * time.Second)
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -121,7 +124,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		}
 	}
 
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -145,7 +148,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 // Create Promise
 
 func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *CreatePromiseBody) (*t_api.CreatePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -164,6 +167,8 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 		Callback: s.sendOrPanic(cq),
 	})
 
+	time.Sleep(20 * time.Second)
+
 	cqe := <-cq
 	if cqe.Error != nil {
 		return nil, cqe.Error
@@ -176,7 +181,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 // Cancel Promise
 
 func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *CancelPromiseBody) (*t_api.CancelPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -205,7 +210,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 // Resolve Promise
 
 func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *ResolvePromiseBody) (*t_api.ResolvePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -234,7 +239,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 // Reject Promise
 
 func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *RejectPromiseBody) (*t_api.RejectPromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response])
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 	defer close(cq)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -268,10 +273,6 @@ func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) f
 			Error:      err,
 		}
 
-		select {
-		case cq <- cqe:
-		default:
-			panic("response channel must not block")
-		}
+		cq <- cqe // writing to a closed channel panics
 	}
 }
