@@ -75,10 +75,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ci]
     steps: 
-    - name: Download resonate binary
+    - name: Download resonate binary 
       uses: actions/download-artifact@v3
       with:
         name: resonate
+
+    - name: Run resonate server 
+      run: |
+        chmod +x resonate
+        ./resonate serve &
 
     - name: Checkout test harness 
       uses: actions/checkout@v3
@@ -91,8 +96,6 @@ jobs:
     
     - name: Run linearizability check 
       run: |
-        chmod +x resonate
-        ./resonate serve &
         chmod +x harness
         ./harness verify -r 100 -c 10 
 
