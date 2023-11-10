@@ -82,8 +82,7 @@ jobs:
     - name: Checkout test harness 
       uses: actions/checkout@v3
       with: 
-        repository: resonate/durable-promise-test-harness
-        path: test-harness
+        repository: resonatehq/durable-promise-test-harness
 
     - name: Build test harness
       run: |
@@ -93,8 +92,9 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate serve &
+        chmod +x harness
         ./harness verify -r 100 -c 10 
-        
+
   semgrep:
     name: semgrep
     runs-on: ubuntu-20.04
