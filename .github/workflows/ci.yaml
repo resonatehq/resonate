@@ -83,7 +83,7 @@ jobs:
     - name: Run resonate server 
       run: |
         chmod +x resonate
-        ./resonate serve &
+        ./resonate serve --aio-store-sqlite-path :memory: &
 
     - name: Checkout test harness 
       uses: actions/checkout@v3
