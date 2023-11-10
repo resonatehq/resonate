@@ -62,6 +62,39 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
 
+    - name: Build resonate
+      run: go build -o resonate
+
+    - name: Upload resonate binary
+      uses: actions/upload-artifact@v3
+      with:
+        name: resonate
+        path: resonate
+
+  harness: 
+    runs-on: ubuntu-latest
+    steps: 
+    - name: Download resonate binary
+      uses: actions/download-artifact@v3
+      with:
+        name: resonate
+
+    - name: Checkout test harness 
+      uses: actions/checkout@v3
+      with: 
+        repository: resonate/durable-promise-test-harness
+        path: test-harness
+
+    - name: Build test harness
+      run: |
+        go build -o harness
+    
+    - name: Run linearizability check 
+      run: |
+        chmod +x resonate
+        ./resonate serve &
+        ./harness verify -r 100 -c 10 
+        
   semgrep:
     name: semgrep
     runs-on: ubuntu-20.04
