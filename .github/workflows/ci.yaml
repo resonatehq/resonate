@@ -80,10 +80,11 @@ jobs:
       with:
         name: resonate
 
+    # ./resonate serve --aio-store-sqlite-path :memory: &
     - name: Run resonate server 
       run: |
         chmod +x resonate
-        ./resonate serve --aio-store-sqlite-path :memory: &
+        ./resonate serve &
 
     - name: Checkout test harness 
       uses: actions/checkout@v3
