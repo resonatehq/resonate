@@ -88,9 +88,7 @@ jobs:
     - name: Checkout test harness 
       uses: actions/checkout@v3
       with: 
-        # repository: resonatehq/durable-promise-test-harness
-        repository: guergabo/durable-promise-test-harness
-        ref: debug-ci
+        repository: resonatehq/durable-promise-test-harness
 
     - name: Build test harness
       run: |
@@ -99,7 +97,7 @@ jobs:
     - name: Run linearizability check 
       run: |
         chmod +x harness
-        ./harness verify -r 100 -c 10
+        ./harness verify -r 1000 -c 10
 
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}
