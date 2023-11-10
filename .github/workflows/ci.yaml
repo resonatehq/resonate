@@ -99,6 +99,12 @@ jobs:
         chmod +x harness
         ./harness verify -r 100 -c 10 
 
+    - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
+      with:
+        name: test-harness-results
+        path: test/results/
+
   semgrep:
     name: semgrep
     runs-on: ubuntu-20.04
