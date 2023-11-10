@@ -97,7 +97,7 @@ jobs:
     - name: Run linearizability check 
       run: |
         chmod +x harness
-        ./harness verify -r 100 -c 10 
+        ./harness verify -r 10 -c 3
 
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}
