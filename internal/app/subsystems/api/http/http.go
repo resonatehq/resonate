@@ -2,9 +2,11 @@ package http
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"net/http"
+	"slices"
 	"time"
+
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"log/slog"
 
@@ -15,6 +17,7 @@ import (
 type Config struct {
 	Addr    string
 	Timeout time.Duration
+	Enable  []string
 }
 
 type Http struct {
@@ -38,6 +41,13 @@ func New(api api.API, config *Config) api.Subsystem {
 	r.POST("/promises/:id/cancel", s.cancelPromise)
 	r.POST("/promises/:id/resolve", s.resolvePromise)
 	r.POST("/promises/:id/reject", s.rejectPromise)
+
+	// Subscription API (experimental)
+	if slices.Contains(config.Enable, "subscription") {
+		r.GET("/subscriptions", s.searchSubscriptions)
+		r.POST("/subscriptions/:id/create", s.createSubscription)
+		r.POST("/subscriptions/:id/delete", s.deleteSubscription)
+	}
 
 	return &Http{
 		config: config,

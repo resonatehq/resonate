@@ -1,6 +1,9 @@
 package service
 
-import "github.com/resonatehq/resonate/pkg/promise"
+import (
+	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/subscription"
+)
 
 type ValidationError struct {
 	msg string // description of error
@@ -9,6 +12,8 @@ type ValidationError struct {
 type Header struct {
 	RequestId string `header:"request-id"`
 }
+
+// Promise
 
 type SearchPromiseParams struct {
 	Q      string `form:"q" json:"q"`
@@ -57,4 +62,35 @@ type RejectPromiseHeader struct {
 
 type RejectPromiseBody struct {
 	Value promise.Value `json:"value"`
+}
+
+// Subscription
+
+type SearchSubscriptionsParams struct {
+	// Q      string `form:"q" json:"q"`
+	PromiseId string `json:"promiseId"`
+	Limit     int    `form:"limit" json:"limit"`
+	// Cursor    string `form:"cursor" json:"cursor"`
+}
+
+type CreateSubscriptionHeader struct {
+	RequestId      string                  `header:"request-id"` // qq: just for grpc?
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
+}
+
+type CreateSubscriptionBody struct {
+	PromiseId   string                    `json:"promiseId"`
+	Url         string                    `json:"url"`
+	RetryPolicy *subscription.RetryPolicy `json:"retryPolicy"`
+}
+
+type DeleteSubscriptionHeader struct {
+	RequestId      string                  `header:"request-id"`
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	Strict         bool                    `header:"strict"`
+}
+
+type DeleteSubscriptionBody struct {
+	PromiseId string `json:"promiseId"`
 }
