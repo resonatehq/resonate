@@ -29,6 +29,6 @@ func ParseLevel(lvl string) (slog.Level, error) {
 	case "error":
 		return ErrorLevel, nil
 	default:
-		return 0, fmt.Errorf("unrecognized level: %q", lvl)
+		return 0, fmt.Errorf("unrecognized level: %s", lvl)
 	}
 }
