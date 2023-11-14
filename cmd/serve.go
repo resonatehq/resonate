@@ -163,7 +163,7 @@ var serveCmd = &cobra.Command{
 
 func init() {
 	// api
-	serveCmd.Flags().Var(&ExperimentalFeatures{}, "api-enable-feature", "enable features that are disabled by default since they are considered experimental")
+	serveCmd.Flags().Var(&ExperimentalFeatures{}, "enable-feature", "enable features that are disabled by default since they are considered experimental")
 	serveCmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
 	serveCmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
 	serveCmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
@@ -172,7 +172,7 @@ func init() {
 	_ = viper.BindPFlag("api.size", serveCmd.Flags().Lookup("api-size"))
 	_ = viper.BindPFlag("api.subsystems.http.addr", serveCmd.Flags().Lookup("api-http-addr"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", serveCmd.Flags().Lookup("api-http-timeout"))
-	_ = viper.BindPFlag("api.subsystems.http.enable", serveCmd.Flags().Lookup("api-enable-feature"))
+	_ = viper.BindPFlag("api.subsystems.http.enable", serveCmd.Flags().Lookup("enable-feature"))
 	_ = viper.BindPFlag("api.subsystems.grpc.addr", serveCmd.Flags().Lookup("api-grpc-addr"))
 
 	// aio
