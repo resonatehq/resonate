@@ -22,6 +22,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/pkg/log"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -102,8 +103,13 @@ var dstRunCmd = &cobra.Command{
 		}
 
 		// logger
+		logLevel, err := log.ParseLevel(config.Log.Level)
+		if err != nil {
+			slog.Error("failed to parse log level", "error", err)
+			return err
+		}
 		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-			Level: config.Log.Level,
+			Level: logLevel,
 			ReplaceAttr: func(groups []string, attr slog.Attr) slog.Attr {
 				// suppress time attr
 				if attr.Key == "time" {
