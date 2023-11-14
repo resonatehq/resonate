@@ -21,6 +21,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/pkg/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -36,7 +37,12 @@ var serveCmd = &cobra.Command{
 		}
 
 		// logger
-		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: config.Log.Level}))
+		logLevel, err := log.ParseLevel(config.Log.Level)
+		if err != nil {
+			slog.Error("failed to parse log level", "error", err)
+			return err
+		}
+		logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 		slog.SetDefault(logger)
 
 		// instantiate metrics

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"log/slog"
 	"math/rand" // nosemgrep
 
 	"github.com/mitchellh/mapstructure"
@@ -57,7 +56,7 @@ type MetricsConfig struct {
 }
 
 type LogConfig struct {
-	Level slog.Level
+	Level string
 }
 
 // DST Config

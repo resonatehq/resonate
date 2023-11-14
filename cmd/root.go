@@ -20,7 +20,7 @@ func init() {
 	cobra.OnInitialize(initConfig)
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (defaults to resonate.yml)")
-	rootCmd.PersistentFlags().Int("log-level", 0, "log level")
+	rootCmd.PersistentFlags().String("log-level", "info", "log level, Options: debug, info, warn, error.")
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 }
