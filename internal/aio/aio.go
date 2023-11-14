@@ -11,6 +11,11 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
+var (
+	ErrAIOSubsytemNetworkSubmissionQueueFull = fmt.Errorf("aio:subsystem:network submission queue full")
+	ErrAIOSubsytemStoreSubmissionQueueFull   = fmt.Errorf("aio:subsystem:store submission queue full")
+)
+
 type AIO interface {
 	String() string
 	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
@@ -110,7 +115,14 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
 		default:
-			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
+			switch sqe.Submission.Kind {
+			case t_aio.Network:
+				sqe.Callback(nil, ErrAIOSubsytemNetworkSubmissionQueueFull)
+			case t_aio.Store:
+				sqe.Callback(nil, ErrAIOSubsytemStoreSubmissionQueueFull)
+			default:
+				panic(fmt.Sprintf("invalid aio submission kind: %s", sqe.Submission.Kind))
+			}
 		}
 	} else {
 		panic("invalid aio submission")

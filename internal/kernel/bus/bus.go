@@ -30,7 +30,9 @@ type CQE[I Input, O Output] struct {
 	Metadata   *metadata.Metadata
 	Completion *O
 	Callback   func(*O, error)
-	Error      error
+
+	// reserved for platform level errors - 5xx (same as err := but via channel)
+	Error error
 }
 
 func (cqe *CQE[I, O]) String() string {

@@ -44,7 +44,7 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 			res(&t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.ResponseNotFound,
+					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
 		} else {

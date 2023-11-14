@@ -56,12 +56,20 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 
 	cqe := <-cq
 	if cqe.Error != nil {
+		// platform level error - 5xx
 		return nil, cqe.Error
 	}
 
 	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
-	return cqe.Completion.ReadPromise, nil
 
+	// application level error - 3xx, 4xx
+	if api.IsApplicationLevelError(cqe.Completion.ReadPromise.Status) {
+		return nil, api.NewAPIErrorResponse(cqe.Completion.ReadPromise.Status)
+	}
+
+	// success
+	util.Assert(cqe.Completion.ReadPromise.Status != t_api.StatusOK, "response status must not be t_api.StatusOK")
+	return cqe.Completion.ReadPromise, nil
 }
 
 // Search Promise

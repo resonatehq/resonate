@@ -1,8 +1,10 @@
 package http
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"github.com/gin-gonic/gin"
@@ -21,13 +23,15 @@ func (s *server) readPromise(c *gin.Context) {
 
 	resp, err := s.service.ReadPromise(c.Param("id"), &header)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
+		}
+		panic(err)
 	}
 
-	c.JSON(int(resp.Status), resp.Promise)
+	c.JSON(http.StatusOK, resp.Promise)
 }
 
 // Search Promise
@@ -50,6 +54,8 @@ func (s *server) searchPromises(c *gin.Context) {
 	}
 
 	resp, err := s.service.SearchPromises(&header, &params)
+
+	// TODO: validate 400 errors ^^ fields details etc. all that juicy stuff can be clean
 
 	if err != nil {
 		if verr, ok := err.(*service.ValidationError); ok {

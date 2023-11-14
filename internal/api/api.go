@@ -1,15 +1,22 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+)
+
+var (
+	ErrAPISubmissionQueueFull = errors.New("api submission queue full")
+	ErrSystemShuttingDown     = errors.New("system is shutting down")
 )
 
 type API interface {
@@ -83,8 +90,22 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		var status int
 
 		if err != nil {
-			status = 500
+			// platform level error - tolerable, but expected
+			if errors.Is(err, ErrAPISubmissionQueueFull) {
+				status = int(t_api.StatusAPISubmissionQueueFull)
+			} else if errors.Is(err, ErrSystemShuttingDown) {
+				status = int(t_api.StatusSystemShuttingDown)
+			} else if errors.Is(err, aio.ErrAIOSubsytemNetworkSubmissionQueueFull) {
+				status = int(t_api.StatusAIONetworkSubmissionQueueFull)
+			} else if errors.Is(err, aio.ErrAIOSubsytemStoreSubmissionQueueFull) {
+				status = int(t_api.StatusAIOStoreSubmissionQueueFull)
+			} else {
+				// should know every platform level error that can happen here
+				// -- too  strict for now, but good to go in the future
+				panic(err)
+			}
 		} else {
+			// application level error - tolerable, but expected
 			switch res.Kind {
 			case t_api.ReadPromise:
 				status = int(res.ReadPromise.Status)
@@ -105,7 +126,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
 			default:
-				status = 200
+				panic(fmt.Errorf("unknown response kind: %v", res.Kind))
 			}
 		}
 
@@ -118,7 +139,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// we must wait to close the channel because even in a select
 	// sending to a closed channel will panic
 	if a.done {
-		sqe.Callback(nil, fmt.Errorf("system is shutting down"))
+		sqe.Callback(nil, ErrSystemShuttingDown)
 		return
 	}
 
@@ -126,7 +147,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	case a.sq <- sqe:
 		slog.Debug("api:enqueue", "sqe", sqe)
 	default:
-		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
+		sqe.Callback(nil, ErrAPISubmissionQueueFull)
 	}
 }
 
