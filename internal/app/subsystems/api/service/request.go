@@ -7,9 +7,9 @@ type Header struct {
 }
 
 type SearchPromiseParams struct {
-	Q      string `form:"q" json:"q" binding:"required"`
-	State  string `form:"state" json:"state" binding:"oneof=pending resolved rejected"`
-	Limit  int    `form:"limit" json:"limit" binding:"gte=0,lte=100"`
+	Q      string `form:"q" json:"q"` // TODO: what is proper validation here -- DSL?
+	State  string `form:"state" json:"state" binding:"omitempty,oneof=pending resolved rejected"`
+	Limit  *int   `form:"limit" json:"limit" binding:"omitempty,gt=0,lte=100"`
 	Cursor string `form:"cursor" json:"cursor"`
 }
 

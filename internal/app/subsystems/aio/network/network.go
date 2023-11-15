@@ -71,7 +71,7 @@ func (d *NetworkDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completi
 			res, err := d.httpRequest(sqe.Submission.Network.Http)
 			if err != nil {
 				slog.Error("failed http request", "err", err)
-				cqe.Error = t_api.ErrNetworkFailure
+				cqe.Error = t_api.ErrAIONetworkFailure
 			} else {
 				cqe.Completion = &t_aio.Completion{
 					Kind: t_aio.Network,

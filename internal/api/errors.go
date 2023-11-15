@@ -15,15 +15,10 @@ type APIErrorResponse struct {
 	APIError APIError `json:"error,omitempty"`
 }
 
-// NewErrorResponse creates a new ErrorResponse with the given code and message.
-func NewAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
-	return handleAPIErrorResponse(status)
-}
-
 // Error returns the json string representation of this error.
 func (e *APIErrorResponse) Error() string {
-	errJson, _ := json.Marshal(e)
-	return string(errJson)
+	errJSON, _ := json.Marshal(e)
+	return string(errJSON)
 }
 
 // StatusCode returns the HTTP status code for this error.
@@ -54,42 +49,21 @@ type ErrorDetail struct {
 	// Message is a human-readable description of the error.
 	Message string `json:"message,omitempty"`
 
-	// Reason is a short description why it failed.
-	Reason string `json:"reason,omitempty"`
-
 	// Domain is the domain of the error.
 	Domain string `json:"domain,omitempty"`
 
 	// Metadata is additional metadata about the error.
 	Metadata map[string]string `json:"metadata,omitempty"`
-
-	// FieldViolations is a list of field violations.
-	FieldViolations []FieldViolation `json:"fieldViolations,omitempty"`
 }
 
-// FieldViolation is a JSON:API field violation object.
-type FieldViolation struct {
-	Field       string `json:"field,omitempty"`
-	Description string `json:"description,omitempty"`
-}
-
-/*
-A few ideas in no particular order
-1. I wonder if we can pull the (platform) errors out into a separate file,
-then we might be able to enumerate them in one place and
-specify that the return type on t
-he SQ/CQ must be our own custom type
-(that implements the Error interface)
-
-2. What do you think about combining the aio network / aio store full error into one and differentiating on a field in the custom error type?
-
-
-*/
-
+// HandlePlatformLevelError handles platform level errors and returns an APIErrorResponse.
 func HandlePlatformLevelError(err error) *APIErrorResponse {
 	var apiError APIError
 
 	switch err {
+
+	// 5xx
+
 	case t_api.ErrAPISubmissionQueueFull:
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
@@ -146,14 +120,14 @@ func HandlePlatformLevelError(err error) *APIErrorResponse {
 			Status:  err.Error(),
 		}
 
-	case t_api.ErrNetworkFailure:
+	case t_api.ErrAIONetworkFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Network failure",
 			Status:  err.Error(),
 		}
 
-	case t_api.ErrStoreFailure:
+	case t_api.ErrAIOStoreFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Store failure",
@@ -165,10 +139,29 @@ func HandlePlatformLevelError(err error) *APIErrorResponse {
 		}
 	}
 
+	apiError.Details = append(apiError.Details, ErrorDetail{
+		Type:    "PlatformLevelError",
+		Message: "Platform level errors may be retryable since they are caused by transient platform failures",
+		Domain:  "platform",
+		Metadata: map[string]string{
+			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
+		},
+	})
+
 	return &APIErrorResponse{APIError: apiError}
 }
 
-func handleAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
+func IsApplicationLevelError(status t_api.ResponseStatus) bool {
+	switch status {
+	case t_api.StatusOK, t_api.StatusCreated, t_api.StatusNoContent:
+		return false
+	default:
+		return true
+	}
+}
+
+// HandleApplicationLevelError handles application level errors and returns an APIErrorResponse.
+func HandleApplicationLevelError(status t_api.ResponseStatus) *APIErrorResponse {
 	var apiError APIError
 
 	switch status {
@@ -227,6 +220,9 @@ func handleAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
+		Type:    "ApplicationLevelError",
+		Message: "Application level errors are not retryable since they are caused by invalid client requests",
+		Domain:  "application",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
 		},
@@ -235,15 +231,7 @@ func handleAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
 	return &APIErrorResponse{APIError: apiError}
 }
 
-func IsApplicationLevelError(status t_api.ResponseStatus) bool {
-	switch status {
-	case t_api.StatusOK, t_api.StatusCreated, t_api.StatusNoContent:
-		return false
-	default:
-		return true
-	}
-}
-
+// HandleValidationError is handled separately from other application level errors since it is more involved.
 func HandleValidationError(err error) *APIErrorResponse {
 	var apiError APIError
 	apiError.Code = http.StatusBadRequest
@@ -256,11 +244,10 @@ func HandleValidationError(err error) *APIErrorResponse {
 		details = append(details, ErrorDetail{
 			Type:    "FieldValidationError",
 			Message: err,
-			// FieldViolations: []FieldViolation{
-			// 	{
-			// 		Field: "param",
-			// 	},
-			// },
+			Domain:  "validation",
+			Metadata: map[string]string{
+				"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
+			},
 		})
 	}
 
@@ -294,6 +281,18 @@ func parseFieldError(e validator.FieldError) string {
 	case "gte":
 		param := e.Param()
 		return fmt.Sprintf("%s must be greater than or equal to %s", fieldPrefix, param)
+	case "gt":
+		param := e.Param()
+		return fmt.Sprintf("%s must be greater than %s", fieldPrefix, param)
+	case "lte":
+		param := e.Param()
+		return fmt.Sprintf("%s must be less than or equal to %s", fieldPrefix, param)
+	case "oneof":
+		param := e.Param()
+		paramArr := strings.Split(param, " ")
+		paramArr[len(paramArr)-1] = "or " + paramArr[len(paramArr)-1]
+		param = strings.Join(paramArr, ", ")
+		return fmt.Sprintf("%s must be either %s", fieldPrefix, param)
 	default:
 		return e.Error()
 	}

@@ -37,8 +37,6 @@ func (s *Service) metadata(id string, name string) *metadata.Metadata {
 	return metadata
 }
 
-// fix this layer too for all of them -- url
-
 // Read Promise
 
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
@@ -64,11 +62,10 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 
 	// application level error - 3xx, 4xx
 	if api.IsApplicationLevelError(cqe.Completion.ReadPromise.Status) {
-		return nil, api.NewAPIErrorResponse(cqe.Completion.ReadPromise.Status)
+		return nil, api.HandleApplicationLevelError(cqe.Completion.ReadPromise.Status)
 	}
 
 	// success
-	util.Assert(cqe.Completion.ReadPromise.Status != t_api.StatusOK, "response status must not be t_api.StatusOK")
 	return cqe.Completion.ReadPromise, nil
 }
 
@@ -83,6 +80,11 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		}
 		searchPromises = cursor.Next
 	} else {
+		// set default query
+		if params.Q == "" {
+			params.Q = "*"
+		}
+
 		var states []promise.State
 		switch strings.ToLower(params.State) {
 		case "":
@@ -111,10 +113,15 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 			panic(fmt.Sprintf("invalid state: %s", params.State))
 		}
 
+		// set default limit
+		if params.Limit == nil || *params.Limit == 0 {
+			*params.Limit = 100
+		}
+
 		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      params.Q,
 			States: states,
-			Limit:  params.Limit,
+			Limit:  *params.Limit,
 		}
 	}
 
@@ -135,6 +142,12 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 	}
 
 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
+
+	if api.IsApplicationLevelError(cqe.Completion.SearchPromises.Status) {
+		return nil, api.HandleApplicationLevelError(cqe.Completion.SearchPromises.Status)
+	}
+
+	// success
 	return cqe.Completion.SearchPromises, nil
 }
 
@@ -167,7 +180,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
 
 	if api.IsApplicationLevelError(cqe.Completion.CreatePromise.Status) {
-		return nil, api.NewAPIErrorResponse(cqe.Completion.CreatePromise.Status)
+		return nil, api.HandleApplicationLevelError(cqe.Completion.CreatePromise.Status)
 	}
 
 	// success
@@ -199,6 +212,12 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 	}
 
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
+
+	if api.IsApplicationLevelError(cqe.Completion.CancelPromise.Status) {
+		return nil, api.HandleApplicationLevelError(cqe.Completion.CancelPromise.Status)
+	}
+
+	// success
 	return cqe.Completion.CancelPromise, nil
 }
 
@@ -227,6 +246,12 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 	}
 
 	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
+
+	if api.IsApplicationLevelError(cqe.Completion.ResolvePromise.Status) {
+		return nil, api.HandleApplicationLevelError(cqe.Completion.ResolvePromise.Status)
+	}
+
+	// success
 	return cqe.Completion.ResolvePromise, nil
 }
 
@@ -255,6 +280,12 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 	}
 
 	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
+
+	if api.IsApplicationLevelError(cqe.Completion.RejectPromise.Status) {
+		return nil, api.HandleApplicationLevelError(cqe.Completion.RejectPromise.Status)
+	}
+
+	// success
 	return cqe.Completion.RejectPromise, nil
 }
 

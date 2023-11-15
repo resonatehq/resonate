@@ -5,7 +5,7 @@
 // to handle the two types differently - platform errors may trigger retries with backoff, while application errors
 // should report immediately to the users since these failures are not typically recoverable by simply retrying.
 //
-// In our Go system, platform errors are represented as typical Go `error` values returned from function calls. For example:
+// In our Go system, platform errors are represented as typical Go `error` value returned from function calls. For example:
 //
 // dbResult, dbErr := database.Query("SELECT...")
 //
@@ -45,14 +45,13 @@ var (
 	ErrSystemShuttingDown            *PlatformLevelError = &PlatformLevelError{code: 5033} // map to 503 service unavailable
 
 	// coroutine ones -- slog.Error() logs details
-	ErrFailedToReadPromise        *PlatformLevelError = &PlatformLevelError{code: 5001}
-	ErrFailedToSearchPromises     *PlatformLevelError = &PlatformLevelError{code: 5002}
-	ErrFailedToParsePromiseRecord *PlatformLevelError = &PlatformLevelError{code: 5003}
-	ErrFailedToTimeoutPromise     *PlatformLevelError = &PlatformLevelError{code: 5004}
-	ErrFailedToUpdatePromise      *PlatformLevelError = &PlatformLevelError{code: 5005}
-	ErrNetworkFailure             *PlatformLevelError = &PlatformLevelError{code: 5006}
-	ErrStoreFailure               *PlatformLevelError = &PlatformLevelError{code: 5007}
-	// Subscription
+	ErrFailedToReadPromise             *PlatformLevelError = &PlatformLevelError{code: 5001}
+	ErrFailedToSearchPromises          *PlatformLevelError = &PlatformLevelError{code: 5002}
+	ErrFailedToParsePromiseRecord      *PlatformLevelError = &PlatformLevelError{code: 5003}
+	ErrFailedToTimeoutPromise          *PlatformLevelError = &PlatformLevelError{code: 5004}
+	ErrFailedToUpdatePromise           *PlatformLevelError = &PlatformLevelError{code: 5005}
+	ErrAIONetworkFailure               *PlatformLevelError = &PlatformLevelError{code: 5006}
+	ErrAIOStoreFailure                 *PlatformLevelError = &PlatformLevelError{code: 5007}
 	ErrFailedToReadSubscriptions       *PlatformLevelError = &PlatformLevelError{code: 5008}
 	ErrFailedToCreateSubscription      *PlatformLevelError = &PlatformLevelError{code: 5009}
 	ErrFailedToReadSubscription        *PlatformLevelError = &PlatformLevelError{code: 5010}

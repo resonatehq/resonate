@@ -35,7 +35,7 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 
 		if err != nil {
 			slog.Error("failed store execution", "err", err)
-			cqe.Error = t_api.ErrStoreFailure
+			cqe.Error = t_api.ErrAIOStoreFailure
 		} else {
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Store,

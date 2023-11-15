@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/util"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
@@ -97,7 +98,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	params := &service.SearchPromiseParams{
 		Q:      req.Q,
 		State:  searchState(req.State),
-		Limit:  int(req.Limit),
+		Limit:  util.ToPointer(int(req.Limit)),
 		Cursor: req.Cursor,
 	}
 

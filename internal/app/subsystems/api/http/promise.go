@@ -56,7 +56,8 @@ func (s *server) searchPromises(c *gin.Context) {
 		}
 		panic(err)
 	}
-	c.JSON(int(resp.Status), gin.H{
+
+	c.JSON(http.StatusOK, gin.H{
 		"cursor":   resp.Cursor,
 		"promises": resp.Promises,
 	})
