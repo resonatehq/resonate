@@ -15,6 +15,7 @@ package t_api
 
 import "strconv"
 
+// Application level status (2000-4999
 type ResponseStatus int
 
 func (s ResponseStatus) String() string {
@@ -22,51 +23,59 @@ func (s ResponseStatus) String() string {
 }
 
 const (
-	// Application level errors (2000-4999)
-	StatusOK                     ResponseStatus = 2000 // map to 200 ok
-	StatusCreated                ResponseStatus = 2010 // map to 201 created
-	StatusNoContent              ResponseStatus = 2040 // map to 204 no content (delete is special case)
-	StatusFieldValidationFailure ResponseStatus = 4000 // map to 400 bad request
-	StatusPromiseAlreadyResolved ResponseStatus = 4030 // map to 403 forbidden
-	StatusPromiseAlreadyRejected ResponseStatus = 4031 // map to 403 forbidden
-	StatusPromiseAlreadyCanceled ResponseStatus = 4032 // map to 403 forbidden
-	StatusPromiseAlreadyTimedOut ResponseStatus = 4033 // map to 403 forbidden
-	StatusPromiseNotFound        ResponseStatus = 4040 // map to 404 not found
-	StatusSubscriptionNotFound   ResponseStatus = 4041 // map to 404 not found
-	StatusPromiseAlreadyExists   ResponseStatus = 4090 // map to 409 conflict
+	StatusOK                     ResponseStatus = 2000
+	StatusCreated                ResponseStatus = 2010
+	StatusNoContent              ResponseStatus = 2040
+	StatusFieldValidationFailure ResponseStatus = 4000
+	StatusPromiseAlreadyResolved ResponseStatus = 4030
+	StatusPromiseAlreadyRejected ResponseStatus = 4031
+	StatusPromiseAlreadyCanceled ResponseStatus = 4032
+	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
+	StatusPromiseNotFound        ResponseStatus = 4040
+	StatusSubscriptionNotFound   ResponseStatus = 4041
+	StatusPromiseAlreadyExists   ResponseStatus = 4090
 )
 
-// Platform level errors (5000-5999)
-var (
-	ErrInternalServer                *PlatformLevelError = &PlatformLevelError{code: 5000} // map to 500 internal server error (for now, but should be exact and not need this in the future)
-	ErrAPISubmissionQueueFull        *PlatformLevelError = &PlatformLevelError{code: 5030} // map to 503 service unavailable
-	ErrAIONetworkSubmissionQueueFull *PlatformLevelError = &PlatformLevelError{code: 5031} // map to 503 service unavailable
-	ErrAIOStoreSubmissionQueueFull   *PlatformLevelError = &PlatformLevelError{code: 5032} // map to 503 service unavailable
-	ErrSystemShuttingDown            *PlatformLevelError = &PlatformLevelError{code: 5033} // map to 503 service unavailable
+// Platform level errors (5000-5999
+type ResonateErrorCode int
 
-	// coroutine ones -- slog.Error() logs details
-	ErrFailedToReadPromise             *PlatformLevelError = &PlatformLevelError{code: 5001}
-	ErrFailedToSearchPromises          *PlatformLevelError = &PlatformLevelError{code: 5002}
-	ErrFailedToParsePromiseRecord      *PlatformLevelError = &PlatformLevelError{code: 5003}
-	ErrFailedToTimeoutPromise          *PlatformLevelError = &PlatformLevelError{code: 5004}
-	ErrFailedToUpdatePromise           *PlatformLevelError = &PlatformLevelError{code: 5005}
-	ErrAIONetworkFailure               *PlatformLevelError = &PlatformLevelError{code: 5006}
-	ErrAIOStoreFailure                 *PlatformLevelError = &PlatformLevelError{code: 5007}
-	ErrFailedToReadSubscriptions       *PlatformLevelError = &PlatformLevelError{code: 5008}
-	ErrFailedToCreateSubscription      *PlatformLevelError = &PlatformLevelError{code: 5009}
-	ErrFailedToReadSubscription        *PlatformLevelError = &PlatformLevelError{code: 5010}
-	ErrFailedToParseSubscriptionRecord *PlatformLevelError = &PlatformLevelError{code: 5011}
-	ErrFailedToDeleteSubscription      *PlatformLevelError = &PlatformLevelError{code: 5012}
+const (
+	ErrInternalServer = iota + 5000
+	ErrAPISubmissionQueueFull
+	ErrAIONetworkSubmissionQueueFull
+	ErrAIOStoreSubmissionQueueFull
+	ErrSystemShuttingDown
+	ErrFailedToReadPromise
+	ErrFailedToSearchPromises
+	ErrFailedToParsePromiseRecord
+	ErrFailedToTimeoutPromise
+	ErrFailedToUpdatePromise
+	ErrAIONetworkFailure
+	ErrAIOStoreFailure
+	ErrFailedToReadSubscriptions
+	ErrFailedToCreateSubscription
+	ErrFailedToReadSubscription
+	ErrFailedToParseSubscriptionRecord
+	ErrFailedToDeleteSubscription
 )
 
-type PlatformLevelError struct {
-	code int
+type ResonateError struct {
+	code     ResonateErrorCode
+	metadata string
 }
 
-func (e *PlatformLevelError) Error() string {
-	return strconv.Itoa(e.code)
+func NewResonateError(code ResonateErrorCode, metadata string) *ResonateError {
+	return &ResonateError{code: code, metadata: metadata}
 }
 
-func (e *PlatformLevelError) Code() int {
+func (e *ResonateError) Error() string {
+	return strconv.Itoa(int(e.code))
+}
+
+func (e *ResonateError) Metadata() string {
+	return e.metadata
+}
+
+func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -55,7 +56,9 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, api.HandlePlatformLevelError(cqe.Error)
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
+		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
 	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
@@ -174,7 +177,9 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, api.HandlePlatformLevelError(cqe.Error)
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
+		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
@@ -208,7 +213,9 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, api.HandlePlatformLevelError(cqe.Error)
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
+		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
@@ -242,7 +249,9 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, api.HandlePlatformLevelError(cqe.Error)
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
+		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
 	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
@@ -276,7 +285,9 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, api.HandlePlatformLevelError(cqe.Error)
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
+		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
 	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
@@ -289,8 +300,8 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 	return cqe.Completion.RejectPromise, nil
 }
 
-func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, *t_api.PlatformLevelError) {
-	return func(completion *t_api.Response, err *t_api.PlatformLevelError) {
+func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
+	return func(completion *t_api.Response, err error) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
 			// Tags:       s.protocol(),
 			Completion: completion,

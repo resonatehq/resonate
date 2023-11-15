@@ -66,7 +66,7 @@ func TestSystemLoop(t *testing.T) {
 					Data: data,
 				},
 			},
-			Callback: func(res *t_api.Response, err *t_api.PlatformLevelError) {
+			Callback: func(res *t_api.Response, err error) {
 				recieved <- 1
 
 				assert.Nil(t, err)
@@ -92,7 +92,7 @@ func TestSystemLoop(t *testing.T) {
 					Data: "nope",
 				},
 			},
-			Callback: func(res *t_api.Response, err *t_api.PlatformLevelError) {
+			Callback: func(res *t_api.Response, err error) {
 				recieved <- 1
 
 				assert.NotNil(t, err)

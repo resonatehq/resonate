@@ -36,7 +36,7 @@ type System struct {
 	config    *Config
 	metrics   *metrics.Metrics
 	scheduler *scheduler.Scheduler
-	onRequest map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
+	onRequest map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
 	onTick    map[int][]func(int64, *Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
 	ticks     int64
 }
@@ -48,7 +48,7 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		config:    config,
 		metrics:   metrics,
 		scheduler: scheduler.NewScheduler(aio, metrics),
-		onRequest: map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
+		onRequest: map[t_api.Kind]func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
 		onTick:    map[int][]func(int64, *Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]{},
 	}
 }
@@ -99,7 +99,7 @@ func (s *System) Shutdown() {
 	s.aio.Shutdown()
 }
 
-func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func (s *System) AddOnRequest(kind t_api.Kind, constructor func(*metadata.Metadata, *t_api.Request, func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 	s.onRequest[kind] = constructor
 }
 

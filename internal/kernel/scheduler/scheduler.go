@@ -6,7 +6,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
@@ -26,7 +25,7 @@ type Scheduler struct {
 type runnableCoroutine struct {
 	*Coroutine[*t_aio.Completion, *t_aio.Submission]
 	next  *t_aio.Completion
-	error *t_api.PlatformLevelError
+	error error
 }
 
 func NewScheduler(aio aio.AIO, metrics *metrics.Metrics) *Scheduler {
@@ -74,7 +73,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{
 				Metadata:   metadata,
 				Submission: submission,
-				Callback: func(completion *t_aio.Completion, err *t_api.PlatformLevelError) {
+				Callback: func(completion *t_aio.Completion, err error) {
 					// unsuspend
 					s.runnable = append(s.runnable, &runnableCoroutine{
 						Coroutine: coroutine.Coroutine,

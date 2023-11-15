@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
@@ -29,9 +29,9 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 			},
 		})
 
-		if err != (*t_api.PlatformLevelError)(nil) {
+		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, t_api.ErrFailedToReadPromise)
+			res(nil, t_api.NewResonateError(t_api.ErrFailedToReadPromise, err.Error()))
 			return
 		}
 
@@ -51,7 +51,7 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, t_api.ErrFailedToParsePromiseRecord)
+				res(nil, t_api.NewResonateError(t_api.ErrFailedToParsePromiseRecord, err.Error()))
 				return
 			}
 
@@ -59,7 +59,7 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 				c.Scheduler.Add(TimeoutPromise(metadata, p, ReadPromise(metadata, req, res), func(err error) {
 					if err != nil {
 						slog.Error("failed to timeout promise", "req", req, "err", err)
-						res(nil, t_api.ErrFailedToTimeoutPromise)
+						res(nil, t_api.NewResonateError(t_api.ErrFailedToTimeoutPromise, err.Error()))
 						return
 					}
 

@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
@@ -44,7 +44,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 		if err != nil {
 			slog.Error("failed to create subscription", "req", req, "err", err)
-			res(nil, t_api.ErrFailedToCreateSubscription)
+			res(nil, t_api.NewResonateError(t_api.ErrFailedToCreateSubscription, err.Error()))
 			return
 		}
 
@@ -87,7 +87,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 			if err != nil {
 				slog.Error("failed to read subscription", "req", req, "err", err)
-				res(nil, t_api.ErrFailedToReadSubscription)
+				res(nil, t_api.NewResonateError(t_api.ErrFailedToReadSubscription, err.Error()))
 				return
 			}
 
@@ -100,7 +100,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 				subscription, err := result.Records[0].Subscription()
 				if err != nil {
 					slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-					res(nil, t_api.ErrFailedToParseSubscriptionRecord)
+					res(nil, t_api.NewResonateError(t_api.ErrFailedToParseSubscriptionRecord, err.Error()))
 					return
 				}
 

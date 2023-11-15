@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type API interface {
@@ -79,11 +81,13 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// replace sqe.Callback with a callback that wraps the original
 	// function and emits metrics
 	callback := sqe.Callback
-	sqe.Callback = func(res *t_api.Response, err *t_api.PlatformLevelError) {
+	sqe.Callback = func(res *t_api.Response, err error) {
 		var status int
 
 		if err != nil {
-			status = err.Code()
+			var resErr *t_api.ResonateError
+			util.Assert(errors.As(err, &resErr), "err must be a ResonateError")
+			status = int(resErr.Code())
 		} else {
 			switch res.Kind {
 			case t_api.ReadPromise:
@@ -118,7 +122,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// we must wait to close the channel because even in a select
 	// sending to a closed channel will panic
 	if a.done {
-		sqe.Callback(nil, t_api.ErrSystemShuttingDown)
+		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSystemShuttingDown, "system is shutting down"))
 		return
 	}
 
@@ -126,7 +130,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	case a.sq <- sqe:
 		slog.Debug("api:enqueue", "sqe", sqe)
 	default:
-		sqe.Callback(nil, t_api.ErrAPISubmissionQueueFull)
+		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAPISubmissionQueueFull, "api submission queue is full"))
 	}
 }
 

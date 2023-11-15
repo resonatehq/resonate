@@ -57,10 +57,10 @@ type ErrorDetail struct {
 }
 
 // HandlePlatformLevelError handles platform level errors and returns an APIErrorResponse.
-func HandlePlatformLevelError(err error) *APIErrorResponse {
+func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 	var apiError APIError
 
-	switch err {
+	switch err.Code() {
 
 	// 5xx
 
@@ -140,8 +140,8 @@ func HandlePlatformLevelError(err error) *APIErrorResponse {
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
-		Type:    "PlatformLevelError",
-		Message: "Platform level errors may be retryable since they are caused by transient platform failures",
+		Type:    "ResonateError",
+		Message: err.Metadata(),
 		Domain:  "platform",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),

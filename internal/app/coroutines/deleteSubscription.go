@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func DeleteSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func DeleteSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
@@ -31,7 +31,7 @@ func DeleteSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 		if err != nil {
 			slog.Error("failed to delete subscription", "req", req, "err", err)
-			res(nil, t_api.ErrFailedToDeleteSubscription)
+			res(nil, t_api.NewResonateError(t_api.ErrFailedToDeleteSubscription, err.Error()))
 			return
 		}
 

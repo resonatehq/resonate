@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
@@ -38,7 +38,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, t_api.ErrFailedToReadPromise)
+			res(nil, t_api.NewResonateError(t_api.ErrFailedToReadPromise, err.Error()))
 			return
 		}
 
@@ -58,7 +58,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, t_api.ErrFailedToParsePromiseRecord)
+				res(nil, t_api.NewResonateError(t_api.ErrFailedToParsePromiseRecord, err.Error()))
 				return
 			}
 
@@ -67,7 +67,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					c.Scheduler.Add(TimeoutPromise(metadata, p, RejectPromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, t_api.ErrFailedToTimeoutPromise)
+							res(nil, t_api.NewResonateError(t_api.ErrFailedToTimeoutPromise, err.Error()))
 							return
 						}
 
@@ -130,7 +130,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, t_api.ErrFailedToUpdatePromise)
+						res(nil, t_api.NewResonateError(t_api.ErrFailedToUpdatePromise, err.Error()))
 						return
 					}
 

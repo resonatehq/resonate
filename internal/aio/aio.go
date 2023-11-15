@@ -113,9 +113,10 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 		default:
 			switch sqe.Submission.Kind {
 			case t_aio.Network:
-				sqe.Callback(nil, t_api.ErrAIONetworkSubmissionQueueFull)
+
+				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIONetworkSubmissionQueueFull, "aio: network submission queue full"))
 			case t_aio.Store:
-				sqe.Callback(nil, t_api.ErrAIOStoreSubmissionQueueFull)
+				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOStoreSubmissionQueueFull, "aio: store submission queue full"))
 			default:
 				panic(fmt.Sprintf("invalid aio submission kind: %s", sqe.Submission.Kind))
 			}
