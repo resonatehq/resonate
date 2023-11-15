@@ -103,11 +103,13 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 
 	resp, err := s.service.SearchPromises(header, params)
 	if err != nil {
-		if verr, ok := err.(*service.ValidationError); ok {
-			return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
-		} else {
-			return nil, grpcStatus.Error(codes.Internal, err.Error())
-		}
+		// TODO: http, extensible -- for now, just return internal
+		// if verr, ok := err.(*service.ValidationError); ok {
+		// 	return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
+		// } else {
+		// 	return nil, grpcStatus.Error(codes.Internal, err.Error())
+		// }
+		return nil, grpcStatus.Error(codes.Internal, err.Error())
 	}
 
 	promises := make([]*grpcApi.Promise, len(resp.Promises))
@@ -155,11 +157,11 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	}
 
 	body := &service.CreatePromiseBody{
-		Param: promise.Value{
+		Param: &promise.Value{
 			Headers: headers,
 			Data:    data,
 		},
-		Timeout: req.Timeout,
+		Timeout: &req.Timeout,
 	}
 
 	resp, err := s.service.CreatePromise(req.Id, header, body)
@@ -297,16 +299,17 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 
 func protoStatus(status t_api.ResponseStatus) grpcApi.Status {
 	switch status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		return grpcApi.Status_OK
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		return grpcApi.Status_CREATED
-	case t_api.ResponseNoContent:
+	case t_api.StatusNoContent:
 		return grpcApi.Status_NOCONTENT
-	case t_api.ResponseForbidden:
-		return grpcApi.Status_FORBIDDEN
-	case t_api.ResponseNotFound:
-		return grpcApi.Status_NOTFOUND
+	// come back to this and back extensible for grpc
+	// case t_api.ResponseForbidden:
+	// 	return grpcApi.Status_FORBIDDEN
+	// case t_api.ResponseNotFound:
+	// 	return grpcApi.Status_NOTFOUND
 	default:
 		return grpcApi.Status_UNKNOWN
 	}

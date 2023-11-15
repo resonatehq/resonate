@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		if req.RejectPromise.Value.Headers == nil {
 			req.RejectPromise.Value.Headers = map[string]string{}
@@ -38,7 +38,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.ErrFailedToReadPromise)
 			return
 		}
 
@@ -51,14 +51,14 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			res(&t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status: t_api.ResponseNotFound,
+					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.ErrFailedToParsePromiseRecord)
 				return
 			}
 
@@ -67,14 +67,14 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					c.Scheduler.Add(TimeoutPromise(metadata, p, RejectPromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
+							res(nil, t_api.ErrFailedToTimeoutPromise)
 							return
 						}
 
 						res(&t_api.Response{
 							Kind: t_api.RejectPromise,
 							RejectPromise: &t_api.RejectPromiseResponse{
-								Status: t_api.ResponseForbidden,
+								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
 									State: promise.Timedout,
@@ -130,7 +130,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.ErrFailedToUpdatePromise)
 						return
 					}
 
@@ -143,7 +143,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 						res(&t_api.Response{
 							Kind: t_api.RejectPromise,
 							RejectPromise: &t_api.RejectPromiseResponse{
-								Status: t_api.ResponseCreated,
+								Status: t_api.StatusCreated,
 								Promise: &promise.Promise{
 									Id:                        p.Id,
 									State:                     promise.Rejected,
@@ -163,11 +163,11 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := t_api.ResponseForbidden
+				status := getForbiddenStatus(p.State)
 				strict := req.RejectPromise.Strict && p.State != promise.Rejected
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.RejectPromise.IdempotencyKey) {
-					status = t_api.ResponseOK
+					status = t_api.StatusOK
 				}
 
 				res(&t_api.Response{

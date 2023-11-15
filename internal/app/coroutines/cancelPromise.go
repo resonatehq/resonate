@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
@@ -11,7 +12,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		if req.CancelPromise.Value.Headers == nil {
 			req.CancelPromise.Value.Headers = map[string]string{}
@@ -38,7 +39,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.ErrFailedToReadPromise)
 			return
 		}
 
@@ -51,14 +52,14 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			res(&t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseNotFound,
+					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.ErrFailedToParsePromiseRecord)
 				return
 			}
 
@@ -67,14 +68,14 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					c.Scheduler.Add(TimeoutPromise(metadata, p, CancelPromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
+							res(nil, t_api.ErrFailedToTimeoutPromise)
 							return
 						}
 
 						res(&t_api.Response{
 							Kind: t_api.CancelPromise,
 							CancelPromise: &t_api.CancelPromiseResponse{
-								Status: t_api.ResponseForbidden,
+								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
 									State: promise.Timedout,
@@ -130,7 +131,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.ErrFailedToUpdatePromise)
 						return
 					}
 
@@ -143,7 +144,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 						res(&t_api.Response{
 							Kind: t_api.CancelPromise,
 							CancelPromise: &t_api.CancelPromiseResponse{
-								Status: t_api.ResponseCreated,
+								Status: t_api.StatusCreated,
 								Promise: &promise.Promise{
 									Id:                        p.Id,
 									State:                     promise.Canceled,
@@ -163,11 +164,11 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := t_api.ResponseForbidden
+				status := getForbiddenStatus(p.State)
 				strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdempotencyKey) {
-					status = t_api.ResponseOK
+					status = t_api.StatusCreated
 				}
 
 				res(&t_api.Response{
@@ -180,4 +181,20 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			}
 		}
 	})
+}
+
+// move to utils
+func getForbiddenStatus(currentState promise.State) t_api.ResponseStatus {
+	switch currentState {
+	case promise.Resolved:
+		return t_api.StatusPromiseAlreadyResolved
+	case promise.Rejected:
+		return t_api.StatusPromiseAlreadyRejected
+	case promise.Canceled:
+		return t_api.StatusPromiseAlreadyCanceled
+	case promise.Timedout:
+		return t_api.StatusPromiseAlreadyTimedOut
+	default:
+		panic(fmt.Sprintf("invalid promise state: %v", currentState))
+	}
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
-func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		// default retry policy
 		if req.CreateSubscription.RetryPolicy == nil {
@@ -44,7 +44,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 		if err != nil {
 			slog.Error("failed to create subscription", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.ErrFailedToCreateSubscription)
 			return
 		}
 
@@ -57,7 +57,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 			res(&t_api.Response{
 				Kind: t_api.CreateSubscription,
 				CreateSubscription: &t_api.CreateSubscriptionResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Subscription: &subscription.Subscription{
 						Id:          req.CreateSubscription.Id,
 						PromiseId:   req.CreateSubscription.PromiseId,
@@ -87,7 +87,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 			if err != nil {
 				slog.Error("failed to read subscription", "req", req, "err", err)
-				res(nil, err)
+				res(nil, t_api.ErrFailedToReadSubscription)
 				return
 			}
 
@@ -100,14 +100,14 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 				subscription, err := result.Records[0].Subscription()
 				if err != nil {
 					slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-					res(nil, err)
+					res(nil, t_api.ErrFailedToParseSubscriptionRecord)
 					return
 				}
 
 				res(&t_api.Response{
 					Kind: t_api.CreateSubscription,
 					CreateSubscription: &t_api.CreateSubscriptionResponse{
-						Status:       t_api.ResponseOK,
+						Status:       t_api.StatusOK,
 						Subscription: subscription,
 					},
 				}, nil)

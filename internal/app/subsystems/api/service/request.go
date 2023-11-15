@@ -2,18 +2,14 @@ package service
 
 import "github.com/resonatehq/resonate/pkg/promise"
 
-type ValidationError struct {
-	msg string // description of error
-}
-
 type Header struct {
 	RequestId string `header:"request-id"`
 }
 
 type SearchPromiseParams struct {
-	Q      string `form:"q" json:"q"`
-	State  string `form:"state" json:"state"`
-	Limit  int    `form:"limit" json:"limit"`
+	Q      string `form:"q" json:"q" binding:"required"`
+	State  string `form:"state" json:"state" binding:"oneof=pending resolved rejected"`
+	Limit  int    `form:"limit" json:"limit" binding:"gte=0,lte=100"`
 	Cursor string `form:"cursor" json:"cursor"`
 }
 
@@ -24,8 +20,8 @@ type CreatePromiseHeader struct {
 }
 
 type CreatePromiseBody struct {
-	Param   promise.Value     `json:"param"`
-	Timeout int64             `json:"timeout"`
+	Param   *promise.Value    `json:"param" binding:"required"`
+	Timeout *int64            `json:"timeout" binding:"required,gte=0"`
 	Tags    map[string]string `json:"tags"`
 }
 
@@ -36,7 +32,7 @@ type CancelPromiseHeader struct {
 }
 
 type CancelPromiseBody struct {
-	Value promise.Value `json:"value"`
+	Value promise.Value `json:"value" binding:"required"`
 }
 
 type ResolvePromiseHeader struct {
@@ -46,7 +42,7 @@ type ResolvePromiseHeader struct {
 }
 
 type ResolvePromiseBody struct {
-	Value promise.Value `json:"value"`
+	Value promise.Value `json:"value" binding:"required"`
 }
 
 type RejectPromiseHeader struct {
@@ -56,5 +52,5 @@ type RejectPromiseHeader struct {
 }
 
 type RejectPromiseBody struct {
-	Value promise.Value `json:"value"`
+	Value promise.Value `json:"value" binding:"required"`
 }

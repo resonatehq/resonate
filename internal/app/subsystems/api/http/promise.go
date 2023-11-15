@@ -15,9 +15,7 @@ import (
 func (s *server) readPromise(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
@@ -39,35 +37,24 @@ func (s *server) readPromise(c *gin.Context) {
 func (s *server) searchPromises(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	var params service.SearchPromiseParams
 	if err := c.ShouldBindQuery(&params); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	resp, err := s.service.SearchPromises(&header, &params)
-
-	// TODO: validate 400 errors ^^ fields details etc. all that juicy stuff can be clean
-
 	if err != nil {
-		if verr, ok := err.(*service.ValidationError); ok {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"error": verr.Error(),
-			})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": err.Error(),
-			})
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
 		}
-		return
+		panic(err)
 	}
 	c.JSON(int(resp.Status), gin.H{
 		"cursor":   resp.Cursor,
@@ -79,57 +66,54 @@ func (s *server) searchPromises(c *gin.Context) {
 func (s *server) createPromise(c *gin.Context) {
 	var header service.CreatePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	var body *service.CreatePromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	resp, err := s.service.CreatePromise(c.Param("id"), &header, body)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
+		}
+		panic(err)
 	}
 
-	c.JSON(int(resp.Status), resp.Promise)
+	c.JSON(http.StatusCreated, resp.Promise)
 }
 
 // Cancel Promise
 func (s *server) cancelPromise(c *gin.Context) {
 	var header service.CancelPromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	var body *service.CancelPromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-	resp, err := s.service.CancelPromise(c.Param("id"), &header, body)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	c.JSON(int(resp.Status), resp.Promise)
+	resp, err := s.service.CancelPromise(c.Param("id"), &header, body)
+	if err != nil {
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
+		}
+		panic(err)
+	}
+
+	c.JSON(http.StatusCreated, resp.Promise)
 }
 
 // Resolve Promise
@@ -137,53 +121,53 @@ func (s *server) cancelPromise(c *gin.Context) {
 func (s *server) resolvePromise(c *gin.Context) {
 	var header service.ResolvePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	var body *service.ResolvePromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	resp, err := s.service.ResolvePromise(c.Param("id"), &header, body)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
+		}
+		panic(err)
 	}
-	c.JSON(int(resp.Status), resp.Promise)
+
+	c.JSON(http.StatusCreated, resp.Promise)
 }
 
 // Reject Promise
 func (s *server) rejectPromise(c *gin.Context) {
 	var header service.RejectPromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
 	var body *service.RejectPromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
+
 	resp, err := s.service.RejectPromise(c.Param("id"), &header, body)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": err.Error(),
-		})
-		return
+		var resp *api.APIErrorResponse
+		if errors.As(err, &resp) {
+			c.JSON(resp.StatusCode(), resp)
+			return
+		}
+		panic(err)
 	}
-	c.JSON(int(resp.Status), resp.Promise)
+
+	// 200 vs 201
+	c.JSON(http.StatusCreated, resp.Promise)
 }

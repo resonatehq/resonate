@@ -93,7 +93,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 				Metadata:   metadata,
 				Submission: req,
-				Callback: func(res *t_api.Response, err error) {
+				Callback: func(res *t_api.Response, err *t_api.PlatformLevelError) {
 					modelErr := model.Step(req, res, err)
 					if modelErr != nil {
 						errs = append(errs, modelErr)

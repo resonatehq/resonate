@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
@@ -71,7 +73,101 @@ type FieldViolation struct {
 	Description string `json:"description,omitempty"`
 }
 
-// TODO: 400 validation already being handled in api layer !!!
+/*
+A few ideas in no particular order
+1. I wonder if we can pull the (platform) errors out into a separate file,
+then we might be able to enumerate them in one place and
+specify that the return type on t
+he SQ/CQ must be our own custom type
+(that implements the Error interface)
+
+2. What do you think about combining the aio network / aio store full error into one and differentiating on a field in the custom error type?
+
+
+*/
+
+func HandlePlatformLevelError(err error) *APIErrorResponse {
+	var apiError APIError
+
+	switch err {
+	case t_api.ErrAPISubmissionQueueFull:
+		apiError = APIError{
+			Code:    http.StatusServiceUnavailable,
+			Message: "The API submission queue is full",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrAIONetworkSubmissionQueueFull:
+		apiError = APIError{
+			Code:    http.StatusServiceUnavailable,
+			Message: "The AIO network submission queue is full",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrAIOStoreSubmissionQueueFull:
+		apiError = APIError{
+			Code:    http.StatusServiceUnavailable,
+			Message: "The AIO store submission queue is full",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrSystemShuttingDown:
+		apiError = APIError{
+			Code:    http.StatusServiceUnavailable,
+			Message: "The system is shutting down",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrFailedToReadPromise:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Failed to read promise",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrFailedToParsePromiseRecord:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Failed to parse promise record",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrFailedToTimeoutPromise:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Failed to timeout promise",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrFailedToUpdatePromise:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Failed to update promise",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrNetworkFailure:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Network failure",
+			Status:  err.Error(),
+		}
+
+	case t_api.ErrStoreFailure:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: "Store failure",
+			Status:  err.Error(),
+		}
+	default:
+		apiError = APIError{
+			Code: http.StatusInternalServerError,
+		}
+	}
+
+	return &APIErrorResponse{APIError: apiError}
+}
+
 func handleAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
 	var apiError APIError
 
@@ -126,44 +222,13 @@ func handleAPIErrorResponse(status t_api.ResponseStatus) *APIErrorResponse {
 			Status:  t_api.StatusPromiseAlreadyExists.String(),
 		}
 
-	// 5xx
-
-	case t_api.StatusSystemShuttingDown:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The system is shutting down",
-			Status:  t_api.StatusSystemShuttingDown.String(),
-		}
-
-	case t_api.StatusAPISubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The API submission queue is full",
-			Status:  t_api.StatusAPISubmissionQueueFull.String(),
-		}
-
-	case t_api.StatusAIONetworkSubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The AIO network submission queue is full",
-			Status:  t_api.StatusAIONetworkSubmissionQueueFull.String(),
-		}
-
-	case t_api.StatusAIOStoreSubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The AIO store submission queue is full",
-			Status:  t_api.StatusAIOStoreSubmissionQueueFull.String(),
-		}
-
 	default:
 		panic(fmt.Sprintf("unknown status code %d", status))
 	}
 
-	// add url to error code page -- think about this
 	apiError.Details = append(apiError.Details, ErrorDetail{
 		Metadata: map[string]string{
-			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes/%d", apiError.Code), // TODO: make this the internal error code
+			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
 		},
 	})
 
@@ -176,5 +241,60 @@ func IsApplicationLevelError(status t_api.ResponseStatus) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+func HandleValidationError(err error) *APIErrorResponse {
+	var apiError APIError
+	apiError.Code = http.StatusBadRequest
+	apiError.Message = "The request is invalid"
+	apiError.Status = t_api.StatusFieldValidationFailure.String()
+
+	var details []ErrorDetail
+
+	for _, err := range parseBindingError(err) {
+		details = append(details, ErrorDetail{
+			Type:    "FieldValidationError",
+			Message: err,
+			// FieldViolations: []FieldViolation{
+			// 	{
+			// 		Field: "param",
+			// 	},
+			// },
+		})
+	}
+
+	apiError.Details = details
+
+	return &APIErrorResponse{APIError: apiError}
+}
+
+func parseBindingError(errs ...error) []string {
+	var out []string
+	for _, err := range errs {
+		switch typedErr := err.(type) {
+		case validator.ValidationErrors:
+			for _, e := range typedErr {
+				out = append(out, parseFieldError(e))
+			}
+		default:
+			out = append(out, err.Error())
+		}
+	}
+	return out
+}
+
+func parseFieldError(e validator.FieldError) string {
+	fieldPrefix := fmt.Sprintf("The field %s", e.Field())
+	tag := strings.Split(e.Tag(), "|")[0]
+
+	switch tag {
+	case "required":
+		return fmt.Sprintf("%s is required", fieldPrefix)
+	case "gte":
+		param := e.Param()
+		return fmt.Sprintf("%s must be greater than or equal to %s", fieldPrefix, param)
+	default:
+		return e.Error()
 	}
 }

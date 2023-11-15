@@ -2,7 +2,6 @@ package t_api
 
 import (
 	"fmt"
-	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -21,54 +20,6 @@ type Response struct {
 	DeleteSubscription *DeleteSubscriptionResponse
 	Echo               *EchoResponse
 }
-
-type ResponseStatus int
-
-func (s ResponseStatus) String() string {
-	return strconv.Itoa(int(s))
-}
-
-// TODO: DELET THESE
-const (
-	ResponseOK        ResponseStatus = 200
-	ResponseCreated   ResponseStatus = 201
-	ResponseNoContent ResponseStatus = 204
-	ResponseForbidden ResponseStatus = 403
-	ResponseNotFound  ResponseStatus = 404
-)
-
-// In our system, errors are separated into two categories - platform errors and application errors.
-// Platform errors represent failures at the runtime level, such as database connection issues, file I/O failures,
-// or network request problems.These are usually transient issues that are recoverable if retried later.
-// Application errors indicate errors code specific to our business logic and use cases. This separation allows us
-// to handle the two types differently - platform errors may trigger retries with backoff, while application errors
-// should report immediately to the users since these failures are not typically recoverable by simply retrying.
-//
-// In our Go system, platform errors are represented as typical Go `error` values returned from function calls. For example:
-//
-// dbResult, dbErr := database.Query("SELECT...")
-//
-// The dbErr would contain platform errors like connection failures. While application errors are returned in
-// the response object, while the `error` return is `nil`.
-const (
-	// Platform level errors (1000-1999)
-	StatusInternalServerError           ResponseStatus = 1000 // map to 500 internal server error (for now, but should be exact)
-	StatusAPISubmissionQueueFull        ResponseStatus = 1001 // map to 503 service unavailable
-	StatusAIONetworkSubmissionQueueFull ResponseStatus = 1002 // map to 503 service unavailable
-	StatusAIOStoreSubmissionQueueFull   ResponseStatus = 1003 // map to 503 service unavailable
-	StatusSystemShuttingDown            ResponseStatus = 1004 // map to 503 service unavailable
-
-	// Application level errors (2000-2999)
-	StatusOK                     ResponseStatus = 2000 // map to 200 ok
-	StatusCreated                ResponseStatus = 2001 // map to 201 created
-	StatusNoContent              ResponseStatus = 2002 // map to 204 no content ( delete is special case )
-	StatusPromiseAlreadyResolved ResponseStatus = 2003 // map to 403 forbidden
-	StatusPromiseAlreadyRejected ResponseStatus = 2004 // map to 403 forbidden
-	StatusPromiseAlreadyCanceled ResponseStatus = 2005 // map to 403 forbidden
-	StatusPromiseAlreadyTimedOut ResponseStatus = 2006 // map to 403 forbidden
-	StatusPromiseNotFound        ResponseStatus = 2007 // map to 404 not found
-	StatusPromiseAlreadyExists   ResponseStatus = 2008 // map to 409 conflict
-)
 
 type ReadPromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`

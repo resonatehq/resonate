@@ -43,7 +43,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine[*t_aio
 				},
 			},
 		})
-
+		// return nil -- "called using nil *PlatformLevelError pointer"
 		if err != nil {
 			slog.Error("failed to read timeouts", "err", err)
 			return

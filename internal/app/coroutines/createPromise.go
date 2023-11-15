@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		if req.CreatePromise.Param.Headers == nil {
 			req.CreatePromise.Param.Headers = map[string]string{}
@@ -41,7 +41,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.ErrFailedToReadPromise)
 			return
 		}
 
@@ -75,7 +75,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 			if err != nil {
 				slog.Error("failed to update promise", "req", req, "err", err)
-				res(nil, err)
+				res(nil, t_api.ErrFailedToUpdatePromise)
 				return
 			}
 
@@ -88,7 +88,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 				res(&t_api.Response{
 					Kind: t_api.CreatePromise,
 					CreatePromise: &t_api.CreatePromiseResponse{
-						Status: t_api.ResponseCreated,
+						Status: t_api.StatusCreated,
 						Promise: &promise.Promise{
 							Id:                      req.CreatePromise.Id,
 							State:                   promise.Pending,
@@ -107,22 +107,22 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.ErrFailedToParsePromiseRecord)
 				return
 			}
 
-			status := t_api.ResponseForbidden
+			status := t_api.StatusPromiseAlreadyExists
 			strict := req.CreatePromise.Strict && p.State != promise.Pending
 
 			if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
-				status = t_api.ResponseOK
+				status = t_api.StatusCreated
 			}
 
 			if p.State == promise.Pending && c.Time() >= p.Timeout {
 				c.Scheduler.Add(TimeoutPromise(metadata, p, CreatePromise(metadata, req, res), func(err error) {
 					if err != nil {
 						slog.Error("failed to timeout promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.ErrFailedToTimeoutPromise)
 						return
 					}
 

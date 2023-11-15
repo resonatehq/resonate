@@ -1,8 +1,11 @@
 package store
 
 import (
+	"log/slog"
+
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -31,7 +34,8 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 		}
 
 		if err != nil {
-			cqe.Error = err
+			slog.Error("failed store execution", "err", err)
+			cqe.Error = t_api.ErrStoreFailure
 		} else {
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Store,

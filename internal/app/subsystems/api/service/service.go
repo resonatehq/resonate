@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -11,8 +12,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
-
-func (e *ValidationError) Error() string { return e.msg }
 
 type Service struct {
 	api      api.API
@@ -38,6 +37,8 @@ func (s *Service) metadata(id string, name string) *metadata.Metadata {
 	return metadata
 }
 
+// fix this layer too for all of them -- url
+
 // Read Promise
 
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
@@ -56,8 +57,7 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		// platform level error - 5xx
-		return nil, cqe.Error
+		return nil, api.HandlePlatformLevelError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
@@ -79,15 +79,10 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 	if params.Cursor != "" {
 		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](params.Cursor)
 		if err != nil {
-			return nil, &ValidationError{msg: err.Error()}
+			return nil, api.HandleValidationError(err)
 		}
 		searchPromises = cursor.Next
 	} else {
-		// validate
-		if params.Q == "" {
-			return nil, &ValidationError{msg: "query must be provided"}
-		}
-
 		var states []promise.State
 		switch strings.ToLower(params.State) {
 		case "":
@@ -113,18 +108,13 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 				promise.Canceled,
 			}
 		default:
-			return nil, &ValidationError{"state must be one of: pending, resolved, rejected"}
-		}
-
-		limit := params.Limit
-		if limit <= 0 || limit > 100 {
-			limit = 100
+			panic(fmt.Sprintf("invalid state: %s", params.State))
 		}
 
 		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      params.Q,
 			States: states,
-			Limit:  limit,
+			Limit:  params.Limit,
 		}
 	}
 
@@ -161,8 +151,8 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
-				Param:          body.Param,
-				Timeout:        body.Timeout,
+				Param:          *body.Param,   // required
+				Timeout:        *body.Timeout, // required
 				Tags:           body.Tags,
 			},
 		},
@@ -171,10 +161,16 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, api.HandlePlatformLevelError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
+
+	if api.IsApplicationLevelError(cqe.Completion.CreatePromise.Status) {
+		return nil, api.NewAPIErrorResponse(cqe.Completion.CreatePromise.Status)
+	}
+
+	// success
 	return cqe.Completion.CreatePromise, nil
 }
 
@@ -199,7 +195,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, api.HandlePlatformLevelError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
@@ -227,7 +223,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, api.HandlePlatformLevelError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
@@ -255,15 +251,15 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, api.HandlePlatformLevelError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
 	return cqe.Completion.RejectPromise, nil
 }
 
-func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
-	return func(completion *t_api.Response, err error) {
+func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, *t_api.PlatformLevelError) {
+	return func(completion *t_api.Response, err *t_api.PlatformLevelError) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
 			// Tags:       s.protocol(),
 			Completion: completion,

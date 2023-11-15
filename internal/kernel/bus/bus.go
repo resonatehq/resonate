@@ -19,7 +19,7 @@ type Output interface {
 type SQE[I Input, O Output] struct {
 	Metadata   *metadata.Metadata
 	Submission *I
-	Callback   func(*O, error)
+	Callback   func(*O, *t_api.PlatformLevelError)
 }
 
 func (sqe *SQE[I, O]) String() string {
@@ -29,10 +29,8 @@ func (sqe *SQE[I, O]) String() string {
 type CQE[I Input, O Output] struct {
 	Metadata   *metadata.Metadata
 	Completion *O
-	Callback   func(*O, error)
-
-	// reserved for platform level errors - 5xx (same as err := but via channel)
-	Error error
+	Callback   func(*O, *t_api.PlatformLevelError)
+	Error      *t_api.PlatformLevelError
 }
 
 func (cqe *CQE[I, O]) String() string {

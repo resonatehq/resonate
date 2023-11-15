@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
+func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, *t_api.PlatformLevelError)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
 		util.Assert(req.SearchPromises.Q != "", "query must not be empty")
 		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
@@ -55,7 +55,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 		if err != nil {
 			slog.Error("failed to search promises", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.ErrFailedToSearchPromises)
 			return
 		}
 
@@ -91,7 +91,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 		res(&t_api.Response{
 			Kind: t_api.SearchPromises,
 			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.ResponseOK,
+				Status:   t_api.StatusOK,
 				Cursor:   cursor,
 				Promises: promises,
 			},

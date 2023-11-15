@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
 type Coroutine[I, O any] struct {
@@ -27,7 +28,7 @@ func (c *Coroutine[I, O]) String() string {
 
 type WrapI[I any] struct {
 	Value I
-	Error error
+	Error *t_api.PlatformLevelError
 }
 
 type WrapO[O any] struct {
@@ -59,14 +60,14 @@ func (c *Coroutine[I, O]) OnDone(f func()) {
 	c.onDone = append(c.onDone, f)
 }
 
-func (c *Coroutine[I, O]) Yield(o O) (I, error) {
+func (c *Coroutine[I, O]) Yield(o O) (I, *t_api.PlatformLevelError) {
 	c.c_o <- &WrapO[O]{Value: o, Done: false}
 
 	i := <-c.c_i
 	return i.Value, i.Error
 }
 
-func (c *Coroutine[I, O]) Resume(i I, e error) (O, bool) {
+func (c *Coroutine[I, O]) Resume(i I, e *t_api.PlatformLevelError) (O, bool) {
 	c.c_i <- &WrapI[I]{Value: i, Error: e}
 
 	o := <-c.c_o
