@@ -75,6 +75,9 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 // Search Promise
 
 func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*t_api.SearchPromisesResponse, error) {
+	if params == nil {
+		params = &SearchPromiseParams{}
+	}
 	var searchPromises *t_api.SearchPromisesRequest
 	if params.Cursor != "" {
 		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](params.Cursor)
@@ -85,7 +88,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 	} else {
 		// set default query
 		if params.Q == nil {
-			*params.Q = "*"
+			params.Q = util.ToPointer("*")
 		}
 
 		var states []promise.State
@@ -118,7 +121,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 
 		// set default limit
 		if params.Limit == nil || *params.Limit == 0 {
-			*params.Limit = 100
+			params.Limit = util.ToPointer(100)
 		}
 
 		searchPromises = &t_api.SearchPromisesRequest{

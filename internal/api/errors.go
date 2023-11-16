@@ -287,7 +287,7 @@ func parseFieldError(e validator.FieldError) string {
 	case "lte":
 		param := e.Param()
 		return fmt.Sprintf("%s must be less than or equal to %s", fieldPrefix, param)
-	case "oneof":
+	case "oneof", "oneofcaseinsensitive":
 		param := e.Param()
 		paramArr := strings.Split(param, " ")
 		paramArr[len(paramArr)-1] = "or " + paramArr[len(paramArr)-1]
