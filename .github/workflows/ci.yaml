@@ -101,6 +101,12 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
 
+    - uses: actions/upload-artifact@v3
+      if: ${{ always() }}
+      with:
+        name: test-harness-results
+        path: test/results/
+
     # - name: Build test harness
     #   run: |
     #     go build -o harness
@@ -109,12 +115,6 @@ jobs:
     #   run: |
     #     chmod +x harness
     #     ./harness verify -r 1000 -c 10
-
-    - uses: actions/upload-artifact@v3
-      if: ${{ always() }}
-      with:
-        name: test-harness-results
-        path: test/results/
 
   semgrep:
     name: semgrep
