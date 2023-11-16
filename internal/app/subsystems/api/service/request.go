@@ -7,10 +7,10 @@ type Header struct {
 }
 
 type SearchPromiseParams struct {
-	Q      string `form:"q" json:"q"` // TODO: what is proper validation here -- DSL?
-	State  string `form:"state" json:"state" binding:"omitempty,oneof=pending resolved rejected"`
-	Limit  *int   `form:"limit" json:"limit" binding:"omitempty,gt=0,lte=100"`
-	Cursor string `form:"cursor" json:"cursor"`
+	Q      *string `form:"q" json:"q" binding:"omitempty,len=1"` // PLAY AROUND MORE WITH THIS ??? --
+	State  string  `form:"state" json:"state" binding:"omitempty,oneof=pending resolved rejected"`
+	Limit  *int    `form:"limit" json:"limit" binding:"omitempty,gt=0,lte=100"`
+	Cursor string  `form:"cursor" json:"cursor"`
 }
 
 type CreatePromiseHeader struct {
@@ -20,7 +20,7 @@ type CreatePromiseHeader struct {
 }
 
 type CreatePromiseBody struct {
-	Param   *promise.Value    `json:"param" binding:"required"`
+	Param   *promise.Value    `json:"param"`
 	Timeout *int64            `json:"timeout" binding:"required,gte=0"`
 	Tags    map[string]string `json:"tags"`
 }
@@ -32,7 +32,7 @@ type CancelPromiseHeader struct {
 }
 
 type CancelPromiseBody struct {
-	Value promise.Value `json:"value" binding:"required"`
+	Value promise.Value `json:"value"`
 }
 
 type ResolvePromiseHeader struct {
@@ -42,7 +42,7 @@ type ResolvePromiseHeader struct {
 }
 
 type ResolvePromiseBody struct {
-	Value promise.Value `json:"value" binding:"required"`
+	Value promise.Value `json:"value"`
 }
 
 type RejectPromiseHeader struct {
@@ -52,5 +52,5 @@ type RejectPromiseHeader struct {
 }
 
 type RejectPromiseBody struct {
-	Value promise.Value `json:"value" binding:"required"`
+	Value promise.Value `json:"value"`
 }

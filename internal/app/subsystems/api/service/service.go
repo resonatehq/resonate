@@ -61,7 +61,7 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 		return nil, api.HandlePlatformLevelError(resErr)
 	}
 
-	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
+	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil") // WHY AM I GETTING NIL RESPONSES?
 
 	// application level error - 3xx, 4xx
 	if api.IsApplicationLevelError(cqe.Completion.ReadPromise.Status) {
@@ -84,8 +84,8 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		searchPromises = cursor.Next
 	} else {
 		// set default query
-		if params.Q == "" {
-			params.Q = "*"
+		if params.Q == nil {
+			*params.Q = "*"
 		}
 
 		var states []promise.State
@@ -122,7 +122,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		}
 
 		searchPromises = &t_api.SearchPromisesRequest{
-			Q:      params.Q,
+			Q:      *params.Q,
 			States: states,
 			Limit:  *params.Limit,
 		}
@@ -167,8 +167,8 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
-				Param:          *body.Param,   // required
-				Timeout:        *body.Timeout, // required
+				Param:          util.SafeDeref(body.Param),
+				Timeout:        *body.Timeout, // required by binding
 				Tags:           body.Tags,
 			},
 		},

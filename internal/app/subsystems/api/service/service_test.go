@@ -31,10 +31,11 @@ func TestReadPromise(t *testing.T) {
 	serviceTest := setup()
 
 	for _, tc := range []struct {
-		name string
-		id   string
-		req  *t_api.Request
-		res  *t_api.Response
+		name           string
+		id             string
+		req            *t_api.Request
+		res            *t_api.Response
+		expectedErrMsg *string
 	}{
 		{
 			name: "ReadPromise",
@@ -72,6 +73,7 @@ func TestReadPromise(t *testing.T) {
 					Promise: nil,
 				},
 			},
+			expectedErrMsg: util.ToPointer(`{"error":{"code":404,"message":"The specified promise was not found","status":"4040","details":[{"@type":"ApplicationLevelError","message":"Application level errors are not retryable since they are caused by invalid client requests","domain":"application","metadata":{"url":"https://docs.resonatehq.io/reference/error-codes#4040"}}]}}`),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,7 +81,8 @@ func TestReadPromise(t *testing.T) {
 
 			res, err := serviceTest.service.ReadPromise(tc.id, &Header{})
 			if err != nil {
-				t.Fatal(err)
+				assert.Equal(t, *tc.expectedErrMsg, err.Error())
+				return
 			}
 
 			assert.Equal(t, tc.res.ReadPromise, res)
@@ -99,7 +102,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromises",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
@@ -166,7 +169,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesPending",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "pending",
 				Limit: util.ToPointer(10),
 			},
@@ -192,7 +195,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesResolved",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "resolved",
 				Limit: util.ToPointer(10),
 			},
@@ -218,7 +221,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesRejected",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "rejected",
 				Limit: util.ToPointer(10),
 			},
