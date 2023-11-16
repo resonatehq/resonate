@@ -107,19 +107,21 @@ func HandleResonateError(err *t_api.ResonateError) *APIErrorResponse {
 		}
 
 	default:
-		apiError = APIError{
-			Code: http.StatusInternalServerError,
-		}
+		panic(fmt.Sprintf("unknown error code %d", err.Code()))
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
-		Type:    "ServerError",
-		Message: err.Unwrap().Error(),
-		Domain:  "platform",
+		Type:   "ServerError",
+		Domain: "server",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
 		},
 	})
+
+	ogErr := err.Unwrap()
+	if ogErr != nil {
+		apiError.Details[0].Message = ogErr.Error()
+	}
 
 	return &APIErrorResponse{APIError: apiError}
 }
