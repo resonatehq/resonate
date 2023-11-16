@@ -88,16 +88,27 @@ jobs:
     - name: Checkout test harness 
       uses: actions/checkout@v3
       with: 
-        repository: resonatehq/durable-promise-test-harness
+        # repository: resonatehq/durable-promise-test-harness
+        repository: guergabo/durable-promise-test-harness
+        ref: error-handling
 
-    - name: Build test harness
+    - name: Run test harness 
       run: |
-        go build -o harness
+        go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+
+    - name: Upload coverage report to Codecov
+      uses: codecov/codecov-action@v3 # nosemgrep
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+    # - name: Build test harness
+    #   run: |
+    #     go build -o harness
     
-    - name: Run linearizability check 
-      run: |
-        chmod +x harness
-        ./harness verify -r 1000 -c 10
+    # - name: Run linearizability check 
+    #   run: |
+    #     chmod +x harness
+    #     ./harness verify -r 1000 -c 10
 
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}

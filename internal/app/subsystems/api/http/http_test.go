@@ -243,11 +243,19 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
-			name:   "SearchPromisesInvalidQuery", // this is nil pointer dereference
+			name:   "SearchPromisesInvalidQuery",
 			path:   "promises?q=",
 			method: "GET",
 			req:    nil,
-			res:    nil, // TODO: needs to be an error
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchPromisesInvalidLimit",
+			path:   "promises?limit=-1",
+			method: "GET",
+			req:    nil,
+			res:    nil,
 			status: 400,
 		},
 		{
@@ -255,7 +263,7 @@ func TestHttpServer(t *testing.T) {
 			path:   "promises?q=*&state=*",
 			method: "GET",
 			req:    nil,
-			res:    nil, // TODO: needs to be an error ?? not checking it ?
+			res:    nil,
 			status: 400,
 		},
 		{
@@ -299,7 +307,7 @@ func TestHttpServer(t *testing.T) {
 			status: 201,
 		},
 		{
-			name:   "CreatePromiseMinimal", // TODO: this one failed
+			name:   "CreatePromiseMinimal",
 			path:   "promises/foo/create",
 			method: "POST",
 			body: []byte(`{
@@ -557,7 +565,7 @@ func TestHttpServer(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tc.status, res.StatusCode, string(body)) // it is not asserting body, just asserting status code
+			assert.Equal(t, tc.status, res.StatusCode, string(body))
 
 			// TODO: assert body
 
