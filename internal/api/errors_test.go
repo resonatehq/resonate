@@ -159,10 +159,12 @@ func TestIsRequestError(t *testing.T) {
 
 type fieldErrorMock struct {
 	validator.FieldError
+	field string
+	tag   string
 }
 
-func (m fieldErrorMock) Field() string { return "Timeout" }
-func (m fieldErrorMock) Tag() string   { return "required" }
+func (m fieldErrorMock) Field() string { return m.field }
+func (m fieldErrorMock) Tag() string   { return m.tag }
 func (m fieldErrorMock) Error() string { return "" }
 
 func TestValidationError(t *testing.T) {
@@ -177,7 +179,10 @@ func TestValidationError(t *testing.T) {
 		{
 			name: "MissingRequiredField",
 			inputErr: validator.ValidationErrors{
-				fieldErrorMock{},
+				fieldErrorMock{
+					field: "Timeout",
+					tag:   "required",
+				},
 			},
 			expectedCode:   http.StatusBadRequest,
 			expectedStatus: "4000",
