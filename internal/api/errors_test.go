@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/require"
 )
@@ -115,6 +116,84 @@ func TestHandleRequestError(t *testing.T) {
 
 			require.Equal(t, tc.expectedCode, result.APIError.Code)
 			require.Equal(t, tc.expectedStatus, result.APIError.Status)
+		})
+	}
+}
+
+func TestIsRequestError(t *testing.T) {
+	tcs := []struct {
+		name           string
+		inputError     t_api.ResponseStatus
+		expectedResult bool
+	}{
+		{
+			name:           "StatusOK",
+			inputError:     t_api.StatusOK,
+			expectedResult: false,
+		},
+		{
+			name:           "StatusCreated",
+			inputError:     t_api.StatusCreated,
+			expectedResult: false,
+		},
+		{
+			name:           "StatusNoContent",
+			inputError:     t_api.StatusNoContent,
+			expectedResult: false,
+		},
+		{
+			name:           "StatusPromiseAlreadyResolved",
+			inputError:     t_api.StatusPromiseAlreadyResolved,
+			expectedResult: true,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			result := IsRequestError(tc.inputError)
+
+			require.Equal(t, tc.expectedResult, result)
+		})
+	}
+}
+
+type fieldErrorMock struct {
+	validator.FieldError
+}
+
+func (m fieldErrorMock) Field() string { return "Timeout" }
+func (m fieldErrorMock) Tag() string   { return "required" }
+func (m fieldErrorMock) Error() string { return "" }
+
+func TestValidationError(t *testing.T) {
+	tcs := []struct {
+		name           string
+		inputErr       validator.ValidationErrors
+		expectedCode   int
+		expectedStatus string
+		expectedErrMsg string
+		expectedDetail string
+	}{
+		{
+			name: "MissingRequiredField",
+			inputErr: validator.ValidationErrors{
+				fieldErrorMock{},
+			},
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "The field Timeout is required",
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			result := HandleValidationError(tc.inputErr)
+
+			require.Equal(t, tc.expectedCode, result.APIError.Code)
+			require.Equal(t, tc.expectedStatus, result.APIError.Status)
+			require.Equal(t, tc.expectedErrMsg, result.APIError.Message)
+			require.Equal(t, tc.expectedDetail, result.APIError.Details[0].Message)
 		})
 	}
 }

@@ -11,7 +11,6 @@ import (
 )
 
 // Read Promise
-
 func (s *server) readPromise(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -33,7 +32,6 @@ func (s *server) readPromise(c *gin.Context) {
 }
 
 // Search Promise
-
 func (s *server) searchPromises(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -87,7 +85,7 @@ func (s *server) createPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
+	c.JSON(resp.Status.HTTP(), resp.Promise)
 }
 
 // Cancel Promise
@@ -114,11 +112,10 @@ func (s *server) cancelPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
+	c.JSON(resp.Status.HTTP(), resp.Promise)
 }
 
 // Resolve Promise
-
 func (s *server) resolvePromise(c *gin.Context) {
 	var header service.ResolvePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -142,7 +139,7 @@ func (s *server) resolvePromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
+	c.JSON(resp.Status.HTTP(), resp.Promise)
 }
 
 // Reject Promise
@@ -169,5 +166,5 @@ func (s *server) rejectPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
+	c.JSON(resp.Status.HTTP(), resp.Promise)
 }
