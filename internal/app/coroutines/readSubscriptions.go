@@ -33,7 +33,7 @@ func ReadSubscriptions(metadata *metadata.Metadata, req *t_api.Request, res func
 
 		if err != nil {
 			slog.Error("failed to read subscriptions", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrFailedToReadSubscriptions, err.Error()))
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read subscriptions", err))
 			return
 		}
 

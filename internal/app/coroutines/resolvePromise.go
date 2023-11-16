@@ -38,7 +38,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrFailedToReadPromise, err.Error()))
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err))
 			return
 		}
 
@@ -58,7 +58,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, t_api.NewResonateError(t_api.ErrFailedToParsePromiseRecord, err.Error()))
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "", err))
 				return
 			}
 
@@ -67,7 +67,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 					c.Scheduler.Add(TimeoutPromise(metadata, p, ResolvePromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, t_api.NewResonateError(t_api.ErrFailedToTimeoutPromise, err.Error()))
+							res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "", err))
 							return
 						}
 
@@ -130,7 +130,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, t_api.NewResonateError(t_api.ErrFailedToUpdatePromise, err.Error()))
+						res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "", err))
 						return
 					}
 
@@ -162,7 +162,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 					}
 				}
 			} else {
-				status := getForbiddenStatus(p.State)
+				status := util.GetForbiddenStatus(p.State)
 				strict := req.ResolvePromise.Strict && p.State != promise.Resolved
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdempotencyKey) {

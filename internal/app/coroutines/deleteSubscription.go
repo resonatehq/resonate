@@ -31,7 +31,7 @@ func DeleteSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 		if err != nil {
 			slog.Error("failed to delete subscription", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrFailedToDeleteSubscription, err.Error()))
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to delete subscription", err))
 			return
 		}
 

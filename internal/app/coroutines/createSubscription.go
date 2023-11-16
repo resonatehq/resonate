@@ -44,7 +44,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 		if err != nil {
 			slog.Error("failed to create subscription", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrFailedToCreateSubscription, err.Error()))
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create subscription", err))
 			return
 		}
 
@@ -87,7 +87,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 
 			if err != nil {
 				slog.Error("failed to read subscription", "req", req, "err", err)
-				res(nil, t_api.NewResonateError(t_api.ErrFailedToReadSubscription, err.Error()))
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read subscription", err))
 				return
 			}
 
@@ -100,7 +100,7 @@ func CreateSubscription(metadata *metadata.Metadata, req *t_api.Request, res fun
 				subscription, err := result.Records[0].Subscription()
 				if err != nil {
 					slog.Error("failed to parse subscription record", "record", result.Records[0], "err", err)
-					res(nil, t_api.NewResonateError(t_api.ErrFailedToParseSubscriptionRecord, err.Error()))
+					res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse subscription record", err))
 					return
 				}
 

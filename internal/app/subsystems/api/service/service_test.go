@@ -73,7 +73,7 @@ func TestReadPromise(t *testing.T) {
 					Promise: nil,
 				},
 			},
-			expectedErrMsg: util.ToPointer(`{"error":{"code":404,"message":"The specified promise was not found","status":"4040","details":[{"@type":"ApplicationLevelError","message":"Application level errors are not retryable since they are caused by invalid client requests","domain":"application","metadata":{"url":"https://docs.resonatehq.io/reference/error-codes#4040"}}]}}`),
+			expectedErrMsg: util.ToPointer(`{"error":{"code":404,"message":"The specified promise was not found","status":"4040","details":[{"@type":"RequestError","message":"Request errors are not retryable since they are caused by invalid client requests","domain":"request","metadata":{"url":"https://docs.resonatehq.io/reference/error-codes#4040"}}]}}`),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

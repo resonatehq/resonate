@@ -64,75 +64,48 @@ func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 
 	// 5xx
 
-	case t_api.ErrAPISubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The API submission queue is full",
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIONetworkSubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The AIO network submission queue is full",
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIOStoreSubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: "The AIO store submission queue is full",
-			Status:  err.Code().String(),
-		}
-
 	case t_api.ErrSystemShuttingDown:
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
-			Message: "The system is shutting down",
+			Message: err.Error(),
 			Status:  err.Code().String(),
 		}
 
-	case t_api.ErrFailedToReadPromise:
+	case t_api.ErrAPISubmissionQueueFull:
 		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to read promise",
+			Code:    http.StatusServiceUnavailable,
+			Message: err.Error(),
 			Status:  err.Code().String(),
 		}
 
-	case t_api.ErrFailedToParsePromiseRecord:
+	case t_api.ErrAIOSubmissionQueueFull:
 		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to parse promise record",
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrFailedToTimeoutPromise:
-		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to timeout promise",
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrFailedToUpdatePromise:
-		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: "Failed to update promise",
+			Code:    http.StatusServiceUnavailable,
+			Message: err.Error(),
 			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIONetworkFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
-			Message: "Network failure",
+			Message: err.Error(),
 			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIOStoreFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
-			Message: "Store failure",
+			Message: err.Error(),
 			Status:  err.Code().String(),
 		}
+
+	case t_api.ErrAIOStoreSerializationFailure:
+		apiError = APIError{
+			Code:    http.StatusInternalServerError,
+			Message: err.Error(),
+			Status:  err.Code().String(),
+		}
+
 	default:
 		apiError = APIError{
 			Code: http.StatusInternalServerError,
@@ -140,8 +113,8 @@ func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
-		Type:    "ResonateError",
-		Message: err.Error(),
+		Type:    "ServerError",
+		Message: err.Unwrap().Error(),
 		Domain:  "platform",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
@@ -220,9 +193,9 @@ func HandleApplicationLevelError(status t_api.ResponseStatus) *APIErrorResponse 
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
-		Type:    "ApplicationLevelError",
-		Message: "Application level errors are not retryable since they are caused by invalid client requests",
-		Domain:  "application",
+		Type:    "RequestError",
+		Message: "Request errors are not retryable since they are caused by invalid client requests",
+		Domain:  "request",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
 		},

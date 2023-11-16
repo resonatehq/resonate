@@ -15,7 +15,7 @@ package t_api
 
 import "strconv"
 
-// Application level status (2000-4999
+// Application level status (2000-4999)
 
 type ResponseStatus int
 
@@ -51,41 +51,41 @@ func (e ResonateErrorCode) String() string {
 }
 
 const (
+	// catch call for now
 	ErrInternalServer = iota + 5000
-	ErrAPISubmissionQueueFull
-	ErrAIONetworkSubmissionQueueFull
-	ErrAIOStoreSubmissionQueueFull
+
+	// API
 	ErrSystemShuttingDown
-	ErrFailedToReadPromise
-	ErrFailedToSearchPromises
-	ErrFailedToParsePromiseRecord
-	ErrFailedToTimeoutPromise
-	ErrFailedToUpdatePromise
+	ErrAPISubmissionQueueFull
+
+	// AIO
+	ErrAIOSubmissionQueueFull
 	ErrAIONetworkFailure
 	ErrAIOStoreFailure
-	ErrFailedToReadSubscriptions
-	ErrFailedToCreateSubscription
-	ErrFailedToReadSubscription
-	ErrFailedToParseSubscriptionRecord
-	ErrFailedToDeleteSubscription
+	ErrAIOStoreSerializationFailure
 )
 
 type ResonateError struct {
-	code     ResonateErrorCode
-	metadata string
+	code   ResonateErrorCode
+	reason string
+	ogErr  error
 }
 
-func NewResonateError(code ResonateErrorCode, metadata string) *ResonateError {
-	return &ResonateError{code: code, metadata: metadata}
+func NewResonateError(code ResonateErrorCode, out string, in error) *ResonateError {
+	return &ResonateError{
+		code:   code,
+		reason: out,
+		ogErr:  in,
+	}
 }
 
 func (e *ResonateError) Error() string {
-	return e.metadata
+	return e.reason
 }
 
-// func (e *ResonateError) Metadata() string {
-// 	return e.metadata
-// }
+func (e *ResonateError) Unwrap() error {
+	return e.ogErr
+}
 
 func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code

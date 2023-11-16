@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
@@ -40,7 +39,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
 			// put in original error
-			res(nil, t_api.NewResonateError(t_api.ErrFailedToReadPromise, err.Error()))
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err))
 			// store submission is failing -- single AIOStoreSubmissionFailure -- metadata information on that guy
 			return
 		}
@@ -61,7 +60,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, t_api.NewResonateError(t_api.ErrFailedToParsePromiseRecord, err.Error()))
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err))
 				return
 			}
 
@@ -70,7 +69,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					c.Scheduler.Add(TimeoutPromise(metadata, p, CancelPromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, t_api.NewResonateError(t_api.ErrFailedToTimeoutPromise, err.Error()))
+							res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to timeout promise", err))
 							return
 						}
 
@@ -133,7 +132,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, t_api.NewResonateError(t_api.ErrFailedToUpdatePromise, err.Error()))
+						res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err))
 						return
 					}
 
@@ -166,7 +165,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := getForbiddenStatus(p.State)
+				status := util.GetForbiddenStatus(p.State)
 				strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdempotencyKey) {
@@ -183,20 +182,4 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			}
 		}
 	})
-}
-
-// move to utils
-func getForbiddenStatus(currentState promise.State) t_api.ResponseStatus {
-	switch currentState {
-	case promise.Resolved:
-		return t_api.StatusPromiseAlreadyResolved
-	case promise.Rejected:
-		return t_api.StatusPromiseAlreadyRejected
-	case promise.Canceled:
-		return t_api.StatusPromiseAlreadyCanceled
-	case promise.Timedout:
-		return t_api.StatusPromiseAlreadyTimedOut
-	default:
-		panic(fmt.Sprintf("invalid promise state: %v", currentState))
-	}
 }

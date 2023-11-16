@@ -111,15 +111,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
 		default:
-			switch sqe.Submission.Kind {
-			case t_aio.Network:
-
-				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIONetworkSubmissionQueueFull, "aio: network submission queue full"))
-			case t_aio.Store:
-				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOStoreSubmissionQueueFull, "aio: store submission queue full"))
-			default:
-				panic(fmt.Sprintf("invalid aio submission kind: %s", sqe.Submission.Kind))
-			}
+			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, "submission queue full", fmt.Errorf("aio:subsytem:%v store submission queue full", subsystem)))
 		}
 	} else {
 		panic("invalid aio submission")
