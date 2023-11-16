@@ -1,6 +1,7 @@
 package system
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"testing"
@@ -95,8 +96,10 @@ func TestSystemLoop(t *testing.T) {
 			Callback: func(res *t_api.Response, err error) {
 				recieved <- 1
 
+				var apiErr *t_api.ResonateError
+				assert.True(t, errors.As(err, &apiErr))
 				assert.NotNil(t, err)
-				assert.ErrorContains(t, err, "system is shutting down")
+				assert.ErrorContains(t, apiErr, "system is shutting down")
 			},
 		})
 	}

@@ -46,6 +46,10 @@ const (
 
 type ResonateErrorCode int
 
+func (e ResonateErrorCode) String() string {
+	return strconv.Itoa(int(e))
+}
+
 const (
 	ErrInternalServer = iota + 5000
 	ErrAPISubmissionQueueFull
@@ -76,12 +80,12 @@ func NewResonateError(code ResonateErrorCode, metadata string) *ResonateError {
 }
 
 func (e *ResonateError) Error() string {
-	return strconv.Itoa(int(e.code))
-}
-
-func (e *ResonateError) Metadata() string {
 	return e.metadata
 }
+
+// func (e *ResonateError) Metadata() string {
+// 	return e.metadata
+// }
 
 func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code

@@ -68,70 +68,70 @@ func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
 			Message: "The API submission queue is full",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIONetworkSubmissionQueueFull:
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
 			Message: "The AIO network submission queue is full",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIOStoreSubmissionQueueFull:
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
 			Message: "The AIO store submission queue is full",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrSystemShuttingDown:
 		apiError = APIError{
 			Code:    http.StatusServiceUnavailable,
 			Message: "The system is shutting down",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrFailedToReadPromise:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Failed to read promise",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrFailedToParsePromiseRecord:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Failed to parse promise record",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrFailedToTimeoutPromise:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Failed to timeout promise",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrFailedToUpdatePromise:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Failed to update promise",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIONetworkFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Network failure",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 
 	case t_api.ErrAIOStoreFailure:
 		apiError = APIError{
 			Code:    http.StatusInternalServerError,
 			Message: "Store failure",
-			Status:  err.Error(),
+			Status:  err.Code().String(),
 		}
 	default:
 		apiError = APIError{
@@ -141,7 +141,7 @@ func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
 		Type:    "ResonateError",
-		Message: err.Metadata(),
+		Message: err.Error(),
 		Domain:  "platform",
 		Metadata: map[string]string{
 			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
