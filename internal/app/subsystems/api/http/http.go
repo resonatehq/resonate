@@ -33,7 +33,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// register custom validators
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
-		v.RegisterValidation("oneofcaseinsensitive", service.OneOfCaseInsensitive)
+		_ = v.RegisterValidation("oneofcaseinsensitive", service.OneOfCaseInsensitive)
 	}
 
 	// Middleware
