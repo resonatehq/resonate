@@ -16,10 +16,16 @@ package t_api
 import "strconv"
 
 // Application level status (2000-4999
+
 type ResponseStatus int
 
 func (s ResponseStatus) String() string {
 	return strconv.Itoa(int(s))
+}
+
+// methods to map to http status code
+func (s ResponseStatus) HTTP() int {
+	return int(s) / 10
 }
 
 const (
@@ -36,7 +42,8 @@ const (
 	StatusPromiseAlreadyExists   ResponseStatus = 4090
 )
 
-// Platform level errors (5000-5999
+// Platform level errors (5000-5999)
+
 type ResonateErrorCode int
 
 const (

@@ -170,7 +170,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 				strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdempotencyKey) {
-					status = t_api.StatusCreated
+					status = t_api.StatusOK
 				}
 
 				res(&t_api.Response{

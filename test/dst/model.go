@@ -187,8 +187,8 @@ func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) er
 		// update model state
 		pm.promise = res.CreatePromise.Promise
 		return nil
-	// case t_api.ResponseForbidden:
-	// 	return nil
+	case t_api.StatusPromiseAlreadyExists:
+		return nil
 	case t_api.StatusPromiseNotFound:
 		return fmt.Errorf("invalid response '%d' for create promise request", res.CreatePromise.Status)
 	default:
@@ -233,13 +233,13 @@ func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.CancelPromise.Promise
 		return nil
-	// case t_api.ResponseForbidden:
-	// 	return nil
-	// case t_api.ResponseNotFound:
-	// 	if pm.promise != nil {
-	// 		return fmt.Errorf("promise exists %s", pm.promise)
-	// 	}
-	// 	return nil
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
+		return nil
+	case t_api.StatusPromiseNotFound:
+		if pm.promise != nil {
+			return fmt.Errorf("promise exists %s", pm.promise)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.CancelPromise.Status)
 	}
@@ -282,13 +282,13 @@ func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) 
 		// update model state
 		pm.promise = res.ResolvePromise.Promise
 		return nil
-	// case t_api.ResponseForbidden:
-	// 	return nil
-	// case t_api.ResponseNotFound:
-	// 	if pm.promise != nil {
-	// 		return fmt.Errorf("promise exists %s", pm.promise)
-	// 	}
-	// 	return nil
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
+		return nil
+	case t_api.StatusPromiseNotFound:
+		if pm.promise != nil {
+			return fmt.Errorf("promise exists %s", pm.promise)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.ResolvePromise.Status)
 	}
@@ -298,7 +298,7 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 	pm := m.promises.Get(req.RejectPromise.Id)
 
 	switch res.RejectPromise.Status {
-	case t_api.StatusOK:
+	case t_api.StatusOK: // dst use the 200 for idempotency,, uggghhh
 		if pm.completed() {
 			if !pm.idempotencyKeyForCompleteMatch(res.RejectPromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.RejectPromise.Promise.IdempotencyKeyForComplete)
@@ -331,13 +331,13 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.RejectPromise.Promise
 		return nil
-	// case t_api.ResponseForbidden:
-	// 	return nil
-	// case t_api.ResponseNotFound:
-	// 	if pm.promise != nil {
-	// 		return fmt.Errorf("promise exists %s", pm.promise)
-	// 	}
-	// 	return nil
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
+		return nil
+	case t_api.StatusPromiseNotFound:
+		if pm.promise != nil {
+			return fmt.Errorf("promise exists %s", pm.promise)
+		}
+		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.RejectPromise.Status)
 	}
@@ -387,16 +387,16 @@ func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Respon
 }
 
 func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Response) error {
-	// pm := m.promises.Get(req.DeleteSubscription.PromiseId)
-	// 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
+	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
+	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
 
 	switch res.DeleteSubscription.Status {
-	// case t_api.ResponseNoContent:
-	// 	sm.subscription = nil
-	// 	return nil
-	// case t_api.ResponseNotFound:
-	// 	sm.subscription = nil
-	// 	return nil
+	case t_api.StatusNoContent:
+		sm.subscription = nil
+		return nil
+	case t_api.StatusSubscriptionNotFound:
+		sm.subscription = nil
+		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSubscription.Status)
 	}

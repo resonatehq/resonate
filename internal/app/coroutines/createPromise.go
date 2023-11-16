@@ -116,7 +116,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			strict := req.CreatePromise.Strict && p.State != promise.Pending
 
 			if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
-				status = t_api.StatusCreated
+				status = t_api.StatusOK
 			}
 
 			if p.State == promise.Pending && c.Time() >= p.Timeout {

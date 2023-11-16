@@ -87,7 +87,7 @@ func (s *server) createPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(http.StatusCreated, resp.Promise)
+	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
 }
 
 // Cancel Promise
@@ -114,7 +114,7 @@ func (s *server) cancelPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(http.StatusCreated, resp.Promise)
+	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
 }
 
 // Resolve Promise
@@ -142,7 +142,7 @@ func (s *server) resolvePromise(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(http.StatusCreated, resp.Promise)
+	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
 }
 
 // Reject Promise
@@ -169,6 +169,5 @@ func (s *server) rejectPromise(c *gin.Context) {
 		panic(err)
 	}
 
-	// 200 vs 201
-	c.JSON(http.StatusCreated, resp.Promise)
+	c.JSON(resp.Status.HTTP(), resp.Promise) // map to http status code
 }
