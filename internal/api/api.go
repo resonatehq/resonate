@@ -108,8 +108,10 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.CreateSubscription.Status)
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
+			case t_api.Echo:
+				status = 200
 			default:
-				panic(fmt.Errorf("unknown response kind: %v", res.Kind))
+				panic(fmt.Errorf("unknown response kind: %d", res.Kind))
 			}
 		}
 
