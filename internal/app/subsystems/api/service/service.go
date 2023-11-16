@@ -58,14 +58,14 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 	if cqe.Error != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandlePlatformLevelError(resErr)
+		return nil, api.HandleResonateError(resErr)
 	}
 
 	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil") // WHY AM I GETTING NIL RESPONSES?
 
 	// application level error - 3xx, 4xx
-	if api.IsApplicationLevelError(cqe.Completion.ReadPromise.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.ReadPromise.Status)
+	if api.IsRequestError(cqe.Completion.ReadPromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.ReadPromise.Status)
 	}
 
 	// success
@@ -149,8 +149,8 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 
 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
 
-	if api.IsApplicationLevelError(cqe.Completion.SearchPromises.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.SearchPromises.Status)
+	if api.IsRequestError(cqe.Completion.SearchPromises.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.SearchPromises.Status)
 	}
 
 	// success
@@ -182,13 +182,13 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 	if cqe.Error != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandlePlatformLevelError(resErr)
+		return nil, api.HandleResonateError(resErr)
 	}
 
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
 
-	if api.IsApplicationLevelError(cqe.Completion.CreatePromise.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.CreatePromise.Status)
+	if api.IsRequestError(cqe.Completion.CreatePromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.CreatePromise.Status)
 	}
 
 	// success
@@ -218,13 +218,13 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 	if cqe.Error != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandlePlatformLevelError(resErr)
+		return nil, api.HandleResonateError(resErr)
 	}
 
 	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
 
-	if api.IsApplicationLevelError(cqe.Completion.CancelPromise.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.CancelPromise.Status)
+	if api.IsRequestError(cqe.Completion.CancelPromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.CancelPromise.Status)
 	}
 
 	// success
@@ -254,13 +254,13 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 	if cqe.Error != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandlePlatformLevelError(resErr)
+		return nil, api.HandleResonateError(resErr)
 	}
 
 	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
 
-	if api.IsApplicationLevelError(cqe.Completion.ResolvePromise.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.ResolvePromise.Status)
+	if api.IsRequestError(cqe.Completion.ResolvePromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.ResolvePromise.Status)
 	}
 
 	// success
@@ -290,13 +290,13 @@ func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *Re
 	if cqe.Error != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandlePlatformLevelError(resErr)
+		return nil, api.HandleResonateError(resErr)
 	}
 
 	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
 
-	if api.IsApplicationLevelError(cqe.Completion.RejectPromise.Status) {
-		return nil, api.HandleApplicationLevelError(cqe.Completion.RejectPromise.Status)
+	if api.IsRequestError(cqe.Completion.RejectPromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.RejectPromise.Status)
 	}
 
 	// success

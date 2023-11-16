@@ -56,8 +56,8 @@ type ErrorDetail struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// HandlePlatformLevelError handles platform level errors and returns an APIErrorResponse.
-func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
+// HandleResonateError handles platform level errors and returns an APIErrorResponse.
+func HandleResonateError(err *t_api.ResonateError) *APIErrorResponse {
 	var apiError APIError
 
 	switch err.Code() {
@@ -124,7 +124,7 @@ func HandlePlatformLevelError(err *t_api.ResonateError) *APIErrorResponse {
 	return &APIErrorResponse{APIError: apiError}
 }
 
-func IsApplicationLevelError(status t_api.ResponseStatus) bool {
+func IsRequestError(status t_api.ResponseStatus) bool {
 	switch status {
 	case t_api.StatusOK, t_api.StatusCreated, t_api.StatusNoContent:
 		return false
@@ -133,8 +133,8 @@ func IsApplicationLevelError(status t_api.ResponseStatus) bool {
 	}
 }
 
-// HandleApplicationLevelError handles application level errors and returns an APIErrorResponse.
-func HandleApplicationLevelError(status t_api.ResponseStatus) *APIErrorResponse {
+// HandleRequestError handles application level errors and returns an APIErrorResponse.
+func HandleRequestError(status t_api.ResponseStatus) *APIErrorResponse {
 	var apiError APIError
 
 	switch status {
