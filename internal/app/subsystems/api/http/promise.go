@@ -21,9 +21,9 @@ func (s *server) readPromise(c *gin.Context) {
 
 	resp, err := s.service.ReadPromise(c.Param("id"), &header)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
@@ -49,9 +49,9 @@ func (s *server) searchPromises(c *gin.Context) {
 
 	resp, err := s.service.SearchPromises(&header, &params)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
@@ -79,9 +79,9 @@ func (s *server) createPromise(c *gin.Context) {
 
 	resp, err := s.service.CreatePromise(c.Param("id"), &header, body)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
@@ -106,9 +106,9 @@ func (s *server) cancelPromise(c *gin.Context) {
 
 	resp, err := s.service.CancelPromise(c.Param("id"), &header, body)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
@@ -134,9 +134,9 @@ func (s *server) resolvePromise(c *gin.Context) {
 
 	resp, err := s.service.ResolvePromise(c.Param("id"), &header, body)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
@@ -161,9 +161,9 @@ func (s *server) rejectPromise(c *gin.Context) {
 
 	resp, err := s.service.RejectPromise(c.Param("id"), &header, body)
 	if err != nil {
-		var resp *api.APIErrorResponse
-		if errors.As(err, &resp) {
-			c.JSON(resp.StatusCode(), resp)
+		var apiErr *api.APIErrorResponse
+		if errors.As(err, &apiErr) {
+			c.JSON(apiErr.StatusCode(), apiErr)
 			return
 		}
 		panic(err)
