@@ -307,7 +307,9 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 
 	resp, err := s.service.RejectPromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.RejectPromiseResponse{

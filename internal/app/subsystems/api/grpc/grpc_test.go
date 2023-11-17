@@ -341,11 +341,12 @@ func TestCreatePromise(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		grpcReq *grpcApi.CreatePromiseRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		noop    bool
+		name        string
+		grpcReq     *grpcApi.CreatePromiseRequest
+		req         *t_api.Request
+		res         *t_api.Response
+		noop        bool
+		expectedErr codes.Code
 	}{
 		{
 			name: "CreatePromise",
@@ -415,6 +416,38 @@ func TestCreatePromise(t *testing.T) {
 			},
 			noop: false,
 		},
+		{
+			name: "CreatePromiseTimeOutRequired",
+			grpcReq: &grpcApi.CreatePromiseRequest{
+				Id: "foo",
+				// Timeout: 1,
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					Param: promise.Value{
+						Headers: nil,
+						Data:    nil,
+					},
+					Timeout: 1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreatePromise,
+				CreatePromise: &t_api.CreatePromiseResponse{
+					Status: t_api.StatusCreated,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Pending,
+					},
+				},
+			},
+			noop:        false,
+			expectedErr: codes.InvalidArgument,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grpcTest.Load(t, tc.req, tc.res)
@@ -424,7 +457,12 @@ func TestCreatePromise(t *testing.T) {
 
 			res, err := grpcTest.client.CreatePromise(ctx, tc.grpcReq)
 			if err != nil {
-				t.Fatal(err)
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.expectedErr, s.Code())
+				return
 			}
 
 			assert.Equal(t, tc.noop, res.Noop)
@@ -449,11 +487,12 @@ func TestCancelPromise(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		grpcReq *grpcApi.CancelPromiseRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		noop    bool
+		name        string
+		grpcReq     *grpcApi.CancelPromiseRequest
+		req         *t_api.Request
+		res         *t_api.Response
+		noop        bool
+		expectedErr codes.Code
 	}{
 		{
 			name: "CancelPromise",
@@ -519,6 +558,36 @@ func TestCancelPromise(t *testing.T) {
 			},
 			noop: false,
 		},
+		{
+			name: "CancelPromiseAlreadyResolved",
+			grpcReq: &grpcApi.CancelPromiseRequest{
+				Id: "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					Value: promise.Value{
+						Headers: nil,
+						Data:    nil,
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CancelPromise,
+				CancelPromise: &t_api.CancelPromiseResponse{
+					Status: t_api.StatusPromiseAlreadyResolved,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Resolved,
+					},
+				},
+			},
+			noop:        false,
+			expectedErr: codes.PermissionDenied,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grpcTest.Load(t, tc.req, tc.res)
@@ -528,7 +597,12 @@ func TestCancelPromise(t *testing.T) {
 
 			res, err := grpcTest.client.CancelPromise(ctx, tc.grpcReq)
 			if err != nil {
-				t.Fatal(err)
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.expectedErr, s.Code())
+				return
 			}
 
 			assert.Equal(t, tc.noop, res.Noop)
@@ -553,11 +627,12 @@ func TestResolvePromise(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		grpcReq *grpcApi.ResolvePromiseRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		noop    bool
+		name        string
+		grpcReq     *grpcApi.ResolvePromiseRequest
+		req         *t_api.Request
+		res         *t_api.Response
+		noop        bool
+		expectedErr codes.Code
 	}{
 		{
 			name: "ResolvePromise",
@@ -623,6 +698,36 @@ func TestResolvePromise(t *testing.T) {
 			},
 			noop: false,
 		},
+		{
+			name: "ResolvePromiseAlreadyRejected",
+			grpcReq: &grpcApi.ResolvePromiseRequest{
+				Id: "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					Value: promise.Value{
+						Headers: nil,
+						Data:    nil,
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ResolvePromise,
+				ResolvePromise: &t_api.ResolvePromiseResponse{
+					Status: t_api.StatusPromiseAlreadyRejected,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Rejected,
+					},
+				},
+			},
+			noop:        false,
+			expectedErr: codes.PermissionDenied,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grpcTest.Load(t, tc.req, tc.res)
@@ -632,7 +737,12 @@ func TestResolvePromise(t *testing.T) {
 
 			res, err := grpcTest.client.ResolvePromise(ctx, tc.grpcReq)
 			if err != nil {
-				t.Fatal(err)
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.expectedErr, s.Code())
+				return
 			}
 
 			assert.Equal(t, tc.noop, res.Noop)
@@ -657,11 +767,12 @@ func TestRejectPromise(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name    string
-		grpcReq *grpcApi.RejectPromiseRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		noop    bool
+		name        string
+		grpcReq     *grpcApi.RejectPromiseRequest
+		req         *t_api.Request
+		res         *t_api.Response
+		noop        bool
+		expectedErr codes.Code
 	}{
 		{
 			name: "RejectPromise",
@@ -727,6 +838,36 @@ func TestRejectPromise(t *testing.T) {
 			},
 			noop: false,
 		},
+		{
+			name: "RejectPromiseAlreadyResolved",
+			grpcReq: &grpcApi.RejectPromiseRequest{
+				Id: "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					Value: promise.Value{
+						Headers: nil,
+						Data:    nil,
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.RejectPromise,
+				RejectPromise: &t_api.RejectPromiseResponse{
+					Status: t_api.StatusPromiseAlreadyResolved,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Resolved,
+					},
+				},
+			},
+			noop:        false,
+			expectedErr: codes.PermissionDenied,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grpcTest.Load(t, tc.req, tc.res)
@@ -736,7 +877,12 @@ func TestRejectPromise(t *testing.T) {
 
 			res, err := grpcTest.client.RejectPromise(ctx, tc.grpcReq)
 			if err != nil {
-				t.Fatal(err)
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.expectedErr, s.Code())
+				return
 			}
 
 			assert.Equal(t, tc.noop, res.Noop)
