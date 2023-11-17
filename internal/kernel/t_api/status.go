@@ -72,16 +72,16 @@ const (
 )
 
 type ResonateError struct {
-	code   ResonateErrorCode
-	reason string
-	ogErr  error
+	code          ResonateErrorCode
+	reason        string
+	originalError error
 }
 
 func NewResonateError(code ResonateErrorCode, out string, in error) *ResonateError {
 	return &ResonateError{
-		code:   code,
-		reason: out,
-		ogErr:  in,
+		code:          code,
+		reason:        out,
+		originalError: in,
 	}
 }
 
@@ -90,7 +90,7 @@ func (e *ResonateError) Error() string {
 }
 
 func (e *ResonateError) Unwrap() error {
-	return e.ogErr
+	return e.originalError
 }
 
 func (e *ResonateError) Code() ResonateErrorCode {

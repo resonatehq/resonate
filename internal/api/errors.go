@@ -118,9 +118,9 @@ func HandleResonateError(err *t_api.ResonateError) *APIErrorResponse {
 		},
 	})
 
-	ogErr := err.Unwrap()
-	if ogErr != nil {
-		apiError.Details[0].Message = ogErr.Error()
+	originalError := err.Unwrap()
+	if originalError != nil {
+		apiError.Details[0].Message = originalError.Error()
 	}
 
 	return &APIErrorResponse{APIError: apiError}
