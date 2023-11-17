@@ -3,12 +3,11 @@ package grpc
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net"
-	"net/http"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 
 	"github.com/resonatehq/resonate/internal/api"
@@ -85,11 +84,10 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.ReadPromiseResponse{
-		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -119,7 +117,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	promises := make([]*grpcApi.Promise, len(resp.Promises))
@@ -137,7 +135,6 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	}
 
 	return &grpcApi.SearchPromisesResponse{
-		Status:   resp.Status.GRPC_OK(),
 		Cursor:   cursor,
 		Promises: promises,
 	}, nil
@@ -184,11 +181,11 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Status:  resp.Status.GRPC_OK(),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -226,11 +223,11 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.CancelPromiseResponse{
-		Status:  resp.Status.GRPC_OK(),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -269,11 +266,11 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.ResolvePromiseResponse{
-		Status:  resp.Status.GRPC_OK(),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -314,7 +311,7 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}
 
 	return &grpcApi.RejectPromiseResponse{
-		Status:  resp.Status.GRPC_OK(),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -378,26 +375,5 @@ func searchState(searchState grpcApi.SearchState) string {
 		return "pending"
 	default:
 		panic("invalid state")
-	}
-}
-
-func toGRPCErrorCode(httpCode int) codes.Code {
-	switch httpCode {
-	case http.StatusOK:
-		return codes.OK
-	case http.StatusForbidden:
-		return codes.PermissionDenied
-	case http.StatusBadRequest:
-		return codes.InvalidArgument
-	case http.StatusNotFound:
-		return codes.NotFound
-	case http.StatusConflict:
-		return codes.AlreadyExists
-	case http.StatusInternalServerError:
-		return codes.Internal
-	case http.StatusServiceUnavailable:
-		return codes.Unavailable
-	default:
-		panic(fmt.Sprintf("unexpected http code %d", httpCode))
 	}
 }

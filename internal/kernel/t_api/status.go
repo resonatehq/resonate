@@ -3,37 +3,11 @@ package t_api
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"google.golang.org/grpc/codes"
 )
 
 // Application level status (2000-4999)
-
-type ResponseStatus int
-
-func (s ResponseStatus) String() string {
-	return strconv.Itoa(int(s))
-}
-
-// methods to map to http status code
-func (s ResponseStatus) HTTP() int {
-	return int(s) / 10
-}
-
-// we capture the type of ok status in the response object to have the same dedup info as the http api
-func (s ResponseStatus) GRPC_OK() grpcApi.Status {
-	switch s {
-	case StatusOK:
-		return grpcApi.Status(http.StatusOK)
-	case StatusCreated:
-		return grpcApi.Status(http.StatusCreated)
-	default:
-		panic(fmt.Sprintf("invalid success status: %d", s))
-	}
-}
-
 const (
 	StatusOK                     ResponseStatus = 2000
 	StatusCreated                ResponseStatus = 2010
@@ -48,28 +22,105 @@ const (
 	StatusPromiseAlreadyExists   ResponseStatus = 4090
 )
 
-// Platform level errors (5000-5999)
+// ResponseStatus is the status code for the response.
+type ResponseStatus int
 
-type ResonateErrorCode int
-
-func (e ResonateErrorCode) String() string {
-	return strconv.Itoa(int(e))
+// String returns the string representation of the status code.
+func (s ResponseStatus) String() string {
+	switch s {
+	case StatusOK, StatusCreated, StatusNoContent:
+		return "The request was successful"
+	case StatusFieldValidationFailure:
+		return "The request is invalid"
+	case StatusPromiseAlreadyResolved:
+		return "The promise has already been resolved"
+	case StatusPromiseAlreadyRejected:
+		return "The promise has already been rejected"
+	case StatusPromiseAlreadyCanceled:
+		return "The promise has already been canceled"
+	case StatusPromiseAlreadyTimedOut:
+		return "The promise has already timed out"
+	case StatusPromiseNotFound:
+		return "The specified promise was not found"
+	case StatusSubscriptionNotFound:
+		return "The specified subscription was not found"
+	case StatusPromiseAlreadyExists:
+		return "A promise with this identifier already exists"
+	default:
+		panic(fmt.Sprintf("unknown status code %d", s))
+	}
 }
 
-const (
-	// catch all for now
-	ErrInternalServer ResonateErrorCode = iota + 5000
+// HTTP maps to http status code.
+func (s ResponseStatus) HTTP() int {
+	return int(s) / 10
+}
 
+// GRPC maps to grpc status code.
+func (s ResponseStatus) GRPC() codes.Code {
+	switch s {
+	case StatusOK, StatusCreated, StatusNoContent:
+		return codes.OK
+	case StatusFieldValidationFailure:
+		return codes.InvalidArgument
+	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedOut:
+		return codes.PermissionDenied
+	case StatusPromiseNotFound, StatusSubscriptionNotFound:
+		return codes.NotFound
+	case StatusPromiseAlreadyExists:
+		return codes.AlreadyExists
+	default:
+		panic(fmt.Sprintf("invalid status: %d", s))
+	}
+}
+
+// Platform level errors (5000-5999)
+const (
+	// Catch all for now
+	ErrInternalServer ResonateErrorCode = iota + 5000
 	// API
 	ErrSystemShuttingDown
 	ErrAPISubmissionQueueFull
-
 	// AIO
 	ErrAIOSubmissionQueueFull
 	ErrAIONetworkFailure
 	ErrAIOStoreFailure
 	ErrAIOStoreSerializationFailure
 )
+
+type ResonateErrorCode int
+
+func (e ResonateErrorCode) HTTP() int {
+	switch e {
+	case ErrSystemShuttingDown, ErrAPISubmissionQueueFull, ErrAIOSubmissionQueueFull:
+		return http.StatusServiceUnavailable
+	case ErrAIONetworkFailure, ErrAIOStoreFailure, ErrAIOStoreSerializationFailure:
+		return http.StatusInternalServerError
+	default:
+		panic(fmt.Sprintf("invalid error code: %d", e))
+	}
+}
+
+func (e ResonateErrorCode) GRPC() codes.Code {
+	switch e {
+	case ErrInternalServer:
+		return codes.Internal
+	case ErrSystemShuttingDown:
+		return codes.Unavailable
+	case ErrAPISubmissionQueueFull:
+		return codes.Unavailable
+	case ErrAIOSubmissionQueueFull:
+		return codes.Unavailable
+	case ErrAIONetworkFailure:
+		return codes.Unavailable
+	case ErrAIOStoreFailure:
+		return codes.Unavailable
+	case ErrAIOStoreSerializationFailure:
+		return codes.Unavailable
+	default:
+		panic(fmt.Sprintf("invalid error code: %d", e))
+	}
+}
 
 type ResonateError struct {
 	code          ResonateErrorCode
@@ -95,25 +146,4 @@ func (e *ResonateError) Unwrap() error {
 
 func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code
-}
-
-func (e *ResonateError) GRPC() codes.Code {
-	switch e.code {
-	case ErrInternalServer:
-		return codes.Internal
-	case ErrSystemShuttingDown:
-		return codes.Unavailable
-	case ErrAPISubmissionQueueFull:
-		return codes.Unavailable
-	case ErrAIOSubmissionQueueFull:
-		return codes.Unavailable
-	case ErrAIONetworkFailure:
-		return codes.Unavailable
-	case ErrAIOStoreFailure:
-		return codes.Unavailable
-	case ErrAIOStoreSerializationFailure:
-		return codes.Unavailable
-	default:
-		return codes.Unknown
-	}
 }

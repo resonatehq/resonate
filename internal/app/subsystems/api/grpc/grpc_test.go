@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -73,8 +72,7 @@ func TestReadPromise(t *testing.T) {
 		grpcReq *grpcApi.ReadPromiseRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status // success
-		code    codes.Code     // grpc error code
+		code    codes.Code // grpc error code
 	}{
 		{
 			name: "ReadPromise",
@@ -97,8 +95,7 @@ func TestReadPromise(t *testing.T) {
 					},
 				},
 			},
-			status: 200,
-			code:   codes.OK,
+			code: codes.OK,
 		},
 		{
 			name: "ReadPromiseNotFound",
@@ -118,8 +115,7 @@ func TestReadPromise(t *testing.T) {
 					Promise: nil,
 				},
 			},
-			status: 404,
-			code:   codes.NotFound,
+			code: codes.NotFound,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -128,7 +124,7 @@ func TestReadPromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.ReadPromise(ctx, tc.grpcReq)
+			_, err := grpcTest.client.ReadPromise(ctx, tc.grpcReq)
 			if err != nil {
 				// actual grpc error
 				s, ok := status.FromError(err)
@@ -140,7 +136,6 @@ func TestReadPromise(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.code, codes.OK)
-			assert.Equal(t, tc.status, res.Status)
 
 			select {
 			case err := <-grpcTest.errors:
@@ -166,7 +161,6 @@ func TestSearchPromises(t *testing.T) {
 		grpcReq *grpcApi.SearchPromisesRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status
 	}{
 		{
 			name: "SearchPromises",
@@ -196,7 +190,6 @@ func TestSearchPromises(t *testing.T) {
 					Promises: []*promise.Promise{},
 				},
 			},
-			status: 200,
 		},
 		{
 			name: "SearchPromisesCursor",
@@ -235,7 +228,6 @@ func TestSearchPromises(t *testing.T) {
 					Promises: []*promise.Promise{},
 				},
 			},
-			status: 200,
 		},
 		{
 			name: "SearchPromisesPending",
@@ -262,7 +254,6 @@ func TestSearchPromises(t *testing.T) {
 					Promises: []*promise.Promise{},
 				},
 			},
-			status: 200,
 		},
 		{
 			name: "SearchPromisesResolved",
@@ -289,7 +280,6 @@ func TestSearchPromises(t *testing.T) {
 					Promises: []*promise.Promise{},
 				},
 			},
-			status: 200,
 		},
 		{
 			name: "SearchPromisesRejected",
@@ -318,7 +308,6 @@ func TestSearchPromises(t *testing.T) {
 					Promises: []*promise.Promise{},
 				},
 			},
-			status: 200,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -327,13 +316,10 @@ func TestSearchPromises(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.SearchPromises(ctx, tc.grpcReq)
+			_, err := grpcTest.client.SearchPromises(ctx, tc.grpcReq)
 			if err != nil {
-				fmt.Println("we are here bro", res.Status)
 				t.Fatal(err)
 			}
-
-			assert.Equal(t, tc.status, res.Status)
 
 			select {
 			case err := <-grpcTest.errors:
@@ -359,7 +345,7 @@ func TestCreatePromise(t *testing.T) {
 		grpcReq *grpcApi.CreatePromiseRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status
+		noop    bool
 	}{
 		{
 			name: "CreatePromise",
@@ -396,7 +382,7 @@ func TestCreatePromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 		{
 			name: "CreatePromiseMinimal",
@@ -427,7 +413,7 @@ func TestCreatePromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -441,7 +427,7 @@ func TestCreatePromise(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tc.status, res.Status)
+			assert.Equal(t, tc.noop, res.Noop)
 
 			select {
 			case err := <-grpcTest.errors:
@@ -467,7 +453,7 @@ func TestCancelPromise(t *testing.T) {
 		grpcReq *grpcApi.CancelPromiseRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status
+		noop    bool
 	}{
 		{
 			name: "CancelPromise",
@@ -502,7 +488,7 @@ func TestCancelPromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 		{
 			name: "CancelPromiseMinimal",
@@ -531,7 +517,7 @@ func TestCancelPromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -545,7 +531,7 @@ func TestCancelPromise(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tc.status, res.Status)
+			assert.Equal(t, tc.noop, res.Noop)
 
 			select {
 			case err := <-grpcTest.errors:
@@ -571,7 +557,7 @@ func TestResolvePromise(t *testing.T) {
 		grpcReq *grpcApi.ResolvePromiseRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status
+		noop    bool
 	}{
 		{
 			name: "ResolvePromise",
@@ -606,7 +592,7 @@ func TestResolvePromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 		{
 			name: "ResolvePromiseMinimal",
@@ -635,7 +621,7 @@ func TestResolvePromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -649,7 +635,7 @@ func TestResolvePromise(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tc.status, res.Status)
+			assert.Equal(t, tc.noop, res.Noop)
 
 			select {
 			case err := <-grpcTest.errors:
@@ -675,7 +661,7 @@ func TestRejectPromise(t *testing.T) {
 		grpcReq *grpcApi.RejectPromiseRequest
 		req     *t_api.Request
 		res     *t_api.Response
-		status  grpcApi.Status
+		noop    bool
 	}{
 		{
 			name: "RejectPromise",
@@ -710,7 +696,7 @@ func TestRejectPromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 		{
 			name: "RejectPromiseMinimal",
@@ -739,7 +725,7 @@ func TestRejectPromise(t *testing.T) {
 					},
 				},
 			},
-			status: 201,
+			noop: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -753,7 +739,7 @@ func TestRejectPromise(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			assert.Equal(t, tc.status, res.Status)
+			assert.Equal(t, tc.noop, res.Noop)
 
 			select {
 			case err := <-grpcTest.errors:

@@ -22,7 +22,7 @@ func (s *server) readPromise(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)
@@ -49,7 +49,7 @@ func (s *server) searchPromises(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)
@@ -79,7 +79,7 @@ func (s *server) createPromise(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)
@@ -106,7 +106,7 @@ func (s *server) cancelPromise(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)
@@ -133,7 +133,7 @@ func (s *server) resolvePromise(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)
@@ -160,7 +160,7 @@ func (s *server) rejectPromise(c *gin.Context) {
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.StatusCode(), apiErr)
+			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
 			return
 		}
 		panic(err)

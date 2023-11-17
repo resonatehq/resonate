@@ -12,6 +12,9 @@ message Promise {
   int64 timeout = 5;
   string idempotencyKeyForCreate = 6;
   string idempotencyKeyForComplete = 7;
+  int64 createdOn = 8; 
+  int64 completedOn = 9; 
+  map<string, string> tags = 10; 
 }
 
 enum State {
@@ -29,16 +32,6 @@ enum SearchState {
   SEARCH_REJECTED = 3;
 }
 
-enum Status {
-  UNKNOWN = 0;
-  OK = 200;
-  CREATED = 201;
-  NOCONTENT = 204;
-  FORBIDDEN = 403;
-  NOTFOUND = 404;
-  CONFLICT = 409;
-}
-
 message Value {
   map<string, string> headers = 1;
   bytes data = 3;
@@ -46,11 +39,10 @@ message Value {
 
 message ReadPromiseRequest {
   string id = 1;
-  string requestId = 2;
+  string requestId = 2; 
 }
 
 message ReadPromiseResponse {
-  Status status = 1;
   Promise promise = 2;
 }
 
@@ -59,11 +51,10 @@ message SearchPromisesRequest {
   SearchState state = 2;
   int32 limit = 3;
   string cursor = 4;
-  string requestId = 5;
+  string requestId = 5; 
 }
 
 message SearchPromisesResponse {
-  Status status = 1;
   string cursor = 2;
   repeated Promise promises = 3;
 }
@@ -74,11 +65,11 @@ message CreatePromiseRequest {
   bool strict = 3;
   Value param = 4;
   int64 timeout = 5;
-  string requestId = 6;
+  string requestId = 6; 
 }
 
 message CreatePromiseResponse {
-  Status status = 1;
+  bool noop = 1;
   Promise promise = 2;
 }
 
@@ -87,11 +78,11 @@ message CancelPromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5;
+  string requestId = 5; 
 }
 
 message CancelPromiseResponse {
-  Status status = 1;
+  bool noop = 1;
   Promise promise = 2;
 }
 
@@ -100,11 +91,11 @@ message ResolvePromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5;
+  string requestId = 5; 
 }
 
 message ResolvePromiseResponse {
-  Status status = 1;
+  bool noop = 1;
   Promise promise = 2;
 }
 
@@ -113,11 +104,11 @@ message RejectPromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5;
+  string requestId = 5; 
 }
 
 message RejectPromiseResponse {
-  Status status = 1;
+  bool noop = 1;
   Promise promise = 2;
 }
 

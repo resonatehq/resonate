@@ -3,11 +3,11 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"google.golang.org/grpc/codes"
 )
 
 // APIErrorResponse is the actual error response sent to the client.
@@ -22,20 +22,22 @@ func (e *APIErrorResponse) Error() string {
 }
 
 // StatusCode returns the HTTP status code for this error.
-func (e *APIErrorResponse) StatusCode() int {
-	return e.APIError.Code
+// func (e *APIErrorResponse) StatusCode() int {
+// 	return e.APIError.Code
+// }
+
+type Code interface {
+	HTTP() int
+	GRPC() codes.Code
 }
 
 // Error is the error object sent to the client.
 type APIError struct {
-	// Code is the HTTP status code for this error.
-	Code int `json:"code,omitempty"`
+	// Code is the internal code that indicates the error type.
+	Code Code `json:"code,omitempty"`
 
 	// Message is the error message.
 	Message string `json:"message,omitempty"`
-
-	// Status is the internal status code that indicates the error type.
-	Status string `json:"status,omitempty"`
 
 	// Details is a list of details about the error.
 	Details []ErrorDetail `json:"details,omitempty"`
@@ -58,63 +60,16 @@ type ErrorDetail struct {
 
 // HandleResonateError handles platform level errors and returns an APIErrorResponse.
 func HandleResonateError(err *t_api.ResonateError) *APIErrorResponse {
-	var apiError APIError
-
-	switch err.Code() {
-
-	// 5xx
-
-	case t_api.ErrSystemShuttingDown:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAPISubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIOSubmissionQueueFull:
-		apiError = APIError{
-			Code:    http.StatusServiceUnavailable,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIONetworkFailure:
-		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIOStoreFailure:
-		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	case t_api.ErrAIOStoreSerializationFailure:
-		apiError = APIError{
-			Code:    http.StatusInternalServerError,
-			Message: err.Error(),
-			Status:  err.Code().String(),
-		}
-
-	default:
-		panic(fmt.Sprintf("unknown error code %d", err.Code()))
+	apiError := APIError{
+		Code:    err.Code(),
+		Message: err.Error(),
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
 		Type:   "ServerError",
 		Domain: "server",
 		Metadata: map[string]string{
-			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
+			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%d", apiError.Code),
 		},
 	})
 
@@ -137,56 +92,9 @@ func IsRequestError(status t_api.ResponseStatus) bool {
 
 // HandleRequestError handles application level errors and returns an APIErrorResponse.
 func HandleRequestError(status t_api.ResponseStatus) *APIErrorResponse {
-	var apiError APIError
-
-	switch status {
-
-	// 4xx
-
-	case t_api.StatusPromiseAlreadyResolved:
-		apiError = APIError{
-			Code:    http.StatusForbidden,
-			Message: "The promise has already been resolved",
-			Status:  t_api.StatusPromiseAlreadyResolved.String(),
-		}
-
-	case t_api.StatusPromiseAlreadyRejected:
-		apiError = APIError{
-			Code:    http.StatusForbidden,
-			Message: "The promise has already been rejected",
-			Status:  t_api.StatusPromiseAlreadyRejected.String(),
-		}
-
-	case t_api.StatusPromiseAlreadyCanceled:
-		apiError = APIError{
-			Code:    http.StatusForbidden,
-			Message: "The promise has already been canceled",
-			Status:  t_api.StatusPromiseAlreadyCanceled.String(),
-		}
-
-	case t_api.StatusPromiseAlreadyTimedOut:
-		apiError = APIError{
-			Code:    http.StatusForbidden,
-			Message: "The promise has already timed out",
-			Status:  t_api.StatusPromiseAlreadyTimedOut.String(),
-		}
-
-	case t_api.StatusPromiseNotFound:
-		apiError = APIError{
-			Code:    http.StatusNotFound,
-			Message: "The specified promise was not found",
-			Status:  t_api.StatusPromiseNotFound.String(),
-		}
-
-	case t_api.StatusPromiseAlreadyExists:
-		apiError = APIError{
-			Code:    http.StatusConflict,
-			Message: "A promise with this identifier already exists",
-			Status:  t_api.StatusPromiseAlreadyExists.String(),
-		}
-
-	default:
-		panic(fmt.Sprintf("unknown status code %d", status))
+	apiError := APIError{
+		Code:    status,
+		Message: status.String(),
 	}
 
 	apiError.Details = append(apiError.Details, ErrorDetail{
@@ -194,7 +102,7 @@ func HandleRequestError(status t_api.ResponseStatus) *APIErrorResponse {
 		Message: "Request errors are not retryable since they are caused by invalid client requests",
 		Domain:  "request",
 		Metadata: map[string]string{
-			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
+			"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%d", apiError.Code),
 		},
 	})
 
@@ -204,9 +112,8 @@ func HandleRequestError(status t_api.ResponseStatus) *APIErrorResponse {
 // HandleValidationError is handled separately from other application level errors since it is more involved.
 func HandleValidationError(err error) *APIErrorResponse {
 	var apiError APIError
-	apiError.Code = http.StatusBadRequest
-	apiError.Message = "The request is invalid"
-	apiError.Status = t_api.StatusFieldValidationFailure.String()
+	apiError.Code = t_api.StatusFieldValidationFailure
+	apiError.Message = t_api.StatusFieldValidationFailure.String()
 
 	var details []ErrorDetail
 
@@ -216,7 +123,7 @@ func HandleValidationError(err error) *APIErrorResponse {
 			Message: err,
 			Domain:  "validation",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%s", apiError.Status),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%d", apiError.Code),
 			},
 		})
 	}

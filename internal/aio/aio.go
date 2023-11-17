@@ -111,7 +111,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
 		default:
-			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, "aio submission queue full", nil))
+			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, fmt.Sprintf("aio:subsytem:%s submission queue full", subsystem), nil))
 		}
 	} else {
 		panic("invalid aio submission")

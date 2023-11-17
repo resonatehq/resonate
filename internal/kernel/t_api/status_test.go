@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"testing"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/codes"
 )
@@ -19,12 +18,57 @@ func TestResponseStatusString(t *testing.T) {
 		{
 			name:   "StatusOK",
 			status: StatusOK,
-			want:   "2000",
+			want:   "The request was successful",
 		},
 		{
 			name:   "StatusCreated",
 			status: StatusCreated,
-			want:   "2010",
+			want:   "The request was successful",
+		},
+		{
+			name:   "StatusNoContent",
+			status: StatusNoContent,
+			want:   "The request was successful",
+		},
+		{
+			name:   "StatusFieldValidationFailure",
+			status: StatusFieldValidationFailure,
+			want:   "The request is invalid",
+		},
+		{
+			name:   "StatusPromiseAlreadyResolved",
+			status: StatusPromiseAlreadyResolved,
+			want:   "The promise has already been resolved",
+		},
+		{
+			name:   "StatusPromiseAlreadyRejected",
+			status: StatusPromiseAlreadyRejected,
+			want:   "The promise has already been rejected",
+		},
+		{
+			name:   "StatusPromiseAlreadyCanceled",
+			status: StatusPromiseAlreadyCanceled,
+			want:   "The promise has already been canceled",
+		},
+		{
+			name:   "StatusPromiseAlreadyTimedOut",
+			status: StatusPromiseAlreadyTimedOut,
+			want:   "The promise has already timed out",
+		},
+		{
+			name:   "StatusPromiseNotFound",
+			status: StatusPromiseNotFound,
+			want:   "The specified promise was not found",
+		},
+		{
+			name:   "StatusSubscriptionNotFound",
+			status: StatusSubscriptionNotFound,
+			want:   "The specified subscription was not found",
+		},
+		{
+			name:   "StatusPromiseAlreadyExists",
+			status: StatusPromiseAlreadyExists,
+			want:   "A promise with this identifier already exists",
 		},
 	}
 	for _, tc := range tcs {
@@ -58,55 +102,119 @@ func TestResponseStatusHTTP(t *testing.T) {
 	}
 }
 
-func TestResponseStatusGRPC_OK(t *testing.T) {
+func TestResponseStatusGRPC(t *testing.T) {
 	tcs := []struct {
 		name   string
 		status ResponseStatus
-		want   grpcApi.Status
+		want   codes.Code
 	}{
 		{
 			name:   "StatusOK",
 			status: StatusOK,
-			want:   grpcApi.Status(http.StatusOK),
+			want:   codes.OK,
 		},
 		{
 			name:   "StatusCreated",
 			status: StatusCreated,
-			want:   grpcApi.Status(http.StatusCreated),
+			want:   codes.OK,
+		},
+		{
+			name:   "StatusNoContent",
+			status: StatusNoContent,
+			want:   codes.OK,
+		},
+		{
+			name:   "StatusFieldValidationFailure",
+			status: StatusFieldValidationFailure,
+			want:   codes.InvalidArgument,
+		},
+		{
+			name:   "StatusPromiseAlreadyResolved",
+			status: StatusPromiseAlreadyResolved,
+			want:   codes.PermissionDenied,
+		},
+		{
+			name:   "StatusPromiseAlreadyRejected",
+			status: StatusPromiseAlreadyRejected,
+			want:   codes.PermissionDenied,
+		},
+		{
+			name:   "StatusPromiseAlreadyCanceled",
+			status: StatusPromiseAlreadyCanceled,
+			want:   codes.PermissionDenied,
+		},
+		{
+			name:   "StatusPromiseAlreadyTimedOut",
+			status: StatusPromiseAlreadyTimedOut,
+			want:   codes.PermissionDenied,
+		},
+		{
+			name:   "StatusPromiseNotFound",
+			status: StatusPromiseNotFound,
+			want:   codes.NotFound,
+		},
+		{
+			name:   "StatusSubscriptionNotFound",
+			status: StatusSubscriptionNotFound,
+			want:   codes.NotFound,
+		},
+		{
+			name:   "StatusPromiseAlreadyExists",
+			status: StatusPromiseAlreadyExists,
+			want:   codes.AlreadyExists,
 		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.status.GRPC_OK())
+			assert.Equal(t, tc.want, tc.status.GRPC())
 		})
 	}
 }
 
-func TestResonateErrorCode_String(t *testing.T) {
+func TestResonateErrorHTTP(t *testing.T) {
 	tcs := []struct {
 		name string
 		code ResonateErrorCode
-		want string
+		want int
 	}{
-		{
-			name: "ErrInternalServer",
-			code: ErrInternalServer,
-			want: "5000",
-		},
 		{
 			name: "ErrSystemShuttingDown",
 			code: ErrSystemShuttingDown,
-			want: "5001",
+			want: http.StatusServiceUnavailable,
+		},
+		{
+			name: "ErrAPISubmissionQueueFull",
+			code: ErrAPISubmissionQueueFull,
+			want: http.StatusServiceUnavailable,
+		},
+		{
+			name: "ErrAIOSubmissionQueueFull",
+			code: ErrAIOSubmissionQueueFull,
+			want: http.StatusServiceUnavailable,
+		},
+		{
+			name: "ErrAIONetworkFailure",
+			code: ErrAIONetworkFailure,
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "ErrAIOStoreFailure",
+			code: ErrAIOStoreFailure,
+			want: http.StatusInternalServerError,
+		},
+		{
+			name: "ErrAIOStoreSerializationFailure",
+			code: ErrAIOStoreSerializationFailure,
+			want: http.StatusInternalServerError,
 		},
 	}
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			assert.Equal(t, tc.want, tc.code.String())
+			assert.Equal(t, tc.want, NewResonateError(tc.code, "", nil).code.HTTP())
 		})
 	}
 }
-
-func TestResonateError_GRPC(t *testing.T) {
+func TestResonateErrorGRPC(t *testing.T) {
 	tcs := []struct {
 		name string
 		code ResonateErrorCode
@@ -147,15 +255,10 @@ func TestResonateError_GRPC(t *testing.T) {
 			code: ErrAIOStoreSerializationFailure,
 			want: codes.Unavailable,
 		},
-		{
-			name: "ErrUnknown",
-			code: 10000,
-			want: codes.Unknown,
-		},
 	}
 	for _, tc := range tcs {
-		t.Run(tc.want.String(), func(t *testing.T) {
-			assert.Equal(t, tc.want, NewResonateError(tc.code, "", nil).GRPC())
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, NewResonateError(tc.code, "", nil).code.GRPC())
 		})
 	}
 }
