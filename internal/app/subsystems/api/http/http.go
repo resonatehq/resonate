@@ -31,7 +31,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	r := gin.New()
 	s := &server{service: service.New(api, "http")}
 
-	// register custom validators
+	// Register custom validators
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
 		_ = v.RegisterValidation("oneofcaseinsensitive", service.OneOfCaseInsensitive)
 	}

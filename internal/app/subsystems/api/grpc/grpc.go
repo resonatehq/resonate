@@ -123,14 +123,12 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		var err error
 		cursor, err = resp.Cursor.Encode()
 		if err != nil {
-			// !2xx
 			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
 	}
 
-	// both interfaces, same information --
 	return &grpcApi.SearchPromisesResponse{
-		Status:   resp.Status.GRPC_OK(), // 200 or 201 = OK (being dedup)
+		Status:   resp.Status.GRPC_OK(),
 		Cursor:   cursor,
 		Promises: promises,
 	}, nil

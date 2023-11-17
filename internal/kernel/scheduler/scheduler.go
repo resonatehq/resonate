@@ -78,7 +78,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 					s.runnable = append(s.runnable, &runnableCoroutine{
 						Coroutine: coroutine.Coroutine,
 						next:      completion,
-						error:     err, // this is the spot where the error is hidden platform level error
+						error:     err,
 					})
 
 					for i, c := range s.suspended {

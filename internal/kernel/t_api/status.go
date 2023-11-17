@@ -19,7 +19,7 @@ import (
 	"strconv"
 
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"google.golang.org/genproto/googleapis/rpc/code"
+	"google.golang.org/grpc/codes"
 )
 
 // Application level status (2000-4999)
@@ -110,23 +110,23 @@ func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code
 }
 
-func (e *ResonateError) GRPC() code.Code {
+func (e *ResonateError) GRPC() codes.Code {
 	switch e.code {
 	case ErrInternalServer:
-		return code.Code_INTERNAL
+		return codes.Internal
 	case ErrSystemShuttingDown:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	case ErrAPISubmissionQueueFull:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	case ErrAIOSubmissionQueueFull:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	case ErrAIONetworkFailure:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	case ErrAIOStoreFailure:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	case ErrAIOStoreSerializationFailure:
-		return code.Code_UNAVAILABLE
+		return codes.Unavailable
 	default:
-		return code.Code_UNKNOWN
+		return codes.Unknown
 	}
 }
