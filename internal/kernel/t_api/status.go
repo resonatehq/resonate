@@ -80,8 +80,8 @@ const (
 	ErrAIOStoreFailure              ResonateErrorCode = 5002
 	ErrAIOStoreSerializationFailure ResonateErrorCode = 5003
 	ErrSystemShuttingDown           ResonateErrorCode = 5030
-	ErrAPISubmissionQueueFull       ResonateErrorCode = 5032
-	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5033
+	ErrAPISubmissionQueueFull       ResonateErrorCode = 5031
+	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5032
 )
 
 type ResonateErrorCode int
