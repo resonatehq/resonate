@@ -161,10 +161,12 @@ type fieldErrorMock struct {
 	validator.FieldError
 	field string
 	tag   string
+	param string
 }
 
-func (m fieldErrorMock) Field() string { return m.field }
 func (m fieldErrorMock) Tag() string   { return m.tag }
+func (m fieldErrorMock) Param() string { return m.param }
+func (m fieldErrorMock) Field() string { return m.field }
 func (m fieldErrorMock) Error() string { return "" }
 
 func TestValidationError(t *testing.T) {
@@ -188,6 +190,62 @@ func TestValidationError(t *testing.T) {
 			expectedStatus: "4000",
 			expectedErrMsg: "The request is invalid",
 			expectedDetail: "The field Timeout is required",
+		},
+		{
+			name: "MustBeGreaterThanOrEqualToZero",
+			inputErr: validator.ValidationErrors{
+				fieldErrorMock{
+					field: "Timeout",
+					tag:   "gte",
+					param: "0",
+				},
+			},
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "The field Timeout must be greater than or equal to 0",
+		},
+		{
+			name: "MustBeGreaterThan",
+			inputErr: validator.ValidationErrors{
+				fieldErrorMock{
+					field: "Limit",
+					tag:   "gt",
+					param: "0",
+				},
+			},
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "The field Limit must be greater than 0",
+		},
+		{
+			name: "MustBeLessThanOrEqualTo",
+			inputErr: validator.ValidationErrors{
+				fieldErrorMock{
+					field: "Limit",
+					tag:   "lte",
+					param: "100",
+				},
+			},
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "The field Limit must be less than or equal to 100",
+		},
+		{
+			name: "MustBeOneOf",
+			inputErr: validator.ValidationErrors{
+				fieldErrorMock{
+					field: "State",
+					tag:   "oneofcaseinsensitive",
+					param: "pending resolved rejected",
+				},
+			},
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "The field State must be either pending, resolved, or rejected",
 		},
 	}
 
