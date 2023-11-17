@@ -2,7 +2,6 @@ package t_api
 
 import (
 	"fmt"
-	"net/http"
 
 	"google.golang.org/grpc/codes"
 )
@@ -76,29 +75,19 @@ func (s ResponseStatus) GRPC() codes.Code {
 
 // Platform level errors (5000-5999)
 const (
-	// Catch all for now
-	ErrInternalServer ResonateErrorCode = iota + 5000
-	// API
-	ErrSystemShuttingDown
-	ErrAPISubmissionQueueFull
-	// AIO
-	ErrAIOSubmissionQueueFull
-	ErrAIONetworkFailure
-	ErrAIOStoreFailure
-	ErrAIOStoreSerializationFailure
+	ErrInternalServer               ResonateErrorCode = 5000
+	ErrAIONetworkFailure            ResonateErrorCode = 5001
+	ErrAIOStoreFailure              ResonateErrorCode = 5002
+	ErrAIOStoreSerializationFailure ResonateErrorCode = 5003
+	ErrSystemShuttingDown           ResonateErrorCode = 5030
+	ErrAPISubmissionQueueFull       ResonateErrorCode = 5032
+	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5033
 )
 
 type ResonateErrorCode int
 
 func (e ResonateErrorCode) HTTP() int {
-	switch e {
-	case ErrSystemShuttingDown, ErrAPISubmissionQueueFull, ErrAIOSubmissionQueueFull:
-		return http.StatusServiceUnavailable
-	case ErrInternalServer, ErrAIONetworkFailure, ErrAIOStoreFailure, ErrAIOStoreSerializationFailure:
-		return http.StatusInternalServerError
-	default:
-		panic(fmt.Sprintf("invalid error code: %d", e))
-	}
+	return int(e) / 10
 }
 
 func (e ResonateErrorCode) GRPC() codes.Code {

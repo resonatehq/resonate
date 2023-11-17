@@ -243,17 +243,17 @@ func TestResonateErrorGRPC(t *testing.T) {
 		{
 			name: "ErrAIONetworkFailure",
 			code: ErrAIONetworkFailure,
-			want: codes.Unavailable,
+			want: codes.Internal,
 		},
 		{
 			name: "ErrAIOStoreFailure",
 			code: ErrAIOStoreFailure,
-			want: codes.Unavailable,
+			want: codes.Internal,
 		},
 		{
 			name: "ErrAIOStoreSerializationFailure",
 			code: ErrAIOStoreSerializationFailure,
-			want: codes.Unavailable,
+			want: codes.Internal,
 		},
 	}
 	for _, tc := range tcs {
