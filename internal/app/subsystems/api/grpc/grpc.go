@@ -2,15 +2,17 @@ package grpc
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/util"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -81,11 +83,13 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 
 	resp, err := s.service.ReadPromise(req.Id, header)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be an api error")
+		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
 	}
 
 	return &grpcApi.ReadPromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -104,13 +108,9 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 
 	resp, err := s.service.SearchPromises(header, params)
 	if err != nil {
-		// TODO: http, extensible -- for now, just return internal
-		// if verr, ok := err.(*service.ValidationError); ok {
-		// 	return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
-		// } else {
-		// 	return nil, grpcStatus.Error(codes.Internal, err.Error())
-		// }
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
 	}
 
 	promises := make([]*grpcApi.Promise, len(resp.Promises))
@@ -123,12 +123,14 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		var err error
 		cursor, err = resp.Cursor.Encode()
 		if err != nil {
+			// !2xx
 			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
 	}
 
+	// both interfaces, same information --
 	return &grpcApi.SearchPromisesResponse{
-		Status:   protoStatus(resp.Status),
+		Status:   resp.Status.GRPC_OK(), // 200 or 201 = OK (being dedup)
 		Cursor:   cursor,
 		Promises: promises,
 	}, nil
@@ -167,11 +169,13 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 
 	resp, err := s.service.CreatePromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
 	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -207,11 +211,13 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	}
 	resp, err := s.service.CancelPromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
 	}
 
 	return &grpcApi.CancelPromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -248,11 +254,13 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 
 	resp, err := s.service.ResolvePromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(toGRPCErrorCode(apiErr.StatusCode()), err.Error())
 	}
 
 	return &grpcApi.ResolvePromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -293,27 +301,9 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}
 
 	return &grpcApi.RejectPromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Status:  resp.Status.GRPC_OK(),
 		Promise: protoPromise(resp.Promise),
 	}, nil
-}
-
-func protoStatus(status t_api.ResponseStatus) grpcApi.Status {
-	switch status {
-	case t_api.StatusOK:
-		return grpcApi.Status_OK
-	case t_api.StatusCreated:
-		return grpcApi.Status_CREATED
-	case t_api.StatusNoContent:
-		return grpcApi.Status_NOCONTENT
-	// come back to this and back extensible for grpc
-	// case t_api.ResponseForbidden:
-	// 	return grpcApi.Status_FORBIDDEN
-	// case t_api.ResponseNotFound:
-	// 	return grpcApi.Status_NOTFOUND
-	default:
-		return grpcApi.Status_UNKNOWN
-	}
 }
 
 func protoPromise(promise *promise.Promise) *grpcApi.Promise {
@@ -375,5 +365,26 @@ func searchState(searchState grpcApi.SearchState) string {
 		return "pending"
 	default:
 		panic("invalid state")
+	}
+}
+
+func toGRPCErrorCode(httpCode int) codes.Code {
+	switch httpCode {
+	case http.StatusOK:
+		return codes.OK
+	case http.StatusForbidden:
+		return codes.PermissionDenied
+	case http.StatusBadRequest:
+		return codes.InvalidArgument
+	case http.StatusNotFound:
+		return codes.NotFound
+	case http.StatusConflict:
+		return codes.AlreadyExists
+	case http.StatusInternalServerError:
+		return codes.Internal
+	case http.StatusServiceUnavailable:
+		return codes.Unavailable
+	default:
+		panic(fmt.Sprintf("unexpected http code %d", httpCode))
 	}
 }

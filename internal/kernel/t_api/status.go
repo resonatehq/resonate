@@ -13,7 +13,14 @@
 // the response object, while the `error` return is `nil`.
 package t_api
 
-import "strconv"
+import (
+	"fmt"
+	"net/http"
+	"strconv"
+
+	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"google.golang.org/genproto/googleapis/rpc/code"
+)
 
 // Application level status (2000-4999)
 
@@ -26,6 +33,18 @@ func (s ResponseStatus) String() string {
 // methods to map to http status code
 func (s ResponseStatus) HTTP() int {
 	return int(s) / 10
+}
+
+// we capture the type of ok status in the response object to have the same dedup info as the http api
+func (s ResponseStatus) GRPC_OK() grpcApi.Status {
+	switch s {
+	case StatusOK:
+		return grpcApi.Status(http.StatusOK)
+	case StatusCreated:
+		return grpcApi.Status(http.StatusCreated)
+	default:
+		panic(fmt.Sprintf("invalid success status: %d", s))
+	}
 }
 
 const (
@@ -89,4 +108,25 @@ func (e *ResonateError) Unwrap() error {
 
 func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code
+}
+
+func (e *ResonateError) GRPC() code.Code {
+	switch e.code {
+	case ErrInternalServer:
+		return code.Code_INTERNAL
+	case ErrSystemShuttingDown:
+		return code.Code_UNAVAILABLE
+	case ErrAPISubmissionQueueFull:
+		return code.Code_UNAVAILABLE
+	case ErrAIOSubmissionQueueFull:
+		return code.Code_UNAVAILABLE
+	case ErrAIONetworkFailure:
+		return code.Code_UNAVAILABLE
+	case ErrAIOStoreFailure:
+		return code.Code_UNAVAILABLE
+	case ErrAIOStoreSerializationFailure:
+		return code.Code_UNAVAILABLE
+	default:
+		return code.Code_UNKNOWN
+	}
 }
