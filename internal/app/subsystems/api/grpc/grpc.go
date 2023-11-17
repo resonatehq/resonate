@@ -99,6 +99,15 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		RequestId: req.RequestId,
 	}
 
+	// TODO: for now, look at at protobuf validators
+	// ref: https://github.com/protocolbuffers/protobuf/issues/1606
+	// can't check if limit was set or not in proto3. see above issue
+	// so can't check for 0.
+	if req.Limit > 100 || req.Limit < 0 {
+		err := api.HandleValidationError(errors.New("field limit must be greater than 0 and less than or equal to 100"))
+		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+	}
+
 	params := &service.SearchPromiseParams{
 		Q:      util.ToPointer(req.Q),
 		State:  searchState(req.State),
@@ -149,6 +158,12 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	var data []byte
 	if req.Param != nil {
 		data = req.Param.Data
+	}
+
+	// TODO: for now, look at at protobuf validators
+	if req.Timeout < 0 || req.Timeout == 0 {
+		err := api.HandleValidationError(errors.New("timeout must be greater than 0"))
+		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
 	}
 
 	header := &service.CreatePromiseHeader{
