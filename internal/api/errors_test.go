@@ -172,12 +172,20 @@ func (m fieldErrorMock) Error() string { return "" }
 func TestValidationError(t *testing.T) {
 	tcs := []struct {
 		name           string
-		inputErr       validator.ValidationErrors
+		inputErr       error
 		expectedCode   int
 		expectedStatus string
 		expectedErrMsg string
 		expectedDetail string
 	}{
+		{
+			name:           "UnknownError",
+			inputErr:       errors.New("unknown error"),
+			expectedCode:   http.StatusBadRequest,
+			expectedStatus: "4000",
+			expectedErrMsg: "The request is invalid",
+			expectedDetail: "unknown error",
+		},
 		{
 			name: "MissingRequiredField",
 			inputErr: validator.ValidationErrors{

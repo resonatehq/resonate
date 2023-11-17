@@ -141,11 +141,6 @@ func HandleRequestError(status t_api.ResponseStatus) *APIErrorResponse {
 
 	switch status {
 
-	// 2xx
-
-	case t_api.StatusOK, t_api.StatusCreated, t_api.StatusNoContent:
-		return nil
-
 	// 4xx
 
 	case t_api.StatusPromiseAlreadyResolved:

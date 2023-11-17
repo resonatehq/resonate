@@ -1,16 +1,3 @@
-// In our system, errors are separated into two categories - platform errors and application errors.
-// Platform errors represent failures at the runtime level, such as database connection issues, file I/O failures,
-// or network request problems.These are usually transient issues that are recoverable if retried later.
-// Application errors indicate errors code specific to our business logic and use cases. This separation allows us
-// to handle the two types differently - platform errors may trigger retries with backoff, while application errors
-// should report immediately to the users since these failures are not typically recoverable by simply retrying.
-//
-// In our Go system, platform errors are represented as typical Go `error` value returned from function calls. For example:
-//
-// dbResult, dbErr := database.Query("SELECT...")
-//
-// The dbErr would contain platform errors like connection failures. While application errors are returned in
-// the response object, while the `error` return is `nil`.
 package t_api
 
 import (
