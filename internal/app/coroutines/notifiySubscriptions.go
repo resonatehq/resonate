@@ -116,15 +116,15 @@ func notifySubscription(tid string, notification *notification.Notification) *sc
 		}
 
 		record := result.Records[0]
-		promise, otherErr := record.Promise()
-		if otherErr != nil {
+		promise, err := record.Promise()
+		if err != nil {
 			slog.Warn("failed to parse promise record, aborting notification", "record", record)
 			abort(c, notification)
 			return
 		}
 
-		body, otherErr := json.Marshal(promise)
-		if otherErr != nil {
+		body, err := json.Marshal(promise)
+		if err != nil {
 			slog.Warn("failed to serialize promise, aborting notification", "promise", promise)
 			abort(c, notification)
 			return
