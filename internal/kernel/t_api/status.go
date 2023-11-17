@@ -57,7 +57,7 @@ func (e ResonateErrorCode) String() string {
 }
 
 const (
-	// catch call for now
+	// catch all for now
 	ErrInternalServer ResonateErrorCode = iota + 5000
 
 	// API
