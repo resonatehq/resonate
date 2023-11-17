@@ -94,7 +94,7 @@ func (e ResonateErrorCode) HTTP() int {
 	switch e {
 	case ErrSystemShuttingDown, ErrAPISubmissionQueueFull, ErrAIOSubmissionQueueFull:
 		return http.StatusServiceUnavailable
-	case ErrAIONetworkFailure, ErrAIOStoreFailure, ErrAIOStoreSerializationFailure:
+	case ErrInternalServer, ErrAIONetworkFailure, ErrAIOStoreFailure, ErrAIOStoreSerializationFailure:
 		return http.StatusInternalServerError
 	default:
 		panic(fmt.Sprintf("invalid error code: %d", e))
@@ -112,11 +112,11 @@ func (e ResonateErrorCode) GRPC() codes.Code {
 	case ErrAIOSubmissionQueueFull:
 		return codes.Unavailable
 	case ErrAIONetworkFailure:
-		return codes.Unavailable
+		return codes.Internal
 	case ErrAIOStoreFailure:
-		return codes.Unavailable
+		return codes.Internal
 	case ErrAIOStoreSerializationFailure:
-		return codes.Unavailable
+		return codes.Internal
 	default:
 		panic(fmt.Sprintf("invalid error code: %d", e))
 	}
