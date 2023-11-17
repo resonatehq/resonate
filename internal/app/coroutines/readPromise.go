@@ -31,7 +31,7 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err))
 			return
 		}
 
@@ -44,14 +44,14 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 			res(&t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.ResponseNotFound,
+					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err))
 				return
 			}
 
@@ -59,14 +59,14 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 				c.Scheduler.Add(TimeoutPromise(metadata, p, ReadPromise(metadata, req, res), func(err error) {
 					if err != nil {
 						slog.Error("failed to timeout promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to timeout promise", err))
 						return
 					}
 
 					res(&t_api.Response{
 						Kind: t_api.ReadPromise,
 						ReadPromise: &t_api.ReadPromiseResponse{
-							Status: t_api.ResponseOK,
+							Status: t_api.StatusOK,
 							Promise: &promise.Promise{
 								Id:    p.Id,
 								State: promise.Timedout,
@@ -89,7 +89,7 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 				res(&t_api.Response{
 					Kind: t_api.ReadPromise,
 					ReadPromise: &t_api.ReadPromiseResponse{
-						Status:  t_api.ResponseOK,
+						Status:  t_api.StatusOK,
 						Promise: p,
 					},
 				}, nil)

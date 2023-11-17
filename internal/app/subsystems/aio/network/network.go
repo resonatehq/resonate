@@ -2,6 +2,7 @@ package network
 
 import (
 	"bytes"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -68,6 +69,7 @@ func (d *NetworkDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completi
 
 			res, err := d.httpRequest(sqe.Submission.Network.Http)
 			if err != nil {
+				slog.Error("failed http request", "err", err)
 				cqe.Error = err
 			} else {
 				cqe.Completion = &t_aio.Completion{

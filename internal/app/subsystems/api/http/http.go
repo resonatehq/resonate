@@ -2,13 +2,16 @@ package http
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"net/http"
 	"time"
+
+	"github.com/go-playground/validator/v10"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"github.com/resonatehq/resonate/internal/api"
 )
 
@@ -27,6 +30,11 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	r := gin.New()
 	s := &server{service: service.New(api, "http")}
+
+	// Register custom validators
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		_ = v.RegisterValidation("oneofcaseinsensitive", service.OneOfCaseInsensitive)
+	}
 
 	// Middleware
 	r.Use(s.log)

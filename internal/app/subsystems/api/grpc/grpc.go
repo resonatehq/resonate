@@ -2,14 +2,16 @@ package grpc
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -80,11 +82,12 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 
 	resp, err := s.service.ReadPromise(req.Id, header)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be an api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.ReadPromiseResponse{
-		Status:  protoStatus(resp.Status),
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -94,20 +97,27 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		RequestId: req.RequestId,
 	}
 
+	// TODO: for now, look at at protobuf validators
+	// ref: https://github.com/protocolbuffers/protobuf/issues/1606
+	// can't check if limit was set or not in proto3. see above issue
+	// so can't check for 0.
+	if req.Limit > 100 || req.Limit < 0 {
+		err := api.HandleValidationError(errors.New("field limit must be greater than 0 and less than or equal to 100"))
+		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+	}
+
 	params := &service.SearchPromiseParams{
-		Q:      req.Q,
+		Q:      util.ToPointer(req.Q),
 		State:  searchState(req.State),
-		Limit:  int(req.Limit),
+		Limit:  util.ToPointer(int(req.Limit)),
 		Cursor: req.Cursor,
 	}
 
 	resp, err := s.service.SearchPromises(header, params)
 	if err != nil {
-		if verr, ok := err.(*service.ValidationError); ok {
-			return nil, grpcStatus.Error(codes.InvalidArgument, verr.Error())
-		} else {
-			return nil, grpcStatus.Error(codes.Internal, err.Error())
-		}
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	promises := make([]*grpcApi.Promise, len(resp.Promises))
@@ -125,7 +135,6 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	}
 
 	return &grpcApi.SearchPromisesResponse{
-		Status:   protoStatus(resp.Status),
 		Cursor:   cursor,
 		Promises: promises,
 	}, nil
@@ -148,6 +157,12 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		data = req.Param.Data
 	}
 
+	// TODO: for now, look at at protobuf validators
+	if req.Timeout < 0 || req.Timeout == 0 {
+		err := api.HandleValidationError(errors.New("timeout must be greater than 0"))
+		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+	}
+
 	header := &service.CreatePromiseHeader{
 		RequestId:      req.RequestId,
 		Strict:         req.Strict,
@@ -155,20 +170,22 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 	}
 
 	body := &service.CreatePromiseBody{
-		Param: promise.Value{
+		Param: &promise.Value{
 			Headers: headers,
 			Data:    data,
 		},
-		Timeout: req.Timeout,
+		Timeout: &req.Timeout,
 	}
 
 	resp, err := s.service.CreatePromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -204,11 +221,13 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	}
 	resp, err := s.service.CancelPromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.CancelPromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -245,11 +264,13 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 
 	resp, err := s.service.ResolvePromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.ResolvePromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
 }
@@ -286,30 +307,15 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 
 	resp, err := s.service.RejectPromise(req.Id, header, body)
 	if err != nil {
-		return nil, grpcStatus.Error(codes.Internal, err.Error())
+		var apiErr *api.APIErrorResponse
+		util.Assert(errors.As(err, &apiErr), "err must be api error")
+		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
 	return &grpcApi.RejectPromiseResponse{
-		Status:  protoStatus(resp.Status),
+		Noop:    resp.Status == t_api.StatusOK,
 		Promise: protoPromise(resp.Promise),
 	}, nil
-}
-
-func protoStatus(status t_api.ResponseStatus) grpcApi.Status {
-	switch status {
-	case t_api.ResponseOK:
-		return grpcApi.Status_OK
-	case t_api.ResponseCreated:
-		return grpcApi.Status_CREATED
-	case t_api.ResponseNoContent:
-		return grpcApi.Status_NOCONTENT
-	case t_api.ResponseForbidden:
-		return grpcApi.Status_FORBIDDEN
-	case t_api.ResponseNotFound:
-		return grpcApi.Status_NOTFOUND
-	default:
-		return grpcApi.Status_UNKNOWN
-	}
 }
 
 func protoPromise(promise *promise.Promise) *grpcApi.Promise {

@@ -55,7 +55,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 		if err != nil {
 			slog.Error("failed to search promises", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to search promises", err))
 			return
 		}
 
@@ -91,7 +91,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 		res(&t_api.Response{
 			Kind: t_api.SearchPromises,
 			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.ResponseOK,
+				Status:   t_api.StatusOK,
 				Cursor:   cursor,
 				Promises: promises,
 			},

@@ -100,7 +100,7 @@ func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) err
 	pm := m.promises.Get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		if pm.completed() && res.ReadPromise.Promise.State == promise.Pending {
 			return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, res.ReadPromise.Promise.State)
 		}
@@ -108,7 +108,7 @@ func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) err
 		// update model state
 		pm.promise = res.ReadPromise.Promise
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusPromiseNotFound:
 		if pm.promise != nil {
 			return fmt.Errorf("promise exists %s", pm.promise)
 		}
@@ -127,7 +127,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 	}
 
 	switch res.SearchPromises.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		for _, p := range res.SearchPromises.Promises {
 			pm := m.promises.Get(p.Id)
 
@@ -164,7 +164,7 @@ func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) er
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		if pm.promise != nil {
 			if !pm.idempotencyKeyForCreateMatch(res.CreatePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate)
@@ -176,7 +176,7 @@ func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) er
 		// update model state
 		pm.promise = res.CreatePromise.Promise
 		return nil
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		if res.CreatePromise.Promise.State != promise.Pending {
 			return fmt.Errorf("unexpected state %s after create promise", res.CreatePromise.Promise.State)
 		}
@@ -187,9 +187,9 @@ func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) er
 		// update model state
 		pm.promise = res.CreatePromise.Promise
 		return nil
-	case t_api.ResponseForbidden:
+	case t_api.StatusPromiseAlreadyExists:
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusPromiseNotFound:
 		return fmt.Errorf("invalid response '%d' for create promise request", res.CreatePromise.Status)
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.CreatePromise.Status)
@@ -200,7 +200,7 @@ func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) e
 	pm := m.promises.Get(req.CancelPromise.Id)
 
 	switch res.CancelPromise.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		if pm.completed() {
 			if !pm.idempotencyKeyForCompleteMatch(res.CancelPromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CancelPromise.Promise.IdempotencyKeyForComplete)
@@ -217,7 +217,7 @@ func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.CancelPromise.Promise
 		return nil
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		if res.CancelPromise.Promise.State != promise.Canceled {
 			return fmt.Errorf("unexpected state %s after cancel promise", res.CancelPromise.Promise.State)
 		}
@@ -233,9 +233,9 @@ func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.CancelPromise.Promise
 		return nil
-	case t_api.ResponseForbidden:
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusPromiseNotFound:
 		if pm.promise != nil {
 			return fmt.Errorf("promise exists %s", pm.promise)
 		}
@@ -249,7 +249,7 @@ func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) 
 	pm := m.promises.Get(req.ResolvePromise.Id)
 
 	switch res.ResolvePromise.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		if pm.completed() {
 			if !pm.idempotencyKeyForCompleteMatch(res.ResolvePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.ResolvePromise.Promise.IdempotencyKeyForComplete)
@@ -266,7 +266,7 @@ func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) 
 		// update model state
 		pm.promise = res.ResolvePromise.Promise
 		return nil
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		if res.ResolvePromise.Promise.State != promise.Resolved {
 			return fmt.Errorf("unexpected state %s after resolve promise", res.ResolvePromise.Promise.State)
 		}
@@ -282,9 +282,9 @@ func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) 
 		// update model state
 		pm.promise = res.ResolvePromise.Promise
 		return nil
-	case t_api.ResponseForbidden:
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusPromiseNotFound:
 		if pm.promise != nil {
 			return fmt.Errorf("promise exists %s", pm.promise)
 		}
@@ -298,7 +298,7 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 	pm := m.promises.Get(req.RejectPromise.Id)
 
 	switch res.RejectPromise.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK: // dst use the 200 for idempotency,, uggghhh
 		if pm.completed() {
 			if !pm.idempotencyKeyForCompleteMatch(res.RejectPromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.RejectPromise.Promise.IdempotencyKeyForComplete)
@@ -315,7 +315,7 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.RejectPromise.Promise
 		return nil
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		if res.RejectPromise.Promise.State != promise.Rejected {
 			return fmt.Errorf("unexpected state %s after reject promise", res.RejectPromise.Promise.State)
 		}
@@ -331,9 +331,9 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 		// update model state
 		pm.promise = res.RejectPromise.Promise
 		return nil
-	case t_api.ResponseForbidden:
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusPromiseNotFound:
 		if pm.promise != nil {
 			return fmt.Errorf("promise exists %s", pm.promise)
 		}
@@ -352,7 +352,7 @@ func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Respons
 	}
 
 	switch res.ReadSubscriptions.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		for _, s := range res.ReadSubscriptions.Subscriptions {
 			pm := m.promises.Get(s.PromiseId)
 			sm := pm.subscriptions.Get(s.Id)
@@ -375,10 +375,10 @@ func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Respon
 	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
 
 	switch res.CreateSubscription.Status {
-	case t_api.ResponseOK:
+	case t_api.StatusOK:
 		sm.subscription = res.CreateSubscription.Subscription
 		return nil
-	case t_api.ResponseCreated:
+	case t_api.StatusCreated:
 		sm.subscription = res.CreateSubscription.Subscription
 		return nil
 	default:
@@ -391,10 +391,10 @@ func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Respon
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
 
 	switch res.DeleteSubscription.Status {
-	case t_api.ResponseNoContent:
+	case t_api.StatusNoContent:
 		sm.subscription = nil
 		return nil
-	case t_api.ResponseNotFound:
+	case t_api.StatusSubscriptionNotFound:
 		sm.subscription = nil
 		return nil
 	default:

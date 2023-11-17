@@ -38,7 +38,9 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if err != nil {
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			// put in original error
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err))
+			// store submission is failing -- single AIOStoreSubmissionFailure -- metadata information on that guy
 			return
 		}
 
@@ -51,14 +53,14 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			res(&t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseNotFound,
+					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err))
 				return
 			}
 
@@ -67,14 +69,14 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					c.Scheduler.Add(TimeoutPromise(metadata, p, CancelPromise(metadata, req, res), func(err error) {
 						if err != nil {
 							slog.Error("failed to timeout promise", "req", req, "err", err)
-							res(nil, err)
+							res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to timeout promise", err))
 							return
 						}
 
 						res(&t_api.Response{
 							Kind: t_api.CancelPromise,
 							CancelPromise: &t_api.CancelPromiseResponse{
-								Status: t_api.ResponseForbidden,
+								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
 									State: promise.Timedout,
@@ -130,7 +132,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					if err != nil {
 						slog.Error("failed to update promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err))
 						return
 					}
 
@@ -143,7 +145,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 						res(&t_api.Response{
 							Kind: t_api.CancelPromise,
 							CancelPromise: &t_api.CancelPromiseResponse{
-								Status: t_api.ResponseCreated,
+								Status: t_api.StatusCreated,
 								Promise: &promise.Promise{
 									Id:                        p.Id,
 									State:                     promise.Canceled,
@@ -163,11 +165,11 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := t_api.ResponseForbidden
+				status := util.GetForbiddenStatus(p.State)
 				strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdempotencyKey) {
-					status = t_api.ResponseOK
+					status = t_api.StatusOK
 				}
 
 				res(&t_api.Response{

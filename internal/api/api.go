@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type API interface {
@@ -83,7 +85,9 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		var status int
 
 		if err != nil {
-			status = 500
+			var resErr *t_api.ResonateError
+			util.Assert(errors.As(err, &resErr), "err must be a ResonateError")
+			status = int(resErr.Code())
 		} else {
 			switch res.Kind {
 			case t_api.ReadPromise:
@@ -104,8 +108,10 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.CreateSubscription.Status)
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
+			case t_api.Echo:
+				status = 2000
 			default:
-				status = 200
+				panic(fmt.Errorf("unknown response kind: %d", res.Kind))
 			}
 		}
 
@@ -118,7 +124,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// we must wait to close the channel because even in a select
 	// sending to a closed channel will panic
 	if a.done {
-		sqe.Callback(nil, fmt.Errorf("system is shutting down"))
+		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSystemShuttingDown, "system is shutting down", nil))
 		return
 	}
 
@@ -126,7 +132,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	case a.sq <- sqe:
 		slog.Debug("api:enqueue", "sqe", sqe)
 	default:
-		sqe.Callback(nil, fmt.Errorf("api submission queue full"))
+		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAPISubmissionQueueFull, "api submission queue is full", nil))
 	}
 }
 

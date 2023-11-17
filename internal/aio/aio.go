@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -110,7 +111,7 @@ func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			slog.Debug("aio:enqueue", "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
 		default:
-			sqe.Callback(nil, fmt.Errorf("aio:subsystem:%s submission queue full", subsystem))
+			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, fmt.Sprintf("aio:subsytem:%s submission queue full", subsystem), nil))
 		}
 	} else {
 		panic("invalid aio submission")

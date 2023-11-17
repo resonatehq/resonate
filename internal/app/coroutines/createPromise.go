@@ -40,8 +40,9 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 		})
 
 		if err != nil {
+			// transform here -- resonate error
 			slog.Error("failed to read promise", "req", req, "err", err)
-			res(nil, err)
+			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err))
 			return
 		}
 
@@ -75,7 +76,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 			if err != nil {
 				slog.Error("failed to update promise", "req", req, "err", err)
-				res(nil, err)
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err))
 				return
 			}
 
@@ -88,7 +89,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 				res(&t_api.Response{
 					Kind: t_api.CreatePromise,
 					CreatePromise: &t_api.CreatePromiseResponse{
-						Status: t_api.ResponseCreated,
+						Status: t_api.StatusCreated,
 						Promise: &promise.Promise{
 							Id:                      req.CreatePromise.Id,
 							State:                   promise.Pending,
@@ -107,22 +108,22 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			p, err := result.Records[0].Promise()
 			if err != nil {
 				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				res(nil, err)
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err))
 				return
 			}
 
-			status := t_api.ResponseForbidden
+			status := t_api.StatusPromiseAlreadyExists
 			strict := req.CreatePromise.Strict && p.State != promise.Pending
 
 			if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
-				status = t_api.ResponseOK
+				status = t_api.StatusOK
 			}
 
 			if p.State == promise.Pending && c.Time() >= p.Timeout {
 				c.Scheduler.Add(TimeoutPromise(metadata, p, CreatePromise(metadata, req, res), func(err error) {
 					if err != nil {
 						slog.Error("failed to timeout promise", "req", req, "err", err)
-						res(nil, err)
+						res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to timeout promise", err))
 						return
 					}
 

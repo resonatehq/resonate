@@ -74,7 +74,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.ResponseOK,
+					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -96,7 +96,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status:  t_api.ResponseNotFound,
+					Status:  t_api.StatusPromiseNotFound,
 					Promise: nil,
 				},
 			},
@@ -123,7 +123,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -148,7 +148,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status: t_api.ResponseOK,
+					Status: t_api.StatusOK,
 					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
 						Next: &t_api.SearchPromisesRequest{
 							Q: "*",
@@ -185,7 +185,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -209,7 +209,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -235,7 +235,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -245,6 +245,14 @@ func TestHttpServer(t *testing.T) {
 		{
 			name:   "SearchPromisesInvalidQuery",
 			path:   "promises?q=",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchPromisesInvalidLimit",
+			path:   "promises?limit=-1",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -289,7 +297,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -321,7 +329,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -359,7 +367,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Canceled,
@@ -388,7 +396,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Canceled,
@@ -426,7 +434,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Resolved,
@@ -455,7 +463,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Resolved,
@@ -493,7 +501,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Rejected,
@@ -522,7 +530,7 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Rejected,
@@ -558,6 +566,8 @@ func TestHttpServer(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.status, res.StatusCode, string(body))
+
+			// TODO: assert body
 
 			select {
 			case err := <-httpTest.errors:

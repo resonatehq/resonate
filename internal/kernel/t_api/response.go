@@ -21,16 +21,6 @@ type Response struct {
 	Echo               *EchoResponse
 }
 
-type ResponseStatus int
-
-const (
-	ResponseOK        ResponseStatus = 200
-	ResponseCreated   ResponseStatus = 201
-	ResponseNoContent ResponseStatus = 204
-	ResponseForbidden ResponseStatus = 403
-	ResponseNotFound  ResponseStatus = 404
-)
-
 type ReadPromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`

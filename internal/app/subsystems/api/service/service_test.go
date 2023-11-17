@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -30,10 +31,11 @@ func TestReadPromise(t *testing.T) {
 	serviceTest := setup()
 
 	for _, tc := range []struct {
-		name string
-		id   string
-		req  *t_api.Request
-		res  *t_api.Response
+		name           string
+		id             string
+		req            *t_api.Request
+		res            *t_api.Response
+		expectedErrMsg *string
 	}{
 		{
 			name: "ReadPromise",
@@ -47,7 +49,7 @@ func TestReadPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.ResponseOK,
+					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -67,10 +69,11 @@ func TestReadPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ReadPromise,
 				ReadPromise: &t_api.ReadPromiseResponse{
-					Status:  t_api.ResponseNotFound,
+					Status:  t_api.StatusPromiseNotFound,
 					Promise: nil,
 				},
 			},
+			expectedErrMsg: util.ToPointer(`{"error":{"code":4040,"message":"The specified promise was not found","details":[{"@type":"RequestError","message":"Request errors are not retryable since they are caused by invalid client requests","domain":"request","metadata":{"url":"https://docs.resonatehq.io/reference/error-codes#4040"}}]}}`),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,7 +81,8 @@ func TestReadPromise(t *testing.T) {
 
 			res, err := serviceTest.service.ReadPromise(tc.id, &Header{})
 			if err != nil {
-				t.Fatal(err)
+				assert.Equal(t, *tc.expectedErrMsg, err.Error())
+				return
 			}
 
 			assert.Equal(t, tc.res.ReadPromise, res)
@@ -98,8 +102,8 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromises",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
-				Limit: 10,
+				Q:     util.ToPointer("*"),
+				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -118,7 +122,7 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -143,7 +147,7 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status: t_api.ResponseOK,
+					Status: t_api.StatusOK,
 					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
 						Next: &t_api.SearchPromisesRequest{
 							Q: "*",
@@ -165,9 +169,9 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesPending",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "pending",
-				Limit: 10,
+				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -182,7 +186,7 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -191,9 +195,9 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesResolved",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "resolved",
-				Limit: 10,
+				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -208,7 +212,7 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -217,9 +221,9 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesRejected",
 			serviceReq: &SearchPromiseParams{
-				Q:     "*",
+				Q:     util.ToPointer("*"),
 				State: "rejected",
-				Limit: 10,
+				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -236,7 +240,7 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.ResponseOK,
+					Status:   t_api.StatusOK,
 					Cursor:   nil,
 					Promises: []*promise.Promise{},
 				},
@@ -275,11 +279,11 @@ func TestCreatePromise(t *testing.T) {
 				Strict:         true,
 			},
 			serviceReqBody: &CreatePromiseBody{
-				Param: promise.Value{
+				Param: &promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("pending"),
 				},
-				Timeout: 1,
+				Timeout: util.ToPointer(int64(1)),
 			},
 
 			req: &t_api.Request{
@@ -298,7 +302,7 @@ func TestCreatePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -314,11 +318,11 @@ func TestCreatePromise(t *testing.T) {
 				Strict:         false,
 			},
 			serviceReqBody: &CreatePromiseBody{
-				Param: promise.Value{
+				Param: &promise.Value{
 					Headers: nil,
 					Data:    nil,
 				},
-				Timeout: 1,
+				Timeout: util.ToPointer(int64(1)),
 			},
 
 			req: &t_api.Request{
@@ -337,7 +341,7 @@ func TestCreatePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Pending,
@@ -397,7 +401,7 @@ func TestCancelPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Canceled,
@@ -433,7 +437,7 @@ func TestCancelPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Canceled,
@@ -494,7 +498,7 @@ func TestResolvePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Resolved,
@@ -530,7 +534,7 @@ func TestResolvePromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Resolved,
@@ -590,7 +594,7 @@ func TestRejectPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Rejected,
@@ -626,7 +630,7 @@ func TestRejectPromise(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseResponse{
-					Status: t_api.ResponseCreated,
+					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
 						State: promise.Rejected,
