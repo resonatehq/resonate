@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
@@ -76,14 +75,16 @@ func (m *Model) addCursor(next *t_api.Request) {
 func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
-		util.Assert(errors.As(err, &resErr), fmt.Sprintf("unexpected non-resonate error '%v'", err))
+		if !errors.As(err, &resErr) {
+			return fmt.Errorf("unexpected non-resonate error '%v'", err)
+		}
 		switch resErr.Code() {
 		case t_api.ErrAPISubmissionQueueFull:
 			return nil
 		case t_api.ErrAIOSubmissionQueueFull:
 			return nil
 		default:
-			return fmt.Errorf("unexpected error '%v'", resErr)
+			return fmt.Errorf("unexpected resonate error '%v'", resErr)
 		}
 	}
 
