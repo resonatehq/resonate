@@ -9,7 +9,7 @@ import (
 )
 
 func TestModelStep(t *testing.T) {
-	tests := []struct {
+	tcs := []struct {
 		name    string
 		m       *Model
 		req     *t_api.Request
@@ -51,10 +51,10 @@ func TestModelStep(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := tt.m.Step(tt.req, tt.res, tt.err)
-			if tt.wantErr {
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.m.Step(tc.req, tc.res, tc.err)
+			if tc.wantErr {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
