@@ -345,6 +345,9 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 		Timeout:                   promise.Timeout,
 		IdempotencyKeyForCreate:   idempotencyKeyForCreate,
 		IdempotencyKeyForComplete: idempotencyKeyForComplete,
+		CreatedOn:                 util.SafeDeref(promise.CreatedOn),
+		CompletedOn:               util.SafeDeref(promise.CompletedOn),
+		Tags:                      promise.Tags,
 	}
 }
 
