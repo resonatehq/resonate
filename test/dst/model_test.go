@@ -38,7 +38,15 @@ func TestModelStep(t *testing.T) {
 			m:       &Model{},
 			req:     &t_api.Request{},
 			res:     &t_api.Response{},
-			err:     errors.New("unexpected resonate error"),
+			err:     t_api.NewResonateError(-1, "", nil),
+			wantErr: true,
+		},
+		{
+			name:    "unexpected non-resonate error",
+			m:       &Model{},
+			req:     &t_api.Request{},
+			res:     &t_api.Response{},
+			err:     errors.New("unexpected non-resonate error"),
 			wantErr: true,
 		},
 	}
