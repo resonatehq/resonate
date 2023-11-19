@@ -1,11 +1,13 @@
 package dst
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
@@ -73,12 +75,17 @@ func (m *Model) addCursor(next *t_api.Request) {
 
 func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
+		var resErr *t_api.ResonateError
+		util.Assert(errors.As(err, &resErr), fmt.Sprintf("unexpected non-resonate error '%v'", err))
+
 		switch err.Error() {
-		case "api submission queue full":
+		case "api submission queue is full":
 			return nil
-		case "subsystem:store:sqlite submission queue full":
+		case "aio:subsystem:store:sqlite submission queue full":
 			return nil
-		case "subsystem:network:dst submission queue full":
+		case "aio:subsystem:store:postgres submission queue full":
+			return nil
+		case "aio:subsystem:network:dst submission queue full":
 			return nil
 		default:
 			return fmt.Errorf("unexpected error '%v'", err)
