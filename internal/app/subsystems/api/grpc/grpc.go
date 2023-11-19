@@ -331,14 +331,6 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 		idempotencyKeyForComplete = string(*promise.IdempotencyKeyForComplete)
 	}
 
-	var createdOn, completedOn int64
-	if promise.CreatedOn != nil {
-		createdOn = *promise.CreatedOn
-	}
-	if promise.CompletedOn != nil {
-		completedOn = *promise.CompletedOn
-	}
-
 	return &grpcApi.Promise{
 		Id:    promise.Id,
 		State: protoState(promise.State),
@@ -353,8 +345,8 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 		Timeout:                   promise.Timeout,
 		IdempotencyKeyForCreate:   idempotencyKeyForCreate,
 		IdempotencyKeyForComplete: idempotencyKeyForComplete,
-		CreatedOn:                 createdOn,
-		CompletedOn:               completedOn,
+		CreatedOn:                 util.SafeDeref(promise.CreatedOn),
+		CompletedOn:               util.SafeDeref(promise.CompletedOn),
 		Tags:                      promise.Tags,
 	}
 }
