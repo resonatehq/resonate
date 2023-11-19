@@ -77,18 +77,13 @@ func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
 		util.Assert(errors.As(err, &resErr), fmt.Sprintf("unexpected non-resonate error '%v'", err))
-
-		switch err.Error() {
-		case "api submission queue is full":
+		switch resErr.Code() {
+		case t_api.ErrAPISubmissionQueueFull:
 			return nil
-		case "aio:subsystem:store:sqlite submission queue full":
-			return nil
-		case "aio:subsystem:store:postgres submission queue full":
-			return nil
-		case "aio:subsystem:network:dst submission queue full":
+		case t_api.ErrAIOSubmissionQueueFull:
 			return nil
 		default:
-			return fmt.Errorf("unexpected error '%v'", err)
+			return fmt.Errorf("unexpected error '%v'", resErr)
 		}
 	}
 
