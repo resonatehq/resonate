@@ -11,7 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.17
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/prometheus/client_golang v1.16.0
-	github.com/spf13/cobra v1.7.0
+	github.com/spf13/cobra v1.8.0
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
 	google.golang.org/grpc v1.58.1
