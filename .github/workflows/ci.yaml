@@ -39,7 +39,7 @@ jobs:
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Go
       uses: actions/setup-go@v4
@@ -86,7 +86,7 @@ jobs:
         ./resonate serve --aio-store-sqlite-path :memory: &
 
     - name: Checkout test harness 
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with: 
         repository: resonatehq/durable-promise-test-harness
 
@@ -114,5 +114,5 @@ jobs:
       image: returntocorp/semgrep
     if: (github.actor != 'dependabot[bot]')
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - run: semgrep ci
