@@ -170,4 +170,4 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: darwin-aarch64
-        path: ./bin/darwin-aarch64/
+        path: ./bin/darwin-aarch64/g
