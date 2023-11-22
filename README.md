@@ -16,7 +16,7 @@
 <div align="center">
   <a href="https://twitter.com/resonatehqio">Twitter</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="resonatehqcommunity.slack.com">Slack</a>
+  <a href="https://resonatehqcommunity.slack.com">Slack</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://github.com/resonatehq/resonate/issues">Issues</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
