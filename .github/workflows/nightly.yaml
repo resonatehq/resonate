@@ -4,7 +4,7 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
-  
+
 permissions:
   contents: read
 
@@ -49,8 +49,7 @@ jobs:
       uses: actions/setup-go@v4
       with:
         go-version: 1.21
-    - name: Build for both amd64 and arm64
-      description: The clang supports cross-architecture natively. Thanks to LLVM!
+    - name: Build for both amd64 and arm64 # The clang supports cross-architecture natively. Thanks to LLVM!
       run: |
         GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
         GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
