@@ -9,7 +9,8 @@ on:
     - main
 
 permissions:
-  contents: read
+  contents: 'read'
+  id-token: 'write'
 
 jobs:
   ci:
@@ -135,38 +136,54 @@ jobs:
       run: |
         GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
         CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
-    - name: Archive Linux/x86_64
-      uses: actions/upload-artifact@v2
+    
+    - id: 'auth'
+      name: 'Authenticate to Google Cloud'
+      uses: 'google-github-actions/auth@v1'
       with:
-        name: linux-x86_64
-        path: ./bin/linux-x86_64/
-    - name: Archive Linux/aarch64
-      uses: actions/upload-artifact@v2
+        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+    - id: 'upload-linux-x86_64': 
+      uses: 'google-github-actions/upload-cloud-storage@v1'
       with:
-        name: linux-aarch64
-        path: ./bin/linux-aarch64/
+        path: './bin/linux-x86_64/resonate'
+        destination: 'resonate-release/resonate-main-linux-x86_64'
+    - id: 'upload-linux-aarch64': 
+      uses: 'google-github-actions/upload-cloud-storage@v1'
+      with:
+        path: './bin/linux-aarch64/resonate'
+        destination: 'resonate-release/resonate-main-linux-aarch64'
+    # - name: Archive Linux/x86_64
+    #   uses: actions/upload-artifact@v2
+    #   with:
+    #     name: linux-x86_64
+    #     path: ./bin/linux-x86_64/
+    # - name: Archive Linux/aarch64
+    #   uses: actions/upload-artifact@v2
+    #   with:
+    #     name: linux-aarch64
+    #     path: ./bin/linux-aarch64/
   
   # compile the darwin binary for both architectures on the macOS platform. 
-  release-darwin-binary:
-    runs-on: macos-latest
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
-    - name: Set up Go 1.21
-      uses: actions/setup-go@v4
-      with:
-        go-version: 1.21
-    - name: Build for both amd64 and arm64 # The clang supports cross-architecture natively. Thanks to LLVM!
-      run: |
-        GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
-        GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-    - name: Archive Darwin/x86_64
-      uses: actions/upload-artifact@v2
-      with:
-        name: darwin-x86_64
-        path: ./bin/darwin-x86_64/
-    - name: Archive Darwin/aarch64
-      uses: actions/upload-artifact@v2
-      with:
-        name: darwin-aarch64
-        path: ./bin/darwin-aarch64/
+  # release-darwin-binary:
+  #   runs-on: macos-latest
+  #   steps:
+  #   - name: Checkout repository
+  #     uses: actions/checkout@v3
+  #   - name: Set up Go 1.21
+  #     uses: actions/setup-go@v4
+  #     with:
+  #       go-version: 1.21
+  #   - name: Build for both amd64 and arm64 # The clang supports cross-architecture natively. Thanks to LLVM!
+  #     run: |
+  #       GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
+  #       GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
+  #   - name: Archive Darwin/x86_64
+  #     uses: actions/upload-artifact@v2
+  #     with:
+  #       name: darwin-x86_64
+  #       path: ./bin/darwin-x86_64/
+  #   - name: Archive Darwin/aarch64
+  #     uses: actions/upload-artifact@v2
+  #     with:
+  #       name: darwin-aarch64
+  #       path: ./bin/darwin-aarch64/
