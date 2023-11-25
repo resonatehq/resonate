@@ -39,6 +39,14 @@ Functions & Promises have emerged as a popular model of computation, elegantly e
 
 A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise as defined by the [Durable Promise API](https://github.com/resonatehq/durable-promise) is a representation of a future value.
 
+## Install 
+
+Resonate is currently in active development and has not yet reached v1.0. As such, a formal release cycle is not yet established. We welcome early adopters to test drive the nightly builds from the main branch. Please note that this is not an official stable release and you may encounter bugs as development continues towards v1.0. We appreciate any feedback on your experience with these nightly builds as we work to improve stability and performance in future releases.
+
+```bash 
+curl -fsSL https://storage.googleapis.com/resonate-release/install.sh | bash # for macOS, Linux, and WSL
+```
+
 ## Getting Started
 
 Resonate makes it easy to get started creating and interacting with durable promises. Follow these steps to build and run Resonate, then start creating and completing promises.
