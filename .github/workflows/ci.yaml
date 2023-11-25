@@ -10,7 +10,6 @@ on:
 
 permissions:
   contents: 'read'
-  id-token: 'write'
 
 jobs:
   ci:
@@ -116,4 +115,4 @@ jobs:
     if: (github.actor != 'dependabot[bot]')
     steps:
     - uses: actions/checkout@v4
-    - run: semgrep ci
+    - run: semgrep ci 
