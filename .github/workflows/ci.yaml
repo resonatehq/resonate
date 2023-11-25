@@ -9,8 +9,8 @@ on:
     - main
 
 permissions:
-  contents: 'read'
-
+  contents: read
+g
 jobs:
   ci:
     runs-on: ubuntu-latest
