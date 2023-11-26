@@ -27,21 +27,21 @@ jobs:
       run: |
         GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
         CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
-    - id: 'auth'
-      name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v1'
+    - id: auth
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
       with:
         credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
-    - id: 'upload-linux-x86_64' 
-      uses: 'google-github-actions/upload-cloud-storage@v1'
+    - id: upload-linux-x86_64
+      uses: google-github-actions/upload-cloud-storage@v1
       with:
-        path: './bin/linux-x86_64/resonate'
-        destination: 'resonate-release/linux-x86_64'
-    - id: 'upload-linux-aarch64' 
-      uses: 'google-github-actions/upload-cloud-storage@v1'
+        path: ./bin/linux-x86_64/resonate
+        destination: resonate-release/linux-x86_64
+    - id: upload-linux-aarch64
+      uses: google-github-actions/upload-cloud-storage@v1
       with:
-        path: './bin/linux-aarch64/resonate'
-        destination: 'resonate-release/linux-aarch64'
+        path: ./bin/linux-aarch64/resonate
+        destination: resonate-release/linux-aarch64
   
   release-darwin-binary:
     runs-on: macos-latest
@@ -56,18 +56,41 @@ jobs:
       run: |
         GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
         GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-    - id: 'auth'
-      name: 'Authenticate to Google Cloud'
-      uses: 'google-github-actions/auth@v1'
+    - id: auth
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
       with:
         credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
-    - id: 'upload-darwin-x86_64' 
-      uses: 'google-github-actions/upload-cloud-storage@v1'
+    - id: upload-darwin-x86_64 
+      uses: google-github-actions/upload-cloud-storage@v1
       with:
-        path: './bin/darwin-x86_64/resonate'
-        destination: 'resonate-release/darwin-x86_64'
-    - id: 'upload-darwin-aarch64' 
-      uses: 'google-github-actions/upload-cloud-storage@v1'
+        path: ./bin/darwin-x86_64/resonate
+        destination: resonate-release/darwin-x86_64
+    - id: upload-darwin-aarch64 
+      uses: google-github-actions/upload-cloud-storage@v1
       with:
-        path: './bin/darwin-aarch64/resonate'
-        destination: 'resonate-release/darwin-aarch64'
+        path: ./bin/darwin-aarch64/resonate
+        destination: resonate-release/darwin-aarch64
+  
+  release-install-script: 
+    runs-on: ubuntu-latest 
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Get changed files in the scripts folder
+      id: changed-files-specific
+      uses: tj-actions/changed-files@v40
+      with:
+        files: scripts/** 
+    - id: auth
+      if: steps.changed-files-specific.outputs.any_changed == 'true'
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+    - id: upload-install-script
+      if: steps.changed-files-specific.outputs.any_changed == 'true'
+      uses: google-github-actions/upload-cloud-storage@v1
+      with:
+        path: ./scripts/install.sh
+        destination: resonate-release
