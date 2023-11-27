@@ -248,6 +248,7 @@ var dstIssueCmd = &cobra.Command{
 	},
 }
 
+// TODO: repeats remove this too
 func init() {
 	// run command
 	dstRunCmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
