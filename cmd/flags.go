@@ -101,17 +101,17 @@ func addFlagsToCommand(c *cobra.Command, flags ...*ResonateFlag) {
 	for _, flag := range flags {
 		if v, ok := flag.value.(int); ok {
 			c.Flags().Int(flag.flag, v, flag.usage)
-			viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
+			_ = viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
 			continue
 		}
 		if v, ok := flag.value.(string); ok {
 			c.Flags().String(flag.flag, v, flag.usage)
-			viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
+			_ = viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
 			continue
 		}
 		if v, ok := flag.value.(time.Duration); ok {
 			c.Flags().Duration(flag.flag, v, flag.usage)
-			viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
+			_ = viper.BindPFlag(flag.ViperKey(), c.Flags().Lookup(flag.flag))
 			continue
 		}
 		panic(fmt.Sprintf("unsupported flag type: %T", flag.value))
