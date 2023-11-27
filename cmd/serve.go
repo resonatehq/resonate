@@ -23,7 +23,6 @@ import (
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/log"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 var serveCmd = &cobra.Command{
@@ -166,69 +165,157 @@ var serveCmd = &cobra.Command{
 	},
 }
 
+var serveFlags = FlagGroups{
+	{
+		Message: "api",
+		Commands: []*ResonateFlag{
+			{
+				flag:  "api-size",
+				value: 100,
+				usage: "size of the submission queue buffered channel",
+			},
+			{
+				flag:  "api-subsystems-http-addr",
+				value: "0.0.0.0:8001",
+				usage: "http server address",
+			},
+			{
+				flag:  "api-subsystems-http-timeout",
+				value: 10 * time.Second,
+				usage: "http server graceful shutdown timeout",
+			},
+			{
+				flag:  "api-subsystems-grpc-addr",
+				value: "0.0.0.0:50051",
+				usage: "grpc server address",
+			},
+		},
+	},
+	{
+		Message: "aio",
+		Commands: []*ResonateFlag{
+			{
+				flag:  "aio-size",
+				value: 100,
+				usage: "size of the completion queue buffered channel",
+			},
+			{
+				flag:  "aio-subsystems-store-subsystem-size",
+				value: 100,
+				usage: "size of store submission queue buffered channel",
+			},
+			{
+				flag:  "aio-subsystems-store-subsystem-workers",
+				value: 1,
+				usage: "number of concurrent connections to the store",
+			},
+			{
+				flag:  "aio-subsystems-store-subsystem-batchSize",
+				value: 100,
+				usage: "max submissions processed each tick by a store worker",
+			},
+			{
+				flag:  "aio-subsystems-store-config-kind",
+				value: "sqlite",
+				usage: "promise store type",
+			},
+			{
+				flag:  "aio-subsystems-store-config-sqlite-path",
+				value: "resonate.db",
+				usage: "sqlite database path",
+			},
+			{
+				flag:  "aio-subsystems-store-config-sqlite-txTimeout",
+				value: 250 * time.Millisecond,
+				usage: "sqlite transaction timeout",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-host",
+				value: "localhost",
+				usage: "postgres host",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-port",
+				value: "5432",
+				usage: "postgres port",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-username",
+				value: "",
+				usage: "postgres username",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-password",
+				value: "",
+				usage: "postgres password",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-database",
+				value: "resonate",
+				usage: "postgres database name",
+			},
+			{
+				flag:  "aio-subsystems-store-config-postgres-txTimeout",
+				value: 250 * time.Millisecond,
+				usage: "postgres transaction timeout",
+			},
+			{
+				flag:  "aio-subsystems-network-subsystem-size",
+				value: 100,
+				usage: "size of network submission queue buffered channel",
+			},
+			{
+				flag:  "aio-subsystems-network-subsystem-workers",
+				value: 3,
+				usage: "number of concurrent http requests",
+			},
+			{
+				flag:  "aio-subsystems-network-subsystem-batchSize",
+				value: 100,
+				usage: "max submissions processed each tick by a network worker",
+			},
+			{
+				flag:  "aio-subsystems-network-config-timeout",
+				value: 10 * time.Second,
+				usage: "network request timeout",
+			},
+		},
+	},
+	{
+		Message: "system",
+		Commands: []*ResonateFlag{
+			{
+				flag:  "system-notificationCacheSize",
+				value: 100,
+				usage: "max number of notifications to keep in cache",
+			},
+			{
+				flag:  "system-submissionBatchSize",
+				value: 100,
+				usage: "max number of submissions to process on each tick",
+			},
+			{
+				flag:  "system-completionBatchSize",
+				value: 100,
+				usage: "max number of completions to process on each tick",
+			},
+			// TODO: add kernel tick
+		},
+	},
+	{
+		Message: "metrics",
+		Commands: []*ResonateFlag{
+			{
+				flag:  "metrics-port",
+				value: 9090,
+				usage: "prometheus metrics server port",
+			},
+		},
+	},
+}
+
 func init() {
-	// api
-	serveCmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
-	serveCmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
-	serveCmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
-	serveCmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
-
-	_ = viper.BindPFlag("api.size", serveCmd.Flags().Lookup("api-size"))
-	_ = viper.BindPFlag("api.subsystems.http.addr", serveCmd.Flags().Lookup("api-http-addr"))
-	_ = viper.BindPFlag("api.subsystems.http.timeout", serveCmd.Flags().Lookup("api-http-timeout"))
-	_ = viper.BindPFlag("api.subsystems.grpc.addr", serveCmd.Flags().Lookup("api-grpc-addr"))
-
-	// aio
-	serveCmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
-	serveCmd.Flags().String("aio-store", "sqlite", "promise store type")
-	serveCmd.Flags().Int("aio-store-size", 100, "size of store submission queue buffered channel")
-	serveCmd.Flags().Int("aio-store-workers", 1, "number of concurrent connections to the store")
-	serveCmd.Flags().Int("aio-store-batch-size", 100, "max submissions processed each tick by a store worker")
-	serveCmd.Flags().String("aio-store-sqlite-path", "resonate.db", "sqlite database path")
-	serveCmd.Flags().Duration("aio-store-sqlite-tx-timeout", 250*time.Millisecond, "sqlite transaction timeout")
-	serveCmd.Flags().String("aio-store-postgres-host", "localhost", "postgres host")
-	serveCmd.Flags().String("aio-store-postgres-port", "5432", "postgres port")
-	serveCmd.Flags().String("aio-store-postgres-username", "", "postgres username")
-	serveCmd.Flags().String("aio-store-postgres-password", "", "postgres password")
-	serveCmd.Flags().String("aio-store-postgres-database", "resonate", "postgres database name")
-	serveCmd.Flags().Duration("aio-store-postgres-tx-timeout", 250*time.Millisecond, "postgres transaction timeout")
-	serveCmd.Flags().Int("aio-network-size", 100, "size of network submission queue buffered channel")
-	serveCmd.Flags().Int("aio-network-workers", 3, "number of concurrent http requests")
-	serveCmd.Flags().Int("aio-network-batch-size", 100, "max submissions processed each tick by a network worker")
-	serveCmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
-
-	_ = viper.BindPFlag("aio.size", serveCmd.Flags().Lookup("aio-size"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.kind", serveCmd.Flags().Lookup("aio-store"))
-	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", serveCmd.Flags().Lookup("aio-store-size"))
-	_ = viper.BindPFlag("aio.subsystems.store.subsystem.workers", serveCmd.Flags().Lookup("aio-store-workers"))
-	_ = viper.BindPFlag("aio.subsystems.store.subsystem.batchSize", serveCmd.Flags().Lookup("aio-store-batch-size"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.path", serveCmd.Flags().Lookup("aio-store-sqlite-path"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.sqlite.txTimeout", serveCmd.Flags().Lookup("aio-store-sqlite-tx-timeout"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.host", serveCmd.Flags().Lookup("aio-store-postgres-host"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.port", serveCmd.Flags().Lookup("aio-store-postgres-port"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.username", serveCmd.Flags().Lookup("aio-store-postgres-username"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.password", serveCmd.Flags().Lookup("aio-store-postgres-password"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", serveCmd.Flags().Lookup("aio-store-postgres-database"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.txTimeout", serveCmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.size", serveCmd.Flags().Lookup("aio-network-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.workers", serveCmd.Flags().Lookup("aio-network-workers"))
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.batchSize", serveCmd.Flags().Lookup("aio-network-batch-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", serveCmd.Flags().Lookup("aio-network-timeout"))
-
-	// system
-	serveCmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
-	serveCmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
-	serveCmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
-
-	_ = viper.BindPFlag("system.notificationCacheSize", serveCmd.Flags().Lookup("system-notification-cache-size"))
-	_ = viper.BindPFlag("system.submissionBatchSize", serveCmd.Flags().Lookup("system-submission-batch-size"))
-	_ = viper.BindPFlag("system.completionBatchSize", serveCmd.Flags().Lookup("system-completion-batch-size"))
-
-	// metrics
-	serveCmd.Flags().Int("metrics-port", 9090, "prometheus metrics server port")
-	_ = viper.BindPFlag("metrics.port", serveCmd.Flags().Lookup("metrics-port"))
-
+	serveFlags.AddFlagsToCommand(serveCmd)
 	serveCmd.Flags().SortFlags = false
 	rootCmd.AddCommand(serveCmd)
 }
