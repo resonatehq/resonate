@@ -15,7 +15,7 @@ permissions:
 jobs:
 
   ci:
-    uses: ./.github/workflows/ci.yaml
+    uses: ./.github/workflows/ci.yaml # this
 
   cd:
     needs: ci     
