@@ -115,8 +115,3 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: semgrep ci
-
-  trigger-cd:
-    needs: [build, test, semgrep]
-    uses: ./.github/workflows/cd.yaml
-    secrets: inherit
