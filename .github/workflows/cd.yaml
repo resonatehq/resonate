@@ -12,6 +12,7 @@ on:
       - "go.sum"
       - "main.go"
       - "Makefile"
+      - "README.md" # remove just for testing
     branches: 
     - main 
   pull_request: # remove just for testing
