@@ -1,23 +1,23 @@
 name: CD
 
-on:
-  push:
-    paths:
-      - "cmd/**"
-      - "internal/**"
-      - "pkg/**"
-      - "test/**"
-      - "Dockerfile"
-      - "go.mod"
-      - "go.sum"
-      - "main.go"
-      - "Makefile"
-    branches: 
-    - main 
+# on:
+#   push:
+#     paths:
+#       - "cmd/**"
+#       - "internal/**"
+#       - "pkg/**"
+#       - "test/**"
+#       - "Dockerfile"
+#       - "go.mod"
+#       - "go.sum"
+#       - "main.go"
+#       - "Makefile"
+#     branches: 
+#     - main 
   
-  pull_request: # remove just for testing
-    branches:
-    - main
+#   pull_request: # remove just for testing
+#     branches:
+#     - main
 
 permissions:
   contents: read
