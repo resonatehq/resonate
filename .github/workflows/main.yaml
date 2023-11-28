@@ -1,0 +1,20 @@
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+
+permissions:
+  contents: read
+  id-token: write
+  
+jobs:
+
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  cd:
+    needs: ci     
+    uses: ./.github/workflows/cd.yml
