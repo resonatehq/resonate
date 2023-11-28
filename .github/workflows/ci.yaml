@@ -73,7 +73,6 @@ jobs:
 
   test: 
     runs-on: ubuntu-latest
-    needs: [build]
     steps: 
     - name: Download resonate binary 
       uses: actions/download-artifact@v3
@@ -107,7 +106,6 @@ jobs:
 
   semgrep:
     name: semgrep
-    needs: [build]
     runs-on: ubuntu-20.04
     env:
       SEMGREP_RULES: "auto semgrep.yml"
