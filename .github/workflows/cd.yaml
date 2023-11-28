@@ -24,7 +24,6 @@ permissions:
 
 jobs:
   wait: 
-    name: Wait for CI
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -33,7 +32,7 @@ jobs:
       uses: lewagon/wait-on-check-action@v1.3.1
       with:
         ref: ${{ github.ref }}
-        running-workflow-name: 'Wait for CI'
+        check-name: 'Run tests'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         wait-interval: 10
         
