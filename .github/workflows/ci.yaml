@@ -1,4 +1,4 @@
-name: CI/CD
+name: Pipeline
 
 on:
   push:
@@ -118,8 +118,8 @@ jobs:
     - uses: actions/checkout@v4
     - run: semgrep ci
 
-  release-linux-binary:
-    # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  deploy-linux-binary:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [build, test, scan]
     runs-on: ubuntu-latest
     steps:
@@ -153,8 +153,8 @@ jobs:
         path: ./bin/linux-aarch64/resonate
         destination: resonate-release/linux-aarch64
   
-  release-darwin-binary:
-    # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+  deploy-darwin-binary:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [build, test, scan]
     runs-on: macos-latest
     steps:
