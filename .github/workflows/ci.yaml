@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -70,7 +70,7 @@ jobs:
       with:
         name: resonate
         path: resonate
-
+    
   test: 
     runs-on: ubuntu-latest
     needs: [build]
@@ -105,8 +105,9 @@ jobs:
         name: test-harness-results
         path: test/results/
 
-  semgrep:
+  scan:
     name: semgrep
+    needs: [build]
     runs-on: ubuntu-20.04
     env:
       SEMGREP_RULES: "auto semgrep.yml"
@@ -119,7 +120,7 @@ jobs:
 
   release-linux-binary:
     # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [build, test, semgrep]
+    needs: [build, test, scan]
     runs-on: ubuntu-latest
     steps:
     - name: Checkout repository
@@ -154,7 +155,7 @@ jobs:
   
   release-darwin-binary:
     # if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: [build, test, semgrep]
+    needs: [build, test, scan]
     runs-on: macos-latest
     steps:
     - name: Checkout repository
