@@ -119,7 +119,7 @@ jobs:
     - run: semgrep ci
 
   deploy-linux-binary:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build, test, scan]
     runs-on: ubuntu-latest
     steps:
@@ -154,7 +154,7 @@ jobs:
         destination: resonate-release/linux-aarch64
   
   deploy-darwin-binary:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [build, test, scan]
     runs-on: macos-latest
     steps:
