@@ -12,26 +12,32 @@ on:
       - "go.sum"
       - "main.go"
       - "Makefile"
-      - "README.md" # remove just for testing
     branches: 
     - main 
   pull_request: # remove just for testing
     branches:
     - main
-  workflow_run:
-    workflows:
-    - CI
-    types: 
-      - completed
 
 permissions:
   contents: read
   id-token: write
 
 jobs:
+  wait: 
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Wait for other checks to succeed
+      uses: lewagon/wait-on-check-action@v1.3.1
+      with:
+        ref: ${{ github.ref }}
+        running-workflow-name: 'CI'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
   release-linux-binary:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }} 
+    needs: [wait]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -65,7 +71,7 @@ jobs:
   
   release-darwin-binary:
     runs-on: macos-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }} 
+    needs: [wait]
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
