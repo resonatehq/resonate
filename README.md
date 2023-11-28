@@ -41,7 +41,7 @@ A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise a
 
 ## Install 
 
-Resonate is currently in active development without a formal release cycle. We welcome early adopters to play with the [latest build](http://resonatehq.io/download) from main as we work towards our first stable release. We appreciate any feedback on your experience to help improve stability and performance in future releases.
+Resonate is currently in active development without a formal release cycle. We welcome early adopters to experiment with the [latest build](http://resonatehq.io/download) as we work towards our first stable release. Your [feedback](https://github.com/resonatehq/resonate/issues/new/choose) is greatly appreciated.
 
 ## Getting Started
 
