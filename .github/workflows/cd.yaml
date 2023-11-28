@@ -2,9 +2,24 @@ name: CD
 
 on:
   push:
+    paths:
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "test/**"
+      - "Dockerfile"
+      - "go.mod"
+      - "go.sum"
+      - "main.go"
+      - "Makefile"
     branches: 
     - main 
-
+  workflow_run:
+    workflows:
+    - CI
+    types: 
+      - completed
+      
 permissions:
   contents: read
   id-token: write
@@ -12,6 +27,7 @@ permissions:
 jobs:
   release-linux-binary:
     runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -45,6 +61,7 @@ jobs:
   
   release-darwin-binary:
     runs-on: macos-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }} 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -71,26 +88,3 @@ jobs:
       with:
         path: ./bin/darwin-aarch64/resonate
         destination: resonate-release/darwin-aarch64
-  
-  release-install-script: 
-    runs-on: ubuntu-latest 
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-    - name: Get changed files in the scripts folder
-      id: changed-files-specific
-      uses: tj-actions/changed-files@v40
-      with:
-        files: scripts/** 
-    - id: auth
-      if: steps.changed-files-specific.outputs.any_changed == 'true'
-      name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v1
-      with:
-        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
-    - id: upload-install-script
-      if: steps.changed-files-specific.outputs.any_changed == 'true'
-      uses: google-github-actions/upload-cloud-storage@v1
-      with:
-        path: ./scripts/install.sh
-        destination: resonate-release

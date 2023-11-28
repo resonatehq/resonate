@@ -41,11 +41,7 @@ A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise a
 
 ## Install 
 
-Resonate is currently in active development without a formal release cycle. We welcome early adopters to test the latest artifact built from the main branch on each new commit as we work towards v1.0. We appreciate any feedback on your experience with these frequent new builds to help improve stability and performance in future releases.
-
-```bash 
-curl -fsSL https://storage.googleapis.com/resonate-release/install.sh | bash # for macOS, Linux, and WSL
-```
+Resonate is currently in active development without a formal release cycle. We welcome early adopters to play with the [latest build](http://resonatehq.io/download) from main as we work towards our first stable release. We appreciate any feedback on your experience to help improve stability and performance in future releases.
 
 ## Getting Started
 
