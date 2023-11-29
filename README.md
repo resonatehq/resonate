@@ -9,6 +9,7 @@
 [![ci](https://github.com/resonatehq/resonate/actions/workflows/ci.yaml/badge.svg)](https://github.com/resonatehq/resonate/actions/workflows/ci.yaml)
 [![dst](https://github.com/resonatehq/resonate/actions/workflows/dst.yaml/badge.svg)](https://github.com/resonatehq/resonate/actions/workflows/dst.yaml)
 [![codecov](https://codecov.io/gh/resonatehq/resonate/branch/main/graph/badge.svg)](https://codecov.io/gh/resonatehq/resonate)
+[![Go Report Card](https://goreportcard.com/badge/github.com/resonatehq/resonate)](https://goreportcard.com/report/github.com/resonatehq/resonate)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 </div>
@@ -37,6 +38,10 @@ Resonate offers a cloud computing model that allows you to build resilient appli
 Functions & Promises have emerged as a popular model of computation, elegantly expressing concurrency and coordination. Functions represent processes and Promises represent future values. Functions & Promises compose, allowing us to build even the largest system uniformly from the smallest building blocks.
 
 A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise as defined by the [Durable Promise API](https://github.com/resonatehq/durable-promise) is a representation of a future value.
+
+## Install 
+
+Resonate is currently in active development without a formal release cycle. We welcome early adopters to experiment with the [latest build](http://resonatehq.io/download) as we work towards our first stable release. Your [feedback](https://github.com/resonatehq/resonate/issues/new/choose) is greatly appreciated.
 
 ## Getting Started
 

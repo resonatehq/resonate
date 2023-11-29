@@ -1,4 +1,4 @@
-name: CI
+name: CICD
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  ci:
+  build:
     runs-on: ubuntu-latest
 
     env:
@@ -70,10 +70,10 @@ jobs:
       with:
         name: resonate
         path: resonate
-
-  harness: 
+    
+  test: 
     runs-on: ubuntu-latest
-    needs: [ci]
+    needs: [build]
     steps: 
     - name: Download resonate binary 
       uses: actions/download-artifact@v3
@@ -105,8 +105,9 @@ jobs:
         name: test-harness-results
         path: test/results/
 
-  semgrep:
+  scan:
     name: semgrep
+    needs: [build]
     runs-on: ubuntu-20.04
     env:
       SEMGREP_RULES: "auto semgrep.yml"
@@ -116,3 +117,69 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - run: semgrep ci
+
+  deploy-linux-binary:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build, test, scan]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Set up Go 1.21
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.21
+    - name: Install cross-compiler for linux/arm64
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gcc-aarch64-linux-gnu
+    - name: Build for both amd64 and arm64
+      run: |
+        GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
+        CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
+    - id: auth
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+    - id: upload-linux-x86_64
+      uses: google-github-actions/upload-cloud-storage@v1
+      with:
+        path: ./bin/linux-x86_64/resonate
+        destination: resonate-release/linux-x86_64
+    - id: upload-linux-aarch64
+      uses: google-github-actions/upload-cloud-storage@v1
+      with:
+        path: ./bin/linux-aarch64/resonate
+        destination: resonate-release/linux-aarch64
+  
+  deploy-darwin-binary:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build, test, scan]
+    runs-on: macos-latest
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Set up Go 1.21
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.21
+    - name: Build for both amd64 and arm64
+      run: |
+        GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
+        GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
+    - id: auth
+      name: Authenticate to Google Cloud
+      uses: google-github-actions/auth@v1
+      with:
+        credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
+    - id: upload-darwin-x86_64 
+      uses: google-github-actions/upload-cloud-storage@v1
+      with:
+        path: ./bin/darwin-x86_64/resonate
+        destination: resonate-release/darwin-x86_64
+    - id: upload-darwin-aarch64 
+      uses: google-github-actions/upload-cloud-storage@v1
+      with:
+        path: ./bin/darwin-aarch64/resonate
+        destination: resonate-release/darwin-aarch64
