@@ -15,6 +15,8 @@
 </div>
 
 <div align="center">
+<a href="https://docs.resonatehq.io">Docs</a>
+  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://twitter.com/resonatehqio">Twitter</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://resonatehqcommunity.slack.com">Slack</a>
@@ -24,8 +26,6 @@
   <a href="https://github.com/resonatehq/resonate/issues/131">Roadmap</a>
   <br />
 </div>
-
-### [Read the docs →](https://docs.resonatehq.io/)
 
 ## Why Resonate?
 > Resonate is under active development, but already useful for improving development workflows and running simpler production code. It ships as a single executable called `Resonate`. 
