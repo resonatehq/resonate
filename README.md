@@ -1,3 +1,10 @@
+> Resonate is in the **Design Phase**
+> 
+> Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
+>
+> [Join our slack](https://resonatehqcommunity.slack.com)
+
+<br /><br />
 <p align="center">
     <img height="170"src="./docs/img/echo.png">
 </p>
@@ -116,28 +123,13 @@ Resonate makes it easy to get started creating and interacting with durable prom
    ```
 
 ## Development
-
 ```
 go run ./...
 go test -v ./...
 ```
 
 ## Contributing
-
-Refer to the [contribution guide](https://github.com/resonatehq/resonate/blob/main/CONTRIBUTING.md) to start contributing to Resonate. Your contributions will help shape the future of Durable Promises.
-
-## Repositories
-
-| Repo | Description |
-|:-----|:------------|
-| [Resonate](https://github.com/resonatehq/resonate) | The main repository that you are currently in. Contains the Resonate server code.
-| [Resonate-sdk-ts](https://github.com/resonatehq/resonate-sdk-ts) | Resonate SDK for TypeScript. 
-| [Docs](https://docs.resonatehq.io) | The documentation for Resonate.
+See our [contribution guidelines](CONTRIBUTING.md).
 
 ## License
-
 The Resonate Server is available under the [Apache 2.0 License](LICENSE).
-
----
-
-Build reliable and scalable applications with a delightful developer experience.
