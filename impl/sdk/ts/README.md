@@ -33,6 +33,9 @@
 
 An SDK for writing simple and elegant durable async await applications.
 
+## Why Resonate?
+Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
+
 ## What is Durable Async Await?
 
 Durable Async Await are Functions and Promises that maintain progress in durable storage.
