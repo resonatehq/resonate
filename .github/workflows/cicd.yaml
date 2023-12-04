@@ -139,7 +139,7 @@ jobs:
         CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
     - id: auth
       name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v1
+      uses: google-github-actions/auth@v2
       with:
         credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
     - id: upload-linux-x86_64
@@ -170,7 +170,7 @@ jobs:
         GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
     - id: auth
       name: Authenticate to Google Cloud
-      uses: google-github-actions/auth@v1
+      uses: google-github-actions/auth@v2
       with:
         credentials_json: '${{ secrets.GOOGLE_CREDENTIALS }}'
     - id: upload-darwin-x86_64 
