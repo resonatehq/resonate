@@ -35,16 +35,10 @@
 </div>
 
 ## Why Resonate?
-> Resonate is under active development, but already useful for improving development workflows and running simpler production code. It ships as a single executable called `Resonate`. 
+Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
 
-Resonate offers a cloud computing model that allows you to build resilient applications using an intuitive programming interface centered around async • await. With a familiar async • await interface, you can create distributed services without learning complex failure handling techniques or vendor-specific concepts. On day one, use your existing async • await programming knowledge to build systems that recover gracefully. 
-
-## What is a Durable Promise?
-> Resonate implements the [Durable Promise API](https://github.com/resonatehq/durable-promise).
-
-Functions & Promises have emerged as a popular model of computation, elegantly expressing concurrency and coordination. Functions represent processes and Promises represent future values. Functions & Promises compose, allowing us to build even the largest system uniformly from the smallest building blocks.
-
-A Durable Promise is an *addressable*, *persistent* promise. A Durable Promise as defined by the [Durable Promise API](https://github.com/resonatehq/durable-promise) is a representation of a future value.
+## What is Durable Async Await?
+Durable Async Await are Functions and Promises that maintain progress in durable storage.
 
 ## Install 
 
