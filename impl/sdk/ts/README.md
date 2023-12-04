@@ -1,3 +1,9 @@
+> Resonate is in the **Design Phase**
+> 
+> Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
+>
+> [Join our slack](https://resonatehqcommunity.slack.com)
+
 <p align="center">
    <img height="170"src="https://raw.githubusercontent.com/resonatehq/resonate/main/docs/img/echo.png">
 </p>
@@ -46,9 +52,6 @@ Coming soon:
 Let us know [features](https://github.com/resonatehq/resonate-sdk-ts/issues) you would like Resonate to support.
 
 ## Install
-> [!NOTE]
-> Resonate is under active development. Our API is liable to change at any time.
-
 ```bash
 npm install https://github.com/resonatehq/resonate-sdk-ts
 ```
