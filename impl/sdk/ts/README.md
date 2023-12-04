@@ -4,6 +4,7 @@
 >
 > [Join our slack](https://resonatehqcommunity.slack.com)
 
+<br /><br />
 <p align="center">
    <img height="170"src="https://raw.githubusercontent.com/resonatehq/resonate/main/docs/img/echo.png">
 </p>
@@ -90,3 +91,6 @@ npm test
 
 ## Contributing
 See our [contribution guidelines](CONTRIBUTING.md).
+
+## License
+The Resonate TypeScript SDK is available under the [Apache 2.0 License](LICENSE).
