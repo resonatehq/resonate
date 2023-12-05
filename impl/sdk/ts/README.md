@@ -110,7 +110,7 @@ app.post("/purchase", async (req, res) => {
   const user = { id: 1, name: "John" };
   const song = { id: 1, title: "Song 1" };
 
-  // Generate unique ID for purchase execution. This is used to track the execution. 
+  // Create unique ID for purchase execution. This is used to track the execution. 
   // Typically, this would be an external ID from your incoming request.
   const purchaseId = `purchase-${user.id}-${song.id}`
 
