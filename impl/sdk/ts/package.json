@@ -1,11 +1,27 @@
 {
-    "name": "resonate-sdk-ts",
+    "name": "@resonatehq/sdk",
+    "version": "0.0.0",
+    "description": "Resonate TypeScript SDK",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "license": "Apache-2.0",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
+    },
+    "publishConfig": {
+        "provenance": true
+    },
     "scripts": {
         "test": "jest",
+        "build": "tsc --build tsconfig.build.json",
         "lint": "prettier . --check && eslint .",
         "prettier": "prettier . --write",
         "debug": "node --inspect-brk ./node_modules/.bin/jest -i"
     },
+    "files": [
+        "dist"
+    ],
     "devDependencies": {
         "@jest/globals": "^29.7.0",
         "@typescript-eslint/eslint-plugin": "^6.10.0",

@@ -13,7 +13,7 @@
 
 <div align="center">
 
-[![ci](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/ci.yaml/badge.svg)](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/ci.yaml)
+[![cicd](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/cicd.yaml/badge.svg)](https://github.com/resonatehq/resonate-sdk-ts/actions/workflows/cicd.yaml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 </div>

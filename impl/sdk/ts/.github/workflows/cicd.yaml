@@ -1,4 +1,4 @@
-name: CI
+name: CICD
 
 on:
   push:
@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   ci:
@@ -18,17 +19,24 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
+          registry-url: "https://registry.npmjs.org"
       - name: Install dependencies
         run: npm install
-
       - name: Run linter
         run: npm run lint
-
       - name: Run tests
         run: npm test
+      - name: Build
+        run: npm run build
+      - name: Publish
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm install -g npm
+          npm version prerelease --no-git-tag-version --preid $GITHUB_SHA
+          npm publish --access public
