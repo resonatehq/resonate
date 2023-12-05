@@ -57,7 +57,7 @@ Let us know [features](https://github.com/resonatehq/resonate-sdk-ts/issues) you
 
 ## Install
 ```bash
-npm install https://github.com/resonatehq/resonate-sdk-ts
+npm install @resonatehq/sdk
 ```
 
 ## Getting Started
