@@ -62,25 +62,76 @@ npm install https://github.com/resonatehq/resonate-sdk-ts
 
 ## Getting Started
 ```typescript
-import { Resonate, Context } from 'resonate-sdk-ts';
+import express from "express";
+import { Resonate, Context } from "@resonatehq/sdk";
 
-// Initialize Resonate
+/* Your async code using Resonate's Context */
+type User = {
+  id: number;
+  name: string;
+};
+
+type Song = {
+  id: number;
+  title: string;
+};
+
+// Purchase song event handler
+async function purchase(ctx: Context, user: User, song: Song): Promise<{ charge: any; access: any }> {
+  const charge = await ctx.run(chargeCreditCard, user, song);
+  const access = await ctx.run(unlockUserAccess, user, song);
+  return { charge, access };
+}
+
+async function chargeCreditCard(ctx: Context, user: User, song: Song): Promise<any> {
+  console.log("Charging credit card...");
+  return { status: "charged" };
+}
+
+async function unlockUserAccess(ctx: Context, user: User, song: Song): Promise<any> {
+  console.log("Unlocking user access...");
+  return { status: "unlocked" };
+}
+
+/* Express Application w/ Resonate Event Handler */
+
+// Create Resonate instance
 const resonate = new Resonate();
 
-// Register a durable function
-resonate.register('durableAdd', durableAdd);
+// Register purchase handler
+resonate.register("durablePurchase", purchase);
 
-// Call a durable function
-const r = await resonate.run('durableAdd', 'id', 1, 1);
-console.log(r); // 2
+// Initialize Express app with purchase route
+const app = express();
 
-async function durableAdd(c: Context, a: number, b: number): number {
-   return await c.run(add, a, b);
-}
+app.post("/purchase", async (req, res) => {
+  
+  // Dummy user and song data
+  const user = { id: 1, name: "John" };
+  const song = { id: 1, title: "Song 1" };
 
-function add(c: Context, a: number, b: number): number {
-   return a + b;
-}
+  // Generate unique ID for purchase execution. This is used to track the execution. 
+  // Typically, this would be an external ID from your incoming request.
+  const purchaseId = `purchase-${user.id}-${song.id}`
+
+  // Execute durable purchase
+  try {
+    const result = await resonate.run("durablePurchase", purchaseId, user, song);
+    res.send(result);
+  } catch (err) {
+    res.status(500).send("Unable to purchase song");
+  }
+});
+
+app.listen(3000, () => {
+  console.log("App listening on port 3000");
+});
+
+```
+
+Once the server is running, invoke the purchase endpoint.
+```bash
+curl -X POST localhost:3000/purchase
 ```
 
 See our [docs](https://docs.resonatehq.io) for more detailed information.
