@@ -76,19 +76,32 @@ type Song = {
   title: string;
 };
 
+type ChargeStatus = {
+  status: "charged" | "declined";
+};
+
+type AccessStatus = {
+  status: "unlocked" | "locked";
+};
+
+type Status = {
+  charge: ChargeStatus;
+  access: AccessStatus;
+};
+
 // Purchase song event handler
-async function purchase(ctx: Context, user: User, song: Song): Promise<{ charge: any; access: any }> {
+async function purchase(ctx: Context, user: User, song: Song): Promise<Status> {
   const charge = await ctx.run(chargeCreditCard, user, song);
   const access = await ctx.run(unlockUserAccess, user, song);
   return { charge, access };
 }
 
-async function chargeCreditCard(ctx: Context, user: User, song: Song): Promise<any> {
+async function chargeCreditCard(ctx: Context, user: User, song: Song): Promise<ChargeStatus> {
   console.log("Charging credit card...");
   return { status: "charged" };
 }
 
-async function unlockUserAccess(ctx: Context, user: User, song: Song): Promise<any> {
+async function unlockUserAccess(ctx: Context, user: User, song: Song): Promise<AccessStatus> {
   console.log("Unlocking user access...");
   return { status: "unlocked" };
 }
