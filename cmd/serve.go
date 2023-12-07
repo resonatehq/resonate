@@ -130,11 +130,11 @@ var serveCmd = &cobra.Command{
 			// occurs, whichever happens first
 			select {
 			case s := <-sig:
-				slog.Info("shutdown signal recieved, shutting down", "signal", s)
+				slog.Info("shutdown signal received, shutting down", "signal", s)
 			case err := <-api.Errors():
-				slog.Error("api error recieved, shutting down", "error", err)
+				slog.Error("api error received, shutting down", "error", err)
 			case err := <-aio.Errors():
-				slog.Error("aio error recieved, shutting down", "error", err)
+				slog.Error("aio error received, shutting down", "error", err)
 			}
 
 			// shutdown system

@@ -137,6 +137,8 @@ jobs:
       run: |
         GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
         CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
+        chmod +x ./bin/linux-x86_64/resonate
+        chmod +x ./bin/linux-aarch64/resonate
     - id: auth
       name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
@@ -168,6 +170,8 @@ jobs:
       run: |
         GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
         GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
+        chmod +x ./bin/darwin-x86_64/resonate
+        chmod +x ./bin/darwin-aarch64/resonate
     - id: auth
       name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2
