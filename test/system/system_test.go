@@ -48,8 +48,8 @@ func TestSystemLoop(t *testing.T) {
 	system := system.New(api, aio, config, metrics)
 	system.AddOnRequest(t_api.Echo, coroutines.Echo)
 
-	recieved := make(chan int, 10)
-	defer close(recieved)
+	received := make(chan int, 10)
+	defer close(received)
 
 	// all requests made prior to shutdown should succeed
 	for i := 0; i < 5; i++ {
@@ -68,7 +68,7 @@ func TestSystemLoop(t *testing.T) {
 				},
 			},
 			Callback: func(res *t_api.Response, err error) {
-				recieved <- 1
+				received <- 1
 
 				assert.Nil(t, err)
 				assert.Equal(t, data, res.Echo.Data)
@@ -94,7 +94,7 @@ func TestSystemLoop(t *testing.T) {
 				},
 			},
 			Callback: func(res *t_api.Response, err error) {
-				recieved <- 1
+				received <- 1
 
 				var apiErr *t_api.ResonateError
 				assert.True(t, errors.As(err, &apiErr))
@@ -109,8 +109,8 @@ func TestSystemLoop(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		<-recieved
+		<-received
 	}
 
-	assert.Zero(t, len(recieved), "all sqes have been resolved")
+	assert.Zero(t, len(received), "all sqes have been resolved")
 }

@@ -99,7 +99,7 @@ const (
 		(?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
-	PROMISE_UPDATE_STATMENT = `
+	PROMISE_UPDATE_STATEMENT = `
 	UPDATE
 		promises
 	SET
@@ -308,7 +308,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	}
 	defer promiseInsertStmt.Close()
 
-	promiseUpdateStmt, err := tx.Prepare(PROMISE_UPDATE_STATMENT)
+	promiseUpdateStmt, err := tx.Prepare(PROMISE_UPDATE_STATEMENT)
 	if err != nil {
 		return nil, err
 	}
