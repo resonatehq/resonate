@@ -57,94 +57,86 @@ Let us know [features](https://github.com/resonatehq/resonate-sdk-ts/issues) you
 
 ## Install
 ```bash
+npm install -g ts-node
 npm install @resonatehq/sdk
+npm install express @types/express
 ```
 
 ## Getting Started
-```typescript
-import express from "express";
+```ts
 import { Resonate, Context } from "@resonatehq/sdk";
+import express, { Request, Response } from "express";
 
-/* Your async code using Resonate's Context */
 type User = {
   id: number;
-  name: string;
 };
 
 type Song = {
   id: number;
-  title: string;
-};
-
-type ChargeStatus = {
-  status: "charged" | "declined";
-};
-
-type AccessStatus = {
-  status: "unlocked" | "locked";
+  price: number;
 };
 
 type Status = {
-  charge: ChargeStatus;
-  access: AccessStatus;
+  charged: boolean;
+  granted: boolean;
 };
 
-// Purchase song event handler
 async function purchase(ctx: Context, user: User, song: Song): Promise<Status> {
-  const charge = await ctx.run(chargeCreditCard, user, song);
-  const access = await ctx.run(unlockUserAccess, user, song);
-  return { charge, access };
+  const charged = await ctx.run(charge, user, song);
+  const granted = await ctx.run(access, user, song);
+
+  return { charged, granted };
 }
 
-async function chargeCreditCard(ctx: Context, user: User, song: Song): Promise<ChargeStatus> {
-  console.log("Charging credit card...");
-  return { status: "charged" };
+async function charge(ctx: Context, user: User, song: Song): Promise<boolean> {
+  console.log(`Charged user:${user.id} $${song.price}.`);
+  return true;
 }
 
-async function unlockUserAccess(ctx: Context, user: User, song: Song): Promise<AccessStatus> {
-  console.log("Unlocking user access...");
-  return { status: "unlocked" };
+async function access(ctx: Context, user: User, song: Song): Promise<boolean> {
+  console.log(`Granted user:${user.id} access to song:${song.id}.`);
+  return true;
 }
 
-/* Express Application w/ Resonate Event Handler */
-
-// Create Resonate instance
+// Initialize Resonate app
 const resonate = new Resonate();
+resonate.register("purchase", purchase);
 
-// Register purchase handler
-resonate.register("durablePurchase", purchase);
-
-// Initialize Express app with purchase route
+// Initialize Express app
 const app = express();
+app.use(express.json())
 
-app.post("/purchase", async (req, res) => {
-  
-  // Dummy user and song data
-  const user = { id: 1, name: "John" };
-  const song = { id: 1, title: "Song 1" };
+app.post("/purchase", async (req: Request, res: Response) => {
+  const user = { id: req.body?.user ?? 1 };
+  const song = { id: req.body?.song ?? 1, price: 1.99 };
 
-  // Create unique ID for purchase execution. This is used to track the execution. 
-  // Typically, this would be an external ID from your incoming request.
-  const purchaseId = `purchase-${user.id}-${song.id}`
+  // id uniquely identifies the purchase
+  const id = `purchase-${user.id}-${song.id}`;
 
-  // Execute durable purchase
   try {
-    const result = await resonate.run("durablePurchase", purchaseId, user, song);
-    res.send(result);
+    res.send(await resonate.run("purchase", id, user, song));
   } catch (err) {
-    res.status(500).send("Unable to purchase song");
+    res.status(500).send("Could not purchase song");
   }
 });
 
 app.listen(3000, () => {
-  console.log("App listening on port 3000");
+  console.log("Listening on port 3000");
 });
-
 ```
 
-Once the server is running, invoke the purchase endpoint.
+Start the server.
 ```bash
-curl -X POST localhost:3000/purchase
+ts-node app.ts
+```
+
+And call the endpoint providing a user and song id.
+```
+curl \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"user": 1, "song": 1}' \
+  http://localhost:3000/purchase
 ```
 
 See our [docs](https://docs.resonatehq.io) for more detailed information.
