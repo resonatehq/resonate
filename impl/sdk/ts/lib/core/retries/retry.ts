@@ -1,4 +1,4 @@
-import { Context } from "../resonate";
+import { Context } from "../../resonate";
 import { IRetry } from "../retry";
 
 export class Retry implements IRetry {

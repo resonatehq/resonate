@@ -2,7 +2,7 @@
 
 import { jest, describe, test, expect } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
-import { TestLogger } from "../lib/loggers/test";
+import { TestLogger } from "../lib/core/loggers/test";
 
 jest.setTimeout(100000); // 100 seconds
 
