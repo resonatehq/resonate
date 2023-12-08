@@ -125,6 +125,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	limit := RangeIntn(r, 1, 11)
 	states := []promise.State{}
 
+	// query
 	var query string
 	switch r.Intn(2) {
 	case 0:
@@ -133,6 +134,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 		query = fmt.Sprintf("%d*", r.Intn(10))
 	}
 
+	// states
 	for i := 0; i < r.Intn(5); i++ {
 		switch r.Intn(5) {
 		case 0:
@@ -148,11 +150,24 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 		}
 	}
 
+	// tags
+	tags := map[string]string{}
+	switch r.Intn(2) {
+	case 0:
+		for k, v := range g.tagsSet[r.Intn(len(g.tagsSet))] {
+			tags[k] = v
+			break
+		}
+	default:
+		query = fmt.Sprintf("%d*", r.Intn(10))
+	}
+
 	return &t_api.Request{
 		Kind: t_api.SearchPromises,
 		SearchPromises: &t_api.SearchPromisesRequest{
 			Q:      query,
 			States: states,
+			Tags:   tags,
 			Limit:  limit,
 		},
 	}

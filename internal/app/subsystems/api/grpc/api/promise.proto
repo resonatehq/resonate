@@ -12,9 +12,9 @@ message Promise {
   int64 timeout = 5;
   string idempotencyKeyForCreate = 6;
   string idempotencyKeyForComplete = 7;
-  int64 createdOn = 8; 
-  int64 completedOn = 9; 
-  map<string, string> tags = 10; 
+  int64 createdOn = 8;
+  int64 completedOn = 9;
+  map<string, string> tags = 10;
 }
 
 enum State {
@@ -39,7 +39,7 @@ message Value {
 
 message ReadPromiseRequest {
   string id = 1;
-  string requestId = 2; 
+  string requestId = 2;
 }
 
 message ReadPromiseResponse {
@@ -49,9 +49,10 @@ message ReadPromiseResponse {
 message SearchPromisesRequest {
   string q = 1;
   SearchState state = 2;
-  int32 limit = 3;
-  string cursor = 4;
-  string requestId = 5; 
+  bool invocation = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  string requestId = 6;
 }
 
 message SearchPromisesResponse {
@@ -65,7 +66,7 @@ message CreatePromiseRequest {
   bool strict = 3;
   Value param = 4;
   int64 timeout = 5;
-  string requestId = 6; 
+  string requestId = 6;
 }
 
 message CreatePromiseResponse {
@@ -78,7 +79,7 @@ message CancelPromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5; 
+  string requestId = 5;
 }
 
 message CancelPromiseResponse {
@@ -91,7 +92,7 @@ message ResolvePromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5; 
+  string requestId = 5;
 }
 
 message ResolvePromiseResponse {
@@ -104,7 +105,7 @@ message RejectPromiseRequest {
   string idempotencyKey = 2;
   bool strict = 3;
   Value value = 4;
-  string requestId = 5; 
+  string requestId = 5;
 }
 
 message RejectPromiseResponse {

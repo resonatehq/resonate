@@ -161,6 +161,7 @@ type ReadPromiseCommand struct {
 type SearchPromisesCommand struct {
 	Q      string
 	States []promise.State
+	Tags   map[string]string
 	Limit  int
 	SortId *int64
 }

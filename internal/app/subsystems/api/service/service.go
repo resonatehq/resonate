@@ -119,6 +119,12 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 			panic(fmt.Sprintf("invalid state: %s", params.State))
 		}
 
+		// set tags if invocation is true
+		tags := map[string]string{}
+		if params.Invocation {
+			tags["r-invocation"] = "true"
+		}
+
 		// set default limit
 		if params.Limit == nil || *params.Limit == 0 {
 			params.Limit = util.ToPointer(100)
@@ -127,6 +133,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		searchPromises = &t_api.SearchPromisesRequest{
 			Q:      *params.Q,
 			States: states,
+			Tags:   tags,
 			Limit:  *params.Limit,
 		}
 	}

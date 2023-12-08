@@ -86,7 +86,8 @@ const (
 	WHERE
 		(? IS NULL OR sort_id < ?) AND
 		state & ? != 0 AND
-		id LIKE ?
+		id LIKE ? AND
+		(? IS NULL OR json_extract(tags, ?) = ?)
 	ORDER BY
 		sort_id DESC
 	LIMIT
@@ -522,8 +523,18 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 		mask = mask | int(state)
 	}
 
+	// currently we only support one tag per search
+	var key *string
+	var val *string
+	for k, v := range cmd.Tags {
+		k = "$." + k // append required prefix, cannot be part of query
+		key = &k
+		val = &v
+		break
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, query, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, query, key, key, val, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

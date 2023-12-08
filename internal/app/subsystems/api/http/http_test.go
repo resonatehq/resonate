@@ -117,6 +117,7 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -132,7 +133,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesCursor",
-			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwidGFncyI6e30sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.EYMsFICwETpYa13kVZ8CFxaTIALmDmLfeirBqbT1Mcs",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -141,6 +142,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  10,
 					SortId: test.Int64ToPointer(100),
 				},
@@ -148,21 +150,8 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status: t_api.StatusOK,
-					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
-						Next: &t_api.SearchPromisesRequest{
-							Q: "*",
-							States: []promise.State{
-								promise.Pending,
-								promise.Resolved,
-								promise.Rejected,
-								promise.Timedout,
-								promise.Canceled,
-							},
-							Limit:  10,
-							SortId: test.Int64ToPointer(10),
-						},
-					},
+					Status:   t_api.StatusOK,
+					Cursor:   nil, // not checked
 					Promises: []*promise.Promise{},
 				},
 			},
@@ -179,6 +168,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -203,6 +193,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -229,6 +220,38 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.StatusOK,
+					Cursor:   nil,
+					Promises: []*promise.Promise{},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "SearchPromisesInvocation",
+			path:   "promises?q=*&invocation=true&limit=10",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
+					Q: "*",
+					States: []promise.State{
+						promise.Pending,
+						promise.Resolved,
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					Tags: map[string]string{
+						"r-invocation": "true",
+					},
 					Limit: 10,
 				},
 			},
@@ -252,7 +275,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidLimit",
-			path:   "promises?limit=-1",
+			path:   "promises?q=*&limit=0",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -260,7 +283,15 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidState",
-			path:   "promises?q=*&state=*",
+			path:   "promises?q=*&state=x",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchPromisesInvalidInvocation",
+			path:   "promises?q=*&invocation=x",
 			method: "GET",
 			req:    nil,
 			res:    nil,

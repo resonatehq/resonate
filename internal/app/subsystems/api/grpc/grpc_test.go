@@ -179,6 +179,7 @@ func TestSearchPromises(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -194,7 +195,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesCursor",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwidGFncyI6e30sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.EYMsFICwETpYa13kVZ8CFxaTIALmDmLfeirBqbT1Mcs",
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -203,6 +204,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  10,
 					SortId: test.Int64ToPointer(100),
 				},
@@ -210,21 +212,8 @@ func TestSearchPromises(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesResponse{
-					Status: t_api.StatusOK,
-					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
-						Next: &t_api.SearchPromisesRequest{
-							Q: "*",
-							States: []promise.State{
-								promise.Pending,
-								promise.Resolved,
-								promise.Rejected,
-								promise.Timedout,
-								promise.Canceled,
-							},
-							Limit:  10,
-							SortId: test.Int64ToPointer(10),
-						},
-					},
+					Status:   t_api.StatusOK,
+					Cursor:   nil, // not checked
 					Promises: []*promise.Promise{},
 				},
 			},
@@ -243,6 +232,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -269,6 +259,7 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -296,6 +287,40 @@ func TestSearchPromises(t *testing.T) {
 						promise.Rejected,
 						promise.Timedout,
 						promise.Canceled,
+					},
+					Tags:  map[string]string{},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesResponse{
+					Status:   t_api.StatusOK,
+					Cursor:   nil,
+					Promises: []*promise.Promise{},
+				},
+			},
+		},
+		{
+			name: "SearchPromisesInvocation",
+			grpcReq: &grpcApi.SearchPromisesRequest{
+				Q:          "*",
+				Invocation: true,
+				Limit:      10,
+			},
+			req: &t_api.Request{
+				Kind: t_api.SearchPromises,
+				SearchPromises: &t_api.SearchPromisesRequest{
+					Q: "*",
+					States: []promise.State{
+						promise.Pending,
+						promise.Resolved,
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					Tags: map[string]string{
+						"r-invocation": "true",
 					},
 					Limit: 10,
 				},
