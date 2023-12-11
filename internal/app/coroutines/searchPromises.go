@@ -16,10 +16,6 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 		util.Assert(req.SearchPromises.Q != "", "query must not be empty")
 		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
 
-		if req.SearchPromises.Tags == nil {
-			req.SearchPromises.Tags = map[string]string{}
-		}
-
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -46,11 +42,11 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 						{
 							Kind: t_aio.SearchPromises,
 							SearchPromises: &t_aio.SearchPromisesCommand{
-								Q:      req.SearchPromises.Q,
-								States: req.SearchPromises.States,
-								Tags:   req.SearchPromises.Tags,
-								Limit:  req.SearchPromises.Limit,
-								SortId: req.SearchPromises.SortId,
+								Q:          req.SearchPromises.Q,
+								States:     req.SearchPromises.States,
+								Invocation: req.SearchPromises.Invocation,
+								Limit:      req.SearchPromises.Limit,
+								SortId:     req.SearchPromises.SortId,
 							},
 						},
 					},
@@ -85,11 +81,11 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 		if result.RowsReturned == int64(req.SearchPromises.Limit) {
 			cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
 				Next: &t_api.SearchPromisesRequest{
-					Q:      req.SearchPromises.Q,
-					States: req.SearchPromises.States,
-					Tags:   req.SearchPromises.Tags,
-					Limit:  req.SearchPromises.Limit,
-					SortId: &result.LastSortId,
+					Q:          req.SearchPromises.Q,
+					States:     req.SearchPromises.States,
+					Invocation: req.SearchPromises.Invocation,
+					Limit:      req.SearchPromises.Limit,
+					SortId:     &result.LastSortId,
 				},
 			}
 		}

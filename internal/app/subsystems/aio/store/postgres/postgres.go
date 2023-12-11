@@ -29,14 +29,15 @@ const (
 		id                           TEXT,
 		sort_id                      SERIAL,
 		state                        INTEGER DEFAULT 1,
-		param_headers                BYTEA,
+		param_headers                JSONB,
 		param_data                   BYTEA,
-		value_headers                BYTEA,
+		value_headers                JSONB,
 		value_data                   BYTEA,
 		timeout                      BIGINT,
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
-		tags                         BYTEA,
+		tags                         JSONB,
+		invocation                   TEXT GENERATED ALWAYS AS (tags ->> 'R-Invocation') STORED,
 		created_on                   BIGINT,
 		completed_on                 BIGINT,
 		PRIMARY KEY(id)
@@ -93,12 +94,13 @@ const (
 		promises
 	WHERE
 		($1::int IS NULL OR sort_id < $1) AND
-		state & $2 != 0 AND
-		id LIKE $3
+		($2::text IS NULL OR invocation = $2) AND
+		state & $3 != 0 AND
+		id LIKE $4
 	ORDER BY
 		sort_id DESC
 	LIMIT
-		$4`
+		$5`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -547,8 +549,13 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 		mask = mask | int(state)
 	}
 
+	var invocation *string
+	if cmd.Invocation {
+		invocation = util.ToPointer("true")
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, query, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, invocation, mask, query, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

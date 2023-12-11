@@ -59,6 +59,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 			tags[strconv.Itoa(j)] = fmt.Sprintf("%d.%d", i, j)
 		}
 
+		if r.Intn(5) == 0 {
+			tags["R-Invocation"] = "true"
+		}
+
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
 	}
 
@@ -150,25 +154,13 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 		}
 	}
 
-	// tags
-	tags := map[string]string{}
-	switch r.Intn(2) {
-	case 0:
-		for k, v := range g.tagsSet[r.Intn(len(g.tagsSet))] {
-			tags[k] = v
-			break
-		}
-	default:
-		query = fmt.Sprintf("%d*", r.Intn(10))
-	}
-
 	return &t_api.Request{
 		Kind: t_api.SearchPromises,
 		SearchPromises: &t_api.SearchPromisesRequest{
-			Q:      query,
-			States: states,
-			Tags:   tags,
-			Limit:  limit,
+			Q:          query,
+			States:     states,
+			Invocation: r.Intn(2) == 0,
+			Limit:      limit,
 		},
 	}
 }

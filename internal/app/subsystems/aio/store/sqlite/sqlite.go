@@ -36,6 +36,7 @@ const (
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
 		tags                         BLOB,
+		invocation                   TEXT GENERATED ALWAYS AS (json_extract(tags, '$.R-Invocation')) STORED,
 		created_on                   INTEGER,
 		completed_on                 INTEGER
 	);
@@ -85,9 +86,9 @@ const (
 		promises
 	WHERE
 		(? IS NULL OR sort_id < ?) AND
+		(? IS NULL OR invocation = ?) AND
 		state & ? != 0 AND
-		id LIKE ? AND
-		(? IS NULL OR json_extract(tags, ?) = ?)
+		id LIKE ?
 	ORDER BY
 		sort_id DESC
 	LIMIT
@@ -523,18 +524,13 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 		mask = mask | int(state)
 	}
 
-	// currently we only support one tag per search
-	var key *string
-	var val *string
-	for k, v := range cmd.Tags {
-		k = "$." + k // append required prefix, cannot be part of query
-		key = &k
-		val = &v
-		break
+	var invocation *string
+	if cmd.Invocation {
+		invocation = util.ToPointer("true")
 	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, query, key, key, val, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, invocation, invocation, mask, query, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

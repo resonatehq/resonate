@@ -117,7 +117,6 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
-					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -133,7 +132,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesCursor",
-			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwidGFncyI6e30sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.EYMsFICwETpYa13kVZ8CFxaTIALmDmLfeirBqbT1Mcs",
+			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -142,7 +141,6 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
-					Tags:   map[string]string{},
 					Limit:  10,
 					SortId: test.Int64ToPointer(100),
 				},
@@ -168,7 +166,6 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
-					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -193,7 +190,6 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
-					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -220,7 +216,6 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
-					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -249,10 +244,8 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
-					Tags: map[string]string{
-						"r-invocation": "true",
-					},
-					Limit: 10,
+					Invocation: true,
+					Limit:      10,
 				},
 			},
 			res: &t_api.Response{
