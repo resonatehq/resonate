@@ -5,6 +5,7 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 )
@@ -31,6 +32,9 @@ const (
 	TimeoutPromises
 	TimeoutDeleteSubscriptions
 	TimeoutCreateNotifications
+	CreateSchedule
+	ReadSchedule
+	DeleteSchedule
 )
 
 func (k StoreKind) String() string {
@@ -73,6 +77,12 @@ func (k StoreKind) String() string {
 		return "TimeoutDeleteSubscriptions"
 	case TimeoutCreateNotifications:
 		return "TimeoutCreateNotifications"
+	case CreateSchedule:
+		return "CreateSchedule"
+	case ReadSchedule:
+		return "ReadSchedule"
+	case DeleteSchedule:
+		return "DeleteSchedule"
 	default:
 		panic("invalid store kind")
 	}
@@ -119,6 +129,9 @@ type Command struct {
 	TimeoutPromises            *TimeoutPromisesCommand
 	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
+	CreateSchedule             *CreateScheduleCommand
+	ReadSchedule               *ReadScheduleCommand
+	DeleteSchedule             *DeleteScheduleCommand
 }
 
 func (c *Command) String() string {
@@ -146,10 +159,30 @@ type Result struct {
 	TimeoutPromises            *AlterPromisesResult
 	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
+	CreateSchedule             *AlterSchedulesResult
+	ReadSchedule               *QuerySchedulesResult
+	DeleteSchedule             *AlterSchedulesResult
 }
 
 func (r *Result) String() string {
 	return r.Kind.String()
+}
+
+// Schedule commands
+
+type CreateScheduleCommand struct {
+	Id          string
+	Interval    string
+	LastRunTime int64
+	CreatedOn   int64
+}
+
+type ReadScheduleCommand struct {
+	Id string
+}
+
+type DeleteScheduleCommand struct {
+	Id string
 }
 
 // Promise commands
@@ -306,5 +339,16 @@ type QueryNotificationsResult struct {
 }
 
 type AlterNotificationsResult struct {
+	RowsAffected int64
+}
+
+// Schedule results
+
+type QuerySchedulesResult struct {
+	RowsReturned int64
+	Records      []*schedule.ScheduleRecord
+}
+
+type AlterSchedulesResult struct {
 	RowsAffected int64
 }

@@ -4,22 +4,52 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Response struct {
-	Kind               Kind
-	ReadPromise        *ReadPromiseResponse
-	SearchPromises     *SearchPromisesResponse
-	CreatePromise      *CreatePromiseResponse
-	CancelPromise      *CancelPromiseResponse
-	ResolvePromise     *ResolvePromiseResponse
-	RejectPromise      *RejectPromiseResponse
+	Kind Kind
+
+	// Promise
+	ReadPromise    *ReadPromiseResponse
+	SearchPromises *SearchPromisesResponse
+	CreatePromise  *CreatePromiseResponse
+	CancelPromise  *CancelPromiseResponse
+	ResolvePromise *ResolvePromiseResponse
+	RejectPromise  *RejectPromiseResponse
+
+	// Subscriptions
+
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
-	Echo               *EchoResponse
+
+	// Schedules
+	CreateSchedule *CreateScheduleResponse
+	ReadSchedule   *ReadScheduleResponse
+	DeleteSchedule *DeleteScheduleResponse
+
+	Echo *EchoResponse
 }
+
+// Schedule
+
+type CreateScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type ReadScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type DeleteScheduleResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+// Promise
 
 type ReadPromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`

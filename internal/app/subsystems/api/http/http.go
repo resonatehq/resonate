@@ -47,6 +47,11 @@ func New(api api.API, config *Config) api.Subsystem {
 	r.POST("/promises/:id/resolve", s.resolvePromise)
 	r.POST("/promises/:id/reject", s.rejectPromise)
 
+	// Schedule API
+	r.POST("/schedules", s.createSchedule)
+	r.GET("/schedules/:id", s.readSchedule)
+	r.DELETE("/schedules/:id", s.deleteSchedule)
+
 	return &Http{
 		config: config,
 		server: &http.Server{

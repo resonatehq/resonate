@@ -19,8 +19,28 @@ type Request struct {
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
+	CreateSchedule     *CreateScheduleRequest
+	ReadSchedule       *ReadScheduleRequest
+	DeleteSchedule     *DeleteScheduleRequest
 	Echo               *EchoRequest
 }
+
+// Schedule
+
+type CreateScheduleRequest struct {
+	Id       string `json:"id"`
+	Interval string `json:"interval"`
+}
+
+type ReadScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+type DeleteScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+// Promise
 
 type ReadPromiseRequest struct {
 	Id string `json:"id"`

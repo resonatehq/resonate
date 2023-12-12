@@ -16,6 +16,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
@@ -24,6 +25,14 @@ import (
 
 const (
 	CREATE_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS schedules (
+		id            TEXT UNIQUE,
+		sort_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+		interval      TEXT, 
+		last_run_time INTEGER, 
+		created_on    INTEGER
+	);
+
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT UNIQUE,
 		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,6 +224,24 @@ const (
 
 	NOTIFICATION_DELETE_STATEMENT = `
 	DELETE FROM notifications WHERE id = ? AND promise_id = ?`
+
+	SCHEDULE_INSERT_STATEMENT = `
+	INSERT INTO schedules 
+		(id, interval, last_run_time, created_on)
+	VALUES 
+		(?, ?, ?, ?)
+	ON CONFLICT(id) DO NOTHING`
+
+	SCHEDULE_SELECT_STATEMENT = `
+	SELECT 
+		id, interval, last_run_time, created_on
+	FROM 
+		schedules
+    WHERE 
+		id = ?`
+
+	SCHEDULE_DELETE_STATEMENT = `
+	DELETE FROM schedules WHERE id = ?`
 )
 
 type Config struct {
@@ -232,7 +259,7 @@ type SqliteStoreWorker struct {
 }
 
 func New(config *Config) (aio.Subsystem, error) {
-	db, err := sql.Open("sqlite3", config.Path)
+	db, err := sql.Open("sqlite3", config.Path+"?_foreign_keys=on")
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +329,18 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 }
 
 func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
+	scheduleInsertStmt, err := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleInsertStmt.Close()
+
+	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleDeleteStmt.Close()
+
 	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -455,6 +494,17 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
 
+			// Schedule
+			case t_aio.CreateSchedule:
+				util.Assert(command.CreateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
+			case t_aio.ReadSchedule:
+				util.Assert(command.ReadSchedule != nil, "command must not be nil")
+				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
+			case t_aio.DeleteSchedule:
+				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
+				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
+
 			default:
 				panic("invalid command")
 			}
@@ -564,6 +614,76 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 			RowsReturned: rowsReturned,
 			LastSortId:   lastSortId,
 			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id, cmd.Interval, cmd.LastRunTime, cmd.CreatedOn)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateSchedule,
+		CreateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.Result, error) {
+	row := tx.QueryRow(SCHEDULE_SELECT_STATEMENT, cmd.Id)
+	record := &schedule.ScheduleRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.Id,
+		&record.Interval,
+		&record.LastRunTime,
+		&record.CreatedOn,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*schedule.ScheduleRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedule,
+		ReadSchedule: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.DeleteSchedule,
+		DeleteSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
 		},
 	}, nil
 }

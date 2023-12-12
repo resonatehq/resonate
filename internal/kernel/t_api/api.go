@@ -16,6 +16,11 @@ const (
 	CreateSubscription
 	DeleteSubscription
 
+	// Schedule
+	CreateSchedule
+	ReadSchedule
+	DeleteSchedule
+
 	// Echo
 	Echo
 )
