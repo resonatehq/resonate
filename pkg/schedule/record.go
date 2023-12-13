@@ -2,18 +2,20 @@ package schedule
 
 type ScheduleRecord struct {
 	Id          string
-	SortId      int64
-	Interval    string
+	Desc        *string
+	Cron        string
 	LastRunTime *int64
+	NextRunTime int64 // no nill alway has a next run time, even at creation
 	CreatedOn   *int64
 }
 
 func (r *ScheduleRecord) Schedule() (*Schedule, error) {
 	return &Schedule{
 		Id:          r.Id,
-		SortId:      r.SortId,
-		Interval:    r.Interval,
+		Desc:        r.Desc,
+		Cron:        r.Cron,
 		LastRunTime: r.LastRunTime,
+		NextRunTime: r.NextRunTime,
 		CreatedOn:   r.CreatedOn,
 	}, nil
 }

@@ -46,16 +46,24 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
+				next, err := util.Next(createdOn, req.CreateSchedule.Cron)
+				if err != nil {
+					slog.Error("failed to calculate next run time", "req", req, "err", err)
+					res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err))
+					return
+				}
 				res(
 					&t_api.Response{
 						Kind: t_api.CreateSchedule,
 						CreateSchedule: &t_api.CreateScheduleResponse{
 							Status: t_api.StatusCreated,
 							Schedule: &schedule.Schedule{
-								Id:       req.CreateSchedule.Id,
-								Interval: req.CreateSchedule.Interval,
-								// TODO: calculate next run time. -- separte coroutine?
-								CreatedOn: &createdOn,
+								Id:          req.CreateSchedule.Id,
+								Desc:        req.CreateSchedule.Desc,
+								Cron:        req.CreateSchedule.Cron,
+								LastRunTime: nil,
+								NextRunTime: next,
+								CreatedOn:   &createdOn,
 							},
 						},
 					},
@@ -89,6 +97,7 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 	})
 }
 
+// rework this? ?
 // remove request
 func _readSchedule(c *Coroutine, req *t_api.Request, id string) (*t_aio.Completion, error) {
 	return c.Yield(&t_aio.Submission{
@@ -108,6 +117,7 @@ func _readSchedule(c *Coroutine, req *t_api.Request, id string) (*t_aio.Completi
 	})
 }
 
+// rework this
 // make write opertion to command id cinteraval eec. ?? generalizable /
 func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn int64, id string) (*t_aio.Completion, error) {
 	return c.Yield(&t_aio.Submission{
@@ -118,10 +128,12 @@ func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn int64, id string
 					{
 						Kind: t_aio.CreateSchedule,
 						CreateSchedule: &t_aio.CreateScheduleCommand{
-							Id:       id,
-							Interval: req.CreateSchedule.Interval,
-							// TODO: calculate next run time. -- separte coroutine?
-							CreatedOn: createdOn,
+							Id:   id,
+							Cron: req.CreateSchedule.Cron,
+							Desc: req.CreateSchedule.Desc,
+							// LastRunTime:   nil,
+							NextRunTime: 123123123, // calculate this.
+							CreatedOn:   createdOn,
 						},
 					},
 				},

@@ -45,6 +45,12 @@ func (k Kind) String() string {
 		return "create-subscription"
 	case DeleteSubscription:
 		return "delete-subscription"
+	case CreateSchedule:
+		return "create-schedule"
+	case ReadSchedule:
+		return "read-schedule"
+	case DeleteSchedule:
+		return "delete-schedule"
 	default:
 		panic("invalid api")
 	}

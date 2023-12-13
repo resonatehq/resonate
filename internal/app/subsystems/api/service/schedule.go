@@ -19,8 +19,9 @@ func (s *Service) CreateSchedule(id string) (*t_api.CreateScheduleResponse, erro
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
 			CreateSchedule: &t_api.CreateScheduleRequest{
-				Id:       id,
-				Interval: "2d",
+				Id:   id,
+				Desc: util.ToPointer(""),
+				Cron: "0 8 * * *",
 			},
 		},
 		Callback: s.sendOrPanic(cq),

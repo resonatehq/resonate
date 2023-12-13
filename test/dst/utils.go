@@ -1,6 +1,8 @@
 package dst
 
-import "math/rand"
+import (
+	"math/rand"
+)
 
 func RangeIntn(r *rand.Rand, min int, max int) int {
 	return r.Intn(max-min) + min

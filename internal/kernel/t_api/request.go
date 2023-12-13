@@ -28,8 +28,9 @@ type Request struct {
 // Schedule
 
 type CreateScheduleRequest struct {
-	Id       string `json:"id"`
-	Interval string `json:"interval"`
+	Id   string  `json:"id"`
+	Desc *string `json:"desc,omitempty"`
+	Cron string  `json:"cron"`
 }
 
 type ReadScheduleRequest struct {
@@ -178,6 +179,23 @@ func (r *Request) String() string {
 			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(id=%s, desc=%v, cron=%s)",
+			r.CreateSchedule.Id,
+			r.CreateSchedule.Desc,
+			r.CreateSchedule.Cron,
+		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(id=%s)",
+			r.ReadSchedule.Id,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(id=%s)",
+			r.DeleteSchedule.Id,
 		)
 	case Echo:
 		return fmt.Sprintf(

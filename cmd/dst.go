@@ -168,19 +168,31 @@ var dstRunCmd = &cobra.Command{
 		system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
 		system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 		system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
+		system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
+		system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
+		system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
+		system.AddOnTick(2, coroutines.SchedulePromises)
 		system.AddOnTick(2, coroutines.TimeoutPromises)
 		system.AddOnTick(10, coroutines.NotifySubscriptions)
 
 		reqs := []t_api.Kind{
+			// PROMISE
 			t_api.ReadPromise,
 			t_api.SearchPromises,
 			t_api.CreatePromise,
 			t_api.CancelPromise,
 			t_api.ResolvePromise,
 			t_api.RejectPromise,
+
+			// SUBSCRIPTION
 			t_api.ReadSubscriptions,
 			t_api.CreateSubscription,
 			t_api.DeleteSubscription,
+
+			// SCHEDULE
+			t_api.ReadSchedule,
+			t_api.CreateSchedule,
+			t_api.DeleteSchedule,
 		}
 
 		dst := dst.New(&dst.Config{

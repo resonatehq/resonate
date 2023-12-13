@@ -26,13 +26,16 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS schedules (
-		id            TEXT UNIQUE,
-		sort_id       INTEGER PRIMARY KEY AUTOINCREMENT,
-		interval      TEXT, 
-		last_run_time INTEGER, 
+		id            TEXT PRIMARY KEY,
+		desc          TEXT NULL, 
+		cron          TEXT, 
+		last_run_time INTEGER NULL, 
+		next_run_time INTEGER, 
 		created_on    INTEGER
 	);
 
+	CREATE INDEX idx_next_run_time ON schedules (next_run_time);
+	
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT UNIQUE,
 		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,18 +230,35 @@ const (
 
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules 
-		(id, interval, last_run_time, created_on)
+		(id, desc, cron, last_run_time, next_run_time, created_on)
 	VALUES 
-		(?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
+
+	SCHEDULE_UPDATE_STATEMENT = `
+	UPDATE
+		schedules
+	SET
+		desc = ?, cron = ?, last_run_time = ?, next_run_time = ?
+	WHERE
+		id = ? AND last_run_time < ?`
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT 
-		id, interval, last_run_time, created_on
+		id, desc, cron, last_run_time, next_run_time, created_on
 	FROM 
 		schedules
     WHERE 
 		id = ?`
+
+	// todo: add a limit ?
+	SCHEDULE_SELECT_ALL_STATEMENT = `
+	SELECT
+		id, desc, cron, last_run_time, next_run_time, created_on
+	FROM
+		schedules
+	WHERE
+		next_run_time <= ?`
 
 	SCHEDULE_DELETE_STATEMENT = `
 	DELETE FROM schedules WHERE id = ?`
@@ -334,6 +354,12 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 		return nil, err
 	}
 	defer scheduleInsertStmt.Close()
+
+	scheduleUpdateStmt, err := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleUpdateStmt.Close()
 
 	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
 	if err != nil {
@@ -501,6 +527,12 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 			case t_aio.ReadSchedule:
 				util.Assert(command.ReadSchedule != nil, "command must not be nil")
 				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
+			case t_aio.ReadSchedules:
+				util.Assert(command.ReadSchedules != nil, "command must not be nil")
+				results[i][j], err = w.readSchedules(tx, command.ReadSchedules)
+			case t_aio.UpdateSchedule:
+				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
 			case t_aio.DeleteSchedule:
 				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
 				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
@@ -619,7 +651,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Id, cmd.Interval, cmd.LastRunTime, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -644,8 +676,10 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 
 	if err := row.Scan(
 		&record.Id,
-		&record.Interval,
+		&record.Desc,
+		&record.Cron,
 		&record.LastRunTime,
+		&record.NextRunTime,
 		&record.CreatedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -669,6 +703,60 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 	}, nil
 }
 
+func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*schedule.ScheduleRecord
+
+	for rows.Next() {
+		record := &schedule.ScheduleRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Desc,
+			&record.Cron,
+			&record.LastRunTime,
+			&record.NextRunTime,
+			&record.CreatedOn,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedules,
+		ReadSchedules: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Desc, cmd.Cron, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.UpdateSchedule,
+		UpdateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
 func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.Id)
 	if err != nil {

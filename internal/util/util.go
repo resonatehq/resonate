@@ -3,6 +3,9 @@ package util
 import (
 	"cmp"
 	"sort"
+	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 func Assert(cond bool, msg string) {
@@ -67,4 +70,18 @@ func SafeDeref[T any](val *T) T {
 		return zero
 	}
 	return *val
+}
+
+func UnixMilliToTime(unixMilli int64) time.Time {
+	return time.Unix(0, unixMilli*int64(time.Millisecond))
+}
+
+// ref: t := time.Now().UnixMilli()
+func Next(curr int64, cronExp string) (int64, error) {
+	scheduler, err := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
+	if err != nil {
+		return 0, err
+	}
+
+	return scheduler.Next(UnixMilliToTime(curr)).UnixMilli(), nil
 }

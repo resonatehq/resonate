@@ -157,6 +157,23 @@ func (r *Response) String() string {
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
 		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(status=%d, schedule=%s)",
+			r.CreateSchedule.Status,
+			r.CreateSchedule.Schedule,
+		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(status=%d, schedule=%s)",
+			r.ReadSchedule.Status,
+			r.ReadSchedule.Schedule,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(status=%d)",
+			r.DeleteSchedule.Status,
+		)
 	case Echo:
 		return fmt.Sprintf(
 			"Echo(data=%s)",

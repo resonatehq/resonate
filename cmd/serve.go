@@ -96,7 +96,7 @@ var serveCmd = &cobra.Command{
 		system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
 		system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 		system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-		// system.AddOnTock(2, coroutines.CronJobs)
+		system.AddOnTick(2, coroutines.SchedulePromises)
 		system.AddOnTick(2, coroutines.TimeoutPromises)
 		system.AddOnTick(1, coroutines.NotifySubscriptions)
 

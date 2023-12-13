@@ -34,6 +34,8 @@ const (
 	TimeoutCreateNotifications
 	CreateSchedule
 	ReadSchedule
+	ReadSchedules
+	UpdateSchedule
 	DeleteSchedule
 )
 
@@ -81,6 +83,10 @@ func (k StoreKind) String() string {
 		return "CreateSchedule"
 	case ReadSchedule:
 		return "ReadSchedule"
+	case ReadSchedules:
+		return "ReadSchedules"
+	case UpdateSchedule:
+		return "UpdateSchedule"
 	case DeleteSchedule:
 		return "DeleteSchedule"
 	default:
@@ -131,6 +137,8 @@ type Command struct {
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
 	CreateSchedule             *CreateScheduleCommand
 	ReadSchedule               *ReadScheduleCommand
+	ReadSchedules              *ReadSchedulesCommand
+	UpdateSchedule             *UpdateScheduleCommand
 	DeleteSchedule             *DeleteScheduleCommand
 }
 
@@ -161,6 +169,8 @@ type Result struct {
 	TimeoutCreateNotifications *AlterNotificationsResult
 	CreateSchedule             *AlterSchedulesResult
 	ReadSchedule               *QuerySchedulesResult
+	ReadSchedules              *QuerySchedulesResult
+	UpdateSchedule             *AlterSchedulesResult
 	DeleteSchedule             *AlterSchedulesResult
 }
 
@@ -172,13 +182,27 @@ func (r *Result) String() string {
 
 type CreateScheduleCommand struct {
 	Id          string
-	Interval    string
-	LastRunTime int64
+	Desc        *string
+	Cron        string
+	LastRunTime *int64
+	NextRunTime int64
 	CreatedOn   int64
+}
+
+type UpdateScheduleCommand struct {
+	Id          string
+	Desc        *string
+	Cron        string
+	LastRunTime *int64
+	NextRunTime int64
 }
 
 type ReadScheduleCommand struct {
 	Id string
+}
+
+type ReadSchedulesCommand struct {
+	NextRunTime int64
 }
 
 type DeleteScheduleCommand struct {
