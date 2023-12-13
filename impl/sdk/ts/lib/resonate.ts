@@ -1,22 +1,16 @@
 import { Opts, isPartialOpts } from "./core/opts";
 import { IPromiseStore } from "./core/store";
-import {
-  DurablePromise,
-  isCanceledPromise,
-  isPendingPromise,
-  isRejectedPromise,
-  isResolvedPromise,
-  isTimedoutPromise,
-} from "./core/promise";
+import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
 import { IRetry } from "./core/retry";
 import { Retry } from "./core/retries/retry";
 import { IBucket } from "./core/bucket";
 import { Bucket } from "./core/buckets/bucket";
-import { VolatilePromiseStore } from "./core/stores/volatile";
-import { DurablePromiseStore } from "./core/stores/durable";
+import { LocalPromiseStore } from "./core/stores/local";
+import { RemotePromiseStore } from "./core/stores/remote";
 import { ILogger, ITrace } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { IEncoder } from "./core/encoder";
+import { DataEncoder } from "./core/encoders/data";
 import { JSONEncoder } from "./core/encoders/json";
 import { ErrorEncoder } from "./core/encoders/error";
 import { ErrorCodes, ResonateError } from "./core/error";
@@ -66,11 +60,9 @@ export class Resonate {
 
   readonly defaultRetry: () => IRetry;
 
-  readonly defaultEncoder: IEncoder<any, string>;
+  readonly valueEncoder: DataEncoder;
 
-  readonly valueEncoders: IEncoder<any, string>[] = [];
-
-  readonly errorEncoders: IEncoder<any, string>[] = [new ErrorEncoder()];
+  readonly errorEncoder: DataEncoder;
 
   /**
    * Instantiate a new Resonate instance.
@@ -92,9 +84,11 @@ export class Resonate {
   }: Partial<ResonateOpts> = {}) {
     this.logger = logger;
     this.defaultRetry = retry;
-    this.defaultEncoder = encoder;
 
-    this.addStore("default", url ? new DurablePromiseStore(url) : new VolatilePromiseStore());
+    this.valueEncoder = new DataEncoder(encoder);
+    this.errorEncoder = new DataEncoder(encoder, new ErrorEncoder());
+
+    this.addStore("default", url ? new RemotePromiseStore(url) : new LocalPromiseStore());
     this.addBucket("default", bucket);
 
     this.defaults = {
@@ -150,7 +144,7 @@ export class Resonate {
    * @param encoder
    */
   addValueEncoder(encoder: IEncoder<any, string>) {
-    this.valueEncoders.unshift(encoder);
+    this.valueEncoder.add(encoder);
   }
 
   /**
@@ -159,7 +153,7 @@ export class Resonate {
    * @param encoder
    */
   addErrorEncoder(encoder: IEncoder<any, string>) {
-    this.errorEncoders.unshift(encoder);
+    this.errorEncoder.add(encoder);
   }
 
   /**
@@ -396,30 +390,17 @@ class ResonateContext implements Context {
             const r = await invocation.invoke(this, bucket);
 
             try {
-              // serialize value
-              const { key, value } = this.encode(r, this.resonate.valueEncoders);
-              const headers: Record<string, string> = {};
-
-              if (key !== undefined) {
-                headers["Content-Encoding"] = key;
-              }
+              // encode value
+              const { headers, data } = this.encode(r, this.resonate.valueEncoder);
 
               // resolve durable promise
-              const p = await store.resolve(this.id, this.idempotencyKey, false, headers, value);
+              const p = await store.resolve(this.id, this.idempotencyKey, false, headers, data);
 
               if (isResolvedPromise(p)) {
-                resolve(
-                  this.decode<R>(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.valueEncoders),
-                );
+                resolve(this.decode(p.value, this.resonate.valueEncoder));
                 return;
-              } else if (isRejectedPromise(p)) {
-                reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-                return;
-              } else if (isCanceledPromise(p)) {
-                reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-                return;
-              } else if (isTimedoutPromise(p)) {
-                reject();
+              } else {
+                reject(this.decode(p.value, this.resonate.errorEncoder));
                 return;
               }
             } catch (e: unknown) {
@@ -428,30 +409,17 @@ class ResonateContext implements Context {
             }
           } catch (e: unknown) {
             try {
-              // serialize error
-              const { key, value } = this.encode(e, this.resonate.errorEncoders);
-              const headers: Record<string, string> = {};
-
-              if (key !== undefined) {
-                headers["Content-Encoding"] = key;
-              }
+              // encode error
+              const { headers, data } = this.encode(e, this.resonate.errorEncoder);
 
               // reject durable promise
-              const p = await store.reject(this.id, this.idempotencyKey, false, headers, value);
+              const p = await store.reject(this.id, this.idempotencyKey, false, headers, data);
 
               if (isResolvedPromise(p)) {
-                resolve(
-                  this.decode<R>(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.valueEncoders),
-                );
+                resolve(this.decode(p.value, this.resonate.valueEncoder));
                 return;
-              } else if (isRejectedPromise(p)) {
-                reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-                return;
-              } else if (isCanceledPromise(p)) {
-                reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-                return;
-              } else if (isTimedoutPromise(p)) {
-                reject();
+              } else {
+                reject(this.decode(p.value, this.resonate.errorEncoder));
                 return;
               }
             } catch (e: unknown) {
@@ -460,16 +428,10 @@ class ResonateContext implements Context {
             }
           }
         } else if (isResolvedPromise(p)) {
-          resolve(this.decode<R>(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.valueEncoders));
+          resolve(this.decode(p.value, this.resonate.valueEncoder));
           return;
-        } else if (isRejectedPromise(p)) {
-          reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-          return;
-        } else if (isCanceledPromise(p)) {
-          reject(this.decode(p.value.data, p.value.headers?.["Content-Encoding"], this.resonate.errorEncoders));
-          return;
-        } else if (isTimedoutPromise(p)) {
-          reject();
+        } else {
+          reject(this.decode(p.value, this.resonate.errorEncoder));
           return;
         }
       } catch (e: unknown) {
@@ -502,40 +464,28 @@ class ResonateContext implements Context {
     this.canceled = true;
   }
 
-  private encode<T>(value: T, encoders: IEncoder<any, string>[] = []): { key: string | undefined; value: string } {
-    const encoder = this.findEncoder<T>(undefined, value, encoders);
-
+  // wrap encoder error in ResonateError
+  private encode<T>(
+    value: T,
+    encoder: DataEncoder,
+  ): { headers: Record<string, string> | undefined; data: string | undefined } {
     try {
-      return {
-        key: encoder.key,
-        value: encoder.encode(value),
-      };
+      return encoder.encode(value);
     } catch (e: unknown) {
       throw new ResonateError("Encode error", ErrorCodes.ENCODER, e);
     }
   }
 
-  private decode<T>(value: string, key?: string, encoders: IEncoder<any, string>[] = []): T {
-    const encoder = this.findEncoder<T>(key, undefined, encoders);
-
+  // wrap decoder error in ResonateError
+  private decode<T>(
+    value: { headers: Record<string, string> | undefined; data: string | undefined },
+    encoder: DataEncoder,
+  ): T {
     try {
       return encoder.decode(value);
     } catch (e: unknown) {
       throw new ResonateError("Decode error", ErrorCodes.ENCODER, e);
     }
-  }
-
-  private findEncoder<T>(key?: string, value?: T, encoders: IEncoder<any, string>[] = []): IEncoder<T, string> {
-    for (const encoder of encoders) {
-      if (key !== undefined && encoder.key === key) {
-        return encoder;
-      }
-      if (value !== undefined && encoder.match(value)) {
-        return encoder;
-      }
-    }
-
-    return this.resonate.defaultEncoder;
   }
 }
 

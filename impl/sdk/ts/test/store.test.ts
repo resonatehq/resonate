@@ -1,7 +1,7 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
-import { DurablePromiseStore } from "../lib/core/stores/durable";
-import { VolatilePromiseStore } from "../lib/core/stores/volatile";
+import { RemotePromiseStore } from "../lib/core/stores/remote";
+import { LocalPromiseStore } from "../lib/core/stores/local";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
@@ -9,7 +9,7 @@ jest.setTimeout(10000);
 describe("Resonate Server Tests", () => {
   const useDurable = process.env.USE_DURABLE === "true";
   const url = process.env.RESONATE_URL || "http://localhost:8001";
-  const store = useDurable ? new DurablePromiseStore(url) : new VolatilePromiseStore();
+  const store = useDurable ? new RemotePromiseStore(url) : new LocalPromiseStore();
 
   describe("State Transition Tests", () => {
     test("Test Case 0: transitions from Init to Pending via Create", async () => {

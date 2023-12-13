@@ -13,13 +13,18 @@ import { IEncoder } from "../encoder";
 import { Base64Encoder } from "../encoders/base64";
 import { ErrorCodes, ResonateError } from "../error";
 
-export class DurablePromiseStore implements IPromiseStore {
+export class RemotePromiseStore implements IPromiseStore {
   constructor(
     private url: string,
     private encoder: IEncoder<string, string> = new Base64Encoder(),
   ) {}
 
-  private async call<T>(url: string, decode: (b: unknown) => T, options: RequestInit, retries: number = 3): Promise<T> {
+  private async call<T>(
+    url: string,
+    guard: (b: unknown) => b is T,
+    options: RequestInit,
+    retries: number = 3,
+  ): Promise<T> {
     let error: unknown;
 
     for (let i = 0; i < retries; i++) {
@@ -42,7 +47,11 @@ export class DurablePromiseStore implements IPromiseStore {
           }
         }
 
-        return decode(body);
+        if (!guard(body)) {
+          throw new ResonateError("Invalid response", ErrorCodes.PAYLOAD, body);
+        }
+
+        return body;
       } catch (e: unknown) {
         if (e instanceof ResonateError && !e.retryable) {
           throw e;
@@ -55,7 +64,7 @@ export class DurablePromiseStore implements IPromiseStore {
     throw ResonateError.fromError(error);
   }
 
-  create(
+  async create(
     id: string,
     ikey: string | undefined,
     strict: boolean,
@@ -74,7 +83,7 @@ export class DurablePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    return this.call(`${this.url}/promises/${id}/create`, this.promiseDecoder(isDurablePromise), {
+    const promise = await this.call(`${this.url}/promises/${id}/create`, isDurablePromise, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -86,9 +95,11 @@ export class DurablePromiseStore implements IPromiseStore {
         tags: tags,
       }),
     });
+
+    return this.decode(promise);
   }
 
-  cancel(
+  async cancel(
     id: string,
     ikey: string | undefined,
     strict: boolean,
@@ -105,7 +116,7 @@ export class DurablePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    return this.call(`${this.url}/promises/${id}/cancel`, this.promiseDecoder(isCompletedPromise), {
+    const promise = await this.call(`${this.url}/promises/${id}/cancel`, isCompletedPromise, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -115,9 +126,11 @@ export class DurablePromiseStore implements IPromiseStore {
         },
       }),
     });
+
+    return this.decode(promise);
   }
 
-  resolve(
+  async resolve(
     id: string,
     ikey: string | undefined,
     strict: boolean,
@@ -134,7 +147,7 @@ export class DurablePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    return this.call(`${this.url}/promises/${id}/resolve`, this.promiseDecoder(isCompletedPromise), {
+    const promise = await this.call(`${this.url}/promises/${id}/resolve`, isCompletedPromise, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -144,9 +157,11 @@ export class DurablePromiseStore implements IPromiseStore {
         },
       }),
     });
+
+    return this.decode(promise);
   }
 
-  reject(
+  async reject(
     id: string,
     ikey: string | undefined,
     strict: boolean,
@@ -163,7 +178,7 @@ export class DurablePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    return this.call(`${this.url}/promises/${id}/reject`, this.promiseDecoder(isCompletedPromise), {
+    const promise = await this.call(`${this.url}/promises/${id}/reject`, isCompletedPromise, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -173,16 +188,20 @@ export class DurablePromiseStore implements IPromiseStore {
         },
       }),
     });
+
+    return this.decode(promise);
   }
 
-  get(id: string): Promise<DurablePromise> {
-    return this.call(`${this.url}/promises/${id}`, this.promiseDecoder(isDurablePromise), {
+  async get(id: string): Promise<DurablePromise> {
+    const promise = await this.call(`${this.url}/promises/${id}`, isDurablePromise, {
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
       method: "GET",
     });
+
+    return this.decode(promise);
   }
 
   private encode(value: string): string {
@@ -193,29 +212,19 @@ export class DurablePromiseStore implements IPromiseStore {
     }
   }
 
-  private decode(value: string): string {
+  private decode<P extends DurablePromise>(promise: P): P {
     try {
-      return this.encoder.decode(value);
+      if (promise.param?.data) {
+        promise.param.data = this.encoder.decode(promise.param.data);
+      }
+
+      if (promise.value?.data) {
+        promise.value.data = this.encoder.decode(promise.value.data);
+      }
+
+      return promise;
     } catch (e: unknown) {
       throw new ResonateError("Decode error", ErrorCodes.ENCODER, e);
     }
-  }
-
-  private promiseDecoder<T extends DurablePromise>(guard: (p: unknown) => p is T): (p: unknown) => T {
-    return (p: unknown) => {
-      if (!guard(p)) {
-        throw new ResonateError("Invalid response", ErrorCodes.PAYLOAD, p);
-      }
-
-      if (p.param?.data) {
-        p.param.data = this.decode(p.param.data);
-      }
-
-      if (p.value?.data) {
-        p.value.data = this.decode(p.value.data);
-      }
-
-      return p;
-    };
   }
 }

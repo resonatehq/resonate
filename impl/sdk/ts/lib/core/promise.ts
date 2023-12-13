@@ -5,10 +5,13 @@ export type PendingPromise = {
   id: string;
   timeout: number;
   param: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
-  value: undefined;
+  value: {
+    headers: undefined;
+    data: undefined;
+  };
   createdOn: number;
   completedOn: undefined;
   idempotencyKeyForCreate?: string;
@@ -21,12 +24,12 @@ export type ResolvedPromise = {
   id: string;
   timeout: number;
   param: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   value: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   createdOn: number;
   completedOn: number;
@@ -40,12 +43,12 @@ export type RejectedPromise = {
   id: string;
   timeout: number;
   param: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   value: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   createdOn: number;
   completedOn: number;
@@ -59,12 +62,12 @@ export type CanceledPromise = {
   id: string;
   timeout: number;
   param: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   value: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
   createdOn: number;
   completedOn: number;
@@ -78,14 +81,17 @@ export type TimedoutPromise = {
   id: string;
   timeout: number;
   param: {
-    headers: Record<string, string>;
-    data: string;
+    headers: Record<string, string> | undefined;
+    data: string | undefined;
   };
-  value: undefined;
+  value: {
+    headers: undefined;
+    data: undefined;
+  };
   createdOn: number;
   completedOn: number;
   idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: string;
+  idempotencyKeyForComplete?: undefined;
   tags?: Record<string, string>;
 };
 
