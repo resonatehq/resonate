@@ -34,7 +34,14 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 
 		if result.RowsReturned == 0 {
 			createdOn := c.Time()
-			completion, err := _writeSchedule(c, req, createdOn, req.CreateSchedule.Id)
+			next, err := util.Next(createdOn, req.CreateSchedule.Cron)
+			if err != nil {
+				slog.Error("failed to calculate next run time", "req", req, "err", err)
+				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err))
+				return
+			}
+
+			completion, err := _writeSchedule(c, req, createdOn, next, req.CreateSchedule.Id)
 			if err != nil {
 				slog.Error("failed to create schedule", "req", req, "err", err)
 				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create schedule", err))
@@ -46,12 +53,6 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				next, err := util.Next(createdOn, req.CreateSchedule.Cron)
-				if err != nil {
-					slog.Error("failed to calculate next run time", "req", req, "err", err)
-					res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err))
-					return
-				}
 				res(
 					&t_api.Response{
 						Kind: t_api.CreateSchedule,
@@ -119,7 +120,7 @@ func _readSchedule(c *Coroutine, req *t_api.Request, id string) (*t_aio.Completi
 
 // rework this
 // make write opertion to command id cinteraval eec. ?? generalizable /
-func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn int64, id string) (*t_aio.Completion, error) {
+func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn, next int64, id string) (*t_aio.Completion, error) {
 	return c.Yield(&t_aio.Submission{
 		Kind: t_aio.Store,
 		Store: &t_aio.StoreSubmission{
@@ -132,7 +133,7 @@ func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn int64, id string
 							Cron: req.CreateSchedule.Cron,
 							Desc: req.CreateSchedule.Desc,
 							// LastRunTime:   nil,
-							NextRunTime: 123123123, // calculate this.
+							NextRunTime: next,
 							CreatedOn:   createdOn,
 						},
 					},
