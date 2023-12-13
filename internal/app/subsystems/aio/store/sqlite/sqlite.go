@@ -34,7 +34,7 @@ const (
 		created_on    INTEGER
 	);
 
-	CREATE INDEX idx_next_run_time ON schedules (next_run_time);
+	CREATE INDEX IF NOT EXISTS idx_next_run_time ON schedules (next_run_time);
 	
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT UNIQUE,

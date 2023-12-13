@@ -27,7 +27,7 @@ func newScheduleCommand() *cobra.Command {
 
 	cmd.AddCommand(newCreateScheduleCommand())
 	cmd.AddCommand(newDeleteScheduleCommand())
-	cmd.AddCommand(newGetScheduleCommand())
+	cmd.AddCommand(newDescribeScheduleCommand())
 
 	cmd.PersistentFlags().StringVar(&apiServer, "api", apiServer, "API server address")
 
@@ -57,6 +57,7 @@ func newCreateScheduleCommand() *cobra.Command {
 
 			// Build request
 			body := client.CreateScheduleRequest{
+				Id:   &id,
 				Desc: &desc,
 				Cron: &cron,
 			}
@@ -108,9 +109,9 @@ func newDeleteScheduleCommand() *cobra.Command {
 	return cmd
 }
 
-func newGetScheduleCommand() *cobra.Command {
+func newDescribeScheduleCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get [id]",
+		Use:   "describe [id]",
 		Short: "Get details of a schedule",
 		Run: func(cmd *cobra.Command, args []string) {
 			// Get ID from args
@@ -140,7 +141,7 @@ func newGetScheduleCommand() *cobra.Command {
 				panic(err)
 			}
 
-			fmt.Printf("Schedule %s: %+v\n", id, string(body))
+			fmt.Printf("%s", string(body))
 		},
 	}
 

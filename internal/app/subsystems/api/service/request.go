@@ -54,3 +54,11 @@ type RejectPromiseHeader struct {
 type RejectPromiseBody struct {
 	Value promise.Value `json:"value"`
 }
+
+// SCHEDULE
+
+type CreateScheduleBody struct {
+	Id   string `json:"id"`
+	Desc string `json:"desc"`
+	Cron string `json:"cron"`
+}

@@ -11,7 +11,7 @@ import (
 
 // CREATE
 
-func (s *Service) CreateSchedule(id string) (*t_api.CreateScheduleResponse, error) {
+func (s *Service) CreateSchedule(body *CreateScheduleBody) (*t_api.CreateScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -19,9 +19,9 @@ func (s *Service) CreateSchedule(id string) (*t_api.CreateScheduleResponse, erro
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
 			CreateSchedule: &t_api.CreateScheduleRequest{
-				Id:   id,
-				Desc: util.ToPointer(""),
-				Cron: "0 8 * * *",
+				Id:   body.Id,
+				Desc: &body.Desc,
+				Cron: body.Cron,
 			},
 		},
 		Callback: s.sendOrPanic(cq),

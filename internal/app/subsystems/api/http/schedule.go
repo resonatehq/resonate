@@ -2,9 +2,11 @@ package http
 
 import (
 	"errors"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 )
 
 // CREATE
@@ -13,13 +15,13 @@ func (s *server) createSchedule(c *gin.Context) {
 
 	// todo: header
 
-	// var body *service.CreateScheduleBody
-	// if err := c.ShouldBindJSON(&body); err != nil {
-	// 	c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-	// 	return
-	// }
+	var body *service.CreateScheduleBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		return
+	}
 
-	resp, err := s.service.CreateSchedule("my-schedule") // todo: do properly
+	resp, err := s.service.CreateSchedule(body) // todo: do properly
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
