@@ -78,12 +78,15 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
-						{
+						{ // todo: discuss these values more.
 
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id:             "schedule-" + uuid.NewString(),
-								Param:          promise.Value{},
+								Id: "schedule-" + uuid.NewString(),
+								Param: promise.Value{
+									Headers: map[string]string{},
+									Data:    []byte{},
+								},
 								Timeout:        100000000,
 								IdempotencyKey: nil,
 								Tags:           map[string]string{},

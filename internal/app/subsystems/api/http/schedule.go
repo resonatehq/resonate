@@ -19,7 +19,7 @@ func (s *server) createSchedule(c *gin.Context) {
 	// 	return
 	// }
 
-	resp, err := s.service.CreateSchedule("my-schedule")
+	resp, err := s.service.CreateSchedule("my-schedule") // todo: do properly
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
