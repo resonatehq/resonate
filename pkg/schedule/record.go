@@ -8,7 +8,7 @@ type ScheduleRecord struct {
 	PromiseParam *string
 	LastRunTime  *int64
 	NextRunTime  int64 // no nill alway has a next run time, even at creation
-	CreatedOn    *int64
+	CreatedOn    int64
 }
 
 func (r *ScheduleRecord) Schedule() (*Schedule, error) {

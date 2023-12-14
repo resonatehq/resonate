@@ -12,7 +12,7 @@ type Schedule struct {
 	PromiseParam *string `json:"promiseParam,omitempty"`
 	LastRunTime  *int64  `json:"lastRunTime,omitempty"`
 	NextRunTime  int64   `json:"nextRunTime"`
-	CreatedOn    *int64  `json:"createdOn,omitempty"`
+	CreatedOn    int64   `json:"createdOn"`
 }
 
 func (s *Schedule) String() string {

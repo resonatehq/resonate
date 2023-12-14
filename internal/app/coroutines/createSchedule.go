@@ -66,7 +66,7 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 								PromiseParam: req.CreateSchedule.PromiseParam,
 								LastRunTime:  nil,
 								NextRunTime:  next,
-								CreatedOn:    &createdOn,
+								CreatedOn:    createdOn,
 							},
 						},
 					},
