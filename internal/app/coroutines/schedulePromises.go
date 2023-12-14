@@ -2,9 +2,9 @@ package coroutines
 
 import (
 	"fmt"
+	"html/template"
 	"log/slog"
 	"strings"
-	"text/template"
 
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
