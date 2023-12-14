@@ -13,7 +13,7 @@ permissions:
   id-token: write
 
 jobs:
-  ci:
+  cicd:
     runs-on: ubuntu-latest
 
     steps:
@@ -30,6 +30,10 @@ jobs:
         run: npm run lint
       - name: Run tests
         run: npm test
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
       - name: Build
         run: npm run build
       - name: Publish

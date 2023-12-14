@@ -11,8 +11,6 @@ import {
   isCanceledPromise,
 } from "../promise";
 import { IPromiseStore } from "../store";
-import { IEncoder } from "../encoder";
-import { Base64Encoder } from "../encoders/base64";
 import { ErrorCodes, ResonateError } from "../error";
 import { IStorage, WithTimeout } from "../storage";
 import { MemoryStorage } from "../storages/memory";
@@ -20,10 +18,7 @@ import { MemoryStorage } from "../storages/memory";
 export class LocalPromiseStore implements IPromiseStore {
   private storage: IStorage;
 
-  constructor(
-    storage: IStorage = new MemoryStorage(),
-    private encoder: IEncoder<string, string> = new Base64Encoder(),
-  ) {
+  constructor(storage: IStorage = new MemoryStorage()) {
     this.storage = new WithTimeout(storage);
   }
 
@@ -39,11 +34,11 @@ export class LocalPromiseStore implements IPromiseStore {
     return this.storage.rmw(id, (promise) => {
       if (promise) {
         if (strict && !isPendingPromise(promise)) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         if (promise.idempotencyKeyForCreate === undefined || ikey != promise.idempotencyKeyForCreate) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         return promise;
@@ -80,7 +75,7 @@ export class LocalPromiseStore implements IPromiseStore {
     return this.storage.rmw(id, (promise) => {
       if (promise) {
         if (strict && !isPendingPromise(promise) && !isResolvedPromise(promise)) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         if (isPendingPromise(promise)) {
@@ -102,12 +97,12 @@ export class LocalPromiseStore implements IPromiseStore {
         }
 
         if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         return promise;
       } else {
-        throw new ResonateError("Not found", ErrorCodes.NOT_FOUND);
+        throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
     });
   }
@@ -122,7 +117,7 @@ export class LocalPromiseStore implements IPromiseStore {
     return this.storage.rmw(id, (promise) => {
       if (promise) {
         if (strict && !isPendingPromise(promise) && !isRejectedPromise(promise)) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         if (isPendingPromise(promise)) {
@@ -144,12 +139,12 @@ export class LocalPromiseStore implements IPromiseStore {
         }
 
         if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         return promise;
       } else {
-        throw new ResonateError("Not found", ErrorCodes.NOT_FOUND);
+        throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
     });
   }
@@ -164,7 +159,7 @@ export class LocalPromiseStore implements IPromiseStore {
     return this.storage.rmw(id, (promise) => {
       if (promise) {
         if (strict && !isPendingPromise(promise) && !isCanceledPromise(promise)) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         if (isPendingPromise(promise)) {
@@ -186,12 +181,12 @@ export class LocalPromiseStore implements IPromiseStore {
         }
 
         if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError("Forbidden request", ErrorCodes.FORBIDDEN);
+          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
         }
 
         return promise;
       } else {
-        throw new ResonateError("Not found", ErrorCodes.NOT_FOUND);
+        throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
     });
   }
@@ -203,6 +198,6 @@ export class LocalPromiseStore implements IPromiseStore {
       return promise;
     }
 
-    throw new ResonateError("Not found", ErrorCodes.NOT_FOUND);
+    throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
   }
 }

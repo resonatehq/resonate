@@ -1,5 +1,6 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
+import { Logger } from "../lib/core/loggers/logger";
 import { RemotePromiseStore } from "../lib/core/stores/remote";
 import { LocalPromiseStore } from "../lib/core/stores/local";
 
@@ -9,7 +10,7 @@ jest.setTimeout(10000);
 describe("Resonate Server Tests", () => {
   const useDurable = process.env.USE_DURABLE === "true";
   const url = process.env.RESONATE_URL || "http://localhost:8001";
-  const store = useDurable ? new RemotePromiseStore(url) : new LocalPromiseStore();
+  const store = useDurable ? new RemotePromiseStore(url, new Logger()) : new LocalPromiseStore();
 
   describe("State Transition Tests", () => {
     test("Test Case 0: transitions from Init to Pending via Create", async () => {

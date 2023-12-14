@@ -1,7 +1,7 @@
 import { Context } from "../../resonate";
 import { IRetry } from "../retry";
 
-export class Retry implements IRetry {
+export class ExponentialRetry implements IRetry {
   constructor(
     private maxAttempts: number,
     private maxDelay: number,
@@ -9,8 +9,8 @@ export class Retry implements IRetry {
     private backoffFactor: number,
   ) {}
 
-  static atMostOnce(): Retry {
-    return new Retry(1, 0, 0, 0);
+  static atMostOnce(): ExponentialRetry {
+    return new ExponentialRetry(1, 0, 0, 0);
   }
 
   static atLeastOnce(
@@ -18,8 +18,8 @@ export class Retry implements IRetry {
     maxDelay: number = 60000, // 1 minute
     initialDelay: number = 100,
     backoffFactor: number = 2,
-  ): Retry {
-    return new Retry(maxAttempts, maxDelay, initialDelay, backoffFactor);
+  ): ExponentialRetry {
+    return new ExponentialRetry(maxAttempts, maxDelay, initialDelay, backoffFactor);
   }
 
   next(context: Context): { done: boolean; delay?: number } {

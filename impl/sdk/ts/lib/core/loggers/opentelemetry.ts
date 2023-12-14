@@ -1,7 +1,8 @@
 import * as opentelemetry from "@opentelemetry/api";
+import { Logger } from "./logger";
 import { ILogger, ITrace } from "../logger";
 
-export class OpenTelemetryLogger implements ILogger {
+export class OpenTelemetryLogger extends Logger implements ILogger {
   startTrace(id: string, attrs?: Record<string, string>): ITrace {
     return new OpenTelemetrySpan(id, attrs);
   }

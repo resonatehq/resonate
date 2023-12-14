@@ -31,3 +31,4 @@ ignorePatterns:
   - jest.config.js
   - "dist/"
   - "examples/"
+  - "coverage/"

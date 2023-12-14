@@ -1,3 +1,3 @@
 export interface IBucket {
-  schedule<R>(thunk: () => R, delay: number): Promise<R>;
+  schedule<R>(thunk: () => R, delay?: number): Promise<R>;
 }

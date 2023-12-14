@@ -1,13 +1,14 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
 import { IRetry } from "../lib/core/retry";
-import { Retry } from "../lib/core/retries/retry";
+import { ExponentialRetry } from "../lib/core/retries/exponential";
+import { LinearRetry } from "../lib/core/retries/linear";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
 
 describe("Retry policies", () => {
-  const resonate = new Resonate({ timeout: Number.MAX_SAFE_INTEGER, retry: () => Retry.atMostOnce() });
+  const resonate = new Resonate({ timeout: Number.MAX_SAFE_INTEGER, retry: () => ExponentialRetry.atMostOnce() });
   resonate.register("async", foo);
   resonate.register("generator", bar);
 
@@ -18,14 +19,19 @@ describe("Retry policies", () => {
   });
 
   for (const f of ["async", "generator"]) {
-    test(`At most once (${f})`, async () => {
-      await expect(resonate.run(f, `${f}-1`, spy, Retry.atMostOnce())).rejects.toThrow("nope");
-      expect(spy).toHaveBeenCalledTimes(1);
-    });
-
-    for (let i = 2; i < 10; i++) {
-      test(`At least once (${f}, ${i})`, async () => {
-        await expect(resonate.run(f, `${f}-${i}`, spy, Retry.atLeastOnce(i, 0))).rejects.toThrow("nope");
+    for (let i = 1; i <= 10; i++) {
+      test(`Exponential at most once (${f}, ${i})`, async () => {
+        await expect(resonate.run(f, `e-amo-${f}-${i}`, spy, ExponentialRetry.atMostOnce())).rejects.toThrow("nope");
+        expect(spy).toHaveBeenCalledTimes(1);
+      });
+      test(`Exponential at least once (${f}, ${i})`, async () => {
+        await expect(resonate.run(f, `e-alo-${f}-${i}`, spy, ExponentialRetry.atLeastOnce(i, 0))).rejects.toThrow(
+          "nope",
+        );
+        expect(spy).toHaveBeenCalledTimes(i);
+      });
+      test(`Linear (${f}, ${i})`, async () => {
+        await expect(resonate.run(f, `l-${f}-${i}`, spy, new LinearRetry(0, i))).rejects.toThrow("nope");
         expect(spy).toHaveBeenCalledTimes(i);
       });
     }
