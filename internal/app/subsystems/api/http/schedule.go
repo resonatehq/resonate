@@ -12,16 +12,13 @@ import (
 // CREATE
 
 func (s *server) createSchedule(c *gin.Context) {
-
-	// todo: header
-
 	var body *service.CreateScheduleBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.CreateSchedule(body) // todo: do properly
+	resp, err := s.service.CreateSchedule(body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
@@ -37,9 +34,6 @@ func (s *server) createSchedule(c *gin.Context) {
 // READ
 
 func (s *server) readSchedule(c *gin.Context) {
-
-	// todo: header
-
 	res, err := s.service.ReadSchedule(c.Param("id"))
 	if err != nil {
 		var apiErr *api.APIErrorResponse
@@ -55,14 +49,11 @@ func (s *server) readSchedule(c *gin.Context) {
 
 // UPDATE
 
-// pause, resume, trigger
+// todo: pause, resume, trigger
 
 // DELETE
 
 func (s *server) deleteSchedule(c *gin.Context) {
-
-	// todo: header
-
 	res, err := s.service.DeleteSchedule(c.Param("id"))
 	if err != nil {
 		var apiErr *api.APIErrorResponse

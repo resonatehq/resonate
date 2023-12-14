@@ -121,9 +121,11 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	return &t_api.Request{
 		Kind: t_api.CreateSchedule,
 		CreateSchedule: &t_api.CreateScheduleRequest{
-			Id:   id,
-			Desc: util.ToPointer(string(desc)),
-			Cron: cron,
+			Id:           id,
+			Desc:         util.ToPointer(string(desc)),
+			Cron:         cron,
+			PromiseId:    fmt.Sprintf("%s.{{.timestamp}}", id),
+			PromiseParam: nil,
 		},
 	}
 }

@@ -166,15 +166,6 @@ func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) 
 		sm.schedule = nil
 		return nil
 	case t_api.StatusScheduleNotFound:
-		// single client mode dst with some boolean.
-		// stricter mode to assert that kidna sutff.
-		// does not assume that it is the only client.
-		// dst could be distributed.
-		// possible --. subscriptions get deleted when promise completes.
-		// promise could timeout.. -> ( ... )
-		// if sm.schedule != nil {
-		// 	return fmt.Errorf("schedule exists %s", sm.schedule)
-		// }
 		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)

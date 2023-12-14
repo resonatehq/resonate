@@ -16,25 +16,20 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// CreateScheduleRequest defines model for CreateScheduleRequest.
-type CreateScheduleRequest struct {
-	Cron *string `json:"cron,omitempty"`
-	Desc *string `json:"desc,omitempty"`
-	Id   *string `json:"id,omitempty"`
-}
-
 // Schedule defines model for Schedule.
 type Schedule struct {
-	CreatedOn   *int64  `json:"createdOn,omitempty"`
-	Cron        *string `json:"cron,omitempty"`
-	Desc        *string `json:"desc,omitempty"`
-	Id          *string `json:"id,omitempty"`
-	LastRunTime *int64  `json:"lastRunTime,omitempty"`
-	NextRunTime *int64  `json:"nextRunTime,omitempty"`
+	CreatedOn    *int64  `json:"createdOn,omitempty"`
+	Cron         string  `json:"cron"`
+	Desc         *string `json:"desc,omitempty"`
+	Id           string  `json:"id"`
+	LastRunTime  *int64  `json:"lastRunTime,omitempty"`
+	NextRunTime  *int64  `json:"nextRunTime,omitempty"`
+	PromiseId    string  `json:"promiseId"`
+	PromiseParam *string `json:"promiseParam,omitempty"`
 }
 
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.
-type PostSchedulesJSONRequestBody = CreateScheduleRequest
+type PostSchedulesJSONRequestBody = Schedule
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error

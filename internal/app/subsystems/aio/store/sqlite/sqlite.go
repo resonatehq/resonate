@@ -28,7 +28,9 @@ const (
 	CREATE TABLE IF NOT EXISTS schedules (
 		id            TEXT PRIMARY KEY,
 		desc          TEXT NULL, 
-		cron          TEXT, 
+		cron          TEXT,
+		promise_id    TEXT,  
+		promise_param TEXT NULL, 
 		last_run_time INTEGER NULL, 
 		next_run_time INTEGER, 
 		created_on    INTEGER
@@ -230,31 +232,30 @@ const (
 
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules 
-		(id, desc, cron, last_run_time, next_run_time, created_on)
+		(id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on)
 	VALUES 
-		(?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
 		schedules
 	SET
-		desc = ?, cron = ?, last_run_time = ?, next_run_time = ?
+		desc = ?, cron = ?, promise_id = ?, promise_param = ?, last_run_time = ?, next_run_time = ?
 	WHERE
 		id = ? AND (last_run_time IS NULL OR last_run_time < ?)`
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT 
-		id, desc, cron, last_run_time, next_run_time, created_on
+		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on
 	FROM 
 		schedules
     WHERE 
 		id = ?`
 
-	// todo: add a limit ?
 	SCHEDULE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, desc, cron, last_run_time, next_run_time, created_on
+		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on
 	FROM
 		schedules
 	WHERE
@@ -279,7 +280,7 @@ type SqliteStoreWorker struct {
 }
 
 func New(config *Config) (aio.Subsystem, error) {
-	db, err := sql.Open("sqlite3", config.Path+"?_foreign_keys=on")
+	db, err := sql.Open("sqlite3", config.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -651,7 +652,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -678,6 +679,8 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 		&record.Id,
 		&record.Desc,
 		&record.Cron,
+		&record.PromiseId,
+		&record.PromiseParam,
 		&record.LastRunTime,
 		&record.NextRunTime,
 		&record.CreatedOn,
@@ -719,6 +722,8 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 			&record.Id,
 			&record.Desc,
 			&record.Cron,
+			&record.PromiseId,
+			&record.PromiseParam,
 			&record.LastRunTime,
 			&record.NextRunTime,
 			&record.CreatedOn,
@@ -740,7 +745,7 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 }
 
 func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Desc, cmd.Cron, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	res, err := stmt.Exec(cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
 	if err != nil {
 		return nil, err
 	}

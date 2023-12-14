@@ -58,7 +58,9 @@ type RejectPromiseBody struct {
 // SCHEDULE
 
 type CreateScheduleBody struct {
-	Id   string `json:"id"`
-	Desc string `json:"desc"`
-	Cron string `json:"cron"`
+	Id           string `json:"id" binding:"required"`
+	Desc         string `json:"desc"`
+	Cron         string `json:"cron" binding:"required"`
+	PromiseId    string `json:"promiseId" binding:"required"`
+	PromiseParam string `json:"promiseParam"`
 }

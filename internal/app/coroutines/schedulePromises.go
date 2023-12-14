@@ -3,8 +3,9 @@ package coroutines
 import (
 	"fmt"
 	"log/slog"
+	"strings"
+	"text/template"
 
-	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -78,16 +79,17 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
-						{ // todo: discuss these values more.
-
+						{
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id: "schedule-" + uuid.NewString(),
+								Id: generatePromiseId(schedule.PromiseId, map[string]string{
+									"timestamp": fmt.Sprintf("%d", now),
+								}),
 								Param: promise.Value{
 									Headers: map[string]string{},
 									Data:    []byte{},
 								},
-								Timeout:        100000000,
+								Timeout:        2524608000000,
 								IdempotencyKey: nil,
 								Tags:           map[string]string{},
 								CreatedOn:      now,
@@ -96,11 +98,13 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.UpdateSchedule,
 							UpdateSchedule: &t_aio.UpdateScheduleCommand{
-								Id:          schedule.Id,
-								Desc:        schedule.Desc,
-								Cron:        schedule.Cron,
-								LastRunTime: &now,
-								NextRunTime: next,
+								Id:           schedule.Id,
+								Desc:         schedule.Desc,
+								Cron:         schedule.Cron,
+								PromiseId:    schedule.PromiseId,
+								PromiseParam: schedule.PromiseParam,
+								LastRunTime:  &now,
+								NextRunTime:  next,
 							},
 						},
 					},
@@ -115,4 +119,19 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		// todo: add checks for promise creation failure and schedule update failure.
 
 	})
+}
+
+// helpers
+
+func generatePromiseId(id string, vars map[string]string) string {
+	t := template.Must(template.New("promiseID").Parse(id))
+
+	var replaced strings.Builder
+	err := t.Execute(&replaced, vars)
+	if err != nil {
+		// all api-level validations should prevent this.
+		panic(err)
+	}
+
+	return replaced.String()
 }

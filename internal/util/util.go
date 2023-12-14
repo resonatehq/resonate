@@ -78,10 +78,14 @@ func UnixMilliToTime(unixMilli int64) time.Time {
 
 // ref: t := time.Now().UnixMilli()
 func Next(curr int64, cronExp string) (int64, error) {
-	scheduler, err := cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
+	scheduler, err := ParseCron(cronExp)
 	if err != nil {
 		return 0, err
 	}
 
 	return scheduler.Next(UnixMilliToTime(curr)).UnixMilli(), nil
+}
+
+func ParseCron(cronExp string) (cron.Schedule, error) {
+	return cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
 }

@@ -10,7 +10,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CreateScheduleRequest"
+              $ref: "#/components/schemas/Schedule"
         required: true
       responses:
         "200":
@@ -53,33 +53,22 @@ paths:
 
 components:
   schemas:
-    CreateScheduleRequest:
-      type: object
-      properties:
-        id:
-          type: string
-        desc:
-          type: string
-        cron:
-          type: string
-    ReadScheduleRequest:
-      type: object
-      properties:
-        id:
-          type: string
-    DeleteScheduleRequest:
-      type: object
-      properties:
-        id:
-          type: string
     Schedule:
       type: object
+      required:
+        - id
+        - cron
+        - promiseId
       properties:
         id:
           type: string
         desc:
           type: string
         cron:
+          type: string
+        promiseId:
+          type: string
+        promiseParam:
           type: string
         lastRunTime:
           type: integer

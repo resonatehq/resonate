@@ -28,9 +28,11 @@ type Request struct {
 // Schedule
 
 type CreateScheduleRequest struct {
-	Id   string  `json:"id"`
-	Desc *string `json:"desc,omitempty"`
-	Cron string  `json:"cron"`
+	Id           string  `json:"id"`
+	Desc         *string `json:"desc,omitempty"`
+	Cron         string  `json:"cron"`
+	PromiseId    string  `json:"promiseId"`
+	PromiseParam *string `json:"promiseParam,omitempty"`
 }
 
 type ReadScheduleRequest struct {

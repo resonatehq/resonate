@@ -2,6 +2,9 @@ package service
 
 import (
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -14,14 +17,26 @@ import (
 func (s *Service) CreateSchedule(body *CreateScheduleBody) (*t_api.CreateScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
+	// validation
+	if err := validateSchedule(body.Cron); err != nil {
+		return nil, api.HandleValidationError(err)
+	}
+
+	if err := validatePromiseId(body.PromiseId); err != nil {
+		return nil, api.HandleValidationError(err)
+	}
+
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		// todo: requestId + idempotencyKey
 		Metadata: s.metadata("header.RequestId", "create-schedule"),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
 			CreateSchedule: &t_api.CreateScheduleRequest{
-				Id:   body.Id,
-				Desc: &body.Desc,
-				Cron: body.Cron,
+				Id:           body.Id,
+				Desc:         &body.Desc,
+				Cron:         body.Cron,
+				PromiseId:    body.PromiseId,
+				PromiseParam: &body.PromiseParam,
 			},
 		},
 		Callback: s.sendOrPanic(cq),
@@ -105,4 +120,40 @@ func (s *Service) DeleteSchedule(id string) (*t_api.DeleteScheduleResponse, erro
 	}
 
 	return cqe.Completion.DeleteSchedule, nil
+}
+
+// validations
+
+func validateSchedule(schedule string) error {
+	// Validate schedule is valid cron expression.
+	scheduler, err := util.ParseCron(schedule)
+	if err != nil {
+		return fmt.Errorf("invalid cron schedule: %v", err)
+	}
+
+	// Validate time isn't in the past.
+	now := time.Now()
+	next := scheduler.Next(now)
+	if next.Before(now) {
+		return fmt.Errorf("schedule is in the past")
+	}
+
+	return nil
+}
+
+func validatePromiseId(promiseId string) error {
+	if promiseId == "" {
+		return fmt.Errorf("promiseId is required")
+	}
+
+	// Check required syntax
+	// todo: if and only if
+	if !strings.Contains(promiseId, "{{") || !strings.Contains(promiseId, "}}") {
+		return fmt.Errorf("promiseId must contain a templated variable")
+	}
+	if !strings.Contains(promiseId, "{{.timestamp}}") {
+		return fmt.Errorf("promiseId must contain the {{.timeout}} template variable")
+	}
+
+	return nil
 }

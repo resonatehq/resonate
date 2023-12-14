@@ -17,8 +17,6 @@ func init() {
 	rootCmd.AddCommand(newScheduleCommand())
 }
 
-// todo: authentication and configuration of where the server is.
-
 func newScheduleCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "schedule",
@@ -35,74 +33,98 @@ func newScheduleCommand() *cobra.Command {
 }
 
 func newCreateScheduleCommand() *cobra.Command {
-	var desc, cron string
+	var id, promiseId, cron string
+	var desc, promiseParam string
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new schedule",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get ID from args
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
 				return
 			}
+			id = args[0]
 
-			id := args[0]
-
-			// Create API client
 			c, err := client.NewClient(apiServer)
 			if err != nil {
 				panic(err)
 			}
 
-			// Build request
-			body := client.CreateScheduleRequest{
-				Id:   &id,
-				Desc: &desc,
-				Cron: &cron,
+			body := client.Schedule{
+				Id:           id,
+				Desc:         &desc,
+				Cron:         cron,
+				PromiseId:    promiseId,
+				PromiseParam: &promiseParam,
 			}
 
-			// Call API
-			_, err = c.PostSchedules(context.TODO(), body)
+			resp, err := c.PostSchedules(context.TODO(), body)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
 			}
+			defer resp.Body.Close()
 
-			fmt.Println("Created schedule:", id)
+			if resp.StatusCode != 200 && resp.StatusCode != 201 {
+				bs, err := io.ReadAll(resp.Body)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Printf("%s\n", string(bs))
+				return
+			}
+
+			fmt.Printf("Created schedule: %s\n", id)
 		},
 	}
 
 	cmd.Flags().StringVarP(&desc, "desc", "d", "", "Description of schedule")
 	cmd.Flags().StringVarP(&cron, "cron", "c", "", "CRON expression")
+	cmd.Flags().StringVarP(&promiseId, "promise-id", "p", "", "ID of promise")
+	cmd.Flags().StringVarP(&promiseParam, "promise-param", "a", "", "Parameter to pass to promise")
+
+	_ = cmd.MarkFlagRequired("cron")
+	_ = cmd.MarkFlagRequired("promise-id")
 
 	return cmd
 }
 
 func newDeleteScheduleCommand() *cobra.Command {
+	var id string
+
 	cmd := &cobra.Command{
 		Use:   "delete [id]",
 		Short: "Delete a schedule",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get ID from args
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
 				return
 			}
-
-			id := args[0]
+			id = args[0]
 
 			c, err := client.NewClient(apiServer)
 			if err != nil {
 				panic(err)
 			}
 
-			_, err = c.DeleteSchedulesId(context.TODO(), id)
+			resp, err := c.DeleteSchedulesId(context.TODO(), id)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
 			}
-			fmt.Println("Deleted schedule", id)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != 200 {
+				bs, err := io.ReadAll(resp.Body)
+				if err != nil {
+					panic(err)
+				}
+				fmt.Printf("%s\n", string(bs))
+				return
+			}
+
+			fmt.Println("Deleted schedule:", id)
 		},
 	}
 
@@ -110,38 +132,41 @@ func newDeleteScheduleCommand() *cobra.Command {
 }
 
 func newDescribeScheduleCommand() *cobra.Command {
+	var id string
+
 	cmd := &cobra.Command{
 		Use:   "describe [id]",
 		Short: "Get details of a schedule",
 		Run: func(cmd *cobra.Command, args []string) {
-			// Get ID from args
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
 				return
 			}
-
-			id := args[0]
+			id = args[0]
 
 			c, err := client.NewClient(apiServer)
 			if err != nil {
 				panic(err)
 			}
 
-			// execute
-			s, err := c.GetSchedulesId(context.TODO(), id)
+			resp, err := c.GetSchedulesId(context.TODO(), id)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
 			}
+			defer resp.Body.Close()
 
-			defer s.Body.Close()
-
-			body, err := io.ReadAll(s.Body)
+			bs, err := io.ReadAll(resp.Body)
 			if err != nil {
 				panic(err)
 			}
 
-			fmt.Printf("%s", string(body))
+			if resp.StatusCode != 200 {
+				fmt.Printf("%s\n", string(bs))
+				return
+			}
+
+			fmt.Printf("%s\n", string(bs))
 		},
 	}
 
