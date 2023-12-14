@@ -115,12 +115,12 @@ func newDeleteScheduleCommand() *cobra.Command {
 			}
 			defer resp.Body.Close()
 
-			if resp.StatusCode != 200 {
+			if resp.StatusCode != 204 {
 				bs, err := io.ReadAll(resp.Body)
 				if err != nil {
 					panic(err)
 				}
-				fmt.Printf("%s\n", string(bs))
+				fmt.Printf("Error: %s\n", string(bs))
 				return
 			}
 
