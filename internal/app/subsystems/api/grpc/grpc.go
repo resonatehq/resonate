@@ -107,7 +107,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	}
 
 	params := &service.SearchPromiseParams{
-		Id:     util.ToPointer(req.Q),
+		Id:     util.ToPointer(req.Id),
 		State:  searchState(req.State),
 		Limit:  util.ToPointer(int(req.Limit)),
 		Cursor: req.Cursor,

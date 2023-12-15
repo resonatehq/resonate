@@ -1,3 +1,4 @@
+// update proto
 package grpc
 
 import (
@@ -165,7 +166,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromises",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				Limit: 10,
 			},
 			req: &t_api.Request{
@@ -232,7 +233,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesPending",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_PENDING,
 				Limit: 10,
 			},
@@ -258,7 +259,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesResolved",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_RESOLVED,
 				Limit: 10,
 			},
@@ -284,7 +285,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesRejected",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_REJECTED,
 				Limit: 10,
 			},
