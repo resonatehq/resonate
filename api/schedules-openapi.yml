@@ -72,10 +72,13 @@ components:
           type: string
         lastRunTime:
           type: integer
+          readOnly: true
           format: int64
         nextRunTime:
           type: integer
+          readOnly: true
           format: int64
         createdOn:
           type: integer
+          readOnly: true
           format: int64

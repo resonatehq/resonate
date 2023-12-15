@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/viper"
 )
 
+var API = "http://0.0.0.0:8001"
+
 var cfgFile string
 
 var rootCmd = &cobra.Command{
@@ -23,6 +25,10 @@ func init() {
 	rootCmd.PersistentFlags().String("log-level", "info", "log level, Options: debug, info, warn, error.")
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
+
+	// Add Subcommands
+	rootCmd.AddCommand(newPromiseCommand())
+	rootCmd.AddCommand(newScheduleCommand())
 }
 
 func initConfig() {

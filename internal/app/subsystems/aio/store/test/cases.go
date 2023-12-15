@@ -1129,7 +1129,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "foo.*",
+					Id: "foo.*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1139,7 +1139,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*.bar",
+					Id: "*.bar",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1149,7 +1149,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1159,7 +1159,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1430,7 +1430,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1440,7 +1440,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -1450,7 +1450,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -1462,7 +1462,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -1476,7 +1476,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -2396,7 +2396,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q:      "*",
+					Id:     "*",
 					States: []promise.State{promise.Timedout},
 					Limit:  5,
 				},

@@ -102,13 +102,13 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromises",
 			serviceReq: &SearchPromiseParams{
-				Q:     util.ToPointer("*"),
+				Id:    util.ToPointer("*"),
 				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -131,12 +131,12 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesCursor",
 			serviceReq: &SearchPromiseParams{
-				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -150,7 +150,7 @@ func TestSearchPromises(t *testing.T) {
 					Status: t_api.StatusOK,
 					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
 						Next: &t_api.SearchPromisesRequest{
-							Q: "*",
+							Id: "*",
 							States: []promise.State{
 								promise.Pending,
 								promise.Resolved,
@@ -169,14 +169,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesPending",
 			serviceReq: &SearchPromiseParams{
-				Q:     util.ToPointer("*"),
+				Id:    util.ToPointer("*"),
 				State: "pending",
 				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -195,14 +195,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesResolved",
 			serviceReq: &SearchPromiseParams{
-				Q:     util.ToPointer("*"),
+				Id:    util.ToPointer("*"),
 				State: "resolved",
 				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -221,14 +221,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesRejected",
 			serviceReq: &SearchPromiseParams{
-				Q:     util.ToPointer("*"),
+				Id:    util.ToPointer("*"),
 				State: "rejected",
 				Limit: util.ToPointer(10),
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -265,25 +265,24 @@ func TestCreatePromise(t *testing.T) {
 
 	for _, tc := range []struct {
 		name             string
-		id               string
 		serviceReqHeader *CreatePromiseHeader
-		serviceReqBody   *CreatePromiseBody
+		serviceReqBody   *promise.Promise
 		req              *t_api.Request
 		res              *t_api.Response
 	}{
 		{
 			name: "CreatePromise",
-			id:   "foo",
 			serviceReqHeader: &CreatePromiseHeader{
 				IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 				Strict:         true,
 			},
-			serviceReqBody: &CreatePromiseBody{
-				Param: &promise.Value{
+			serviceReqBody: &promise.Promise{
+				Id: "foo",
+				Param: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("pending"),
 				},
-				Timeout: util.ToPointer(int64(1)),
+				Timeout: int64(1),
 			},
 
 			req: &t_api.Request{
@@ -312,17 +311,17 @@ func TestCreatePromise(t *testing.T) {
 		},
 		{
 			name: "CreatePromiseMinimal",
-			id:   "foo",
 			serviceReqHeader: &CreatePromiseHeader{
 				IdempotencyKey: nil,
 				Strict:         false,
 			},
-			serviceReqBody: &CreatePromiseBody{
-				Param: &promise.Value{
+			serviceReqBody: &promise.Promise{
+				Id: "foo",
+				Param: promise.Value{
 					Headers: nil,
 					Data:    nil,
 				},
-				Timeout: util.ToPointer(int64(1)),
+				Timeout: int64(1),
 			},
 
 			req: &t_api.Request{
@@ -352,7 +351,7 @@ func TestCreatePromise(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			serviceTest.Load(t, tc.req, tc.res)
-			res, err := serviceTest.service.CreatePromise(tc.id, tc.serviceReqHeader, tc.serviceReqBody)
+			res, err := serviceTest.service.CreatePromise(tc.serviceReqHeader, tc.serviceReqBody)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -368,19 +367,19 @@ func TestCancelPromise(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		id               string
-		serviceReqHeader *CancelPromiseHeader
-		serviceReqBody   *CancelPromiseBody
+		serviceReqHeader *CompletePromiseHeader
+		serviceReqBody   *CompletePromiseBody
 		req              *t_api.Request
 		res              *t_api.Response
 	}{
 		{
 			name: "CancelPromise",
 			id:   "foo",
-			serviceReqHeader: &CancelPromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 				Strict:         true,
 			},
-			serviceReqBody: &CancelPromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
@@ -400,7 +399,7 @@ func TestCancelPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -412,11 +411,11 @@ func TestCancelPromise(t *testing.T) {
 		{
 			name: "CancelPromiseMinimal",
 			id:   "foo",
-			serviceReqHeader: &CancelPromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: nil,
 				Strict:         false,
 			},
-			serviceReqBody: &CancelPromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: nil,
 					Data:    nil,
@@ -436,7 +435,7 @@ func TestCancelPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -465,19 +464,19 @@ func TestResolvePromise(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		id               string
-		serviceReqHeader *ResolvePromiseHeader
-		serviceReqBody   *ResolvePromiseBody
+		serviceReqHeader *CompletePromiseHeader
+		serviceReqBody   *CompletePromiseBody
 		req              *t_api.Request
 		res              *t_api.Response
 	}{
 		{
 			name: "ResolvePromise",
 			id:   "foo",
-			serviceReqHeader: &ResolvePromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 				Strict:         true,
 			},
-			serviceReqBody: &ResolvePromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
@@ -497,7 +496,7 @@ func TestResolvePromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -509,11 +508,11 @@ func TestResolvePromise(t *testing.T) {
 		{
 			name: "ResolvePromiseMinimal",
 			id:   "foo",
-			serviceReqHeader: &ResolvePromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: nil,
 				Strict:         false,
 			},
-			serviceReqBody: &ResolvePromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: nil,
 					Data:    nil,
@@ -533,7 +532,7 @@ func TestResolvePromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -561,19 +560,19 @@ func TestRejectPromise(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		id               string
-		serviceReqHeader *RejectPromiseHeader
-		serviceReqBody   *RejectPromiseBody
+		serviceReqHeader *CompletePromiseHeader
+		serviceReqBody   *CompletePromiseBody
 		req              *t_api.Request
 		res              *t_api.Response
 	}{
 		{
 			name: "RejectPromise",
 			id:   "foo",
-			serviceReqHeader: &RejectPromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 				Strict:         true,
 			},
-			serviceReqBody: &RejectPromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
@@ -593,7 +592,7 @@ func TestRejectPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -605,11 +604,11 @@ func TestRejectPromise(t *testing.T) {
 		{
 			name: "RejectPromiseMinimal",
 			id:   "foo",
-			serviceReqHeader: &RejectPromiseHeader{
+			serviceReqHeader: &CompletePromiseHeader{
 				IdempotencyKey: nil,
 				Strict:         false,
 			},
-			serviceReqBody: &RejectPromiseBody{
+			serviceReqBody: &CompletePromiseBody{
 				Value: promise.Value{
 					Headers: nil,
 					Data:    nil,
@@ -629,7 +628,7 @@ func TestRejectPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",

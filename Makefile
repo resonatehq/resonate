@@ -8,4 +8,5 @@ deps:
 
 .PHONY: gen-openapi
 gen-openapi: 
-	oapi-codegen -generate types,client -package client ./api/openapi.yml > pkg/client/openapi.go
+	oapi-codegen -generate types,client -package promises ./api/promises-openapi.yml > pkg/client/promises/openapi.go
+	oapi-codegen -generate types,client -package schedules ./api/schedules-openapi.yml > pkg/client/schedules/openapi.go

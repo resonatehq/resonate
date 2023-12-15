@@ -220,7 +220,7 @@ type ReadPromiseCommand struct {
 }
 
 type SearchPromisesCommand struct {
-	Q      string
+	Id     string
 	States []promise.State
 	Limit  int
 	SortId *int64

@@ -593,11 +593,11 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComman
 }
 
 func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Q != "", "query cannot be empty")
+	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
 
 	// convert query
-	query := strings.ReplaceAll(cmd.Q, "*", "%")
+	query := strings.ReplaceAll(cmd.Id, "*", "%")
 
 	// convert list of state to bit mask
 	mask := 0

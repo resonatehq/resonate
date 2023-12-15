@@ -6,28 +6,21 @@ import (
 	"io"
 
 	"github.com/resonatehq/resonate/pkg/client"
+	"github.com/resonatehq/resonate/pkg/client/schedules"
 	"github.com/spf13/cobra"
 )
-
-var apiServer string
-
-func init() {
-	apiServer = "http://0.0.0.0:8001"
-
-	rootCmd.AddCommand(newScheduleCommand())
-}
 
 func newScheduleCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "schedule",
-		Short: "Manage recurring schedules",
+		Short: "Manage schedules",
 	}
 
 	cmd.AddCommand(newCreateScheduleCommand())
 	cmd.AddCommand(newDeleteScheduleCommand())
 	cmd.AddCommand(newDescribeScheduleCommand())
 
-	cmd.PersistentFlags().StringVar(&apiServer, "api", apiServer, "API server address")
+	cmd.PersistentFlags().StringVar(&API, "api", API, "API server address")
 
 	return cmd
 }
@@ -46,12 +39,10 @@ func newCreateScheduleCommand() *cobra.Command {
 			}
 			id = args[0]
 
-			c, err := client.NewClient(apiServer)
-			if err != nil {
-				panic(err)
-			}
+			// have this as a dependency, bring in from other CLI
+			c := client.NewOrDie(API)
 
-			body := client.Schedule{
+			body := schedules.Schedule{
 				Id:           id,
 				Desc:         &desc,
 				Cron:         cron,
@@ -59,7 +50,7 @@ func newCreateScheduleCommand() *cobra.Command {
 				PromiseParam: &promiseParam,
 			}
 
-			resp, err := c.PostSchedules(context.TODO(), body)
+			resp, err := c.SchedulesV1Alpha1().PostSchedules(context.TODO(), body)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
@@ -103,12 +94,9 @@ func newDeleteScheduleCommand() *cobra.Command {
 			}
 			id = args[0]
 
-			c, err := client.NewClient(apiServer)
-			if err != nil {
-				panic(err)
-			}
+			c := client.NewOrDie(API)
 
-			resp, err := c.DeleteSchedulesId(context.TODO(), id)
+			resp, err := c.SchedulesV1Alpha1().DeleteSchedulesId(context.TODO(), id)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
@@ -144,12 +132,9 @@ func newDescribeScheduleCommand() *cobra.Command {
 			}
 			id = args[0]
 
-			c, err := client.NewClient(apiServer)
-			if err != nil {
-				panic(err)
-			}
+			c := client.NewOrDie(API)
 
-			resp, err := c.GetSchedulesId(context.TODO(), id)
+			resp, err := c.SchedulesV1Alpha1().GetSchedulesId(context.TODO(), id)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return

@@ -12,12 +12,12 @@ type Response struct {
 	Kind Kind
 
 	// Promise
+	CreatePromise  *CreatePromiseResponse
 	ReadPromise    *ReadPromiseResponse
 	SearchPromises *SearchPromisesResponse
-	CreatePromise  *CreatePromiseResponse
-	CancelPromise  *CancelPromiseResponse
-	ResolvePromise *ResolvePromiseResponse
-	RejectPromise  *RejectPromiseResponse
+	CancelPromise  *CompletePromiseResponse
+	ResolvePromise *CompletePromiseResponse
+	RejectPromise  *CompletePromiseResponse
 
 	// Subscriptions
 
@@ -49,7 +49,12 @@ type DeleteScheduleResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 
-// Promise
+// PROMISES
+
+type CreatePromiseResponse struct {
+	Status  ResponseStatus   `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
 
 type ReadPromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
@@ -62,25 +67,12 @@ type SearchPromisesResponse struct {
 	Promises []*promise.Promise             `json:"promises,omitempty"`
 }
 
-type CreatePromiseResponse struct {
+type CompletePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
-type CancelPromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
-type ResolvePromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
-type RejectPromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
+// SUBSCRIPTIONS
 
 type ReadSubscriptionsResponse struct {
 	Status        ResponseStatus                    `json:"status"`

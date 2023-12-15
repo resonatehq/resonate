@@ -50,7 +50,7 @@ type ReadPromiseRequest struct {
 }
 
 type SearchPromisesRequest struct {
-	Q      string          `json:"q"`
+	Id     string          `json:"Id"`
 	States []promise.State `json:"states"`
 	Limit  int             `json:"limit"`
 	SortId *int64          `json:"sortId"`
@@ -123,7 +123,7 @@ func (r *Request) String() string {
 
 		return fmt.Sprintf(
 			"SearchPromises(q=%s, states=%s, limit=%d, sortId=%s)",
-			r.SearchPromises.Q,
+			r.SearchPromises.Id,
 			r.SearchPromises.States,
 			r.SearchPromises.Limit,
 			sortId,

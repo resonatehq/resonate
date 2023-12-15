@@ -50,7 +50,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 		if result.RowsReturned == 0 {
 			res(&t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
@@ -73,7 +73,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 						res(&t_api.Response{
 							Kind: t_api.RejectPromise,
-							RejectPromise: &t_api.RejectPromiseResponse{
+							RejectPromise: &t_api.CompletePromiseResponse{
 								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
@@ -142,7 +142,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					if result.RowsAffected == 1 {
 						res(&t_api.Response{
 							Kind: t_api.RejectPromise,
-							RejectPromise: &t_api.RejectPromiseResponse{
+							RejectPromise: &t_api.CompletePromiseResponse{
 								Status: t_api.StatusCreated,
 								Promise: &promise.Promise{
 									Id:                        p.Id,
@@ -172,7 +172,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 				res(&t_api.Response{
 					Kind: t_api.RejectPromise,
-					RejectPromise: &t_api.RejectPromiseResponse{
+					RejectPromise: &t_api.CompletePromiseResponse{
 						Status:  status,
 						Promise: p,
 					},
