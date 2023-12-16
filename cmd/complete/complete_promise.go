@@ -2,6 +2,7 @@ package complete
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 
@@ -11,9 +12,10 @@ import (
 )
 
 func NewCmdCompletePromise(c client.ResonateClient) *cobra.Command {
-	var id string
-	var state string
-	var value promises.Value
+	var (
+		id, state, paramData string
+		paramHeaders         map[string]string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "promise",
@@ -25,10 +27,15 @@ func NewCmdCompletePromise(c client.ResonateClient) *cobra.Command {
 			}
 			id = args[0]
 
+			encoded := base64.StdEncoding.EncodeToString([]byte(paramData))
+
 			u := promises.PromiseStateComplete(state)
 			body := promises.PromiseCompleteRequest{
 				State: &u,
-				Value: &value,
+				Value: &promises.Value{
+					Data:    &encoded,
+					Headers: &paramHeaders,
+				},
 			}
 
 			var params *promises.PatchPromisesIdParams
@@ -53,8 +60,9 @@ func NewCmdCompletePromise(c client.ResonateClient) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&id, "id", "", "ID of the promise")
 	cmd.Flags().StringVar(&state, "state", "", "State of the promise")
+	cmd.Flags().StringVarP(&paramData, "data", "D", "", "Data value")
+	cmd.Flags().StringToStringVarP(&paramHeaders, "headers", "H", map[string]string{}, "Request headers")
 
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("state")
