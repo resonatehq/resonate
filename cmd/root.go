@@ -5,11 +5,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/resonatehq/resonate/cmd/complete"
 	"github.com/resonatehq/resonate/cmd/create"
 	"github.com/resonatehq/resonate/cmd/delete"
 	"github.com/resonatehq/resonate/cmd/describe"
 	"github.com/resonatehq/resonate/cmd/get"
+	"github.com/resonatehq/resonate/cmd/patch"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -35,7 +35,7 @@ func init() {
 
 	// Add Subcommands
 	c := client.NewOrDie(API)
-	rootCmd.AddCommand(complete.NewCmdComplete(c))
+	rootCmd.AddCommand(patch.NewCmdPatch(c))
 	rootCmd.AddCommand(create.NewCmdCreate(c))
 	rootCmd.AddCommand(delete.NewCmdDelete(c))
 	rootCmd.AddCommand(describe.NewCmdDescribe(c))

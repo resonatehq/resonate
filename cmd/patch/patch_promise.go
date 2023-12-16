@@ -1,4 +1,4 @@
-package complete
+package patch
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewCmdCompletePromise(c client.ResonateClient) *cobra.Command {
+func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 	var (
 		id, state, paramData string
 		paramHeaders         map[string]string
@@ -19,7 +19,8 @@ func NewCmdCompletePromise(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "promise",
-		Short: "Complete a promise resource",
+		Short: "Patch a promise resource",
+		Long:  "Patch the state and value of a pending promise.",
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
