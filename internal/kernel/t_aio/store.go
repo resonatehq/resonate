@@ -185,7 +185,8 @@ type CreateScheduleCommand struct {
 	Desc           *string
 	Cron           string
 	PromiseId      string
-	PromiseParam   *string
+	PromiseParam   promise.Value
+	PromiseTimeout int64
 	LastRunTime    *int64
 	NextRunTime    int64
 	CreatedOn      int64
@@ -193,11 +194,9 @@ type CreateScheduleCommand struct {
 }
 
 type UpdateScheduleCommand struct {
-	Id           string
-	PromiseId    string
-	PromiseParam *string
-	LastRunTime  *int64
-	NextRunTime  int64
+	Id          string
+	LastRunTime *int64
+	NextRunTime int64
 }
 
 type ReadScheduleCommand struct {
@@ -227,6 +226,7 @@ type SearchPromisesCommand struct {
 
 type CreatePromiseCommand struct {
 	Id             string
+	State          promise.State
 	Param          promise.Value
 	Timeout        int64
 	IdempotencyKey *promise.IdempotencyKey

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 
@@ -26,12 +27,23 @@ func newScheduleCommand() *cobra.Command {
 }
 
 func newCreateScheduleCommand() *cobra.Command {
-	var id, promiseId, cron string
-	var desc, promiseParam string
+	var (
+		id, desc, cron, promiseId string
+		promiseParamHeaders       map[string]string
+		promiseParamData          string // base64 encoded data
+		promiseTimeout            int64
+	)
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new schedule",
+		Example: `  
+# Create a schedule that runs every 5 minutes.
+resonate schedule create my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000
+
+# Create a schedule that runs every 5 minutes and passes a data value to the promise.
+resonate schedule create my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
+`,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
@@ -39,15 +51,23 @@ func newCreateScheduleCommand() *cobra.Command {
 			}
 			id = args[0]
 
-			// have this as a dependency, bring in from other CLI
 			c := client.NewOrDie(API)
 
+			encodeBase64 := func(s string) *string {
+				encoded := base64.StdEncoding.EncodeToString([]byte(s))
+				return &encoded
+			}
+
 			body := schedules.Schedule{
-				Id:           id,
-				Desc:         &desc,
-				Cron:         cron,
-				PromiseId:    promiseId,
-				PromiseParam: &promiseParam,
+				Id:        id,
+				Desc:      &desc,
+				Cron:      cron,
+				PromiseId: promiseId,
+				PromiseParam: &schedules.Value{
+					Data:    encodeBase64(promiseParamData),
+					Headers: &promiseParamHeaders,
+				},
+				PromiseTimeout: &promiseTimeout,
 			}
 
 			resp, err := c.SchedulesV1Alpha1().PostSchedules(context.TODO(), body)
@@ -73,10 +93,13 @@ func newCreateScheduleCommand() *cobra.Command {
 	cmd.Flags().StringVarP(&desc, "desc", "d", "", "Description of schedule")
 	cmd.Flags().StringVarP(&cron, "cron", "c", "", "CRON expression")
 	cmd.Flags().StringVarP(&promiseId, "promise-id", "p", "", "ID of promise")
-	cmd.Flags().StringVarP(&promiseParam, "promise-param", "a", "", "Parameter to pass to promise")
+	cmd.Flags().StringVarP(&promiseParamData, "data", "D", "", "Data value")
+	cmd.Flags().StringToStringVarP(&promiseParamHeaders, "headers", "H", map[string]string{}, "Request headers")
+	cmd.Flags().Int64VarP(&promiseTimeout, "promise-timeout", "t", 1, "Timeout for promise")
 
 	_ = cmd.MarkFlagRequired("cron")
 	_ = cmd.MarkFlagRequired("promise-id")
+	_ = cmd.MarkFlagRequired("promise-timeout")
 
 	return cmd
 }

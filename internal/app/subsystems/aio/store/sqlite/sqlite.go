@@ -30,7 +30,9 @@ const (
 		desc                       TEXT NULL, 
 		cron                       TEXT,
 		promise_id                 TEXT,  
-		promise_param              TEXT NULL, 
+		promise_param_headers      BLOB,
+		promise_param_data         BLOB,
+		promise_timeout            INTEGER,
 		last_run_time              INTEGER NULL, 
 		next_run_time              INTEGER, 
 		created_on                 INTEGER, 
@@ -233,22 +235,22 @@ const (
 
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules 
-		(id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create)
+		(id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key_for_create)
 	VALUES 
-		(?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
 		schedules
 	SET
-		promise_id = ?, promise_param = ?, last_run_time = ?, next_run_time = ?
+		last_run_time = ?, next_run_time = ?
 	WHERE
 		id = ? AND last_run_time = ?`
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT 
-		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create
+		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key_for_create
 	FROM 
 		schedules
     WHERE 
@@ -256,7 +258,7 @@ const (
 
 	SCHEDULE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create
+		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key_for_create
 	FROM
 		schedules
 	WHERE
@@ -653,7 +655,12 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
+	headers, err := json.Marshal(cmd.PromiseParam.Headers)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, headers, cmd.PromiseParam.Data, cmd.PromiseTimeout, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -681,7 +688,9 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 		&record.Desc,
 		&record.Cron,
 		&record.PromiseId,
-		&record.PromiseParam,
+		&record.PromiseParamHeaders,
+		&record.PromiseParamData,
+		&record.PromiseTimeout,
 		&record.LastRunTime,
 		&record.NextRunTime,
 		&record.CreatedOn,
@@ -725,7 +734,9 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 			&record.Desc,
 			&record.Cron,
 			&record.PromiseId,
-			&record.PromiseParam,
+			&record.PromiseParamHeaders,
+			&record.PromiseParamData,
+			&record.PromiseTimeout,
 			&record.LastRunTime,
 			&record.NextRunTime,
 			&record.CreatedOn,
@@ -748,7 +759,7 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 }
 
 func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	res, err := stmt.Exec(cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
 	if err != nil {
 		return nil, err
 	}
@@ -799,8 +810,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

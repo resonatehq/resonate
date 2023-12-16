@@ -33,7 +33,8 @@ type CreateScheduleRequest struct {
 	Desc           *string                  `json:"desc,omitempty"`
 	Cron           string                   `json:"cron"`
 	PromiseId      string                   `json:"promiseId"`
-	PromiseParam   *string                  `json:"promiseParam,omitempty"`
+	PromiseParam   promise.Value            `json:"promiseParam,omitempty"`
+	PromiseTimeout int64                    `json:"promiseTimeout"`
 	IdempotencyKey *schedule.IdempotencyKey `json:"idemptencyKey,omitempty"`
 }
 

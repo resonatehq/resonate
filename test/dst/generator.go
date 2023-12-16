@@ -119,6 +119,9 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	desc := g.dataSet[r.Intn(len(g.dataSet))]
 	cron := fmt.Sprintf("%d %d * * *", r.Intn(60), r.Intn(24))
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
+	timeout := RangeInt63n(r, t, g.ticks)
 
 	var ikey *schedule.IdempotencyKey
 	if idempotencyKey != nil {
@@ -134,7 +137,8 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 			Desc:           util.ToPointer(string(desc)),
 			Cron:           cron,
 			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
-			PromiseParam:   nil,
+			PromiseParam:   promise.Value{Headers: headers, Data: data},
+			PromiseTimeout: timeout,
 			IdempotencyKey: ikey,
 		},
 	}

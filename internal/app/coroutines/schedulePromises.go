@@ -74,6 +74,21 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			return
 		}
 
+		if schedule.PromiseParam.Headers == nil {
+			schedule.PromiseParam.Headers = map[string]string{}
+		}
+		if schedule.PromiseParam.Data == nil {
+			schedule.PromiseParam.Data = []byte{}
+		}
+
+		// calculate timeout for promise
+
+		now := c.Time()
+		status := promise.Pending
+		if schedule.PromiseTimeout+schedule.NextRunTime < now {
+			status = promise.Timedout
+		}
+
 		_, err = c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -85,11 +100,9 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 								Id: generatePromiseId(schedule.PromiseId, map[string]string{
 									"timestamp": fmt.Sprintf("%d", crontime),
 								}),
-								Param: promise.Value{
-									Headers: map[string]string{},
-									Data:    []byte{},
-								},
-								Timeout:        2524608000000,
+								State:          status,
+								Param:          schedule.PromiseParam,
+								Timeout:        schedule.PromiseTimeout,
 								IdempotencyKey: nil,
 								Tags:           map[string]string{},
 								CreatedOn:      crontime,
@@ -98,11 +111,9 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.UpdateSchedule,
 							UpdateSchedule: &t_aio.UpdateScheduleCommand{
-								Id:           schedule.Id,
-								PromiseId:    schedule.PromiseId,
-								PromiseParam: schedule.PromiseParam,
-								LastRunTime:  &crontime,
-								NextRunTime:  next,
+								Id:          schedule.Id,
+								LastRunTime: &crontime,
+								NextRunTime: next,
 							},
 						},
 					},

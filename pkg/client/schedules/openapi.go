@@ -18,14 +18,22 @@ import (
 
 // Schedule defines model for Schedule.
 type Schedule struct {
-	CreatedOn    *int64  `json:"createdOn,omitempty"`
-	Cron         string  `json:"cron"`
-	Desc         *string `json:"desc,omitempty"`
-	Id           string  `json:"id"`
-	LastRunTime  *int64  `json:"lastRunTime,omitempty"`
-	NextRunTime  *int64  `json:"nextRunTime,omitempty"`
-	PromiseId    string  `json:"promiseId"`
-	PromiseParam *string `json:"promiseParam,omitempty"`
+	CreatedOn               *int64  `json:"createdOn,omitempty"`
+	Cron                    string  `json:"cron"`
+	Desc                    *string `json:"desc,omitempty"`
+	Id                      string  `json:"id"`
+	IdempotencyKeyForCreate *string `json:"idempotencyKeyForCreate,omitempty"`
+	LastRunTime             *int64  `json:"lastRunTime,omitempty"`
+	NextRunTime             *int64  `json:"nextRunTime,omitempty"`
+	PromiseId               string  `json:"promiseId"`
+	PromiseParam            *Value  `json:"promiseParam,omitempty"`
+	PromiseTimeout          *int64  `json:"promiseTimeout,omitempty"`
+}
+
+// Value defines model for Value.
+type Value struct {
+	Data    *string            `json:"data,omitempty"`
+	Headers *map[string]string `json:"headers,omitempty"`
 }
 
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.

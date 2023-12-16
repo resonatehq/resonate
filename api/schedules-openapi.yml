@@ -69,7 +69,10 @@ components:
         promiseId:
           type: string
         promiseParam:
-          type: string
+          $ref: "#/components/schemas/Value"
+        promiseTimeout:
+          type: integer
+          format: int64
         lastRunTime:
           type: integer
           readOnly: true
@@ -82,3 +85,16 @@ components:
           type: integer
           readOnly: true
           format: int64
+        idempotencyKeyForCreate:
+          type: string
+          readOnly: true
+
+    Value:
+      type: object
+      properties:
+        data:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
