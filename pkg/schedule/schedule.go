@@ -5,19 +5,20 @@ import (
 )
 
 type Schedule struct {
-	Id           string  `json:"id"`
-	Desc         *string `json:"desc,omitempty"`
-	Cron         string  `json:"cron"`
-	PromiseId    string  `json:"promiseId"`
-	PromiseParam *string `json:"promiseParam,omitempty"`
-	LastRunTime  *int64  `json:"lastRunTime,omitempty"`
-	NextRunTime  int64   `json:"nextRunTime"`
-	CreatedOn    int64   `json:"createdOn"`
+	Id                      string          `json:"id"`
+	Desc                    *string         `json:"desc,omitempty"`
+	Cron                    string          `json:"cron"`
+	PromiseId               string          `json:"promiseId"`
+	PromiseParam            *string         `json:"promiseParam,omitempty"`
+	LastRunTime             *int64          `json:"lastRunTime,omitempty"`
+	NextRunTime             int64           `json:"nextRunTime"`
+	CreatedOn               int64           `json:"createdOn"`
+	IdempotencyKeyForCreate *IdempotencyKey `json:"idempotencyKeyForCreate,omitempty"`
 }
 
 func (s *Schedule) String() string {
 	return fmt.Sprintf(
-		"Schedule(id=%s, desc=%v, cron=%s, promiseId=%s, promiseParam=%v, lastRunTime=%d, nextRunTime=%d, createdOn=%d)",
+		"Schedule(id=%s, desc=%v, cron=%s, promiseId=%s, promiseParam=%v, lastRunTime=%d, nextRunTime=%d, createdOn=%d, idempotencyKeyForCreate=%s)",
 		s.Id,
 		s.Desc,
 		s.Cron,
@@ -26,5 +27,16 @@ func (s *Schedule) String() string {
 		s.LastRunTime,
 		s.NextRunTime,
 		s.CreatedOn,
+		s.IdempotencyKeyForCreate,
 	)
+}
+
+type IdempotencyKey string
+
+func (i1 *IdempotencyKey) Match(i2 *IdempotencyKey) bool {
+	return i1 != nil && i2 != nil && *i1 == *i2
+}
+
+func (i *IdempotencyKey) String() string {
+	return string(*i)
 }

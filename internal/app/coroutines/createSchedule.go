@@ -19,7 +19,22 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
 
 		// check if it already exists.
-		completion, err := _readSchedule(c, req, req.CreateSchedule.Id)
+
+		completion, err := c.Yield(&t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
+						{
+							Kind: t_aio.ReadSchedule,
+							ReadSchedule: &t_aio.ReadScheduleCommand{
+								Id: req.CreateSchedule.Id,
+							},
+						},
+					},
+				},
+			},
+		})
 		if err != nil {
 			slog.Error("failed to read schedule", "req", req, "err", err)
 			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err))
@@ -41,7 +56,28 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 				return
 			}
 
-			completion, err := _writeSchedule(c, req, createdOn, next, req.CreateSchedule.Id)
+			completion, err := c.Yield(&t_aio.Submission{
+				Kind: t_aio.Store,
+				Store: &t_aio.StoreSubmission{
+					Transaction: &t_aio.Transaction{
+						Commands: []*t_aio.Command{
+							{
+								Kind: t_aio.CreateSchedule,
+								CreateSchedule: &t_aio.CreateScheduleCommand{
+									Id:           req.CreateSchedule.Id,
+									Cron:         req.CreateSchedule.Cron,
+									Desc:         req.CreateSchedule.Desc,
+									PromiseId:    req.CreateSchedule.PromiseId,
+									PromiseParam: req.CreateSchedule.PromiseParam,
+									// LastRunTime:   nil,
+									NextRunTime: next,
+									CreatedOn:   createdOn,
+								},
+							},
+						},
+					},
+				},
+			})
 			if err != nil {
 				slog.Error("failed to create schedule", "req", req, "err", err)
 				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create schedule", err))
@@ -87,62 +123,23 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			return
 		}
 
+		status := t_api.StatusScheduleAlreadyExists
+
+		// if same idempotency key, return ok.
+
+		if s.IdempotencyKeyForCreate.Match(req.CreateSchedule.IdempotencyKey) {
+			status = t_api.StatusOK
+		}
+
 		res(
 			&t_api.Response{
 				Kind: t_api.CreateSchedule,
 				CreateSchedule: &t_api.CreateScheduleResponse{
-					Status:   t_api.StatusScheduleAlreadyExists,
+					Status:   status,
 					Schedule: s,
 				},
 			},
 			nil,
 		)
-	})
-}
-
-// rework this? ?
-// remove request
-func _readSchedule(c *Coroutine, req *t_api.Request, id string) (*t_aio.Completion, error) {
-	return c.Yield(&t_aio.Submission{
-		Kind: t_aio.Store,
-		Store: &t_aio.StoreSubmission{
-			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadSchedule,
-						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: id,
-						},
-					},
-				},
-			},
-		},
-	})
-}
-
-// rework this
-// make write opertion to command id cinteraval eec. ?? generalizable /
-func _writeSchedule(c *Coroutine, req *t_api.Request, createdOn, next int64, id string) (*t_aio.Completion, error) {
-	return c.Yield(&t_aio.Submission{
-		Kind: t_aio.Store,
-		Store: &t_aio.StoreSubmission{
-			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.CreateSchedule,
-						CreateSchedule: &t_aio.CreateScheduleCommand{
-							Id:           id,
-							Cron:         req.CreateSchedule.Cron,
-							Desc:         req.CreateSchedule.Desc,
-							PromiseId:    req.CreateSchedule.PromiseId,
-							PromiseParam: req.CreateSchedule.PromiseParam,
-							// LastRunTime:   nil,
-							NextRunTime: next,
-							CreatedOn:   createdOn,
-						},
-					},
-				},
-			},
-		},
 	})
 }

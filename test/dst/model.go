@@ -126,9 +126,14 @@ func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) 
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
 	switch res.CreateSchedule.Status {
-	// todo: valid with idempotency key
-	// case t_api.StatusOK:
-	// 	return nil
+	case t_api.StatusOK:
+		if sm.schedule != nil {
+			if !sm.idempotencyKeyForCreateMatch(res.CreateSchedule.Schedule) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKeyForCreate, res.CreateSchedule.Schedule.IdempotencyKeyForCreate)
+			}
+		}
+		sm.schedule = res.CreateSchedule.Schedule
+		return nil
 	case t_api.StatusCreated:
 		sm.schedule = res.CreateSchedule.Schedule
 		return nil
@@ -490,4 +495,8 @@ func (m *PromiseModel) idempotencyKeyForCompleteMatch(promise *promise.Promise) 
 
 func (m *PromiseModel) completed() bool {
 	return m.promise != nil && m.promise.State != promise.Pending
+}
+
+func (m *ScheduleModel) idempotencyKeyForCreateMatch(schedule *schedule.Schedule) bool {
+	return m.schedule.IdempotencyKeyForCreate != nil && schedule.IdempotencyKeyForCreate != nil && *m.schedule.IdempotencyKeyForCreate == *schedule.IdempotencyKeyForCreate
 }

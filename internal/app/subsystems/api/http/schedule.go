@@ -12,13 +12,19 @@ import (
 // CREATE
 
 func (s *server) createSchedule(c *gin.Context) {
+	var header service.CreateScheduleHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		return
+	}
+
 	var body *service.CreateScheduleBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.CreateSchedule(body)
+	resp, err := s.service.CreateSchedule(header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

@@ -181,20 +181,19 @@ func (r *Result) String() string {
 // Schedule commands
 
 type CreateScheduleCommand struct {
-	Id           string
-	Desc         *string
-	Cron         string
-	PromiseId    string
-	PromiseParam *string
-	LastRunTime  *int64
-	NextRunTime  int64
-	CreatedOn    int64
+	Id             string
+	Desc           *string
+	Cron           string
+	PromiseId      string
+	PromiseParam   *string
+	LastRunTime    *int64
+	NextRunTime    int64
+	CreatedOn      int64
+	IdempotencyKey *schedule.IdempotencyKey
 }
 
 type UpdateScheduleCommand struct {
 	Id           string
-	Desc         *string
-	Cron         string
 	PromiseId    string
 	PromiseParam *string
 	LastRunTime  *int64

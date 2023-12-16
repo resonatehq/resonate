@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
@@ -28,11 +29,12 @@ type Request struct {
 // Schedule
 
 type CreateScheduleRequest struct {
-	Id           string  `json:"id"`
-	Desc         *string `json:"desc,omitempty"`
-	Cron         string  `json:"cron"`
-	PromiseId    string  `json:"promiseId"`
-	PromiseParam *string `json:"promiseParam,omitempty"`
+	Id             string                   `json:"id"`
+	Desc           *string                  `json:"desc,omitempty"`
+	Cron           string                   `json:"cron"`
+	PromiseId      string                   `json:"promiseId"`
+	PromiseParam   *string                  `json:"promiseParam,omitempty"`
+	IdempotencyKey *schedule.IdempotencyKey `json:"idemptencyKey,omitempty"`
 }
 
 type ReadScheduleRequest struct {

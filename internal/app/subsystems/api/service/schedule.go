@@ -14,7 +14,7 @@ import (
 
 // CREATE
 
-func (s *Service) CreateSchedule(body *CreateScheduleBody) (*t_api.CreateScheduleResponse, error) {
+func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateScheduleBody) (*t_api.CreateScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	// validation
@@ -27,16 +27,16 @@ func (s *Service) CreateSchedule(body *CreateScheduleBody) (*t_api.CreateSchedul
 	}
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		// todo: requestId + idempotencyKey
-		Metadata: s.metadata("header.RequestId", "create-schedule"),
+		Metadata: s.metadata(header.RequestId, "create-schedule"),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
 			CreateSchedule: &t_api.CreateScheduleRequest{
-				Id:           body.Id,
-				Desc:         &body.Desc,
-				Cron:         body.Cron,
-				PromiseId:    body.PromiseId,
-				PromiseParam: &body.PromiseParam,
+				Id:             body.Id,
+				Desc:           &body.Desc,
+				Cron:           body.Cron,
+				PromiseId:      body.PromiseId,
+				PromiseParam:   &body.PromiseParam,
+				IdempotencyKey: header.IdempotencyKey,
 			},
 		},
 		Callback: s.sendOrPanic(cq),

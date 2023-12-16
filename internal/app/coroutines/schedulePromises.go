@@ -67,8 +67,8 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 	// handle creating promise (schedule run) and updating schedule record.
 
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		now := c.Time()
-		next, err := util.Next(now, schedule.Cron)
+		crontime := schedule.NextRunTime
+		next, err := util.Next(crontime, schedule.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "err", err)
 			return
@@ -83,7 +83,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
 								Id: generatePromiseId(schedule.PromiseId, map[string]string{
-									"timestamp": fmt.Sprintf("%d", now),
+									"timestamp": fmt.Sprintf("%d", crontime),
 								}),
 								Param: promise.Value{
 									Headers: map[string]string{},
@@ -92,18 +92,16 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 								Timeout:        2524608000000,
 								IdempotencyKey: nil,
 								Tags:           map[string]string{},
-								CreatedOn:      now,
+								CreatedOn:      crontime,
 							},
 						},
 						{
 							Kind: t_aio.UpdateSchedule,
 							UpdateSchedule: &t_aio.UpdateScheduleCommand{
 								Id:           schedule.Id,
-								Desc:         schedule.Desc,
-								Cron:         schedule.Cron,
 								PromiseId:    schedule.PromiseId,
 								PromiseParam: schedule.PromiseParam,
-								LastRunTime:  &now,
+								LastRunTime:  &crontime,
 								NextRunTime:  next,
 							},
 						},

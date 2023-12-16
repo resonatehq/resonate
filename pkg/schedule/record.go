@@ -1,14 +1,15 @@
 package schedule
 
 type ScheduleRecord struct {
-	Id           string
-	Desc         *string
-	Cron         string
-	PromiseId    string
-	PromiseParam *string
-	LastRunTime  *int64
-	NextRunTime  int64 // no nill alway has a next run time, even at creation
-	CreatedOn    int64
+	Id                      string
+	Desc                    *string
+	Cron                    string
+	PromiseId               string
+	PromiseParam            *string
+	LastRunTime             *int64
+	NextRunTime             int64 // no nill alway has a next run time, even at creation
+	CreatedOn               int64
+	IdempotencyKeyForCreate *IdempotencyKey
 }
 
 func (r *ScheduleRecord) Schedule() (*Schedule, error) {

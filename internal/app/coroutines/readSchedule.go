@@ -13,7 +13,21 @@ import (
 func ReadSchedule(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		completion, err := _readSchedule(c, req, req.ReadSchedule.Id)
+		completion, err := c.Yield(&t_aio.Submission{
+			Kind: t_aio.Store,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: []*t_aio.Command{
+						{
+							Kind: t_aio.ReadSchedule,
+							ReadSchedule: &t_aio.ReadScheduleCommand{
+								Id: req.ReadSchedule.Id,
+							},
+						},
+					},
+				},
+			},
+		})
 		if err != nil {
 			slog.Error("failed to read schedule", "req", req, "err", err)
 			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err))

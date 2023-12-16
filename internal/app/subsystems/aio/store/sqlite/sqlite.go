@@ -26,14 +26,15 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS schedules (
-		id            TEXT PRIMARY KEY,
-		desc          TEXT NULL, 
-		cron          TEXT,
-		promise_id    TEXT,  
-		promise_param TEXT NULL, 
-		last_run_time INTEGER NULL, 
-		next_run_time INTEGER, 
-		created_on    INTEGER
+		id                         TEXT PRIMARY KEY,
+		desc                       TEXT NULL, 
+		cron                       TEXT,
+		promise_id                 TEXT,  
+		promise_param              TEXT NULL, 
+		last_run_time              INTEGER NULL, 
+		next_run_time              INTEGER, 
+		created_on                 INTEGER, 
+		idempotency_key_for_create TEXT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_next_run_time ON schedules (next_run_time);
@@ -232,22 +233,22 @@ const (
 
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules 
-		(id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on)
+		(id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create)
 	VALUES 
-		(?, ?, ?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
 	SCHEDULE_UPDATE_STATEMENT = `
 	UPDATE
 		schedules
 	SET
-		desc = ?, cron = ?, promise_id = ?, promise_param = ?, last_run_time = ?, next_run_time = ?
+		promise_id = ?, promise_param = ?, last_run_time = ?, next_run_time = ?
 	WHERE
-		id = ? AND (last_run_time IS NULL OR last_run_time < ?)`
+		id = ? AND last_run_time = ?`
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT 
-		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on
+		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create
 	FROM 
 		schedules
     WHERE 
@@ -255,7 +256,7 @@ const (
 
 	SCHEDULE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on
+		id, desc, cron, promise_id, promise_param, last_run_time, next_run_time, created_on, idempotency_key_for_create
 	FROM
 		schedules
 	WHERE
@@ -652,7 +653,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
 	if err != nil {
 		return nil, err
 	}
@@ -684,6 +685,7 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 		&record.LastRunTime,
 		&record.NextRunTime,
 		&record.CreatedOn,
+		&record.IdempotencyKeyForCreate,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
@@ -727,6 +729,7 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 			&record.LastRunTime,
 			&record.NextRunTime,
 			&record.CreatedOn,
+			&record.IdempotencyKeyForCreate,
 		); err != nil {
 			return nil, err
 		}
@@ -745,7 +748,7 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 }
 
 func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Desc, cmd.Cron, cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.PromiseParam, cmd.LastRunTime, cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
 	if err != nil {
 		return nil, err
 	}
