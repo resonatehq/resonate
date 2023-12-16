@@ -5,6 +5,11 @@ import (
 	"github.com/resonatehq/resonate/pkg/client/schedules"
 )
 
+type ResonateClient interface {
+	PromisesV1Alpha1() promises.ClientInterface
+	SchedulesV1Alpha1() schedules.ClientInterface
+}
+
 type ClientSet struct {
 	api string
 
@@ -13,7 +18,7 @@ type ClientSet struct {
 }
 
 // convert to rest.Interface -- discovery client ?
-func NewOrDie(api string) *ClientSet {
+func NewOrDie(api string) ResonateClient {
 	var err error
 	cs := &ClientSet{}
 

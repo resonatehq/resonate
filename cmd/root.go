@@ -5,6 +5,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/resonatehq/resonate/cmd/complete"
+	"github.com/resonatehq/resonate/cmd/create"
+	"github.com/resonatehq/resonate/cmd/delete"
+	"github.com/resonatehq/resonate/cmd/describe"
+	"github.com/resonatehq/resonate/cmd/get"
+	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -21,14 +27,19 @@ var rootCmd = &cobra.Command{
 func init() {
 	cobra.OnInitialize(initConfig)
 
+	rootCmd.PersistentFlags().StringVar(&API, "api", API, "API server address")
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (defaults to resonate.yml)")
 	rootCmd.PersistentFlags().String("log-level", "info", "log level, Options: debug, info, warn, error.")
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 
 	// Add Subcommands
-	rootCmd.AddCommand(newPromiseCommand())
-	rootCmd.AddCommand(newScheduleCommand())
+	c := client.NewOrDie(API)
+	rootCmd.AddCommand(complete.NewCmdComplete(c))
+	rootCmd.AddCommand(create.NewCmdCreate(c))
+	rootCmd.AddCommand(delete.NewCmdDelete(c))
+	rootCmd.AddCommand(describe.NewCmdDescribe(c))
+	rootCmd.AddCommand(get.NewCmdGet(c))
 }
 
 func initConfig() {
