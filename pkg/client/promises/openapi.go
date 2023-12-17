@@ -67,11 +67,11 @@ type Value struct {
 	Headers *map[string]string `json:"headers,omitempty"`
 }
 
+// Id defines model for Id.
+type Id = string
+
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
-
-// PathId defines model for PathId.
-type PathId = string
 
 // QueryFilters defines model for QueryFilters.
 type QueryFilters struct {
@@ -94,17 +94,11 @@ type QueryFilters struct {
 // RequestId defines model for RequestId.
 type RequestId = string
 
-// StrictMode defines model for StrictMode.
-type StrictMode = bool
+// Strict defines model for Strict.
+type Strict = bool
 
-// CompletePromise defines model for CompletePromise.
-type CompletePromise = PromiseCompleteRequest
-
-// CreatePromise defines model for CreatePromise.
-type CreatePromise = Promise
-
-// ListPromisesParams defines parameters for ListPromises.
-type ListPromisesParams struct {
+// SearchPromisesParams defines parameters for SearchPromises.
+type SearchPromisesParams struct {
 	Filters *QueryFilters `form:"filters,omitempty" json:"filters,omitempty"`
 }
 
@@ -117,7 +111,7 @@ type CreatePromiseParams struct {
 	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
 
 	// Strict If true, deduplicates only when promise is pending
-	Strict *StrictMode `json:"strict,omitempty"`
+	Strict *Strict `json:"strict,omitempty"`
 }
 
 // PatchPromisesIdParams defines parameters for PatchPromisesId.
@@ -129,7 +123,7 @@ type PatchPromisesIdParams struct {
 	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
 
 	// Strict If true, deduplicates only when promise is pending
-	Strict *StrictMode `json:"strict,omitempty"`
+	Strict *Strict `json:"strict,omitempty"`
 }
 
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
@@ -211,8 +205,8 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// ListPromises request
-	ListPromises(ctx context.Context, params *ListPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// SearchPromises request
+	SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreatePromiseWithBody request with any body
 	CreatePromiseWithBody(ctx context.Context, params *CreatePromiseParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -220,16 +214,16 @@ type ClientInterface interface {
 	CreatePromise(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPromise request
-	GetPromise(ctx context.Context, id PathId, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetPromise(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PatchPromisesIdWithBody request with any body
-	PatchPromisesIdWithBody(ctx context.Context, id PathId, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchPromisesIdWithBody(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchPromisesId(ctx context.Context, id PathId, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchPromisesId(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
-func (c *Client) ListPromises(ctx context.Context, params *ListPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewListPromisesRequest(c.Server, params)
+func (c *Client) SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchPromisesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +258,7 @@ func (c *Client) CreatePromise(ctx context.Context, params *CreatePromiseParams,
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetPromise(ctx context.Context, id PathId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) GetPromise(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPromiseRequest(c.Server, id)
 	if err != nil {
 		return nil, err
@@ -276,7 +270,7 @@ func (c *Client) GetPromise(ctx context.Context, id PathId, reqEditors ...Reques
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id PathId, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchPromisesIdRequestWithBody(c.Server, id, params, contentType, body)
 	if err != nil {
 		return nil, err
@@ -288,7 +282,7 @@ func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id PathId, params 
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchPromisesId(ctx context.Context, id PathId, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) PatchPromisesId(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchPromisesIdRequest(c.Server, id, params, body)
 	if err != nil {
 		return nil, err
@@ -300,8 +294,8 @@ func (c *Client) PatchPromisesId(ctx context.Context, id PathId, params *PatchPr
 	return c.Client.Do(req)
 }
 
-// NewListPromisesRequest generates requests for ListPromises
-func NewListPromisesRequest(server string, params *ListPromisesParams) (*http.Request, error) {
+// NewSearchPromisesRequest generates requests for SearchPromises
+func NewSearchPromisesRequest(server string, params *SearchPromisesParams) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -427,7 +421,7 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 }
 
 // NewGetPromiseRequest generates requests for GetPromise
-func NewGetPromiseRequest(server string, id PathId) (*http.Request, error) {
+func NewGetPromiseRequest(server string, id Id) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -461,7 +455,7 @@ func NewGetPromiseRequest(server string, id PathId) (*http.Request, error) {
 }
 
 // NewPatchPromisesIdRequest calls the generic PatchPromisesId builder with application/json body
-func NewPatchPromisesIdRequest(server string, id PathId, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody) (*http.Request, error) {
+func NewPatchPromisesIdRequest(server string, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -472,7 +466,7 @@ func NewPatchPromisesIdRequest(server string, id PathId, params *PatchPromisesId
 }
 
 // NewPatchPromisesIdRequestWithBody generates requests for PatchPromisesId with any type of body
-func NewPatchPromisesIdRequestWithBody(server string, id PathId, params *PatchPromisesIdParams, contentType string, body io.Reader) (*http.Request, error) {
+func NewPatchPromisesIdRequestWithBody(server string, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -587,8 +581,8 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// ListPromisesWithResponse request
-	ListPromisesWithResponse(ctx context.Context, params *ListPromisesParams, reqEditors ...RequestEditorFn) (*ListPromisesResponse, error)
+	// SearchPromisesWithResponse request
+	SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error)
 
 	// CreatePromiseWithBodyWithResponse request with any body
 	CreatePromiseWithBodyWithResponse(ctx context.Context, params *CreatePromiseParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseResponse, error)
@@ -596,22 +590,22 @@ type ClientWithResponsesInterface interface {
 	CreatePromiseWithResponse(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseResponse, error)
 
 	// GetPromiseWithResponse request
-	GetPromiseWithResponse(ctx context.Context, id PathId, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error)
+	GetPromiseWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error)
 
 	// PatchPromisesIdWithBodyWithResponse request with any body
-	PatchPromisesIdWithBodyWithResponse(ctx context.Context, id PathId, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
+	PatchPromisesIdWithBodyWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
 
-	PatchPromisesIdWithResponse(ctx context.Context, id PathId, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
+	PatchPromisesIdWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
 }
 
-type ListPromisesResponse struct {
+type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *PromiseList
 }
 
 // Status returns HTTPResponse.Status
-func (r ListPromisesResponse) Status() string {
+func (r SearchPromisesResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -619,7 +613,7 @@ func (r ListPromisesResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r ListPromisesResponse) StatusCode() int {
+func (r SearchPromisesResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -629,6 +623,7 @@ func (r ListPromisesResponse) StatusCode() int {
 type CreatePromiseResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON200      *Promise
 	JSON201      *Promise
 }
 
@@ -692,13 +687,13 @@ func (r PatchPromisesIdResponse) StatusCode() int {
 	return 0
 }
 
-// ListPromisesWithResponse request returning *ListPromisesResponse
-func (c *ClientWithResponses) ListPromisesWithResponse(ctx context.Context, params *ListPromisesParams, reqEditors ...RequestEditorFn) (*ListPromisesResponse, error) {
-	rsp, err := c.ListPromises(ctx, params, reqEditors...)
+// SearchPromisesWithResponse request returning *SearchPromisesResponse
+func (c *ClientWithResponses) SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error) {
+	rsp, err := c.SearchPromises(ctx, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseListPromisesResponse(rsp)
+	return ParseSearchPromisesResponse(rsp)
 }
 
 // CreatePromiseWithBodyWithResponse request with arbitrary body returning *CreatePromiseResponse
@@ -719,7 +714,7 @@ func (c *ClientWithResponses) CreatePromiseWithResponse(ctx context.Context, par
 }
 
 // GetPromiseWithResponse request returning *GetPromiseResponse
-func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id PathId, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
+func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
 	rsp, err := c.GetPromise(ctx, id, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -728,7 +723,7 @@ func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id Pat
 }
 
 // PatchPromisesIdWithBodyWithResponse request with arbitrary body returning *PatchPromisesIdResponse
-func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id PathId, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	rsp, err := c.PatchPromisesIdWithBody(ctx, id, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -736,7 +731,7 @@ func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Co
 	return ParsePatchPromisesIdResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchPromisesIdWithResponse(ctx context.Context, id PathId, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (c *ClientWithResponses) PatchPromisesIdWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	rsp, err := c.PatchPromisesId(ctx, id, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -744,15 +739,15 @@ func (c *ClientWithResponses) PatchPromisesIdWithResponse(ctx context.Context, i
 	return ParsePatchPromisesIdResponse(rsp)
 }
 
-// ParseListPromisesResponse parses an HTTP response from a ListPromisesWithResponse call
-func ParseListPromisesResponse(rsp *http.Response) (*ListPromisesResponse, error) {
+// ParseSearchPromisesResponse parses an HTTP response from a SearchPromisesWithResponse call
+func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &ListPromisesResponse{
+	response := &SearchPromisesResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}
@@ -784,6 +779,13 @@ func ParseCreatePromiseResponse(rsp *http.Response) (*CreatePromiseResponse, err
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Promise
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
 		var dest Promise
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

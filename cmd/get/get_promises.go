@@ -38,7 +38,7 @@ func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			s := promises.PromiseState(state)
 
-			params := &promises.ListPromisesParams{
+			params := &promises.SearchPromisesParams{
 				Filters: &promises.QueryFilters{
 					Id:     cmd_util.Unwrap(id),
 					State:  cmd_util.Unwrap(s),
@@ -47,7 +47,7 @@ func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 				},
 			}
 
-			resp, err := c.PromisesV1Alpha1().ListPromises(context.Background(), params)
+			resp, err := c.PromisesV1Alpha1().SearchPromises(context.Background(), params)
 			if err != nil {
 				fmt.Println("Error:", err)
 				return
