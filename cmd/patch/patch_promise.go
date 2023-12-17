@@ -14,12 +14,15 @@ import (
 var patchPromiseExample = `
 # Patch a promise 
 resonate patch promise my-promise --state RESOLVED 
+
+# Patch a promise with a data param 
+resonate patch promise my-promise --state RESOLVED --data '{"foo": "bar"}'
 `
 
 func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 	var (
-		id, state, paramData string
-		paramHeaders         map[string]string
+		id, state, valueData string
+		valueHeaders         map[string]string
 	)
 
 	cmd := &cobra.Command{
@@ -34,14 +37,14 @@ func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 			}
 			id = args[0]
 
-			encoded := base64.StdEncoding.EncodeToString([]byte(paramData))
+			encoded := base64.StdEncoding.EncodeToString([]byte(valueData))
 
 			u := promises.PromiseStateComplete(state)
 			body := promises.PromiseCompleteRequest{
 				State: &u,
 				Value: &promises.Value{
 					Data:    &encoded,
-					Headers: &paramHeaders,
+					Headers: &valueHeaders,
 				},
 			}
 
@@ -68,8 +71,8 @@ func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&state, "state", "s", "", "State of the promise")
-	cmd.Flags().StringVarP(&paramData, "data", "D", "", "Data value")
-	cmd.Flags().StringToStringVarP(&paramHeaders, "headers", "H", map[string]string{}, "Request headers")
+	cmd.Flags().StringVarP(&valueData, "data", "D", "", "Data value")
+	cmd.Flags().StringToStringVarP(&valueHeaders, "headers", "H", map[string]string{}, "Request headers")
 
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("state")
