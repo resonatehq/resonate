@@ -9,12 +9,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var describePromiseExample = `
+# Describe an existing promise 
+resonate describe promise my-promise
+`
+
 func NewCmdDescribePromise(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:   "promise",
-		Short: "Describe a promise resource",
+		Use:     "promise",
+		Short:   "Describe a promise resource",
+		Example: describePromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")

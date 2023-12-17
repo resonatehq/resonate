@@ -32,7 +32,7 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 			Kind: t_api.CreateSchedule,
 			CreateSchedule: &t_api.CreateScheduleRequest{
 				Id:             body.Id,
-				Desc:           &body.Desc,
+				Desc:           body.Desc,
 				Cron:           body.Cron,
 				PromiseId:      body.PromiseId,
 				PromiseParam:   util.SafeDeref(body.PromiseParam),

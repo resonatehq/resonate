@@ -5,10 +5,23 @@ import (
 	"fmt"
 	"io"
 
+	cmd_util "github.com/resonatehq/resonate/cmd/util"
+
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/resonatehq/resonate/pkg/client/promises"
 	"github.com/spf13/cobra"
 )
+
+var getPromiseExample = `
+# Get a list of promises 
+resonate get promises
+
+# Get a list of promises with a specific state 
+resonate get promises --state=RESOLVED 
+
+# Get a list of promises with a fuzzy ID expression 
+resonate get promises --id=my-promise-*
+`
 
 func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 	var (
@@ -18,17 +31,19 @@ func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 		cursor string
 	)
 	cmd := &cobra.Command{
-		Use:   "promise",
-		Short: "Get a list of promise resources",
+		Use:     "promises",
+		Aliases: []string{"promise"},
+		Short:   "Get a list of promise resources",
+		Example: getPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			s := promises.PromiseState(state)
 
 			params := &promises.ListPromisesParams{
 				Filters: &promises.QueryFilters{
-					Id:     &id,
-					State:  &s,
-					Limit:  &limit,
-					Cursor: &cursor,
+					Id:     cmd_util.Unwrap(id),
+					State:  cmd_util.Unwrap(s),
+					Limit:  cmd_util.Unwrap(limit),
+					Cursor: cmd_util.Unwrap(cursor),
 				},
 			}
 
@@ -53,10 +68,10 @@ func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&id, "id", "", "Fuzzy ID expression of the promise")
-	cmd.Flags().StringVar(&state, "state", "", "State of the promise")
-	cmd.Flags().IntVar(&limit, "limit", 0, "Limit the number of results")
-	cmd.Flags().StringVar(&cursor, "cursor", "", "Cursor to use for pagination")
+	cmd.Flags().StringVarP(&id, "id", "i", "", "Fuzzy ID expression of the promise")
+	cmd.Flags().StringVarP(&state, "state", "s", "", "State of the promise")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "Limit the number of results (default: 100)")
+	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "Cursor to use for pagination")
 
 	return cmd
 }

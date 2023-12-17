@@ -11,6 +11,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var patchPromiseExample = `
+# Patch a promise 
+resonate patch promise my-promise --state RESOLVED 
+`
+
 func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 	var (
 		id, state, paramData string
@@ -18,9 +23,10 @@ func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "promise",
-		Short: "Patch a promise resource",
-		Long:  "Patch the state and value of a pending promise.",
+		Use:     "promise",
+		Short:   "Patch a promise resource",
+		Long:    "Patch the state and value of a pending promise.",
+		Example: patchPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
@@ -61,7 +67,7 @@ func NewCmdPatchPromise(c client.ResonateClient) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&state, "state", "", "State of the promise")
+	cmd.Flags().StringVarP(&state, "state", "s", "", "State of the promise")
 	cmd.Flags().StringVarP(&paramData, "data", "D", "", "Data value")
 	cmd.Flags().StringToStringVarP(&paramHeaders, "headers", "H", map[string]string{}, "Request headers")
 

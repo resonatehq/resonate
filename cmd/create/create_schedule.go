@@ -12,7 +12,7 @@ import (
 )
 
 var createScheduleExample = `  
-# Create a schedule that runs every 5 minutes.
+# Create a minimal schedule 
 resonate create schedule my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000
 
 # Create a schedule that runs every 5 minutes and passes a data value to the promise.
@@ -74,9 +74,9 @@ func NewCmdCreateSchedule(c client.ResonateClient) *cobra.Command {
 
 	cmd.Flags().StringVarP(&desc, "desc", "d", "", "Description of schedule")
 	cmd.Flags().StringVarP(&cron, "cron", "c", "", "CRON expression")
-	cmd.Flags().StringVarP(&promiseId, "promise-id", "p", "", "ID of promise")
-	cmd.Flags().StringVarP(&promiseParamData, "data", "D", "", "Data value")
-	cmd.Flags().StringToStringVarP(&promiseParamHeaders, "headers", "H", map[string]string{}, "Request headers")
+	cmd.Flags().StringVarP(&promiseId, "promise-id", "p", "", "templated string for promise ID")
+	cmd.Flags().StringVarP(&promiseParamData, "data", "D", "", "Promise data")
+	cmd.Flags().StringToStringVarP(&promiseParamHeaders, "headers", "H", map[string]string{}, "Promise headers")
 	cmd.Flags().Int64VarP(&promiseTimeout, "promise-timeout", "t", 1, "Timeout for promise")
 
 	_ = cmd.MarkFlagRequired("cron")

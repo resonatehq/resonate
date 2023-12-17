@@ -9,12 +9,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var describeScheduleExample = `
+# Describe an existing schedule 
+resonate describe schedule my-schedule
+`
+
 func NewCmdDescribeSchedule(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:   "schedule",
-		Short: "Describe a schedule resource",
+		Use:     "schedule",
+		Short:   "Describe a schedule resource",
+		Example: describeScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")

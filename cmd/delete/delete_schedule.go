@@ -9,12 +9,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var deleteScheduleExample = `
+# Delete a schedule 
+resonate delete schedule my-schedule
+`
+
 func NewCmdDeleteSchedule(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:   "schedule",
-		Short: "Delete a schedule resource",
+		Use:     "schedule",
+		Short:   "Delete a schedule resource",
+		Example: deleteScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")

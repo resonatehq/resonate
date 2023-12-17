@@ -11,6 +11,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var createPromiseExample = `
+# Create a minimal promise 
+resonate create promise my-promise --timeout 2524608000000
+
+# Create a promise with a data param 
+resonate create promise my-promise --timeout 2524608000000 --data '{"foo": "bar"}'
+
+# Create a promise with a data param and headers 
+resonate create promise my-promise --timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
+`
+
 func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 	var (
 		id           string
@@ -21,8 +32,9 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:   "promise",
-		Short: "Create a promise resource",
+		Use:     "promise",
+		Short:   "Create a promise resource",
+		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
 				fmt.Println("Error: must specify ID")
@@ -64,8 +76,8 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&paramData, "data", "D", "", "Data value")
-	cmd.Flags().StringToStringVarP(&paramHeaders, "headers", "H", map[string]string{}, "Request headers")
+	cmd.Flags().StringVarP(&paramData, "data", "D", "", "Promise data")
+	cmd.Flags().StringToStringVarP(&paramHeaders, "headers", "H", map[string]string{}, "Promise headers")
 	cmd.Flags().StringToStringVarP(&tags, "tags", "T", map[string]string{}, "Promise tags")
 	cmd.Flags().Int64VarP(&timeout, "timeout", "t", 1, "Timeout for promise")
 

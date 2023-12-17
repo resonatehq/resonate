@@ -44,7 +44,7 @@ type CreateScheduleHeader struct {
 
 type CreateScheduleBody struct {
 	Id             string         `json:"id" binding:"required"`
-	Desc           string         `json:"desc"`
+	Desc           *string        `json:"desc,omitempty"`
 	Cron           string         `json:"cron" binding:"required"`
 	PromiseId      string         `json:"promiseId" binding:"required"`
 	PromiseParam   *promise.Value `json:"promiseParam,omitempty"`

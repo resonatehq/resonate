@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-var API = "http://0.0.0.0:8001"
+var API string = "http://0.0.0.0:8001"
 
 var cfgFile string
 
@@ -33,8 +33,9 @@ func init() {
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 
-	// Add Subcommands
 	c := client.NewOrDie(API)
+
+	// Add Subcommands
 	rootCmd.AddCommand(patch.NewCmdPatch(c))
 	rootCmd.AddCommand(create.NewCmdCreate(c))
 	rootCmd.AddCommand(delete.NewCmdDelete(c))
