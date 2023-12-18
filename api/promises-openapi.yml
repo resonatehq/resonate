@@ -37,6 +37,8 @@ paths:
           description: Invalid request
         403:
           description: Forbidden request
+        409:
+          description: Promise already exists
 
     get:
       tags:
@@ -52,6 +54,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PromiseList"
+        400:
+          description: Invalid request
 
   /promises/{id}:
     get:
