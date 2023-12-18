@@ -89,10 +89,6 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			status = promise.Timedout
 		}
 
-		promiseId := generatePromiseId(schedule.PromiseId, map[string]string{
-			"timestamp": fmt.Sprintf("%d", crontime),
-		})
-
 		_, err = c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -101,13 +97,17 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id:             fmt.Sprintf("%s.%s", schedule.Id, promiseId),
+								Id: generatePromiseId(schedule.PromiseId, map[string]string{
+									"timestamp": fmt.Sprintf("%d", crontime),
+								}),
 								State:          status,
 								Param:          schedule.PromiseParam,
 								Timeout:        schedule.PromiseTimeout,
 								IdempotencyKey: nil,
-								Tags:           map[string]string{},
-								CreatedOn:      crontime,
+								Tags: map[string]string{
+									"resonate:invocation": "true",
+								},
+								CreatedOn: crontime,
 							},
 						},
 						{

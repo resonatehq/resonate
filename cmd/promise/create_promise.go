@@ -3,9 +3,9 @@ package promise
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"io"
 
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/resonatehq/resonate/pkg/client/promises"
 	"github.com/spf13/cobra"
@@ -37,7 +37,7 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
-				cmd.OutOrStdout().Write([]byte("Error: must specify ID\n"))
+				util.Write(cmd, cmd.OutOrStdout(), "Error: must specify ID\n")
 				return
 			}
 			id = args[0]
@@ -58,7 +58,7 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 
 			resp, err := c.PromisesV1Alpha1().CreatePromise(context.TODO(), params, body)
 			if err != nil {
-				cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+				util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", err)
 				return
 			}
 			defer resp.Body.Close()
@@ -66,15 +66,15 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 			if resp.StatusCode != 200 && resp.StatusCode != 201 {
 				bs, err := io.ReadAll(resp.Body)
 				if err != nil {
-					cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+					util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", err)
 					return
 				}
 
-				cmd.OutOrStdout().Write([]byte(fmt.Sprintf("%s\n", string(bs))))
+				util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", string(bs))
 				return
 			}
 
-			cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Created promise: %s\n", id)))
+			util.Write(cmd, cmd.OutOrStdout(), "Created promise: %s\n", id)
 		},
 	}
 
