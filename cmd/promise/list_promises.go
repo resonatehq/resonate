@@ -1,4 +1,4 @@
-package get
+package promise
 
 import (
 	"context"
@@ -12,18 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var getPromiseExample = `
+var listPromiseExample = `
 # Get a list of promises 
-resonate get promises
+resonate promise list
 
 # Get a list of promises with a specific state 
-resonate get promises --state=RESOLVED 
+resonate promise list --state=RESOLVED 
 
 # Get a list of promises with a fuzzy ID expression 
-resonate get promises --id=my-promise-*
+resonate promise list --id=my-promise-*
 `
 
-func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
+func NewCmdListPromises(c client.ResonateClient) *cobra.Command {
 	var (
 		id     string
 		state  string
@@ -31,10 +31,9 @@ func NewCmdGetPromise(c client.ResonateClient) *cobra.Command {
 		cursor string
 	)
 	cmd := &cobra.Command{
-		Use:     "promises",
-		Aliases: []string{"promise"},
+		Use:     "list",
 		Short:   "Get a list of promise resources",
-		Example: getPromiseExample,
+		Example: listPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			s := promises.PromiseState(state)
 

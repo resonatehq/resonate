@@ -1,4 +1,4 @@
-package create
+package promise
 
 import (
 	"context"
@@ -13,13 +13,13 @@ import (
 
 var createPromiseExample = `
 # Create a minimal promise 
-resonate create promise my-promise --timeout 2524608000000
+resonate promise create my-promise --timeout 2524608000000
 
 # Create a promise with a data param 
-resonate create promise my-promise --timeout 2524608000000 --data '{"foo": "bar"}'
+resonate promise create my-promise --timeout 2524608000000 --data '{"foo": "bar"}'
 
 # Create a promise with a data param and headers 
-resonate create promise my-promise --timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
+resonate promise create my-promise --timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
 `
 
 func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
@@ -32,12 +32,12 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "promise",
+		Use:     "create",
 		Short:   "Create a promise resource",
 		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
-				fmt.Println("Error: must specify ID")
+				cmd.OutOrStdout().Write([]byte("Error: must specify ID\n"))
 				return
 			}
 			id = args[0]
@@ -58,7 +58,7 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 
 			resp, err := c.PromisesV1Alpha1().CreatePromise(context.TODO(), params, body)
 			if err != nil {
-				fmt.Println("Error:", err)
+				cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Error: %s\n", err)))
 				return
 			}
 			defer resp.Body.Close()
@@ -66,13 +66,15 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 			if resp.StatusCode != 200 && resp.StatusCode != 201 {
 				bs, err := io.ReadAll(resp.Body)
 				if err != nil {
-					panic(err)
+					cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+					return
 				}
-				fmt.Printf("%s\n", string(bs))
+
+				cmd.OutOrStdout().Write([]byte(fmt.Sprintf("%s\n", string(bs))))
 				return
 			}
 
-			fmt.Printf("Created schedule: %s\n", id)
+			cmd.OutOrStdout().Write([]byte(fmt.Sprintf("Created promise: %s\n", id)))
 		},
 	}
 

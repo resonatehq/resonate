@@ -35,6 +35,14 @@ func NewOrDie(api string) ResonateClient {
 	return cs
 }
 
+func (c *ClientSet) SetPromisesV1Alpha1(client promises.ClientInterface) {
+	c.promiseV1alpha1 = client
+}
+
+func (c *ClientSet) SetSchedulesV1Alpha1(client schedules.ClientInterface) {
+	c.schedulesV1alpha1 = client
+}
+
 func (c *ClientSet) PromisesV1Alpha1() promises.ClientInterface {
 	return c.promiseV1alpha1
 }

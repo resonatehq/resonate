@@ -1,4 +1,4 @@
-package describe
+package promise
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 
 var describePromiseExample = `
 # Describe an existing promise 
-resonate describe promise my-promise
+resonate promise describe my-promise
 `
 
 func NewCmdDescribePromise(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:     "promise",
+		Use:     "describe",
 		Short:   "Describe a promise resource",
 		Example: describePromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {

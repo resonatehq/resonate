@@ -5,11 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/resonatehq/resonate/cmd/create"
-	"github.com/resonatehq/resonate/cmd/delete"
-	"github.com/resonatehq/resonate/cmd/describe"
-	"github.com/resonatehq/resonate/cmd/get"
-	"github.com/resonatehq/resonate/cmd/patch"
+	"github.com/resonatehq/resonate/cmd/promise"
+	"github.com/resonatehq/resonate/cmd/schedule"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -20,8 +17,9 @@ var API string = "http://0.0.0.0:8001"
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:   "resonate",
-	Short: "Durable promises and executions",
+	Use:     "resonate",
+	Aliases: []string{"res"},
+	Short:   "Durable promises and executions",
 }
 
 func init() {
@@ -36,11 +34,8 @@ func init() {
 	c := client.NewOrDie(API)
 
 	// Add Subcommands
-	rootCmd.AddCommand(patch.NewCmdPatch(c))
-	rootCmd.AddCommand(create.NewCmdCreate(c))
-	rootCmd.AddCommand(delete.NewCmdDelete(c))
-	rootCmd.AddCommand(describe.NewCmdDescribe(c))
-	rootCmd.AddCommand(get.NewCmdGet(c))
+	rootCmd.AddCommand(promise.NewCmd(c))
+	rootCmd.AddCommand(schedule.NewCmd(c))
 }
 
 func initConfig() {

@@ -1,4 +1,4 @@
-package create
+package schedule
 
 import (
 	"context"
@@ -13,10 +13,10 @@ import (
 
 var createScheduleExample = `  
 # Create a minimal schedule 
-resonate create schedule my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000
+resonate schedule create my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000
 
 # Create a schedule that runs every 5 minutes and passes a data value to the promise.
-resonate create schedule my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
+resonate schedule create my-schedule --cron "*/5 * * * *" --promise-id "my-promise{{.timestamp}}" --promise-timeout 2524608000000 --data '{"foo": "bar"}' --headers Content-Type=application/json
 `
 
 func NewCmdCreateSchedule(c client.ResonateClient) *cobra.Command {
@@ -28,7 +28,7 @@ func NewCmdCreateSchedule(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "schedule",
+		Use:     "create",
 		Short:   "Create a schedule resource",
 		Example: createScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {

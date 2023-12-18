@@ -1,4 +1,4 @@
-package describe
+package schedule
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 
 var describeScheduleExample = `
 # Describe an existing schedule 
-resonate describe schedule my-schedule
+resonate schedule describe my-schedule
 `
 
 func NewCmdDescribeSchedule(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:     "schedule",
+		Use:     "describe",
 		Short:   "Describe a schedule resource",
 		Example: describeScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {

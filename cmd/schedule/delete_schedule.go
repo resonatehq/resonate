@@ -1,4 +1,4 @@
-package delete
+package schedule
 
 import (
 	"context"
@@ -11,14 +11,14 @@ import (
 
 var deleteScheduleExample = `
 # Delete a schedule 
-resonate delete schedule my-schedule
+resonate schedule delete my-schedule
 `
 
 func NewCmdDeleteSchedule(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
-		Use:     "schedule",
+		Use:     "delete",
 		Short:   "Delete a schedule resource",
 		Example: deleteScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
