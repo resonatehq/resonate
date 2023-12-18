@@ -2,7 +2,6 @@ package util
 
 import (
 	"fmt"
-	"io"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -22,7 +21,7 @@ func Errorf(format string, v ...any) {
 	os.Exit(1)
 }
 
-func Write(cmd *cobra.Command, writer io.Writer, format string, v ...any) {
+func Write(cmd *cobra.Command, format string, v ...any) {
 	out := fmt.Sprintf(format, v...)
 	_, _ = cmd.OutOrStdout().Write([]byte(out))
 }

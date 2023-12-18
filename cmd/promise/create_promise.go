@@ -37,7 +37,7 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
-				util.Write(cmd, cmd.OutOrStdout(), "Error: must specify ID\n")
+				util.Write(cmd, "Error: must specify ID\n")
 				return
 			}
 			id = args[0]
@@ -58,7 +58,7 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 
 			resp, err := c.PromisesV1Alpha1().CreatePromise(context.TODO(), params, body)
 			if err != nil {
-				util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", err)
+				util.Write(cmd, "Error: %s\n", err)
 				return
 			}
 			defer resp.Body.Close()
@@ -66,15 +66,15 @@ func NewCmdCreatePromise(c client.ResonateClient) *cobra.Command {
 			if resp.StatusCode != 200 && resp.StatusCode != 201 {
 				bs, err := io.ReadAll(resp.Body)
 				if err != nil {
-					util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", err)
+					util.Write(cmd, "Error: %s\n", err)
 					return
 				}
 
-				util.Write(cmd, cmd.OutOrStdout(), "Error: %s\n", string(bs))
+				util.Write(cmd, "Error: %s\n", string(bs))
 				return
 			}
 
-			util.Write(cmd, cmd.OutOrStdout(), "Created promise: %s\n", id)
+			util.Write(cmd, "Created promise: %s\n", id)
 		},
 	}
 
