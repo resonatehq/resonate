@@ -165,13 +165,13 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromises",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -194,12 +194,12 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesCursor",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -219,14 +219,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesPending",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_PENDING,
 				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -245,14 +245,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesResolved",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_RESOLVED,
 				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -271,14 +271,14 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesRejected",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:     "*",
+				Id:    "*",
 				State: grpcApi.SearchState_SEARCH_REJECTED,
 				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -299,14 +299,16 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesInvocation",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Q:          "*",
-				Invocation: true,
-				Limit:      10,
+				Id: "*",
+				Tags: map[string]string{
+					"resonate:invocation": "true",
+				},
+				Limit: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -314,8 +316,10 @@ func TestSearchPromises(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
-					Invocation: true,
-					Limit:      10,
+					Tags: map[string]string{
+						"resonate:invocation": "true",
+					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{

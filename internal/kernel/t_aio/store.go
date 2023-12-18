@@ -159,11 +159,11 @@ type ReadPromiseCommand struct {
 }
 
 type SearchPromisesCommand struct {
-	Q          string
-	States     []promise.State
-	Invocation bool
-	Limit      int
-	SortId     *int64
+	Id     string
+	States []promise.State
+	Tags   map[string]string
+	Limit  int
+	SortId *int64
 }
 
 type CreatePromiseCommand struct {

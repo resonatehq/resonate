@@ -47,9 +47,9 @@ message ReadPromiseResponse {
 }
 
 message SearchPromisesRequest {
-  string q = 1;
+  string id = 1;
   SearchState state = 2;
-  bool invocation = 3;
+  map<string, string> tags = 3;
   int32 limit = 4;
   string cursor = 5;
   string requestId = 6;

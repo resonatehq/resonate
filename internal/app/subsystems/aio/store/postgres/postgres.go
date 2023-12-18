@@ -37,7 +37,7 @@ const (
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
 		tags                         JSONB,
-		invocation                   TEXT GENERATED ALWAYS AS (tags ->> 'R-Invocation') STORED,
+		invocation                   TEXT GENERATED ALWAYS AS (tags->>'resonate:invocation') STORED,
 		created_on                   BIGINT,
 		completed_on                 BIGINT,
 		PRIMARY KEY(id)
@@ -94,13 +94,14 @@ const (
 		promises
 	WHERE
 		($1::int IS NULL OR sort_id < $1) AND
-		($2::text IS NULL OR invocation = $2) AND
+		id LIKE $2 AND
 		state & $3 != 0 AND
-		id LIKE $4
+		($4::text IS NULL OR invocation = $4) AND
+		($5::jsonb IS NULL OR tags @> $5)
 	ORDER BY
 		sort_id DESC
 	LIMIT
-		$5`
+		$6`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -537,11 +538,12 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Q != "", "query cannot be empty")
+	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
+	util.Assert(cmd.Tags != nil, "tags cannot be empty")
 
 	// convert query
-	query := strings.ReplaceAll(cmd.Q, "*", "%")
+	id := strings.ReplaceAll(cmd.Id, "*", "%")
 
 	// convert list of state to bit mask
 	mask := 0
@@ -549,13 +551,26 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 		mask = mask | int(state)
 	}
 
+	// tags
 	var invocation *string
-	if cmd.Invocation {
-		invocation = util.ToPointer("true")
+	var tags *string
+
+	if v, ok := cmd.Tags["resonate:invocation"]; ok {
+		invocation = &v
+		delete(cmd.Tags, "resonate:invocation")
+	}
+
+	if len(cmd.Tags) > 0 {
+		t, err := json.Marshal(cmd.Tags)
+		if err != nil {
+			return nil, err
+		}
+
+		tags = util.ToPointer(string(t))
 	}
 
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, invocation, mask, query, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, id, mask, invocation, tags, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

@@ -104,12 +104,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromises",
-			path:   "promises?q=*&limit=10",
+			path:   "promises?id=*&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -132,12 +132,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesCursor",
-			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -157,12 +157,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesPending",
-			path:   "promises?q=*&state=pending&limit=10",
+			path:   "promises?id=*&state=pending&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -181,12 +181,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesResolved",
-			path:   "promises?q=*&state=resolved&limit=10",
+			path:   "promises?id=*&state=resolved&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -205,12 +205,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesRejected",
-			path:   "promises?q=*&state=rejected&limit=10",
+			path:   "promises?id=*&state=rejected&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -231,12 +231,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvocation",
-			path:   "promises?q=*&invocation=true&limit=10",
+			path:   "promises?id=*&tags=%7B%22resonate%3Ainvocation%22%3A%22true%22%7D&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -244,8 +244,10 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
-					Invocation: true,
-					Limit:      10,
+					Tags: map[string]string{
+						"resonate:invocation": "true",
+					},
+					Limit: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -260,7 +262,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidQuery",
-			path:   "promises?q=",
+			path:   "promises?id=",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -268,7 +270,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidLimit",
-			path:   "promises?q=*&limit=0",
+			path:   "promises?id=*&limit=0",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -276,15 +278,15 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidState",
-			path:   "promises?q=*&state=x",
+			path:   "promises?id=*&state=x",
 			method: "GET",
 			req:    nil,
 			res:    nil,
 			status: 400,
 		},
 		{
-			name:   "SearchPromisesInvalidInvocation",
-			path:   "promises?q=*&invocation=x",
+			name:   "SearchPromisesInvalidTags",
+			path:   "promises?id=*&tags=x",
 			method: "GET",
 			req:    nil,
 			res:    nil,

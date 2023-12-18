@@ -1147,40 +1147,44 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "foo.*",
+					Id: "foo.*",
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*.bar",
+					Id: "*.bar",
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  2,
 					SortId: int64ToPointer(3),
 				},
@@ -1448,53 +1452,42 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
-					States: []promise.State{
-						promise.Pending,
-						promise.Resolved,
-						promise.Rejected,
-						promise.Timedout,
-						promise.Canceled,
-					},
-					Limit: 3,
-				},
-			},
-			{
-				Kind: t_aio.SearchPromises,
-				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -1502,6 +1495,22 @@ var TestCases = []*testCase{
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
+					Id: "*",
+					States: []promise.State{
+						promise.Pending,
+						promise.Resolved,
+						promise.Rejected,
+						promise.Timedout,
+						promise.Canceled,
+					},
+					Tags:   map[string]string{},
 					SortId: int64ToPointer(3),
 					Limit:  3,
 				},
@@ -1746,7 +1755,8 @@ var TestCases = []*testCase{
 						Data:    []byte{},
 					},
 					Tags: map[string]string{
-						"R-Invocation": "true",
+						"resonate:invocation": "true",
+						"foo":                 "foo",
 					},
 					CreatedOn: 1,
 				},
@@ -1760,7 +1770,9 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Data:    []byte{},
 					},
-					Tags:      map[string]string{},
+					Tags: map[string]string{
+						"bar": "bar",
+					},
 					CreatedOn: 1,
 				},
 			},
@@ -1773,16 +1785,32 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Data:    []byte{},
 					},
-					Tags:      map[string]string{},
+					Tags: map[string]string{
+						"baz": "baz",
+					},
 					CreatedOn: 1,
 				},
 			},
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
+					},
+					Tags:  map[string]string{},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
+					Id: "*",
+					States: []promise.State{
+						promise.Pending,
+					},
+					Tags: map[string]string{
+						"resonate:invocation": "true",
 					},
 					Limit: 3,
 				},
@@ -1790,12 +1818,14 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
-					Invocation: true,
-					Limit:      3,
+					Tags: map[string]string{
+						"bar": "bar",
+					},
+					Limit: 3,
 				},
 			},
 		},
@@ -1831,7 +1861,7 @@ var TestCases = []*testCase{
 							ParamData:    []byte{},
 							Timeout:      2,
 							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{}"),
+							Tags:         []byte("{\"baz\":\"baz\"}"),
 							SortId:       3,
 						},
 						{
@@ -1841,7 +1871,7 @@ var TestCases = []*testCase{
 							ParamData:    []byte{},
 							Timeout:      2,
 							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{}"),
+							Tags:         []byte("{\"bar\":\"bar\"}"),
 							SortId:       2,
 						},
 						{
@@ -1851,7 +1881,7 @@ var TestCases = []*testCase{
 							ParamData:    []byte{},
 							Timeout:      2,
 							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{\"R-Invocation\":\"true\"}"),
+							Tags:         []byte("{\"foo\":\"foo\",\"resonate:invocation\":\"true\"}"),
 							SortId:       1,
 						},
 					},
@@ -1870,8 +1900,27 @@ var TestCases = []*testCase{
 							ParamData:    []byte{},
 							Timeout:      2,
 							CreatedOn:    int64ToPointer(1),
-							Tags:         []byte("{\"R-Invocation\":\"true\"}"),
+							Tags:         []byte("{\"foo\":\"foo\",\"resonate:invocation\":\"true\"}"),
 							SortId:       1,
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					LastSortId:   2,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "bar",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"bar\":\"bar\"}"),
+							SortId:       2,
 						},
 					},
 				},
@@ -2559,8 +2608,9 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q:      "*",
+					Id:     "*",
 					States: []promise.State{promise.Timedout},
+					Tags:   map[string]string{},
 					Limit:  5,
 				},
 			},

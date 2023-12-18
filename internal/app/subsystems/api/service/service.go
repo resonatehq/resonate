@@ -87,8 +87,8 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		searchPromises = cursor.Next
 	} else {
 		// set default query
-		if params.Q == nil {
-			params.Q = util.ToPointer("*")
+		if params.Id == nil {
+			params.Id = util.ToPointer("*")
 		}
 
 		var states []promise.State
@@ -125,10 +125,10 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		}
 
 		searchPromises = &t_api.SearchPromisesRequest{
-			Q:          *params.Q,
-			States:     states,
-			Invocation: params.Invocation,
-			Limit:      *params.Limit,
+			Id:     *params.Id,
+			States: states,
+			Tags:   params.Tags,
+			Limit:  *params.Limit,
 		}
 	}
 

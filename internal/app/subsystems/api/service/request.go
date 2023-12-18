@@ -7,11 +7,11 @@ type Header struct {
 }
 
 type SearchPromiseParams struct {
-	Q          *string `form:"q" json:"q,omitempty" binding:"omitempty,min=1"`
-	State      string  `form:"state" json:"state,omitempty" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
-	Invocation bool    `form:"invocation" json:"invocation,omitempty"`
-	Limit      *int    `form:"limit" json:"limit,omitempty" binding:"omitempty,gt=0,lte=100"`
-	Cursor     string  `form:"cursor" json:"cursor,omitempty"`
+	Id     *string           `form:"id" json:"id,omitempty" binding:"omitempty,min=1"`
+	State  string            `form:"state" json:"state,omitempty" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
+	Tags   map[string]string `form:"tags" json:"invocation,omitempty"`
+	Limit  *int              `form:"limit" json:"limit,omitempty" binding:"omitempty,gt=0,lte=100"`
+	Cursor string            `form:"cursor" json:"cursor,omitempty"`
 }
 
 type CreatePromiseHeader struct {

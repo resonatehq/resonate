@@ -134,7 +134,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 		for _, p := range res.SearchPromises.Promises {
 			pm := m.promises.Get(p.Id)
 
-			regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Q, "*", ".*")))
+			regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
 
 			states := map[promise.State]bool{}
 			for _, state := range req.SearchPromises.States {
@@ -142,7 +142,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 			}
 
 			if !regex.MatchString(p.Id) {
-				return fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Q)
+				return fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Id)
 			}
 			if _, ok := states[p.State]; !ok {
 				return fmt.Errorf("unexpected state %s, searched for %s", p.State, req.SearchPromises.States)
@@ -153,9 +153,9 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 			if pm.completed() && p.State == promise.Pending {
 				return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, p.State)
 			}
-			if req.SearchPromises.Invocation {
-				if value, ok := p.Tags["R-Invocation"]; !ok || value != "true" {
-					return fmt.Errorf("unexpected R-Invocation tag value '%s', expected 'true'", value)
+			for k, v := range req.SearchPromises.Tags {
+				if _v, ok := p.Tags[k]; !ok || v != _v {
+					return fmt.Errorf("unexpected tag '%s:%s', expected '%s:%s'", k, _v, k, v)
 				}
 			}
 
