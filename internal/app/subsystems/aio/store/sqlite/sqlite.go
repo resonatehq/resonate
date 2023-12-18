@@ -43,6 +43,7 @@ const (
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
+	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
