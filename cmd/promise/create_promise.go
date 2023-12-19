@@ -37,7 +37,7 @@ func NewCmdCreatePromise(c client.ResonateClient, w io.Writer) *cobra.Command {
 		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {
-				w.Write([]byte("Error: must specify ID\n"))
+				_, _ = w.Write([]byte("Error: must specify ID\n"))
 				return
 			}
 			id = args[0]
@@ -58,7 +58,7 @@ func NewCmdCreatePromise(c client.ResonateClient, w io.Writer) *cobra.Command {
 
 			resp, err := c.PromisesV1Alpha1().CreatePromise(context.TODO(), params, body)
 			if err != nil {
-				w.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+				_, _ = w.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
 				return
 			}
 			defer resp.Body.Close()
@@ -66,15 +66,15 @@ func NewCmdCreatePromise(c client.ResonateClient, w io.Writer) *cobra.Command {
 			if resp.StatusCode != 200 && resp.StatusCode != 201 {
 				bs, err := io.ReadAll(resp.Body)
 				if err != nil {
-					w.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
+					_, _ = w.Write([]byte(fmt.Sprintf("Error: %s\n", err)))
 					return
 				}
 
-				w.Write([]byte(fmt.Sprintf("Error: %s\n", string(bs))))
+				_, _ = w.Write([]byte(fmt.Sprintf("Error: %s\n", string(bs))))
 				return
 			}
 
-			w.Write([]byte(fmt.Sprintf("Created promise: %s\n", id)))
+			_, _ = w.Write([]byte(fmt.Sprintf("Created promise: %s\n", id)))
 		},
 	}
 
