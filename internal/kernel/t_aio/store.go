@@ -5,6 +5,7 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 )
@@ -31,6 +32,11 @@ const (
 	TimeoutPromises
 	TimeoutDeleteSubscriptions
 	TimeoutCreateNotifications
+	CreateSchedule
+	ReadSchedule
+	ReadSchedules
+	UpdateSchedule
+	DeleteSchedule
 )
 
 func (k StoreKind) String() string {
@@ -73,6 +79,16 @@ func (k StoreKind) String() string {
 		return "TimeoutDeleteSubscriptions"
 	case TimeoutCreateNotifications:
 		return "TimeoutCreateNotifications"
+	case CreateSchedule:
+		return "CreateSchedule"
+	case ReadSchedule:
+		return "ReadSchedule"
+	case ReadSchedules:
+		return "ReadSchedules"
+	case UpdateSchedule:
+		return "UpdateSchedule"
+	case DeleteSchedule:
+		return "DeleteSchedule"
 	default:
 		panic("invalid store kind")
 	}
@@ -119,6 +135,11 @@ type Command struct {
 	TimeoutPromises            *TimeoutPromisesCommand
 	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
+	CreateSchedule             *CreateScheduleCommand
+	ReadSchedule               *ReadScheduleCommand
+	ReadSchedules              *ReadSchedulesCommand
+	UpdateSchedule             *UpdateScheduleCommand
+	DeleteSchedule             *DeleteScheduleCommand
 }
 
 func (c *Command) String() string {
@@ -146,10 +167,48 @@ type Result struct {
 	TimeoutPromises            *AlterPromisesResult
 	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
+	CreateSchedule             *AlterSchedulesResult
+	ReadSchedule               *QuerySchedulesResult
+	ReadSchedules              *QuerySchedulesResult
+	UpdateSchedule             *AlterSchedulesResult
+	DeleteSchedule             *AlterSchedulesResult
 }
 
 func (r *Result) String() string {
 	return r.Kind.String()
+}
+
+// Schedule commands
+
+type CreateScheduleCommand struct {
+	Id             string
+	Desc           *string
+	Cron           string
+	PromiseId      string
+	PromiseParam   promise.Value
+	PromiseTimeout int64
+	LastRunTime    *int64
+	NextRunTime    int64
+	CreatedOn      int64
+	IdempotencyKey *schedule.IdempotencyKey
+}
+
+type UpdateScheduleCommand struct {
+	Id          string
+	LastRunTime *int64
+	NextRunTime int64
+}
+
+type ReadScheduleCommand struct {
+	Id string
+}
+
+type ReadSchedulesCommand struct {
+	NextRunTime int64
+}
+
+type DeleteScheduleCommand struct {
+	Id string
 }
 
 // Promise commands
@@ -159,7 +218,7 @@ type ReadPromiseCommand struct {
 }
 
 type SearchPromisesCommand struct {
-	Q      string
+	Id     string
 	States []promise.State
 	Limit  int
 	SortId *int64
@@ -167,6 +226,7 @@ type SearchPromisesCommand struct {
 
 type CreatePromiseCommand struct {
 	Id             string
+	State          promise.State
 	Param          promise.Value
 	Timeout        int64
 	IdempotencyKey *promise.IdempotencyKey
@@ -306,5 +366,16 @@ type QueryNotificationsResult struct {
 }
 
 type AlterNotificationsResult struct {
+	RowsAffected int64
+}
+
+// Schedule results
+
+type QuerySchedulesResult struct {
+	RowsReturned int64
+	Records      []*schedule.ScheduleRecord
+}
+
+type AlterSchedulesResult struct {
 	RowsAffected int64
 }

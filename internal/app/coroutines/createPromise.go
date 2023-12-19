@@ -62,6 +62,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 								Kind: t_aio.CreatePromise,
 								CreatePromise: &t_aio.CreatePromiseCommand{
 									Id:             req.CreatePromise.Id,
+									State:          promise.Pending,
 									Param:          req.CreatePromise.Param,
 									Timeout:        req.CreatePromise.Timeout,
 									IdempotencyKey: req.CreatePromise.IdempotencyKey,

@@ -39,13 +39,16 @@ func New(api api.API, config *Config) api.Subsystem {
 	// Middleware
 	r.Use(s.log)
 
-	// Promise API
+	// Promises API
+	r.POST("/promises", s.createPromise)
 	r.GET("/promises", s.searchPromises)
 	r.GET("/promises/:id", s.readPromise)
-	r.POST("/promises/:id/create", s.createPromise)
-	r.POST("/promises/:id/cancel", s.cancelPromise)
-	r.POST("/promises/:id/resolve", s.resolvePromise)
-	r.POST("/promises/:id/reject", s.rejectPromise)
+	r.PATCH("/promises/:id", s.completePromise)
+
+	// Schedules API
+	r.POST("/schedules", s.createSchedule)
+	r.GET("/schedules/:id", s.readSchedule)
+	r.DELETE("/schedules/:id", s.deleteSchedule)
 
 	return &Http{
 		config: config,

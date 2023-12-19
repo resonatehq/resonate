@@ -104,12 +104,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromises",
-			path:   "promises?q=*&limit=10",
+			path:   "promises?id=*&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -132,12 +132,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesCursor",
-			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7InEiOiIqIiwic3RhdGVzIjpbIlBFTkRJTkciXSwibGltaXQiOjEwLCJzb3J0SWQiOjEwMH19.yQxXjIxRmxdTQcBDHFv8PyXxrkGa90e4OcIzDqPP1rY",
+			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -151,7 +151,7 @@ func TestHttpServer(t *testing.T) {
 					Status: t_api.StatusOK,
 					Cursor: &t_api.Cursor[t_api.SearchPromisesRequest]{
 						Next: &t_api.SearchPromisesRequest{
-							Q: "*",
+							Id: "*",
 							States: []promise.State{
 								promise.Pending,
 								promise.Resolved,
@@ -170,12 +170,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesPending",
-			path:   "promises?q=*&state=pending&limit=10",
+			path:   "promises?id=*&state=pending&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -194,12 +194,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesResolved",
-			path:   "promises?q=*&state=resolved&limit=10",
+			path:   "promises?id=*&state=resolved&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -218,12 +218,12 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesRejected",
-			path:   "promises?q=*&state=rejected&limit=10",
+			path:   "promises?id=*&state=rejected&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				SearchPromises: &t_api.SearchPromisesRequest{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -244,7 +244,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidQuery",
-			path:   "promises?q=",
+			path:   "promises?id=",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -260,7 +260,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesInvalidState",
-			path:   "promises?q=*&state=*",
+			path:   "promises?id=*&state=*",
 			method: "GET",
 			req:    nil,
 			res:    nil,
@@ -268,13 +268,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CreatePromise",
-			path:   "promises/foo/create",
+			path:   "promises",
 			method: "POST",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"id": "foo",
 				"param": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cGVuZGluZw=="
@@ -308,9 +309,10 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CreatePromiseMinimal",
-			path:   "promises/foo/create",
+			path:   "promises",
 			method: "POST",
 			body: []byte(`{
+				"id": "foo",
 				"timeout": 1
 			}`),
 			req: &t_api.Request{
@@ -340,13 +342,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CancelPromise",
-			path:   "promises/foo/cancel",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "REJECTED_CANCELED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "Y2FuY2Vs"
@@ -366,7 +369,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -378,9 +381,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CancelPromiseMinimal",
-			path:   "promises/foo/cancel",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "REJECTED_CANCELED"
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseRequest{
@@ -395,7 +400,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -407,13 +412,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "ResolvePromise",
-			path:   "promises/foo/resolve",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "RESOLVED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cmVzb2x2ZQ=="
@@ -433,7 +439,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -445,9 +451,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "ResolvePromiseMinimal",
-			path:   "promises/foo/resolve",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "RESOLVED" 
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseRequest{
@@ -462,7 +470,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -474,13 +482,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "RejectPromise",
-			path:   "promises/foo/reject",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "REJECTED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cmVqZWN0"
@@ -500,7 +509,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -512,9 +521,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "RejectPromiseMinimal",
-			path:   "promises/foo/reject",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "REJECTED"
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseRequest{
@@ -529,7 +540,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",

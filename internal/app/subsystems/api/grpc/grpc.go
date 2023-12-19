@@ -107,7 +107,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	}
 
 	params := &service.SearchPromiseParams{
-		Q:      util.ToPointer(req.Q),
+		Id:     util.ToPointer(req.Id),
 		State:  searchState(req.State),
 		Limit:  util.ToPointer(int(req.Limit)),
 		Cursor: req.Cursor,
@@ -169,15 +169,16 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		IdempotencyKey: idempotencyKey,
 	}
 
-	body := &service.CreatePromiseBody{
-		Param: &promise.Value{
+	body := &promise.Promise{
+		Id: req.Id,
+		Param: promise.Value{
 			Headers: headers,
 			Data:    data,
 		},
-		Timeout: &req.Timeout,
+		Timeout: req.Timeout,
 	}
 
-	resp, err := s.service.CreatePromise(req.Id, header, body)
+	resp, err := s.service.CreatePromise(header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
@@ -207,13 +208,13 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 		data = req.Value.Data
 	}
 
-	header := &service.CancelPromiseHeader{
+	header := &service.CompletePromiseHeader{
 		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
 
-	body := &service.CancelPromiseBody{
+	body := &service.CompletePromiseBody{
 		Value: promise.Value{
 			Headers: headers,
 			Data:    data,
@@ -249,13 +250,13 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		data = req.Value.Data
 	}
 
-	header := &service.ResolvePromiseHeader{
+	header := &service.CompletePromiseHeader{
 		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
 
-	body := &service.ResolvePromiseBody{
+	body := &service.CompletePromiseBody{
 		Value: promise.Value{
 			Headers: headers,
 			Data:    data,
@@ -292,13 +293,13 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		data = req.Value.Data
 	}
 
-	header := &service.RejectPromiseHeader{
+	header := &service.CompletePromiseHeader{
 		RequestId:      req.RequestId,
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
 
-	body := &service.RejectPromiseBody{
+	body := &service.CompletePromiseBody{
 		Value: promise.Value{
 			Headers: headers,
 			Data:    data,

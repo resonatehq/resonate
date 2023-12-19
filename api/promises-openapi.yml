@@ -1,0 +1,234 @@
+openapi: 3.0.0
+info:
+  title: Promise API
+  description: Manage promises
+  version: 1.0.0
+paths:
+  /promises:
+    post:
+      tags:
+        - Promises
+      summary: Create a promise
+      operationId: createPromise
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Strict"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Promise"
+      responses:
+        200:
+          description: Operation deduplicated, Promise fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Promise already exists
+
+    get:
+      tags:
+        - Promises
+      summary: Search promises
+      operationId: searchPromises
+      parameters:
+        - $ref: "#/components/parameters/QueryFilters"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PromiseList"
+        400:
+          description: Invalid request
+
+  /promises/{id}:
+    get:
+      tags:
+        - Promises
+      summary: Get a promise
+      operationId: getPromise
+      parameters:
+        - $ref: "#/components/parameters/Id"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        404:
+          description: Promise not found
+
+    patch:
+      tags:
+        - Promises
+      summary: Complete a promise
+      parameters:
+        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/Strict"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PromiseCompleteRequest"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        404:
+          description: Promise not found
+
+components:
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      description: The promise ID
+      schema:
+        type: string
+    IdempotencyKey:
+      name: idempotency-key
+      in: header
+      description: Deduplicates multiple requests
+      schema:
+        type: string
+    Strict:
+      name: strict
+      in: header
+      description: If true, deduplicates only when promise is pending
+      schema:
+        type: boolean
+    RequestId:
+      name: request-id
+      in: header
+      description: Unique ID for each request
+      schema:
+        type: string
+    QueryFilters:
+      name: filters
+      in: query
+      style: form
+      explode: true
+      schema:
+        type: object
+        properties:
+          id:
+            type: string
+            description: |
+              Fuzzy search query string to find promises via fuzzy IDs. This string will be matched flexibly 
+              against IDs in the system, so it does not need to exactly match the full ID.
+
+              Some examples of valid fuzzy ID strings:
+              - "abc123*" - Would match ID "abc123def" 
+              - "pro*fil" - Would match IDs containing "pro123file"
+          state:
+            $ref: "#/components/schemas/PromiseState"
+          limit:
+            type: integer
+            description: Number of results
+          cursor:
+            type: string
+            description: Cursor for pagination
+
+  schemas:
+    Promise:
+      type: object
+      required:
+        - id
+        - timeout
+      properties:
+        id:
+          type: string
+        state:
+          $ref: "#/components/schemas/PromiseState"
+        param:
+          $ref: "#/components/schemas/Value"
+        value:
+          $ref: "#/components/schemas/Value"
+        timeout:
+          type: integer
+          format: int64
+        idempotencyKeyForCreate:
+          type: string
+          readOnly: true
+        idempotencyKeyForComplete:
+          type: string
+          readOnly: true
+        createdOn:
+          type: integer
+          readOnly: true
+        completedOn:
+          type: integer
+          readOnly: true
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+
+    PromiseState:
+      type: string
+      enum:
+        - PENDING
+        - RESOLVED
+        - REJECTED
+        - REJECTED_CANCELED
+        - REJECTED_TIMEDOUT
+
+    PromiseStateComplete:
+      type: string
+      enum:
+        - RESOLVED
+        - REJECTED
+        - REJECTED_CANCELED
+
+    PromiseCompleteRequest:
+      type: object
+      properties:
+        state:
+          $ref: "#/components/schemas/PromiseStateComplete"
+        value:
+          $ref: "#/components/schemas/Value"
+
+    Value:
+      type: object
+      properties:
+        data:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+
+    PromiseList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Promise"

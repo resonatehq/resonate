@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
@@ -19,15 +20,40 @@ type Request struct {
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
+	CreateSchedule     *CreateScheduleRequest
+	ReadSchedule       *ReadScheduleRequest
+	DeleteSchedule     *DeleteScheduleRequest
 	Echo               *EchoRequest
 }
+
+// Schedule
+
+type CreateScheduleRequest struct {
+	Id             string                   `json:"id"`
+	Desc           *string                  `json:"desc,omitempty"`
+	Cron           string                   `json:"cron"`
+	PromiseId      string                   `json:"promiseId"`
+	PromiseParam   promise.Value            `json:"promiseParam,omitempty"`
+	PromiseTimeout int64                    `json:"promiseTimeout"`
+	IdempotencyKey *schedule.IdempotencyKey `json:"idemptencyKey,omitempty"`
+}
+
+type ReadScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+type DeleteScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+// Promise
 
 type ReadPromiseRequest struct {
 	Id string `json:"id"`
 }
 
 type SearchPromisesRequest struct {
-	Q      string          `json:"q"`
+	Id     string          `json:"Id"`
 	States []promise.State `json:"states"`
 	Limit  int             `json:"limit"`
 	SortId *int64          `json:"sortId"`
@@ -100,7 +126,7 @@ func (r *Request) String() string {
 
 		return fmt.Sprintf(
 			"SearchPromises(q=%s, states=%s, limit=%d, sortId=%s)",
-			r.SearchPromises.Q,
+			r.SearchPromises.Id,
 			r.SearchPromises.States,
 			r.SearchPromises.Limit,
 			sortId,
@@ -158,6 +184,23 @@ func (r *Request) String() string {
 			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(id=%s, desc=%v, cron=%s)",
+			r.CreateSchedule.Id,
+			r.CreateSchedule.Desc,
+			r.CreateSchedule.Cron,
+		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(id=%s)",
+			r.ReadSchedule.Id,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(id=%s)",
+			r.DeleteSchedule.Id,
 		)
 	case Echo:
 		return fmt.Sprintf(

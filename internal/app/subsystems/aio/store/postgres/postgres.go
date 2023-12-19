@@ -535,11 +535,11 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 }
 
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Q != "", "query cannot be empty")
+	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
 
 	// convert query
-	query := strings.ReplaceAll(cmd.Q, "*", "%")
+	query := strings.ReplaceAll(cmd.Id, "*", "%")
 
 	// convert list of state to bit mask
 	mask := 0
@@ -609,7 +609,7 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

@@ -1,10 +1,11 @@
 > Resonate is in the **Design Phase**
-> 
+>
 > Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
 >
 > [Join our slack](https://resonatehqcommunity.slack.com)
 
 <br /><br />
+
 <p align="center">
     <img height="170"src="./docs/img/echo.png">
 </p>
@@ -35,12 +36,14 @@
 </div>
 
 ## Why Resonate?
+
 Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
 
 ## What is Durable Async Await?
+
 Durable Async Await are Functions and Promises that maintain progress in durable storage.
 
-## Install 
+## Install
 
 Resonate is currently in active development without a formal release cycle. We welcome early adopters to experiment with the latest build from main as we work towards our first stable release. Your [feedback](https://github.com/resonatehq/resonate/issues/new/choose) is greatly appreciated.
 
@@ -67,7 +70,8 @@ Resonate makes it easy to get started creating and interacting with durable prom
    ./resonate serve
    ```
 
-   Once running, you'll see log output like: 
+   Once running, you'll see log output like:
+
    ```bash
    time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting http server" addr=0.0.0.0:8001
    time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting grpc server" addr=0.0.0.0:50051
@@ -76,54 +80,41 @@ Resonate makes it easy to get started creating and interacting with durable prom
 
 2. **Create a Promise**
 
-   Next, create a durable promise by making a POST request with a unique identifier and an idempotency key.
+   On separate terminal, create a durable promise with a unique identifier, timeout, and data.
 
    ```bash
-   curl -X POST \
-     -H "Idempotency-Key: foo_create" \
-     -d '{
-       "param": {
-         "data": "'$(echo -n 'Durable Promise Created' | base64)'"
-       },
-       "timeout": 2524608000000
-     }' \
-     http://localhost:8001/promises/foo/create
+   resonate create promise my-promise \
+   --timeout 2524608000000 \
+   --data 'Durable Promise Created'
    ```
 
 3. **Complete a Promise**
 
-   Finally, complete the promise by resolving or rejecting it Pass the same ID and a new idempotency key. 
+   Finally, complete the promise by resolving or rejecting it Pass the same ID and the completed state.
 
    ```bash
-   curl -X POST \
-     -H "Idempotency-Key: foo_resolve" \
-     -d '{
-       "value": {
-         "data": "'$(echo -n 'Durable Promise Resolved' | base64)'"
-       }
-     }' \
-     http://localhost:8001/promises/foo/resolve
+   resonate patch promise my-promise \
+   --state RESOLVED \
+   --data 'Durable Promise Resolved'
    ```
 
    ```bash
-   curl -X POST \
-     -H "Idempotency-Key: foo_reject" \ 
-     -d '{
-       "value": {
-         "data": "'$(echo -n 'Durable Promise Rejected' | base64)'"
-       }
-     }' \
-     http://localhost:8001/promises/foo/reject
+   resonate patch promise my-promise \
+   --state REJECTED \
+   --data 'Durable Promise Rejected'
    ```
 
 ## Development
+
 ```
 go run ./...
 go test -v ./...
 ```
 
 ## Contributing
+
 See our [contribution guidelines](CONTRIBUTING.md).
 
 ## License
+
 The Resonate Server is available under the [Apache 2.0 License](LICENSE).

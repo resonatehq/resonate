@@ -1,3 +1,5 @@
+// HOW CREATING PROMISES AFFECTS THE MODEL -- ??? naming convention to avoid naming conflict.
+
 package dst
 
 import (
@@ -8,6 +10,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
@@ -15,6 +18,7 @@ import (
 
 type Model struct {
 	promises  Promises
+	schedules Schedules
 	cursors   []*t_api.Request
 	responses map[t_api.Kind]ResponseValidator
 }
@@ -25,12 +29,18 @@ type PromiseModel struct {
 	subscriptions Subscriptions
 }
 
+type ScheduleModel struct {
+	id       string
+	schedule *schedule.Schedule
+}
+
 type SubscriptionModel struct {
 	id           string
 	subscription *subscription.Subscription
 }
 
 type Promises map[string]*PromiseModel
+type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
 type ResponseValidator func(*t_api.Request, *t_api.Response) error
 
@@ -43,6 +53,16 @@ func (p Promises) Get(id string) *PromiseModel {
 	}
 
 	return p[id]
+}
+
+func (s Schedules) Get(id string) *ScheduleModel {
+	if _, ok := s[id]; !ok {
+		s[id] = &ScheduleModel{
+			id: id,
+		}
+	}
+
+	return s[id]
 }
 
 func (s Subscriptions) Get(id string) *SubscriptionModel {
@@ -58,6 +78,7 @@ func (s Subscriptions) Get(id string) *SubscriptionModel {
 func NewModel() *Model {
 	return &Model{
 		promises:  map[string]*PromiseModel{},
+		schedules: map[string]*ScheduleModel{},
 		responses: map[t_api.Kind]ResponseValidator{},
 	}
 }
@@ -99,6 +120,65 @@ func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
 }
 
+// SCHEDULE
+
+func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.CreateSchedule.Id)
+
+	switch res.CreateSchedule.Status {
+	case t_api.StatusOK:
+		if sm.schedule != nil {
+			if !sm.idempotencyKeyForCreateMatch(res.CreateSchedule.Schedule) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKeyForCreate, res.CreateSchedule.Schedule.IdempotencyKeyForCreate)
+			}
+		}
+		sm.schedule = res.CreateSchedule.Schedule
+		return nil
+	case t_api.StatusCreated:
+		sm.schedule = res.CreateSchedule.Schedule
+		return nil
+	case t_api.StatusScheduleAlreadyExists:
+		return nil
+	case t_api.StatusScheduleNotFound:
+		return fmt.Errorf("invalid response '%d' for create schedule request", res.CreateSchedule.Status)
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
+	}
+}
+
+func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.ReadSchedule.Id)
+
+	switch res.ReadSchedule.Status {
+	case t_api.StatusOK:
+		sm.schedule = res.ReadSchedule.Schedule
+		return nil
+	case t_api.StatusScheduleNotFound:
+		if sm.schedule != nil {
+			return fmt.Errorf("schedule exists %s", sm.schedule)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
+	}
+}
+
+func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.DeleteSchedule.Id)
+
+	switch res.DeleteSchedule.Status {
+	case t_api.StatusNoContent:
+		sm.schedule = nil
+		return nil
+	case t_api.StatusScheduleNotFound:
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)
+	}
+}
+
+// PROMISE
+
 func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 
@@ -134,7 +214,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 		for _, p := range res.SearchPromises.Promises {
 			pm := m.promises.Get(p.Id)
 
-			regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Q, "*", ".*")))
+			regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
 
 			states := map[promise.State]bool{}
 			for _, state := range req.SearchPromises.States {
@@ -142,7 +222,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 			}
 
 			if !regex.MatchString(p.Id) {
-				return fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Q)
+				return fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Id)
 			}
 			if _, ok := states[p.State]; !ok {
 				return fmt.Errorf("unexpected state %s, searched for %s", p.State, req.SearchPromises.States)
@@ -415,4 +495,8 @@ func (m *PromiseModel) idempotencyKeyForCompleteMatch(promise *promise.Promise) 
 
 func (m *PromiseModel) completed() bool {
 	return m.promise != nil && m.promise.State != promise.Pending
+}
+
+func (m *ScheduleModel) idempotencyKeyForCreateMatch(schedule *schedule.Schedule) bool {
+	return m.schedule.IdempotencyKeyForCreate != nil && schedule.IdempotencyKeyForCreate != nil && *m.schedule.IdempotencyKeyForCreate == *schedule.IdempotencyKeyForCreate
 }

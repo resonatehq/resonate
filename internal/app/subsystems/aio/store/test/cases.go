@@ -67,6 +67,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -113,7 +114,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "bar",
+					Id:    "bar",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -162,7 +164,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "baz",
+					Id:    "baz",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte("baz"),
@@ -211,7 +214,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "baz",
+					Id:    "baz",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{
 							"a": "a",
@@ -264,7 +268,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "baz",
+					Id:    "baz",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{
 							"a": "a",
@@ -321,7 +326,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "foo",
+					Id:    "foo",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -333,7 +339,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "foo",
+					Id:    "foo",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -365,6 +372,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -396,6 +404,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -494,6 +503,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -526,6 +536,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -627,6 +638,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -659,6 +671,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -760,6 +773,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -796,6 +810,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -900,7 +915,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "foo",
+					Id:    "foo",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -936,7 +952,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id: "bar",
+					Id:    "bar",
+					State: promise.Pending,
 					Param: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -1078,6 +1095,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo.a",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1091,6 +1109,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo.b",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1104,6 +1123,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "a.bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1117,6 +1137,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "b.bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1129,7 +1150,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "foo.*",
+					Id: "foo.*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1139,7 +1160,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*.bar",
+					Id: "*.bar",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1149,7 +1170,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1159,7 +1180,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1318,6 +1339,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 3,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1331,6 +1353,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 3,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1356,6 +1379,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "baz",
+					State:   promise.Pending,
 					Timeout: 3,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1381,6 +1405,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "qux",
+					State:   promise.Pending,
 					Timeout: 3,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1406,6 +1431,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "quy",
+					State:   promise.Pending,
 					Timeout: 3,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -1430,7 +1456,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 					},
@@ -1440,7 +1466,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Resolved,
 					},
@@ -1450,7 +1476,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Rejected,
 						promise.Timedout,
@@ -1462,7 +1488,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -1476,7 +1502,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q: "*",
+					Id: "*",
 					States: []promise.State{
 						promise.Pending,
 						promise.Resolved,
@@ -2283,6 +2309,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2306,6 +2333,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "bar",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2329,6 +2357,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "baz",
+					State:   promise.Pending,
 					Timeout: 2,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2396,7 +2425,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.SearchPromisesCommand{
-					Q:      "*",
+					Id:     "*",
 					States: []promise.State{promise.Timedout},
 					Limit:  5,
 				},
@@ -2558,6 +2587,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2701,6 +2731,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2811,6 +2842,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreatePromise,
 				CreatePromise: &t_aio.CreatePromiseCommand{
 					Id:      "foo",
+					State:   promise.Pending,
 					Timeout: 1,
 					Param: promise.Value{
 						Headers: map[string]string{},
@@ -2946,7 +2978,8 @@ var TestCases = []*testCase{
 		commands: []*t_aio.Command{{
 			Kind: t_aio.CreatePromise,
 			CreatePromise: &t_aio.CreatePromiseCommand{
-				Id: "foo",
+				Id:    "foo",
+				State: promise.Pending,
 				Param: promise.Value{
 					Headers: nil,
 					Data:    []byte{},
@@ -2961,7 +2994,8 @@ var TestCases = []*testCase{
 		commands: []*t_aio.Command{{
 			Kind: t_aio.CreatePromise,
 			CreatePromise: &t_aio.CreatePromiseCommand{
-				Id: "foo",
+				Id:    "foo",
+				State: promise.Pending,
 				Param: promise.Value{
 					Headers: map[string]string{},
 					Data:    nil,
@@ -2976,7 +3010,8 @@ var TestCases = []*testCase{
 		commands: []*t_aio.Command{{
 			Kind: t_aio.CreatePromise,
 			CreatePromise: &t_aio.CreatePromiseCommand{
-				Id: "foo",
+				Id:    "foo",
+				State: promise.Pending,
 				Param: promise.Value{
 					Headers: map[string]string{},
 					Data:    []byte{},
