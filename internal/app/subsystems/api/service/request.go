@@ -1,6 +1,10 @@
 package service
 
-import "github.com/resonatehq/resonate/pkg/promise"
+import (
+	"github.com/resonatehq/resonate/pkg/promise"
+)
+
+// PROMISES
 
 type Header struct {
 	RequestId string `header:"request-id"`
@@ -20,38 +24,29 @@ type CreatePromiseHeader struct {
 	Strict         bool                    `header:"strict"`
 }
 
-type CreatePromiseBody struct {
-	Param   *promise.Value    `json:"param"`
-	Timeout *int64            `json:"timeout" binding:"required,gte=0"`
-	Tags    map[string]string `json:"tags"`
-}
-
-type CancelPromiseHeader struct {
+type CompletePromiseHeader struct {
 	RequestId      string                  `header:"request-id"`
-	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key,omitempty"`
 	Strict         bool                    `header:"strict"`
 }
 
-type CancelPromiseBody struct {
+type CompletePromiseBody struct {
+	State string        `json:"state" binding:"required,oneofcaseinsensitive=resolved rejected rejected_canceled"`
 	Value promise.Value `json:"value"`
 }
 
-type ResolvePromiseHeader struct {
+// SCHEDULE
+
+type CreateScheduleHeader struct {
 	RequestId      string                  `header:"request-id"`
 	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
-	Strict         bool                    `header:"strict"`
 }
 
-type ResolvePromiseBody struct {
-	Value promise.Value `json:"value"`
-}
-
-type RejectPromiseHeader struct {
-	RequestId      string                  `header:"request-id"`
-	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
-	Strict         bool                    `header:"strict"`
-}
-
-type RejectPromiseBody struct {
-	Value promise.Value `json:"value"`
+type CreateScheduleBody struct {
+	Id             string         `json:"id" binding:"required"`
+	Desc           string         `json:"desc,omitempty"`
+	Cron           string         `json:"cron" binding:"required"`
+	PromiseId      string         `json:"promiseId" binding:"required"`
+	PromiseParam   *promise.Value `json:"promiseParam,omitempty"`
+	PromiseTimeout int64          `json:"promiseTimeout" binding:"required"`
 }

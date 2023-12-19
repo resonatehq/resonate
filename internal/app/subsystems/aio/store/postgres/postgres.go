@@ -317,8 +317,8 @@ func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t
 
 	results, err := w.performCommands(tx, transactions)
 	if err != nil {
-		if err := tx.Rollback(); err != nil {
-			return nil, err
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 		}
 		return nil, err
 	}
@@ -617,6 +617,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 }
 
 func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -632,7 +633,7 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	}
 
 	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

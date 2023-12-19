@@ -230,7 +230,7 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
-			name:   "SearchPromisesInvocation",
+			name:   "SearchPromisesTags",
 			path:   "promises?id=*&tags=%7B%22resonate%3Ainvocation%22%3A%22true%22%7D&limit=10",
 			method: "GET",
 			req: &t_api.Request{
@@ -294,13 +294,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CreatePromise",
-			path:   "promises/foo/create",
+			path:   "promises",
 			method: "POST",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"id": "foo",
 				"param": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cGVuZGluZw=="
@@ -334,9 +335,10 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CreatePromiseMinimal",
-			path:   "promises/foo/create",
+			path:   "promises",
 			method: "POST",
 			body: []byte(`{
+				"id": "foo",
 				"timeout": 1
 			}`),
 			req: &t_api.Request{
@@ -366,13 +368,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CancelPromise",
-			path:   "promises/foo/cancel",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "REJECTED_CANCELED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "Y2FuY2Vs"
@@ -392,7 +395,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -404,9 +407,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CancelPromiseMinimal",
-			path:   "promises/foo/cancel",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "REJECTED_CANCELED"
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseRequest{
@@ -421,7 +426,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -433,13 +438,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "ResolvePromise",
-			path:   "promises/foo/resolve",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "RESOLVED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cmVzb2x2ZQ=="
@@ -459,7 +465,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -471,9 +477,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "ResolvePromiseMinimal",
-			path:   "promises/foo/resolve",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "RESOLVED" 
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseRequest{
@@ -488,7 +496,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -500,13 +508,14 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "RejectPromise",
-			path:   "promises/foo/reject",
-			method: "POST",
+			path:   "promises/foo",
+			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
 				"Strict":          "true",
 			},
 			body: []byte(`{
+				"state": "REJECTED", 
 				"value": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cmVqZWN0"
@@ -526,7 +535,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -538,9 +547,11 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "RejectPromiseMinimal",
-			path:   "promises/foo/reject",
-			method: "POST",
-			body:   []byte(`{}`),
+			path:   "promises/foo",
+			method: "PATCH",
+			body: []byte(`{
+				"state": "REJECTED"
+			}`),
 			req: &t_api.Request{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseRequest{
@@ -555,7 +566,7 @@ func TestHttpServer(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",

@@ -1,6 +1,8 @@
 package test
 
-import "github.com/resonatehq/resonate/pkg/promise"
+import (
+	"github.com/resonatehq/resonate/pkg/promise"
+)
 
 func IdempotencyKeyToPointer(s string) *promise.IdempotencyKey {
 	idempotencyKey := promise.IdempotencyKey(s)

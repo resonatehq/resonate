@@ -46,6 +46,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	// add req/res
 	for _, req := range reqs {
 		switch req {
+		// PROMISE
+
 		case t_api.ReadPromise:
 			generator.AddRequest(generator.GenerateReadPromise)
 			model.AddResponse(t_api.ReadPromise, model.ValidateReadPromise)
@@ -64,6 +66,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.RejectPromise:
 			generator.AddRequest(generator.GenerateRejectPromise)
 			model.AddResponse(t_api.RejectPromise, model.ValidateRejectPromise)
+
+		// SUBSCRIPTION
+
 		case t_api.ReadSubscriptions:
 			generator.AddRequest(generator.GenerateReadSubscriptions)
 			model.AddResponse(t_api.ReadSubscriptions, model.ValidateReadSubscriptions)
@@ -73,6 +78,18 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.DeleteSubscription:
 			generator.AddRequest(generator.GenerateDeleteSubscription)
 			model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+
+		// SCHEDULES
+
+		case t_api.ReadSchedule:
+			generator.AddRequest(generator.GenerateReadSchedule)
+			model.AddResponse(t_api.ReadSchedule, model.ValidateReadSchedule)
+		case t_api.CreateSchedule:
+			generator.AddRequest(generator.GenerateCreateSchedule)
+			model.AddResponse(t_api.CreateSchedule, model.ValidateCreateSchedule)
+		case t_api.DeleteSchedule:
+			generator.AddRequest(generator.GenerateDeleteSchedule)
+			model.AddResponse(t_api.DeleteSchedule, model.ValidateDeleteSchedule)
 		}
 	}
 

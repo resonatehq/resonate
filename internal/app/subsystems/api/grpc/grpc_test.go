@@ -1,3 +1,4 @@
+// update proto
 package grpc
 
 import (
@@ -297,7 +298,7 @@ func TestSearchPromises(t *testing.T) {
 			},
 		},
 		{
-			name: "SearchPromisesInvocation",
+			name: "SearchPromisesTags",
 			grpcReq: &grpcApi.SearchPromisesRequest{
 				Id: "*",
 				Tags: map[string]string{
@@ -541,7 +542,7 @@ func TestCancelPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -570,7 +571,7 @@ func TestCancelPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -599,7 +600,7 @@ func TestCancelPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.CancelPromise,
-				CancelPromise: &t_api.CancelPromiseResponse{
+				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyResolved,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -681,7 +682,7 @@ func TestResolvePromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -710,7 +711,7 @@ func TestResolvePromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -739,7 +740,7 @@ func TestResolvePromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyRejected,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -821,7 +822,7 @@ func TestRejectPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -850,7 +851,7 @@ func TestRejectPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
 						Id:    "foo",
@@ -879,7 +880,7 @@ func TestRejectPromise(t *testing.T) {
 			},
 			res: &t_api.Response{
 				Kind: t_api.RejectPromise,
-				RejectPromise: &t_api.RejectPromiseResponse{
+				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyResolved,
 					Promise: &promise.Promise{
 						Id:    "foo",

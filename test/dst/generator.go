@@ -110,6 +110,8 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*t_api.Requ
 	return reqs
 }
 
+// PROMISE
+
 func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
@@ -125,13 +127,12 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	limit := RangeIntn(r, 1, 11)
 	states := []promise.State{}
 
-	// query
-	var query string
+	var id string
 	switch r.Intn(2) {
 	case 0:
-		query = fmt.Sprintf("*%d", r.Intn(10))
+		id = fmt.Sprintf("*%d", r.Intn(10))
 	default:
-		query = fmt.Sprintf("%d*", r.Intn(10))
+		id = fmt.Sprintf("%d*", r.Intn(10))
 	}
 
 	// states
@@ -156,7 +157,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	return &t_api.Request{
 		Kind: t_api.SearchPromises,
 		SearchPromises: &t_api.SearchPromisesRequest{
-			Id:     query,
+			Id:     id,
 			States: states,
 			Tags:   tags,
 			Limit:  limit,
@@ -248,6 +249,52 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *t_api.Request 
 			},
 			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
+		},
+	}
+}
+
+// SCHEDULE
+
+func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.ReadSchedule,
+		ReadSchedule: &t_api.ReadScheduleRequest{
+			Id: id,
+		},
+	}
+}
+
+func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+	cron := fmt.Sprintf("%d %d * * *", r.Intn(60), r.Intn(24))
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
+	timeout := RangeInt63n(r, t, g.ticks)
+
+	return &t_api.Request{
+		Kind: t_api.CreateSchedule,
+		CreateSchedule: &t_api.CreateScheduleRequest{
+			Id:             id,
+			Desc:           "",
+			Cron:           cron,
+			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
+			PromiseParam:   promise.Value{Headers: headers, Data: data},
+			PromiseTimeout: timeout,
+			IdempotencyKey: idempotencyKey,
+		},
+	}
+}
+
+func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.DeleteSchedule,
+		DeleteSchedule: &t_api.DeleteScheduleRequest{
+			Id: id,
 		},
 	}
 }

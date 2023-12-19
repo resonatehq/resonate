@@ -160,7 +160,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 
 // Create Promise
 
-func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *CreatePromiseBody) (*t_api.CreatePromiseResponse, error) {
+func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -168,11 +168,11 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
 			CreatePromise: &t_api.CreatePromiseRequest{
-				Id:             id,
+				Id:             body.Id,
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
-				Param:          util.SafeDeref(body.Param),
-				Timeout:        *body.Timeout, // required by binding
+				Param:          body.Param,
+				Timeout:        body.Timeout, // required by binding
 				Tags:           body.Tags,
 			},
 		},
@@ -198,7 +198,7 @@ func (s *Service) CreatePromise(id string, header *CreatePromiseHeader, body *Cr
 
 // Cancel Promise
 
-func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *CancelPromiseBody) (*t_api.CancelPromiseResponse, error) {
+func (s *Service) CancelPromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -234,7 +234,7 @@ func (s *Service) CancelPromise(id string, header *CancelPromiseHeader, body *Ca
 
 // Resolve Promise
 
-func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *ResolvePromiseBody) (*t_api.ResolvePromiseResponse, error) {
+func (s *Service) ResolvePromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -270,7 +270,7 @@ func (s *Service) ResolvePromise(id string, header *ResolvePromiseHeader, body *
 
 // Reject Promise
 
-func (s *Service) RejectPromise(id string, header *RejectPromiseHeader, body *RejectPromiseBody) (*t_api.RejectPromiseResponse, error) {
+func (s *Service) RejectPromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{

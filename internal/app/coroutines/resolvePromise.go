@@ -50,7 +50,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 		if result.RowsReturned == 0 {
 			res(&t_api.Response{
 				Kind: t_api.ResolvePromise,
-				ResolvePromise: &t_api.ResolvePromiseResponse{
+				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseNotFound,
 				},
 			}, nil)
@@ -73,7 +73,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 						res(&t_api.Response{
 							Kind: t_api.ResolvePromise,
-							ResolvePromise: &t_api.ResolvePromiseResponse{
+							ResolvePromise: &t_api.CompletePromiseResponse{
 								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
@@ -142,7 +142,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 					if result.RowsAffected == 1 {
 						res(&t_api.Response{
 							Kind: t_api.ResolvePromise,
-							ResolvePromise: &t_api.ResolvePromiseResponse{
+							ResolvePromise: &t_api.CompletePromiseResponse{
 								Status: t_api.StatusCreated,
 								Promise: &promise.Promise{
 									Id:                        p.Id,
@@ -171,7 +171,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 
 				res(&t_api.Response{
 					Kind: t_api.ResolvePromise,
-					ResolvePromise: &t_api.ResolvePromiseResponse{
+					ResolvePromise: &t_api.CompletePromiseResponse{
 						Status:  status,
 						Promise: p,
 					},

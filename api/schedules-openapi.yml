@@ -1,0 +1,100 @@
+openapi: 3.0.0
+info:
+  title: Schedules API
+  version: 1.0.0
+paths:
+  /schedules:
+    post:
+      summary: Create a new schedule
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Schedule"
+        required: true
+      responses:
+        "200":
+          description: Successfully created a schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+  /schedules/{id}:
+    get:
+      summary: Get a schedule
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "200":
+          description: Successfully retrieved the schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "404":
+          description: Schedule not found
+    delete:
+      summary: Delete a schedule
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+      responses:
+        "204":
+          description: Successfully deleted the schedule
+        "404":
+          description: Schedule not found
+
+components:
+  schemas:
+    Schedule:
+      type: object
+      required:
+        - id
+        - cron
+        - promiseId
+      properties:
+        id:
+          type: string
+        desc:
+          type: string
+        cron:
+          type: string
+        promiseId:
+          type: string
+        promiseParam:
+          $ref: "#/components/schemas/Value"
+        promiseTimeout:
+          type: integer
+          format: int64
+        lastRunTime:
+          type: integer
+          readOnly: true
+          format: int64
+        nextRunTime:
+          type: integer
+          readOnly: true
+          format: int64
+        createdOn:
+          type: integer
+          readOnly: true
+          format: int64
+        idempotencyKeyForCreate:
+          type: string
+          readOnly: true
+
+    Value:
+      type: object
+      properties:
+        data:
+          type: string
+        headers:
+          type: object
+          additionalProperties:
+            type: string

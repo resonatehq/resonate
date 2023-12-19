@@ -17,6 +17,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
@@ -44,6 +45,22 @@ const (
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
 	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
+
+	CREATE TABLE IF NOT EXISTS schedules (
+		id                         TEXT PRIMARY KEY,
+		desc                       TEXT,
+		cron                       TEXT,
+		promise_id                 TEXT,
+		promise_param_headers      BLOB,
+		promise_param_data         BLOB,
+		promise_timeout            INTEGER,
+		last_run_time              INTEGER,
+		next_run_time              INTEGER,
+		created_on                 INTEGER,
+		idempotency_key            TEXT
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_next_run_time ON schedules (next_run_time);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -119,6 +136,40 @@ const (
 		state = 8, completed_on = timeout
 	WHERE
 		state = 1 AND timeout <= ?`
+
+	SCHEDULE_SELECT_STATEMENT = `
+	SELECT
+		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+	FROM
+		schedules
+	WHERE
+		id = ?`
+
+	SCHEDULE_SELECT_ALL_STATEMENT = `
+	SELECT
+		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+	FROM
+		schedules
+	WHERE
+		next_run_time <= ?`
+
+	SCHEDULE_INSERT_STATEMENT = `
+	INSERT INTO schedules
+		(id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
+	VALUES
+		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO NOTHING`
+
+	SCHEDULE_UPDATE_STATEMENT = `
+	UPDATE
+		schedules
+	SET
+		last_run_time = next_run_time, next_run_time = ?
+	WHERE
+		id = ? AND next_run_time = ?`
+
+	SCHEDULE_DELETE_STATEMENT = `
+	DELETE FROM schedules WHERE id = ?`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -293,8 +344,8 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 
 	results, err := w.performCommands(tx, transactions)
 	if err != nil {
-		if err := tx.Rollback(); err != nil {
-			return nil, err
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 		}
 		return nil, err
 	}
@@ -307,6 +358,24 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 }
 
 func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
+	scheduleInsertStmt, err := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleInsertStmt.Close()
+
+	scheduleUpdateStmt, err := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleUpdateStmt.Close()
+
+	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleDeleteStmt.Close()
+
 	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -412,6 +481,23 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
 				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
+			// Schedule
+			case t_aio.ReadSchedule:
+				util.Assert(command.ReadSchedule != nil, "command must not be nil")
+				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
+			case t_aio.ReadSchedules:
+				util.Assert(command.ReadSchedules != nil, "command must not be nil")
+				results[i][j], err = w.readSchedules(tx, command.ReadSchedules)
+			case t_aio.CreateSchedule:
+				util.Assert(command.CreateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
+			case t_aio.UpdateSchedule:
+				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
+			case t_aio.DeleteSchedule:
+				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
+				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
+
 			// Timeout
 			case t_aio.ReadTimeouts:
 				util.Assert(command.ReadTimeouts != nil, "command must not be nil")
@@ -472,6 +558,8 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 	return results, nil
 }
+
+// Promises
 
 func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseCommand) (*t_aio.Result, error) {
 	// select
@@ -607,6 +695,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -621,8 +710,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	// insert
-	res, err := stmt.Exec(cmd.Id, promise.Pending, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -690,6 +778,152 @@ func (w *SqliteStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 		},
 	}, nil
 }
+
+// Schedules
+
+func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.Result, error) {
+	row := tx.QueryRow(SCHEDULE_SELECT_STATEMENT, cmd.Id)
+	record := &schedule.ScheduleRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.Id,
+		&record.Desc,
+		&record.Cron,
+		&record.PromiseId,
+		&record.PromiseParamHeaders,
+		&record.PromiseParamData,
+		&record.PromiseTimeout,
+		&record.LastRunTime,
+		&record.NextRunTime,
+		&record.CreatedOn,
+		&record.IdempotencyKey,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*schedule.ScheduleRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedule,
+		ReadSchedule: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*schedule.ScheduleRecord
+
+	for rows.Next() {
+		record := &schedule.ScheduleRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Desc,
+			&record.Cron,
+			&record.PromiseId,
+			&record.PromiseParamHeaders,
+			&record.PromiseParamData,
+			&record.PromiseTimeout,
+			&record.LastRunTime,
+			&record.NextRunTime,
+			&record.CreatedOn,
+			&record.IdempotencyKey,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedules,
+		ReadSchedules: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
+	headers, err := json.Marshal(cmd.PromiseParam.Headers)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, headers, cmd.PromiseParam.Data, cmd.PromiseTimeout, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateSchedule,
+		CreateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.UpdateSchedule,
+		UpdateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.DeleteSchedule,
+		DeleteSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+// Timeouts
 
 func (w *SqliteStoreWorker) readTimeouts(tx *sql.Tx, cmd *t_aio.ReadTimeoutsCommand) (*t_aio.Result, error) {
 	// select
@@ -762,6 +996,8 @@ func (w *SqliteStoreWorker) deleteTimeout(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		},
 	}, nil
 }
+
+// Subscriptions
 
 func (w *SqliteStoreWorker) readSubscription(tx *sql.Tx, cmd *t_aio.ReadSubscriptionCommand) (*t_aio.Result, error) {
 	// select
@@ -912,6 +1148,8 @@ func (w *SqliteStoreWorker) timeoutDeleteSubscriptions(tx *sql.Tx, stmt *sql.Stm
 		},
 	}, nil
 }
+
+// Notifications
 
 func (w *SqliteStoreWorker) readNotifications(tx *sql.Tx, cmd *t_aio.ReadNotificationsCommand) (*t_aio.Result, error) {
 	// select

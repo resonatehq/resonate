@@ -19,8 +19,13 @@ type Request struct {
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
+	CreateSchedule     *CreateScheduleRequest
+	ReadSchedule       *ReadScheduleRequest
+	DeleteSchedule     *DeleteScheduleRequest
 	Echo               *EchoRequest
 }
+
+// Promises
 
 type ReadPromiseRequest struct {
 	Id string `json:"id"`
@@ -63,6 +68,28 @@ type RejectPromiseRequest struct {
 	Strict         bool                    `json:"strict"`
 	Value          promise.Value           `json:"value,omitempty"`
 }
+
+// Schedules
+
+type ReadScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+type CreateScheduleRequest struct {
+	Id             string                  `json:"id"`
+	Desc           string                  `json:"desc,omitempty"`
+	Cron           string                  `json:"cron"`
+	PromiseId      string                  `json:"promiseId"`
+	PromiseParam   promise.Value           `json:"promiseParam,omitempty"`
+	PromiseTimeout int64                   `json:"promiseTimeout"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+}
+
+type DeleteScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+// Subscriptions
 
 type ReadSubscriptionsRequest struct {
 	PromiseId string `json:"promiseId"`
@@ -160,6 +187,23 @@ func (r *Request) String() string {
 			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(id=%s, desc=%s, cron=%s)",
+			r.CreateSchedule.Id,
+			r.CreateSchedule.Desc,
+			r.CreateSchedule.Cron,
+		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(id=%s)",
+			r.ReadSchedule.Id,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(id=%s)",
+			r.DeleteSchedule.Id,
 		)
 	case Echo:
 		return fmt.Sprintf(

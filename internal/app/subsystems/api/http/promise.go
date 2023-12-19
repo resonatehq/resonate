@@ -3,14 +3,18 @@ package http
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Read Promise
+
 func (s *server) readPromise(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -32,6 +36,7 @@ func (s *server) readPromise(c *gin.Context) {
 }
 
 // Search Promise
+
 func (s *server) searchPromises(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -62,6 +67,7 @@ func (s *server) searchPromises(c *gin.Context) {
 }
 
 // Create Promise
+
 func (s *server) createPromise(c *gin.Context) {
 	var header service.CreatePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -69,13 +75,13 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	var body *service.CreatePromiseBody
+	var body *promise.Promise
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.CreatePromise(c.Param("id"), &header, body)
+	resp, err := s.service.CreatePromise(&header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
@@ -88,75 +94,39 @@ func (s *server) createPromise(c *gin.Context) {
 	c.JSON(resp.Status.HTTP(), resp.Promise)
 }
 
-// Cancel Promise
-func (s *server) cancelPromise(c *gin.Context) {
-	var header service.CancelPromiseHeader
+// Complete Promise
+
+func (s *server) completePromise(c *gin.Context) {
+	var header service.CompletePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	var body *service.CancelPromiseBody
+	var body *service.CompletePromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.CancelPromise(c.Param("id"), &header, body)
-	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+	id := c.Param("id")
+
+	var (
+		resp *t_api.CompletePromiseResponse
+		err  error
+	)
+
+	switch strings.ToUpper(body.State) {
+	case promise.Resolved.String():
+		resp, err = s.service.ResolvePromise(id, &header, body)
+	case promise.Rejected.String():
+		resp, err = s.service.RejectPromise(id, &header, body)
+	case promise.Canceled.String():
+		resp, err = s.service.CancelPromise(id, &header, body)
+	default:
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(errors.New("invalid state")))
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise)
-}
-
-// Resolve Promise
-func (s *server) resolvePromise(c *gin.Context) {
-	var header service.ResolvePromiseHeader
-	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-		return
-	}
-
-	var body *service.ResolvePromiseBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-		return
-	}
-
-	resp, err := s.service.ResolvePromise(c.Param("id"), &header, body)
-	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
-	}
-
-	c.JSON(resp.Status.HTTP(), resp.Promise)
-}
-
-// Reject Promise
-func (s *server) rejectPromise(c *gin.Context) {
-	var header service.RejectPromiseHeader
-	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-		return
-	}
-
-	var body *service.RejectPromiseBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-		return
-	}
-
-	resp, err := s.service.RejectPromise(c.Param("id"), &header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

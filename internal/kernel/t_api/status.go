@@ -18,7 +18,9 @@ const (
 	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
 	StatusPromiseNotFound        ResponseStatus = 4040
 	StatusSubscriptionNotFound   ResponseStatus = 4041
+	StatusScheduleNotFound       ResponseStatus = 4042
 	StatusPromiseAlreadyExists   ResponseStatus = 4090
+	StatusScheduleAlreadyExists  ResponseStatus = 4091
 )
 
 // ResponseStatus is the status code for the response.
@@ -43,8 +45,12 @@ func (s ResponseStatus) String() string {
 		return "The specified promise was not found"
 	case StatusSubscriptionNotFound:
 		return "The specified subscription was not found"
+	case StatusScheduleNotFound:
+		return "The specified schedule was not found"
 	case StatusPromiseAlreadyExists:
 		return "A promise with this identifier already exists"
+	case StatusScheduleAlreadyExists:
+		return "A schedule with this identifier already exists"
 	default:
 		panic(fmt.Sprintf("unknown status code %d", s))
 	}

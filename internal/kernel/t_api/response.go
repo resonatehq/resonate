@@ -4,21 +4,56 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Response struct {
-	Kind               Kind
-	ReadPromise        *ReadPromiseResponse
-	SearchPromises     *SearchPromisesResponse
-	CreatePromise      *CreatePromiseResponse
-	CancelPromise      *CancelPromiseResponse
-	ResolvePromise     *ResolvePromiseResponse
-	RejectPromise      *RejectPromiseResponse
+	Kind Kind
+
+	// Promise
+	CreatePromise  *CreatePromiseResponse
+	ReadPromise    *ReadPromiseResponse
+	SearchPromises *SearchPromisesResponse
+	CancelPromise  *CompletePromiseResponse
+	ResolvePromise *CompletePromiseResponse
+	RejectPromise  *CompletePromiseResponse
+
+	// Subscriptions
+
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
-	Echo               *EchoResponse
+
+	// Schedules
+	CreateSchedule *CreateScheduleResponse
+	ReadSchedule   *ReadScheduleResponse
+	DeleteSchedule *DeleteScheduleResponse
+
+	Echo *EchoResponse
+}
+
+// Schedule
+
+type CreateScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type ReadScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type DeleteScheduleResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+// PROMISES
+
+type CreatePromiseResponse struct {
+	Status  ResponseStatus   `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
 type ReadPromiseResponse struct {
@@ -32,25 +67,12 @@ type SearchPromisesResponse struct {
 	Promises []*promise.Promise             `json:"promises,omitempty"`
 }
 
-type CreatePromiseResponse struct {
+type CompletePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
-type CancelPromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
-type ResolvePromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
-type RejectPromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
+// SUBSCRIPTIONS
 
 type ReadSubscriptionsResponse struct {
 	Status        ResponseStatus                    `json:"status"`
@@ -126,6 +148,23 @@ func (r *Response) String() string {
 		return fmt.Sprintf(
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(status=%d, schedule=%s)",
+			r.CreateSchedule.Status,
+			r.CreateSchedule.Schedule,
+		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(status=%d, schedule=%s)",
+			r.ReadSchedule.Status,
+			r.ReadSchedule.Schedule,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(status=%d)",
+			r.DeleteSchedule.Status,
 		)
 	case Echo:
 		return fmt.Sprintf(
