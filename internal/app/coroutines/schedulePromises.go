@@ -127,10 +127,13 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			return
 		}
 
-		// todo: add checks for promise creation failure and schedule update failure.
+		util.Assert(completion.Store != nil, "completion must not be nil")
+
+		result := completion.Store.Results[0].CreatePromise
+		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
 		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
 			slog.Warn("no promise created")
-			fmt.Println(schedule.Id, crontime, next)
 			return
 		}
 
