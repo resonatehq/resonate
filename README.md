@@ -83,7 +83,7 @@ Resonate makes it easy to get started creating and interacting with durable prom
    On separate terminal, create a durable promise with a unique identifier, timeout, and data.
 
    ```bash
-   resonate create promise my-promise \
+   resonate promise create my-promise \
    --timeout 2524608000000 \
    --data 'Durable Promise Created'
    ```
@@ -93,13 +93,13 @@ Resonate makes it easy to get started creating and interacting with durable prom
    Finally, complete the promise by resolving or rejecting it Pass the same ID and the completed state.
 
    ```bash
-   resonate patch promise my-promise \
+   resonate promise complete my-promise \
    --state RESOLVED \
    --data 'Durable Promise Resolved'
    ```
 
    ```bash
-   resonate patch promise my-promise \
+   resonate promise complete my-promise \
    --state REJECTED \
    --data 'Durable Promise Rejected'
    ```
