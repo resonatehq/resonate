@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -339,8 +340,8 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 
 	results, err := w.performCommands(tx, transactions)
 	if err != nil {
-		if err := tx.Rollback(); err != nil {
-			return nil, err
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 		}
 		return nil, err
 	}
