@@ -176,6 +176,11 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 			if pm.completed() && p.State == promise.Pending {
 				return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, p.State)
 			}
+			for k, v := range req.SearchPromises.Tags {
+				if _v, ok := p.Tags[k]; !ok || v != _v {
+					return fmt.Errorf("unexpected tag '%s:%s', expected '%s:%s'", k, _v, k, v)
+				}
+			}
 
 			// update model state
 			pm.promise = p

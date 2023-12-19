@@ -13,8 +13,12 @@ import (
 
 func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		util.Assert(req.SearchPromises.Id != "", "query must not be empty")
+		util.Assert(req.SearchPromises.Id != "", "id must not be empty")
 		util.Assert(req.SearchPromises.Limit > 0, "limit must be greater than zero")
+
+		if req.SearchPromises.Tags == nil {
+			req.SearchPromises.Tags = map[string]string{}
+		}
 
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
@@ -44,6 +48,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 							SearchPromises: &t_aio.SearchPromisesCommand{
 								Id:     req.SearchPromises.Id,
 								States: req.SearchPromises.States,
+								Tags:   req.SearchPromises.Tags,
 								Limit:  req.SearchPromises.Limit,
 								SortId: req.SearchPromises.SortId,
 							},
@@ -82,6 +87,7 @@ func SearchPromises(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 				Next: &t_api.SearchPromisesRequest{
 					Id:     req.SearchPromises.Id,
 					States: req.SearchPromises.States,
+					Tags:   req.SearchPromises.Tags,
 					Limit:  req.SearchPromises.Limit,
 					SortId: &result.LastSortId,
 				},

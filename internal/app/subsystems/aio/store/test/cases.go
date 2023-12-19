@@ -50,6 +50,24 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 				t.Fatal(cqe.Error)
 			}
 
+			// normalize results
+			for _, result := range cqe.Completion.Store.Results {
+				switch result.Kind {
+				case t_aio.ReadPromise:
+					for _, record := range result.ReadPromise.Records {
+						record.ParamHeaders = normalizeJSON(record.ParamHeaders)
+						record.ValueHeaders = normalizeJSON(record.ValueHeaders)
+						record.Tags = normalizeJSON(record.Tags)
+					}
+				case t_aio.SearchPromises:
+					for _, record := range result.SearchPromises.Records {
+						record.ParamHeaders = normalizeJSON(record.ParamHeaders)
+						record.ValueHeaders = normalizeJSON(record.ValueHeaders)
+						record.Tags = normalizeJSON(record.Tags)
+					}
+				}
+			}
+
 			assert.Equal(t, c.expected, cqe.Completion.Store.Results)
 		}
 	})
@@ -1154,6 +1172,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
@@ -1164,6 +1183,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
@@ -1174,6 +1194,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 2,
 				},
 			},
@@ -1184,6 +1205,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  2,
 					SortId: int64ToPointer(3),
 				},
@@ -1460,6 +1482,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
@@ -1470,6 +1493,7 @@ var TestCases = []*testCase{
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
@@ -1482,6 +1506,7 @@ var TestCases = []*testCase{
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
@@ -1496,6 +1521,7 @@ var TestCases = []*testCase{
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 3,
 				},
 			},
@@ -1510,6 +1536,7 @@ var TestCases = []*testCase{
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:   map[string]string{},
 					SortId: int64ToPointer(3),
 					Limit:  3,
 				},
@@ -1735,6 +1762,194 @@ var TestCases = []*testCase{
 							CreatedOn:    int64ToPointer(1),
 							Tags:         []byte("{}"),
 							SortId:       1,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "SearchPromisesByTag",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "foo",
+					State:   promise.Pending,
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags: map[string]string{
+						"resonate:invocation": "true",
+						"foo":                 "foo",
+					},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "bar",
+					State:   promise.Pending,
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags: map[string]string{
+						"bar": "bar",
+					},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "baz",
+					State:   promise.Pending,
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags: map[string]string{
+						"baz": "baz",
+					},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
+					Id: "*",
+					States: []promise.State{
+						promise.Pending,
+					},
+					Tags:  map[string]string{},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
+					Id: "*",
+					States: []promise.State{
+						promise.Pending,
+					},
+					Tags: map[string]string{
+						"resonate:invocation": "true",
+					},
+					Limit: 3,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.SearchPromisesCommand{
+					Id: "*",
+					States: []promise.State{
+						promise.Pending,
+					},
+					Tags: map[string]string{
+						"bar": "bar",
+					},
+					Limit: 3,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
+					RowsReturned: 3,
+					LastSortId:   1,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "baz",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"baz\":\"baz\"}"),
+							SortId:       3,
+						},
+						{
+							Id:           "bar",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"bar\":\"bar\"}"),
+							SortId:       2,
+						},
+						{
+							Id:           "foo",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"foo\":\"foo\",\"resonate:invocation\":\"true\"}"),
+							SortId:       1,
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					LastSortId:   1,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "foo",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"foo\":\"foo\",\"resonate:invocation\":\"true\"}"),
+							SortId:       1,
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.SearchPromises,
+				SearchPromises: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					LastSortId:   2,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "bar",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							CreatedOn:    int64ToPointer(1),
+							Tags:         []byte("{\"bar\":\"bar\"}"),
+							SortId:       2,
 						},
 					},
 				},
@@ -2427,6 +2642,7 @@ var TestCases = []*testCase{
 				SearchPromises: &t_aio.SearchPromisesCommand{
 					Id:     "*",
 					States: []promise.State{promise.Timedout},
+					Tags:   map[string]string{},
 					Limit:  5,
 				},
 			},

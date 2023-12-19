@@ -92,9 +92,9 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		// calculate timeout for promise
 
 		now := c.Time()
-		status := promise.Pending
+		state := promise.Pending
 		if schedule.PromiseTimeout+schedule.NextRunTime < now {
-			status = promise.Timedout
+			state = promise.Timedout
 		}
 
 		completion, err := c.Yield(&t_aio.Submission{
@@ -106,7 +106,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
 								Id:             id,
-								State:          status,
+								State:          state,
 								Param:          schedule.PromiseParam,
 								Timeout:        schedule.PromiseTimeout,
 								IdempotencyKey: nil,

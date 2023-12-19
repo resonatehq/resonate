@@ -127,6 +127,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*
 		searchPromises = &t_api.SearchPromisesRequest{
 			Id:     *params.Id,
 			States: states,
+			Tags:   params.Tags,
 			Limit:  *params.Limit,
 		}
 	}

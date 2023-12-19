@@ -22,7 +22,7 @@ type Promise struct {
 
 func (p *Promise) String() string {
 	return fmt.Sprintf(
-		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s)",
+		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s, tags=%s)",
 		p.Id,
 		p.State,
 		&p.Param,
@@ -30,6 +30,7 @@ func (p *Promise) String() string {
 		p.Timeout,
 		p.IdempotencyKeyForCreate,
 		p.IdempotencyKeyForComplete,
+		p.Tags,
 	)
 }
 

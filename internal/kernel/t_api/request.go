@@ -32,10 +32,11 @@ type ReadPromiseRequest struct {
 }
 
 type SearchPromisesRequest struct {
-	Id     string          `json:"Id"`
-	States []promise.State `json:"states"`
-	Limit  int             `json:"limit"`
-	SortId *int64          `json:"sortId"`
+	Id     string            `json:"id"`
+	States []promise.State   `json:"states"`
+	Tags   map[string]string `json:"tags"`
+	Limit  int               `json:"limit"`
+	SortId *int64            `json:"sortId"`
 }
 
 type CreatePromiseRequest struct {
@@ -126,9 +127,10 @@ func (r *Request) String() string {
 		}
 
 		return fmt.Sprintf(
-			"SearchPromises(q=%s, states=%s, limit=%d, sortId=%s)",
+			"SearchPromises(id=%s, states=%s, tags=%s, limit=%d, sortId=%s)",
 			r.SearchPromises.Id,
 			r.SearchPromises.States,
+			r.SearchPromises.Tags,
 			r.SearchPromises.Limit,
 			sortId,
 		)

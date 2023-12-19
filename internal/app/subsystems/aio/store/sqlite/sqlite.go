@@ -38,11 +38,13 @@ const (
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
 		tags                         BLOB,
+		invocation                   TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:invocation')) STORED,
 		created_on                   INTEGER,
 		completed_on                 INTEGER
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
+	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
 
 	CREATE TABLE IF NOT EXISTS schedules (
 		id                         TEXT PRIMARY KEY,
@@ -103,8 +105,10 @@ const (
 		promises
 	WHERE
 		(? IS NULL OR sort_id < ?) AND
+		id LIKE ? AND
 		state & ? != 0 AND
-		id LIKE ?
+		(? IS NULL OR invocation = ?)
+		%s
 	ORDER BY
 		sort_id DESC
 	LIMIT
@@ -601,9 +605,10 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComman
 func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
+	util.Assert(cmd.Tags != nil, "tags cannot be empty")
 
 	// convert query
-	query := strings.ReplaceAll(cmd.Id, "*", "%")
+	id := strings.ReplaceAll(cmd.Id, "*", "%")
 
 	// convert list of state to bit mask
 	mask := 0
@@ -611,8 +616,40 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 		mask = mask | int(state)
 	}
 
+	// tags
+	var invocation *string
+	placeholders := []string{}
+	placeholderVars := []any{}
+
+	for k, v := range cmd.Tags {
+		if k == "resonate:invocation" {
+			invocation = &v
+			continue
+		}
+
+		placeholders = append(placeholders, "json_extract(tags, ?) = ?")
+		placeholderVars = append(placeholderVars, "$."+k, v)
+	}
+
+	vars := []any{
+		cmd.SortId,
+		cmd.SortId,
+		id,
+		mask,
+		invocation,
+		invocation,
+	}
+
+	vars = append(vars, placeholderVars...)
+	vars = append(vars, cmd.Limit)
+
+	var placeholder string
+	if len(placeholders) > 0 {
+		placeholder = "AND " + strings.Join(placeholders, " AND ")
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, cmd.SortId, mask, query, cmd.Limit)
+	rows, err := tx.Query(fmt.Sprintf(PROMISE_SEARCH_STATEMENT, placeholder), vars...)
 	if err != nil {
 		return nil, err
 	}
@@ -658,6 +695,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")

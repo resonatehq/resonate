@@ -29,20 +29,22 @@ const (
 		id                           TEXT,
 		sort_id                      SERIAL,
 		state                        INTEGER DEFAULT 1,
-		param_headers                BYTEA,
+		param_headers                JSONB,
 		param_data                   BYTEA,
-		value_headers                BYTEA,
+		value_headers                JSONB,
 		value_data                   BYTEA,
 		timeout                      BIGINT,
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
-		tags                         BYTEA,
+		tags                         JSONB,
+		invocation                   TEXT GENERATED ALWAYS AS (tags->>'resonate:invocation') STORED,
 		created_on                   BIGINT,
 		completed_on                 BIGINT,
 		PRIMARY KEY(id)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
+	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -93,12 +95,14 @@ const (
 		promises
 	WHERE
 		($1::int IS NULL OR sort_id < $1) AND
-		state & $2 != 0 AND
-		id LIKE $3
+		id LIKE $2 AND
+		state & $3 != 0 AND
+		($4::text IS NULL OR invocation = $4) AND
+		($5::jsonb IS NULL OR tags @> $5)
 	ORDER BY
 		sort_id DESC
 	LIMIT
-		$4`
+		$6`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
@@ -537,9 +541,10 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
+	util.Assert(cmd.Tags != nil, "tags cannot be empty")
 
 	// convert query
-	query := strings.ReplaceAll(cmd.Id, "*", "%")
+	id := strings.ReplaceAll(cmd.Id, "*", "%")
 
 	// convert list of state to bit mask
 	mask := 0
@@ -547,8 +552,26 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 		mask = mask | int(state)
 	}
 
+	// tags
+	var invocation *string
+	var tags *string
+
+	if v, ok := cmd.Tags["resonate:invocation"]; ok {
+		invocation = &v
+		delete(cmd.Tags, "resonate:invocation")
+	}
+
+	if len(cmd.Tags) > 0 {
+		t, err := json.Marshal(cmd.Tags)
+		if err != nil {
+			return nil, err
+		}
+
+		tags = util.ToPointer(string(t))
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, mask, query, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, id, mask, invocation, tags, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -594,6 +617,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 }
 
 func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
