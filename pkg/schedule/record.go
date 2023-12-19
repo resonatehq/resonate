@@ -7,17 +7,17 @@ import (
 )
 
 type ScheduleRecord struct {
-	Id                      string
-	Desc                    *string
-	Cron                    string
-	PromiseId               string
-	PromiseParamHeaders     []byte
-	PromiseParamData        []byte
-	PromiseTimeout          int64
-	LastRunTime             *int64
-	NextRunTime             int64
-	CreatedOn               int64
-	IdempotencyKeyForCreate *IdempotencyKey
+	Id                  string
+	Desc                string
+	Cron                string
+	PromiseId           string
+	PromiseParamHeaders []byte
+	PromiseParamData    []byte
+	PromiseTimeout      int64
+	LastRunTime         *int64
+	NextRunTime         int64
+	CreatedOn           int64
+	IdempotencyKey      *promise.IdempotencyKey
 }
 
 func (r *ScheduleRecord) Schedule() (*Schedule, error) {

@@ -2,7 +2,6 @@ package service
 
 import (
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/schedule"
 )
 
 // PROMISES
@@ -38,13 +37,13 @@ type CompletePromiseBody struct {
 // SCHEDULE
 
 type CreateScheduleHeader struct {
-	RequestId      string                   `header:"request-id"`
-	IdempotencyKey *schedule.IdempotencyKey `header:"idempotency-key"`
+	RequestId      string                  `header:"request-id"`
+	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
 }
 
 type CreateScheduleBody struct {
 	Id             string         `json:"id" binding:"required"`
-	Desc           *string        `json:"desc,omitempty"`
+	Desc           string         `json:"desc,omitempty"`
 	Cron           string         `json:"cron" binding:"required"`
 	PromiseId      string         `json:"promiseId" binding:"required"`
 	PromiseParam   *promise.Value `json:"promiseParam,omitempty"`

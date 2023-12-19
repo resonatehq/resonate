@@ -5,9 +5,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
-	"github.com/resonatehq/resonate/pkg/util"
 )
 
 type Request struct {
@@ -27,27 +25,7 @@ type Request struct {
 	Echo               *EchoRequest
 }
 
-// Schedule
-
-type CreateScheduleRequest struct {
-	Id             string                   `json:"id"`
-	Desc           *string                  `json:"desc,omitempty"`
-	Cron           string                   `json:"cron"`
-	PromiseId      string                   `json:"promiseId"`
-	PromiseParam   promise.Value            `json:"promiseParam,omitempty"`
-	PromiseTimeout int64                    `json:"promiseTimeout"`
-	IdempotencyKey *schedule.IdempotencyKey `json:"idemptencyKey,omitempty"`
-}
-
-type ReadScheduleRequest struct {
-	Id string `json:"id"`
-}
-
-type DeleteScheduleRequest struct {
-	Id string `json:"id"`
-}
-
-// Promise
+// Promises
 
 type ReadPromiseRequest struct {
 	Id string `json:"id"`
@@ -89,6 +67,28 @@ type RejectPromiseRequest struct {
 	Strict         bool                    `json:"strict"`
 	Value          promise.Value           `json:"value,omitempty"`
 }
+
+// Schedules
+
+type ReadScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+type CreateScheduleRequest struct {
+	Id             string                  `json:"id"`
+	Desc           string                  `json:"desc,omitempty"`
+	Cron           string                  `json:"cron"`
+	PromiseId      string                  `json:"promiseId"`
+	PromiseParam   promise.Value           `json:"promiseParam,omitempty"`
+	PromiseTimeout int64                   `json:"promiseTimeout"`
+	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+}
+
+type DeleteScheduleRequest struct {
+	Id string `json:"id"`
+}
+
+// Subscriptions
 
 type ReadSubscriptionsRequest struct {
 	PromiseId string `json:"promiseId"`
@@ -190,7 +190,7 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"CreateSchedule(id=%s, desc=%s, cron=%s)",
 			r.CreateSchedule.Id,
-			util.SafeDeref(r.CreateSchedule.Desc),
+			r.CreateSchedule.Desc,
 			r.CreateSchedule.Cron,
 		)
 	case ReadSchedule:
