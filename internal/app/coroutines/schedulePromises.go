@@ -74,6 +74,14 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			return
 		}
 
+		id, err := generatePromiseId(schedule.PromiseId, map[string]string{
+			"timestamp": fmt.Sprintf("%d", crontime),
+		})
+		if err != nil {
+			slog.Error("failed to generate promise id", "err", err)
+			return
+		}
+
 		if schedule.PromiseParam.Headers == nil {
 			schedule.PromiseParam.Headers = map[string]string{}
 		}
@@ -97,9 +105,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id: generatePromiseId(schedule.PromiseId, map[string]string{
-									"timestamp": fmt.Sprintf("%d", crontime),
-								}),
+								Id:             id,
 								State:          status,
 								Param:          schedule.PromiseParam,
 								Timeout:        schedule.PromiseTimeout,
@@ -133,7 +139,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
-			slog.Warn("no promise created")
+			slog.Warn("promise to be scheduled already exists", "schedule", schedule, "promise", id)
 			return
 		}
 
@@ -142,15 +148,13 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 
 // helpers
 
-func generatePromiseId(id string, vars map[string]string) string {
+func generatePromiseId(id string, vars map[string]string) (string, error) {
 	t := template.Must(template.New("promiseID").Parse(id))
 
 	var replaced strings.Builder
-	err := t.Execute(&replaced, vars)
-	if err != nil {
-		// all api-level validations should prevent this.
-		panic(err)
+	if err := t.Execute(&replaced, vars); err != nil {
+		return "", err
 	}
 
-	return replaced.String()
+	return replaced.String(), nil
 }

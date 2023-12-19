@@ -6,9 +6,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
@@ -110,60 +108,6 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*t_api.Requ
 	}
 
 	return reqs
-}
-
-// SCHEDULE
-
-func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	desc := g.dataSet[r.Intn(len(g.dataSet))]
-	cron := fmt.Sprintf("%d %d * * *", r.Intn(60), r.Intn(24))
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	timeout := RangeInt63n(r, t, g.ticks)
-
-	var ikey *schedule.IdempotencyKey
-	if idempotencyKey != nil {
-		ikey = util.ToPointer(schedule.IdempotencyKey(*idempotencyKey))
-	} else {
-		ikey = nil
-	}
-
-	return &t_api.Request{
-		Kind: t_api.CreateSchedule,
-		CreateSchedule: &t_api.CreateScheduleRequest{
-			Id:             id,
-			Desc:           util.ToPointer(string(desc)),
-			Cron:           cron,
-			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
-			PromiseParam:   promise.Value{Headers: headers, Data: data},
-			PromiseTimeout: timeout,
-			IdempotencyKey: ikey,
-		},
-	}
-}
-
-func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Kind: t_api.ReadSchedule,
-		ReadSchedule: &t_api.ReadScheduleRequest{
-			Id: id,
-		},
-	}
-}
-
-func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Kind: t_api.DeleteSchedule,
-		DeleteSchedule: &t_api.DeleteScheduleRequest{
-			Id: id,
-		},
-	}
 }
 
 // PROMISE
@@ -300,6 +244,52 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *t_api.Request 
 			},
 			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
+		},
+	}
+}
+
+// SCHEDULE
+
+func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.ReadSchedule,
+		ReadSchedule: &t_api.ReadScheduleRequest{
+			Id: id,
+		},
+	}
+}
+
+func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+	cron := fmt.Sprintf("%d %d * * *", r.Intn(60), r.Intn(24))
+	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
+	timeout := RangeInt63n(r, t, g.ticks)
+
+	return &t_api.Request{
+		Kind: t_api.CreateSchedule,
+		CreateSchedule: &t_api.CreateScheduleRequest{
+			Id:             id,
+			Desc:           "",
+			Cron:           cron,
+			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
+			PromiseParam:   promise.Value{Headers: headers, Data: data},
+			PromiseTimeout: timeout,
+			IdempotencyKey: idempotencyKey,
+		},
+	}
+}
+
+func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request {
+	id := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.DeleteSchedule,
+		DeleteSchedule: &t_api.DeleteScheduleRequest{
+			Id: id,
 		},
 	}
 }

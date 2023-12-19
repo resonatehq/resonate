@@ -120,64 +120,7 @@ func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
 }
 
-// SCHEDULE
-
-func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.CreateSchedule.Id)
-
-	switch res.CreateSchedule.Status {
-	case t_api.StatusOK:
-		if sm.schedule != nil {
-			if !sm.idempotencyKeyForCreateMatch(res.CreateSchedule.Schedule) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKeyForCreate, res.CreateSchedule.Schedule.IdempotencyKeyForCreate)
-			}
-		}
-		sm.schedule = res.CreateSchedule.Schedule
-		return nil
-	case t_api.StatusCreated:
-		sm.schedule = res.CreateSchedule.Schedule
-		return nil
-	case t_api.StatusScheduleAlreadyExists:
-		return nil
-	case t_api.StatusScheduleNotFound:
-		return fmt.Errorf("invalid response '%d' for create schedule request", res.CreateSchedule.Status)
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
-	}
-}
-
-func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.ReadSchedule.Id)
-
-	switch res.ReadSchedule.Status {
-	case t_api.StatusOK:
-		sm.schedule = res.ReadSchedule.Schedule
-		return nil
-	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil {
-			return fmt.Errorf("schedule exists %s", sm.schedule)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
-	}
-}
-
-func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.DeleteSchedule.Id)
-
-	switch res.DeleteSchedule.Status {
-	case t_api.StatusNoContent:
-		sm.schedule = nil
-		return nil
-	case t_api.StatusScheduleNotFound:
-		return nil
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)
-	}
-}
-
-// PROMISE
+// PROMISES
 
 func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
@@ -426,6 +369,65 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 	}
 }
 
+// SCHEDULES
+
+func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.CreateSchedule.Id)
+
+	switch res.CreateSchedule.Status {
+	case t_api.StatusOK:
+		if sm.schedule != nil {
+			if !sm.idempotencyKeyMatch(res.CreateSchedule.Schedule) {
+				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey)
+			}
+		}
+		sm.schedule = res.CreateSchedule.Schedule
+		return nil
+	case t_api.StatusCreated:
+		sm.schedule = res.CreateSchedule.Schedule
+		return nil
+	case t_api.StatusScheduleAlreadyExists:
+		return nil
+	case t_api.StatusScheduleNotFound:
+		return fmt.Errorf("invalid response '%d' for create schedule request", res.CreateSchedule.Status)
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
+	}
+}
+
+func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.ReadSchedule.Id)
+
+	switch res.ReadSchedule.Status {
+	case t_api.StatusOK:
+		sm.schedule = res.ReadSchedule.Schedule
+		return nil
+	case t_api.StatusScheduleNotFound:
+		if sm.schedule != nil {
+			return fmt.Errorf("schedule exists %s", sm.schedule)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
+	}
+}
+
+func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.DeleteSchedule.Id)
+
+	switch res.DeleteSchedule.Status {
+	case t_api.StatusNoContent:
+		sm.schedule = nil
+		return nil
+	case t_api.StatusScheduleNotFound:
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)
+	}
+}
+
+// SUBSCRIPTIONS
+
 func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&t_api.Request{
@@ -497,6 +499,6 @@ func (m *PromiseModel) completed() bool {
 	return m.promise != nil && m.promise.State != promise.Pending
 }
 
-func (m *ScheduleModel) idempotencyKeyForCreateMatch(schedule *schedule.Schedule) bool {
-	return m.schedule.IdempotencyKeyForCreate != nil && schedule.IdempotencyKeyForCreate != nil && *m.schedule.IdempotencyKeyForCreate == *schedule.IdempotencyKeyForCreate
+func (m *ScheduleModel) idempotencyKeyMatch(schedule *schedule.Schedule) bool {
+	return m.schedule.IdempotencyKey != nil && schedule.IdempotencyKey != nil && *m.schedule.IdempotencyKey == *schedule.IdempotencyKey
 }

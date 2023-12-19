@@ -129,7 +129,7 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 
 		// if same idempotency key, return ok.
 
-		if s.IdempotencyKeyForCreate.Match(req.CreateSchedule.IdempotencyKey) {
+		if s.IdempotencyKey.Match(req.CreateSchedule.IdempotencyKey) {
 			status = t_api.StatusOK
 		}
 

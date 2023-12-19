@@ -120,6 +120,11 @@ type Command struct {
 	SearchPromises             *SearchPromisesCommand
 	CreatePromise              *CreatePromiseCommand
 	UpdatePromise              *UpdatePromiseCommand
+	ReadSchedule               *ReadScheduleCommand
+	ReadSchedules              *ReadSchedulesCommand
+	CreateSchedule             *CreateScheduleCommand
+	UpdateSchedule             *UpdateScheduleCommand
+	DeleteSchedule             *DeleteScheduleCommand
 	ReadTimeouts               *ReadTimeoutsCommand
 	CreateTimeout              *CreateTimeoutCommand
 	DeleteTimeout              *DeleteTimeoutCommand
@@ -135,11 +140,6 @@ type Command struct {
 	TimeoutPromises            *TimeoutPromisesCommand
 	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
-	CreateSchedule             *CreateScheduleCommand
-	ReadSchedule               *ReadScheduleCommand
-	ReadSchedules              *ReadSchedulesCommand
-	UpdateSchedule             *UpdateScheduleCommand
-	DeleteSchedule             *DeleteScheduleCommand
 }
 
 func (c *Command) String() string {
@@ -152,6 +152,11 @@ type Result struct {
 	SearchPromises             *QueryPromisesResult
 	CreatePromise              *AlterPromisesResult
 	UpdatePromise              *AlterPromisesResult
+	ReadSchedule               *QuerySchedulesResult
+	ReadSchedules              *QuerySchedulesResult
+	CreateSchedule             *AlterSchedulesResult
+	UpdateSchedule             *AlterSchedulesResult
+	DeleteSchedule             *AlterSchedulesResult
 	ReadTimeouts               *QueryTimeoutsResult
 	CreateTimeout              *AlterTimeoutsResult
 	DeleteTimeout              *AlterTimeoutsResult
@@ -167,48 +172,10 @@ type Result struct {
 	TimeoutPromises            *AlterPromisesResult
 	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
-	CreateSchedule             *AlterSchedulesResult
-	ReadSchedule               *QuerySchedulesResult
-	ReadSchedules              *QuerySchedulesResult
-	UpdateSchedule             *AlterSchedulesResult
-	DeleteSchedule             *AlterSchedulesResult
 }
 
 func (r *Result) String() string {
 	return r.Kind.String()
-}
-
-// Schedule commands
-
-type CreateScheduleCommand struct {
-	Id             string
-	Desc           *string
-	Cron           string
-	PromiseId      string
-	PromiseParam   promise.Value
-	PromiseTimeout int64
-	LastRunTime    *int64
-	NextRunTime    int64
-	CreatedOn      int64
-	IdempotencyKey *schedule.IdempotencyKey
-}
-
-type UpdateScheduleCommand struct {
-	Id          string
-	LastRunTime *int64
-	NextRunTime int64
-}
-
-type ReadScheduleCommand struct {
-	Id string
-}
-
-type ReadSchedulesCommand struct {
-	NextRunTime int64
-}
-
-type DeleteScheduleCommand struct {
-	Id string
 }
 
 // Promise commands
@@ -252,6 +219,50 @@ type QueryPromisesResult struct {
 }
 
 type AlterPromisesResult struct {
+	RowsAffected int64
+}
+
+// Schedule commands
+
+type ReadScheduleCommand struct {
+	Id string
+}
+
+type ReadSchedulesCommand struct {
+	NextRunTime int64
+}
+
+type CreateScheduleCommand struct {
+	Id             string
+	Desc           string
+	Cron           string
+	PromiseId      string
+	PromiseParam   promise.Value
+	PromiseTimeout int64
+	LastRunTime    *int64
+	NextRunTime    int64
+	CreatedOn      int64
+	IdempotencyKey *promise.IdempotencyKey
+}
+
+type UpdateScheduleCommand struct {
+	Id          string
+	LastRunTime *int64
+	NextRunTime int64
+}
+
+type DeleteScheduleCommand struct {
+	Id string
+}
+
+// Schedule results
+
+type QuerySchedulesResult struct {
+	RowsReturned int64
+	Records      []*schedule.ScheduleRecord
+}
+
+type AlterSchedulesResult struct {
 	RowsAffected int64
 }
 
@@ -366,16 +377,5 @@ type QueryNotificationsResult struct {
 }
 
 type AlterNotificationsResult struct {
-	RowsAffected int64
-}
-
-// Schedule results
-
-type QuerySchedulesResult struct {
-	RowsReturned int64
-	Records      []*schedule.ScheduleRecord
-}
-
-type AlterSchedulesResult struct {
 	RowsAffected int64
 }

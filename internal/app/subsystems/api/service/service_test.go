@@ -666,11 +666,11 @@ func TestCreateSchedule(t *testing.T) {
 		{
 			name: "CreateScheduleMinimal",
 			serviceReqHeader: CreateScheduleHeader{
-				IdempotencyKey: test.StringToScheduleIkey("bar"),
+				IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 			},
 			serviceReqBody: &CreateScheduleBody{
 				Id:             "foo",
-				Desc:           nil,
+				Desc:           "",
 				Cron:           "* * * * * *",
 				PromiseId:      "foo.promise{{.timestamp}}",
 				PromiseTimeout: 1000000,
@@ -679,7 +679,7 @@ func TestCreateSchedule(t *testing.T) {
 				Kind: t_api.CreateSchedule,
 				CreateSchedule: &t_api.CreateScheduleRequest{
 					Id:             "foo",
-					IdempotencyKey: test.StringToScheduleIkey("bar"),
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Cron:           "* * * * * *",
 					PromiseId:      "foo.promise{{.timestamp}}",
 					PromiseTimeout: 1000000,
@@ -691,7 +691,7 @@ func TestCreateSchedule(t *testing.T) {
 					Status: t_api.StatusCreated,
 					Schedule: &schedule.Schedule{
 						Id:   "foo",
-						Desc: nil,
+						Desc: "",
 						Cron: "* * * * * *",
 						// PromiseId:      "foo.promise{{.timestamp}}",
 						PromiseTimeout: 1000000,
@@ -739,7 +739,7 @@ func TestReadSchedule(t *testing.T) {
 					Status: t_api.StatusCreated,
 					Schedule: &schedule.Schedule{
 						Id:             "foo",
-						Desc:           nil,
+						Desc:           "",
 						Cron:           "* * * * * *",
 						PromiseId:      "foo.promise.123123123",
 						PromiseTimeout: 1000000,
