@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/util"
 )
 
 type Schedule struct {
@@ -21,9 +22,9 @@ type Schedule struct {
 
 func (s *Schedule) String() string {
 	return fmt.Sprintf(
-		"Schedule(id=%s, desc=%v, cron=%s, promiseId=%s, promiseParam=%v, promiseTimeout=%d, lastRunTime=%d, nextRunTime=%d, createdOn=%d, idempotencyKeyForCreate=%s)",
+		"Schedule(id=%s, desc=%s, cron=%s, promiseId=%s, promiseParam=%s, promiseTimeout=%d, lastRunTime=%d, nextRunTime=%d, createdOn=%d, idempotencyKeyForCreate=%s)",
 		s.Id,
-		s.Desc,
+		util.SafeDeref(s.Desc),
 		s.Cron,
 		s.PromiseId,
 		s.PromiseParam,
