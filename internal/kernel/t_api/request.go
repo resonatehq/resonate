@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/util"
 )
 
 type Request struct {
@@ -187,9 +188,9 @@ func (r *Request) String() string {
 		)
 	case CreateSchedule:
 		return fmt.Sprintf(
-			"CreateSchedule(id=%s, desc=%v, cron=%s)",
+			"CreateSchedule(id=%s, desc=%s, cron=%s)",
 			r.CreateSchedule.Id,
-			r.CreateSchedule.Desc,
+			util.SafeDeref(r.CreateSchedule.Desc),
 			r.CreateSchedule.Cron,
 		)
 	case ReadSchedule:
