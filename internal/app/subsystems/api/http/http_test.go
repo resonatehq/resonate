@@ -12,6 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -575,6 +576,88 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			status: 201,
+		},
+		{
+			name:   "ReadSchedule",
+			path:   "schedules/foo",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.ReadSchedule,
+				ReadSchedule: &t_api.ReadScheduleRequest{
+					Id: "foo",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ReadSchedule,
+				ReadSchedule: &t_api.ReadScheduleResponse{
+					Status: t_api.StatusOK,
+					Schedule: &schedule.Schedule{
+						Id:             "foo",
+						Desc:           "",
+						Cron:           "* * * * * *",
+						PromiseId:      "foo.{{.timestamp}}",
+						PromiseTimeout: 1000000,
+					},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "CreateSchedule",
+			path:   "schedules",
+			method: "POST",
+			headers: map[string]string{
+				"Idempotency-Key": "bar",
+			},
+			body: []byte(`{
+				"id": "foo",
+				"desc": "",
+				"cron": "* * * * * *",
+				"promiseId": "foo.{{.timestamp}}",
+				"promiseTimeout": 1000000
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.CreateSchedule,
+				CreateSchedule: &t_api.CreateScheduleRequest{
+					Id:             "foo",
+					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					Cron:           "* * * * * *",
+					PromiseId:      "foo.{{.timestamp}}",
+					PromiseTimeout: 1000000,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateSchedule,
+				CreateSchedule: &t_api.CreateScheduleResponse{
+					Status: t_api.StatusCreated,
+					Schedule: &schedule.Schedule{
+						Id:             "foo",
+						Desc:           "",
+						Cron:           "* * * * * *",
+						PromiseId:      "foo.{{.timestamp}}",
+						PromiseTimeout: 1000000,
+					},
+				},
+			},
+			status: 201,
+		},
+		{
+			name:   "DeleteSchedule",
+			path:   "schedules/foo",
+			method: "DELETE",
+			req: &t_api.Request{
+				Kind: t_api.DeleteSchedule,
+				DeleteSchedule: &t_api.DeleteScheduleRequest{
+					Id: "foo",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.DeleteSchedule,
+				DeleteSchedule: &t_api.DeleteScheduleResponse{
+					Status: t_api.StatusNoContent,
+				},
+			},
+			status: 204,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
