@@ -246,7 +246,7 @@ const (
 	SET
 		last_run_time = ?, next_run_time = ?
 	WHERE
-		id = ? AND (last_run_time IS NULL OR next_run_time = ?)`
+		id = ? AND next_run_time = ?`
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT 
