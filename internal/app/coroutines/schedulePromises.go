@@ -89,7 +89,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			status = promise.Timedout
 		}
 
-		_, err = c.Yield(&t_aio.Submission{
+		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
@@ -123,11 +123,16 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			},
 		})
 		if err != nil {
-			slog.Error("failed to read schedules", "err", err)
+			slog.Error("failed to create promise and update schedule", "err", err)
 			return
 		}
 
 		// todo: add checks for promise creation failure and schedule update failure.
+		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
+			slog.Warn("no promise created")
+			fmt.Println(schedule.Id, crontime, next)
+			return
+		}
 
 	})
 }
