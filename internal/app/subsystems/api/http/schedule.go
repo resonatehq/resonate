@@ -40,7 +40,9 @@ func (s *server) createSchedule(c *gin.Context) {
 // READ
 
 func (s *server) readSchedule(c *gin.Context) {
-	res, err := s.service.ReadSchedule(c.Param("id"))
+	id := ExtractId(c.Param("id"))
+
+	res, err := s.service.ReadSchedule(id)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
@@ -60,7 +62,9 @@ func (s *server) readSchedule(c *gin.Context) {
 // DELETE
 
 func (s *server) deleteSchedule(c *gin.Context) {
-	res, err := s.service.DeleteSchedule(c.Param("id"))
+	id := ExtractId(c.Param("id"))
+
+	res, err := s.service.DeleteSchedule(id)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

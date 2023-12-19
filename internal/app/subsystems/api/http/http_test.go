@@ -85,6 +85,28 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
+			name:   "ReadPromiseWithSlash",
+			path:   "promises/foo/bar",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseRequest{
+					Id: "foo/bar",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ReadPromise,
+				ReadPromise: &t_api.ReadPromiseResponse{
+					Status: t_api.StatusOK,
+					Promise: &promise.Promise{
+						Id:    "foo/bar",
+						State: promise.Pending,
+					},
+				},
+			},
+			status: 200,
+		},
+		{
 			name:   "ReadPromiseNotFound",
 			path:   "promises/bar",
 			method: "GET",
@@ -302,7 +324,7 @@ func TestHttpServer(t *testing.T) {
 				"Strict":          "true",
 			},
 			body: []byte(`{
-				"id": "foo",
+				"id": "foo/bar",
 				"param": {
 					"headers": {"a":"a","b":"b","c":"c"},
 					"data": "cGVuZGluZw=="
@@ -312,7 +334,7 @@ func TestHttpServer(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseRequest{
-					Id:             "foo",
+					Id:             "foo/bar",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Param: promise.Value{
@@ -327,7 +349,7 @@ func TestHttpServer(t *testing.T) {
 				CreatePromise: &t_api.CreatePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
+						Id:    "foo/bar",
 						State: promise.Pending,
 					},
 				},
@@ -369,7 +391,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "CancelPromise",
-			path:   "promises/foo",
+			path:   "promises/foo/bar",
 			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
@@ -385,7 +407,7 @@ func TestHttpServer(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseRequest{
-					Id:             "foo",
+					Id:             "foo/bar",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
@@ -399,7 +421,7 @@ func TestHttpServer(t *testing.T) {
 				CancelPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
+						Id:    "foo/bar",
 						State: promise.Canceled,
 					},
 				},
@@ -439,7 +461,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "ResolvePromise",
-			path:   "promises/foo",
+			path:   "promises/foo/bar",
 			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
@@ -455,7 +477,7 @@ func TestHttpServer(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseRequest{
-					Id:             "foo",
+					Id:             "foo/bar",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
@@ -469,7 +491,7 @@ func TestHttpServer(t *testing.T) {
 				ResolvePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
+						Id:    "foo/bar",
 						State: promise.Resolved,
 					},
 				},
@@ -509,7 +531,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "RejectPromise",
-			path:   "promises/foo",
+			path:   "promises/foo/bar",
 			method: "PATCH",
 			headers: map[string]string{
 				"Idempotency-Key": "bar",
@@ -525,7 +547,7 @@ func TestHttpServer(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseRequest{
-					Id:             "foo",
+					Id:             "foo/bar",
 					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
 					Strict:         true,
 					Value: promise.Value{
@@ -539,7 +561,7 @@ func TestHttpServer(t *testing.T) {
 				RejectPromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
+						Id:    "foo/bar",
 						State: promise.Rejected,
 					},
 				},

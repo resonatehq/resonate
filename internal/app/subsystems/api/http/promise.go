@@ -16,13 +16,15 @@ import (
 // Read Promise
 
 func (s *server) readPromise(c *gin.Context) {
+	id := ExtractId(c.Param("id"))
+
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.ReadPromise(c.Param("id"), &header)
+	resp, err := s.service.ReadPromise(id, &header)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
@@ -97,6 +99,8 @@ func (s *server) createPromise(c *gin.Context) {
 // Complete Promise
 
 func (s *server) completePromise(c *gin.Context) {
+	id := ExtractId(c.Param("id"))
+
 	var header service.CompletePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
@@ -108,8 +112,6 @@ func (s *server) completePromise(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
-
-	id := c.Param("id")
 
 	var (
 		resp *t_api.CompletePromiseResponse
