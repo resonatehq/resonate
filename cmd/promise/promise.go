@@ -1,6 +1,8 @@
 package promise
 
 import (
+	"os"
+
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -14,7 +16,7 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	}
 
 	// Add subcommands
-	cmd.AddCommand(NewCmdCreatePromise(c))
+	cmd.AddCommand(NewCmdCreatePromise(c, os.Stdout))
 	cmd.AddCommand(NewCmdDescribePromise(c))
 	cmd.AddCommand(NewCmdListPromises(c))
 	cmd.AddCommand(NewCmdCompletePromise(c))

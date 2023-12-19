@@ -80,17 +80,17 @@ func TestCreatePromiseCmd(t *testing.T) {
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
 			// Create buffer writer
-			var stdout bytes.Buffer
+			stdout := &bytes.Buffer{}
 
 			// Wire up client set
 			clientSet := &client.ClientSet{}
 			clientSet.SetPromisesV1Alpha1(tc.mockPromiseClient)
 
 			// Create command in test
-			cmd := NewCmdCreatePromise(clientSet)
+			cmd := NewCmdCreatePromise(clientSet, stdout)
 
 			// Set streams for command
-			cmd.SetOut(&stdout)
+			cmd.SetOut(stdout)
 
 			// Set args for command
 			cmd.SetArgs(tc.args)
