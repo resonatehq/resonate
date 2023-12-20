@@ -67,15 +67,14 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 	// handle creating promise (schedule run) and updating schedule record.
 
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		crontime := schedule.NextRunTime
-		next, err := util.Next(crontime, schedule.Cron)
+		next, err := util.Next(schedule.NextRunTime, schedule.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "err", err)
 			return
 		}
 
 		id, err := generatePromiseId(schedule.PromiseId, map[string]string{
-			"timestamp": fmt.Sprintf("%d", crontime),
+			"timestamp": fmt.Sprintf("%d", schedule.NextRunTime),
 		})
 		if err != nil {
 			slog.Error("failed to generate promise id", "err", err)
@@ -91,9 +90,8 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 
 		// calculate timeout for promise
 
-		now := c.Time()
 		state := promise.Pending
-		if schedule.PromiseTimeout+schedule.NextRunTime < now {
+		if c.Time() >= schedule.PromiseTimeout+schedule.NextRunTime {
 			state = promise.Timedout
 		}
 
@@ -113,14 +111,14 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 								Tags: map[string]string{
 									"resonate:invocation": "true",
 								},
-								CreatedOn: crontime,
+								CreatedOn: schedule.NextRunTime,
 							},
 						},
 						{
 							Kind: t_aio.UpdateSchedule,
 							UpdateSchedule: &t_aio.UpdateScheduleCommand{
 								Id:          schedule.Id,
-								LastRunTime: &crontime,
+								LastRunTime: &schedule.NextRunTime,
 								NextRunTime: next,
 							},
 						},
@@ -149,7 +147,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 // helpers
 
 func generatePromiseId(id string, vars map[string]string) (string, error) {
-	t := template.Must(template.New("promiseID").Parse(id))
+	t := template.Must(template.New("promiseId").Parse(id))
 
 	var replaced strings.Builder
 	if err := t.Execute(&replaced, vars); err != nil {
