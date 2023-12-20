@@ -13,7 +13,7 @@ type ResonateClient interface {
 type ClientSet struct {
 	server string
 
-	promiseV1alpha1   promises.ClientWithResponsesInterface
+	promisesV1alpha1  promises.ClientWithResponsesInterface
 	schedulesV1alpha1 schedules.ClientWithResponsesInterface
 }
 
@@ -23,7 +23,7 @@ func NewOrDie(server string) ResonateClient {
 	cs := &ClientSet{}
 
 	cs.server = server
-	cs.promiseV1alpha1, err = promises.NewClientWithResponses(server)
+	cs.promisesV1alpha1, err = promises.NewClientWithResponses(server)
 	if err != nil {
 		panic(err)
 	}
@@ -36,7 +36,7 @@ func NewOrDie(server string) ResonateClient {
 }
 
 func (c *ClientSet) SetPromisesV1Alpha1(client promises.ClientWithResponsesInterface) {
-	c.promiseV1alpha1 = client
+	c.promisesV1alpha1 = client
 }
 
 func (c *ClientSet) SetSchedulesV1Alpha1(client schedules.ClientWithResponsesInterface) {
@@ -44,7 +44,7 @@ func (c *ClientSet) SetSchedulesV1Alpha1(client schedules.ClientWithResponsesInt
 }
 
 func (c *ClientSet) PromisesV1Alpha1() promises.ClientWithResponsesInterface {
-	return c.promiseV1alpha1
+	return c.promisesV1alpha1
 }
 
 func (c *ClientSet) SchedulesV1Alpha1() schedules.ClientWithResponsesInterface {
