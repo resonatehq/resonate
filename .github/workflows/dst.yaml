@@ -2,6 +2,9 @@ name: DST
 
 on:
   workflow_dispatch:
+    inputs: 
+      seed: 
+        type: string 
   schedule:
   - cron: '0 */4 * * *'  # every 4 hours
 
@@ -29,6 +32,7 @@ jobs:
         path: resonate
 
   seed:
+    if: ${{ !inputs.seed }}
     runs-on: ubuntu-latest
     steps:
     - id: seed
@@ -47,19 +51,19 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
+    - name: Run dst (seed=${{ inputs.seed || needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
+        ./resonate dst run --seed ${{ inputs.seed || needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: ${{ failure() }}
       run: |
         ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
+          --seed ${{ inputs.seed || needs.seed.outputs.seed }} \
           --store sqlite \
-          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
+          --reason "DST run failed for seed=${{ inputs.seed || needs.seed.outputs.seed }} and store=sqlite." \
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
@@ -78,10 +82,10 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
+    - name: Run dst (seed=${{ inputs.seed || needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
+        ./resonate dst run --seed ${{ inputs.seed || needs.seed.outputs.seed }} --aio-store sqlite > logs.txt
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}
       with:
@@ -120,19 +124,19 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
+    - name: Run dst (seed=${{ inputs.seed || needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
+        ./resonate dst run --seed ${{ inputs.seed || needs.seed.outputs.seed }} --aio-store postgres > logs.txt
     - name: Create issue if dst failed
       env:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: ${{ failure() }}
       run: |
         ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
+          --seed ${{ inputs.seed || needs.seed.outputs.seed }} \
           --store postgres \
-          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+          --reason "DST run failed for seed=${{ inputs.seed || needs.seed.outputs.seed }} and store=postgres." \
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
@@ -174,10 +178,10 @@ jobs:
       uses: actions/download-artifact@v3
       with:
         name: resonate
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }})
+    - name: Run dst (seed=${{ inputs.seed || needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store postgres > logs.txt
+        ./resonate dst run --seed ${{ inputs.seed || needs.seed.outputs.seed }} --aio-store postgres > logs.txt
     - uses: actions/upload-artifact@v3
       if: ${{ always() }}
       with:
@@ -212,9 +216,9 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
+          --seed ${{ inputs.seed || needs.seed.outputs.seed }} \
           --store sqlite \
-          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
+          --reason "Two DST runs produced different results for seed=${{ inputs.seed || needs.seed.outputs.seed }} and store=sqlite." \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
 
@@ -246,9 +250,9 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
+          --seed ${{ inputs.seed || needs.seed.outputs.seed }} \
           --store postgres \
-          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
+          --reason "Two DST runs produced different results for seed=${{ inputs.seed || needs.seed.outputs.seed }} and store=postgres." \
           --repo $GITHUB_REPOSITORY \
           --commit $GITHUB_SHA
 
@@ -280,7 +284,7 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate dst issue \
-          --seed ${{ needs.seed.outputs.seed }} \
+          --seed ${{ inputs.seed || needs.seed.outputs.seed }} \
           --store sqlite/postgres \
           --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite/postgres." \
           --repo $GITHUB_REPOSITORY \
