@@ -47,7 +47,7 @@ jobs:
 
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
@@ -78,7 +78,7 @@ jobs:
     timeout-minutes: 150
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
@@ -120,7 +120,7 @@ jobs:
 
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
@@ -174,7 +174,7 @@ jobs:
 
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
@@ -192,16 +192,16 @@ jobs:
     needs: [build, seed, dst-sqlite-1, dst-sqlite-2]
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Download logs from run 1
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: sqlite-logs-1
         path: logs-1.txt
     - name: Download logs from run 2
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: sqlite-logs-2
         path: logs-2.txt
@@ -226,16 +226,16 @@ jobs:
     needs: [build, seed, dst-postgres-1, dst-postgres-2]
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Download logs from run 1
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: postgres-logs-1
         path: logs-1.txt
     - name: Download logs from run 2
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: postgres-logs-2
         path: logs-2.txt
@@ -260,16 +260,16 @@ jobs:
     needs: [build, seed, dst-sqlite-1, dst-postgres-1]
     steps:
     - name: Download resonate binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: resonate
     - name: Download logs from run 1
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: sqlite-logs-1
         path: logs-1.txt
     - name: Download logs from run 2
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: postgres-logs-1
         path: logs-2.txt
