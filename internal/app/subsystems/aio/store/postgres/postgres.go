@@ -145,6 +145,40 @@ const (
 	WHERE
 		state = 1 AND timeout <= $1`
 
+	SCHEDULE_SELECT_STATEMENT = `
+	SELECT
+		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+	FROM
+		schedules
+	WHERE
+		id = $1`
+
+	SCHEDULE_SELECT_ALL_STATEMENT = `
+	SELECT
+		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+	FROM
+		schedules
+	WHERE
+		next_run_time <= $1`
+
+	SCHEDULE_INSERT_STATEMENT = `
+	INSERT INTO schedules
+		(id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
+	VALUES
+		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	ON CONFLICT(id) DO NOTHING`
+
+	SCHEDULE_UPDATE_STATEMENT = `
+	UPDATE
+		schedules
+	SET
+		last_run_time = next_run_time, next_run_time = $1
+	WHERE
+		id = $2 AND next_run_time = $3`
+
+	SCHEDULE_DELETE_STATEMENT = `
+	DELETE FROM schedules WHERE id = $1`
+
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
         id, time
@@ -242,40 +276,6 @@ const (
 
 	NOTIFICATION_DELETE_STATEMENT = `
 	DELETE FROM notifications WHERE id = $1 AND promise_id = $2`
-
-	SCHEDULE_SELECT_STATEMENT = `
-	SELECT
-		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
-	FROM
-		schedules
-	WHERE
-		id = $1`
-
-	SCHEDULE_SELECT_ALL_STATEMENT = `
-	SELECT
-		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
-	FROM
-		schedules
-	WHERE
-		next_run_time <= $1`
-
-	SCHEDULE_INSERT_STATEMENT = `
-	INSERT INTO schedules
-		(id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
-	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-	ON CONFLICT(id) DO NOTHING`
-
-	SCHEDULE_UPDATE_STATEMENT = `
-	UPDATE
-		schedules
-	SET
-		last_run_time = next_run_time, next_run_time = $1
-	WHERE
-		id = $2 AND next_run_time = $3`
-
-	SCHEDULE_DELETE_STATEMENT = `
-	DELETE FROM schedules WHERE id = $1`
 )
 
 type Config struct {
@@ -383,25 +383,6 @@ func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t
 }
 
 func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
-	// SCHEDULES
-	scheduleInsertStmt, err := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleInsertStmt.Close()
-
-	scheduleUpdateStmt, err := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleUpdateStmt.Close()
-
-	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleDeleteStmt.Close()
-
 	// PROMISES
 
 	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
@@ -422,6 +403,28 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 	defer promiseUpdateTimeoutStmt.Close()
 
+	// SCHEDULES
+
+	scheduleInsertStmt, err := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleInsertStmt.Close()
+
+	scheduleUpdateStmt, err := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleUpdateStmt.Close()
+
+	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer scheduleDeleteStmt.Close()
+
+	// TIMEOUTS
+
 	timeoutInsertStmt, err := tx.Prepare(TIMEOUT_INSERT_STATEMENT)
 	if err != nil {
 		return nil, err
@@ -433,6 +436,8 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 		return nil, err
 	}
 	defer timeoutDeleteStmt.Close()
+
+	// SUBSCRIPTIONS
 
 	subscriptionInsertStmt, err := tx.Prepare(SUBSCRIPTION_INSERT_STATEMENT)
 	if err != nil {
@@ -457,6 +462,8 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 		return nil, err
 	}
 	defer subscriptionDeleteAllTimeoutStmt.Close()
+
+	// NOTIFICATIONS
 
 	notificationInsertStmt, err := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
 	if err != nil {
@@ -557,7 +564,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
 
-				// Schedule
+			// Schedule
 			case t_aio.ReadSchedule:
 				util.Assert(command.ReadSchedule != nil, "command must not be nil")
 				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
@@ -585,150 +592,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 
 	return results, nil
-}
-
-// SCHEDULES
-
-func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.Result, error) {
-	row := tx.QueryRow(SCHEDULE_SELECT_STATEMENT, cmd.Id)
-	record := &schedule.ScheduleRecord{}
-	rowsReturned := int64(1)
-
-	if err := row.Scan(
-		&record.Id,
-		&record.Desc,
-		&record.Cron,
-		&record.PromiseId,
-		&record.PromiseParamHeaders,
-		&record.PromiseParamData,
-		&record.PromiseTimeout,
-		&record.LastRunTime,
-		&record.NextRunTime,
-		&record.CreatedOn,
-		&record.IdempotencyKey,
-	); err != nil {
-		if err == sql.ErrNoRows {
-			rowsReturned = 0
-		} else {
-			return nil, err
-		}
-	}
-
-	var records []*schedule.ScheduleRecord
-	if rowsReturned == 1 {
-		records = append(records, record)
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.ReadSchedule,
-		ReadSchedule: &t_aio.QuerySchedulesResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
-	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	rowsReturned := int64(0)
-	var records []*schedule.ScheduleRecord
-
-	for rows.Next() {
-		record := &schedule.ScheduleRecord{}
-		if err := rows.Scan(
-			&record.Id,
-			&record.Desc,
-			&record.Cron,
-			&record.PromiseId,
-			&record.PromiseParamHeaders,
-			&record.PromiseParamData,
-			&record.PromiseTimeout,
-			&record.LastRunTime,
-			&record.NextRunTime,
-			&record.CreatedOn,
-			&record.IdempotencyKey,
-		); err != nil {
-			return nil, err
-		}
-
-		records = append(records, record)
-		rowsReturned++
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.ReadSchedules,
-		ReadSchedules: &t_aio.QuerySchedulesResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	headers, err := json.Marshal(cmd.PromiseParam.Headers)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, headers, cmd.PromiseParam.Data, cmd.PromiseTimeout, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.CreateSchedule,
-		CreateSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.UpdateSchedule,
-		UpdateSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Id)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.DeleteSchedule,
-		DeleteSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
 }
 
 // PROMISES
@@ -937,6 +800,152 @@ func (w *PostgresStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *t
 		},
 	}, nil
 }
+
+// SCHEDULES
+
+func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.Result, error) {
+	row := tx.QueryRow(SCHEDULE_SELECT_STATEMENT, cmd.Id)
+	record := &schedule.ScheduleRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.Id,
+		&record.Desc,
+		&record.Cron,
+		&record.PromiseId,
+		&record.PromiseParamHeaders,
+		&record.PromiseParamData,
+		&record.PromiseTimeout,
+		&record.LastRunTime,
+		&record.NextRunTime,
+		&record.CreatedOn,
+		&record.IdempotencyKey,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*schedule.ScheduleRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedule,
+		ReadSchedule: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*schedule.ScheduleRecord
+
+	for rows.Next() {
+		record := &schedule.ScheduleRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Desc,
+			&record.Cron,
+			&record.PromiseId,
+			&record.PromiseParamHeaders,
+			&record.PromiseParamData,
+			&record.PromiseTimeout,
+			&record.LastRunTime,
+			&record.NextRunTime,
+			&record.CreatedOn,
+			&record.IdempotencyKey,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadSchedules,
+		ReadSchedules: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
+	headers, err := json.Marshal(cmd.PromiseParam.Headers)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, headers, cmd.PromiseParam.Data, cmd.PromiseTimeout, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateSchedule,
+		CreateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.UpdateSchedule,
+		UpdateSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.DeleteSchedule,
+		DeleteSchedule: &t_aio.AlterSchedulesResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+// TIMEOUTS
 
 func (w *PostgresStoreWorker) readTimeouts(tx *sql.Tx, cmd *t_aio.ReadTimeoutsCommand) (*t_aio.Result, error) {
 	// select

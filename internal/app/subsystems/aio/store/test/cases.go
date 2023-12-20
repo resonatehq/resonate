@@ -71,6 +71,10 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 					for _, record := range result.ReadSchedule.Records {
 						record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
 					}
+				case t_aio.ReadSchedules:
+					for _, record := range result.ReadSchedules.Records {
+						record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					}
 				}
 			}
 
@@ -84,220 +88,9 @@ func (c *testCase) Panic() bool {
 }
 
 var TestCases = []*testCase{
-	{
-		name: "CreateUpdateDeleteSchedule",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.CreateScheduleCommand{
-					Id:        "foo",
-					Desc:      "this is a test schedule",
-					Cron:      "* * * * *",
-					PromiseId: "foo.{{.timestamp}}",
-					PromiseParam: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte("Created Durable Promise"),
-					},
-					PromiseTimeout: 1000000,
-					LastRunTime:    nil,
-					NextRunTime:    1000,
-					CreatedOn:      500,
-					IdempotencyKey: nil,
-				},
-			},
-			{
-				Kind: t_aio.UpdateSchedule,
-				UpdateSchedule: &t_aio.UpdateScheduleCommand{
-					Id:          "foo",
-					LastRunTime: util.ToPointer[int64](1000),
-					NextRunTime: 1500,
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedule,
-				ReadSchedule: &t_aio.ReadScheduleCommand{
-					Id: "foo",
-				},
-			},
-			{
-				Kind: t_aio.DeleteSchedule,
-				DeleteSchedule: &t_aio.DeleteScheduleCommand{
-					Id: "foo",
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedule,
-				ReadSchedule: &t_aio.ReadScheduleCommand{
-					Id: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.UpdateSchedule,
-				UpdateSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedule,
-				ReadSchedule: &t_aio.QuerySchedulesResult{
-					RowsReturned: 1,
-					Records: []*schedule.ScheduleRecord{{
-						Id:                  "foo",
-						Desc:                "this is a test schedule",
-						Cron:                "* * * * *",
-						PromiseId:           "foo.{{.timestamp}}",
-						PromiseParamHeaders: []byte("{}"),
-						PromiseParamData:    []byte("Created Durable Promise"),
-						PromiseTimeout:      1000000,
-						LastRunTime:         util.ToPointer[int64](1000),
-						NextRunTime:         1500,
-						CreatedOn:           500,
-						IdempotencyKey:      nil,
-					}},
-				},
-			},
-			{
-				Kind: t_aio.DeleteSchedule,
-				DeleteSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedule,
-				ReadSchedule: &t_aio.QuerySchedulesResult{
-					RowsReturned: 0,
-					Records:      nil,
-				},
-			},
-		},
-	},
-	{
-		name: "ReadSchedules",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.CreateScheduleCommand{
-					Id:        "foo-1",
-					Desc:      "this is a test schedule",
-					Cron:      "* * * * *",
-					PromiseId: "foo.{{.timestamp}}",
-					PromiseParam: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte("Created Durable Promise"),
-					},
-					PromiseTimeout: 1000000,
-					LastRunTime:    nil,
-					NextRunTime:    1000,
-					CreatedOn:      500,
-					IdempotencyKey: nil,
-				},
-			},
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.CreateScheduleCommand{
-					Id:        "foo-2",
-					Desc:      "this is a test schedule",
-					Cron:      "* * * * *",
-					PromiseId: "foo.{{.timestamp}}",
-					PromiseParam: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte("Created Durable Promise"),
-					},
-					PromiseTimeout: 1000000,
-					LastRunTime:    nil,
-					NextRunTime:    2000,
-					CreatedOn:      500,
-					IdempotencyKey: nil,
-				},
-			},
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.CreateScheduleCommand{
-					Id:        "foo-3",
-					Desc:      "this is a test schedule",
-					Cron:      "* * * * *",
-					PromiseId: "foo.{{.timestamp}}",
-					PromiseParam: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte("Created Durable Promise"),
-					},
-					PromiseTimeout: 1000000,
-					LastRunTime:    nil,
-					NextRunTime:    3000,
-					CreatedOn:      500,
-					IdempotencyKey: nil,
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedules,
-				ReadSchedules: &t_aio.ReadSchedulesCommand{
-					NextRunTime: 2500,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSchedule,
-				CreateSchedule: &t_aio.AlterSchedulesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSchedules,
-				ReadSchedules: &t_aio.QuerySchedulesResult{
-					RowsReturned: 2,
-					Records: []*schedule.ScheduleRecord{
-						{
-							Id:                  "foo-1",
-							Desc:                "this is a test schedule",
-							Cron:                "* * * * *",
-							PromiseId:           "foo.{{.timestamp}}",
-							PromiseParamHeaders: []byte("{}"),
-							PromiseParamData:    []byte("Created Durable Promise"),
-							PromiseTimeout:      1000000,
-							LastRunTime:         nil,
-							NextRunTime:         1000,
-							CreatedOn:           500,
-							IdempotencyKey:      nil,
-						},
-						{
-							Id:                  "foo-2",
-							Desc:                "this is a test schedule",
-							Cron:                "* * * * *",
-							PromiseId:           "foo.{{.timestamp}}",
-							PromiseParamHeaders: []byte("{}"),
-							PromiseParamData:    []byte("Created Durable Promise"),
-							PromiseTimeout:      1000000,
-							LastRunTime:         nil,
-							NextRunTime:         2000,
-							CreatedOn:           500,
-							IdempotencyKey:      nil,
-						},
-					},
-				},
-			},
-		},
-	},
+
+	// PROMISES
+
 	{
 		name: "CreatePromise",
 		commands: []*t_aio.Command{
@@ -2176,6 +1969,226 @@ var TestCases = []*testCase{
 			},
 		},
 	},
+
+	// SCHEDULES
+
+	{
+		name: "CreateUpdateDeleteSchedule",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.CreateScheduleCommand{
+					Id:        "foo",
+					Desc:      "this is a test schedule",
+					Cron:      "* * * * *",
+					PromiseId: "foo.{{.timestamp}}",
+					PromiseParam: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte("Created Durable Promise"),
+					},
+					PromiseTimeout: 1000000,
+					LastRunTime:    nil,
+					NextRunTime:    1000,
+					CreatedOn:      500,
+					IdempotencyKey: nil,
+				},
+			},
+			{
+				Kind: t_aio.UpdateSchedule,
+				UpdateSchedule: &t_aio.UpdateScheduleCommand{
+					Id:          "foo",
+					LastRunTime: util.ToPointer[int64](1000),
+					NextRunTime: 1500,
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedule,
+				ReadSchedule: &t_aio.ReadScheduleCommand{
+					Id: "foo",
+				},
+			},
+			{
+				Kind: t_aio.DeleteSchedule,
+				DeleteSchedule: &t_aio.DeleteScheduleCommand{
+					Id: "foo",
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedule,
+				ReadSchedule: &t_aio.ReadScheduleCommand{
+					Id: "foo",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateSchedule,
+				UpdateSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedule,
+				ReadSchedule: &t_aio.QuerySchedulesResult{
+					RowsReturned: 1,
+					Records: []*schedule.ScheduleRecord{{
+						Id:                  "foo",
+						Desc:                "this is a test schedule",
+						Cron:                "* * * * *",
+						PromiseId:           "foo.{{.timestamp}}",
+						PromiseParamHeaders: []byte("{}"),
+						PromiseParamData:    []byte("Created Durable Promise"),
+						PromiseTimeout:      1000000,
+						LastRunTime:         util.ToPointer[int64](1000),
+						NextRunTime:         1500,
+						CreatedOn:           500,
+						IdempotencyKey:      nil,
+					}},
+				},
+			},
+			{
+				Kind: t_aio.DeleteSchedule,
+				DeleteSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedule,
+				ReadSchedule: &t_aio.QuerySchedulesResult{
+					RowsReturned: 0,
+					Records:      nil,
+				},
+			},
+		},
+	},
+	{
+		name: "ReadSchedules",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.CreateScheduleCommand{
+					Id:        "foo-1",
+					Desc:      "this is a test schedule",
+					Cron:      "* * * * *",
+					PromiseId: "foo.{{.timestamp}}",
+					PromiseParam: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte("Created Durable Promise"),
+					},
+					PromiseTimeout: 1000000,
+					LastRunTime:    nil,
+					NextRunTime:    1000,
+					CreatedOn:      500,
+					IdempotencyKey: nil,
+				},
+			},
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.CreateScheduleCommand{
+					Id:        "foo-2",
+					Desc:      "this is a test schedule",
+					Cron:      "* * * * *",
+					PromiseId: "foo.{{.timestamp}}",
+					PromiseParam: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte("Created Durable Promise"),
+					},
+					PromiseTimeout: 1000000,
+					LastRunTime:    nil,
+					NextRunTime:    2000,
+					CreatedOn:      500,
+					IdempotencyKey: nil,
+				},
+			},
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.CreateScheduleCommand{
+					Id:        "foo-3",
+					Desc:      "this is a test schedule",
+					Cron:      "* * * * *",
+					PromiseId: "foo.{{.timestamp}}",
+					PromiseParam: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte("Created Durable Promise"),
+					},
+					PromiseTimeout: 1000000,
+					LastRunTime:    nil,
+					NextRunTime:    3000,
+					CreatedOn:      500,
+					IdempotencyKey: nil,
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedules,
+				ReadSchedules: &t_aio.ReadSchedulesCommand{
+					NextRunTime: 2500,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateSchedule,
+				CreateSchedule: &t_aio.AlterSchedulesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadSchedules,
+				ReadSchedules: &t_aio.QuerySchedulesResult{
+					RowsReturned: 2,
+					Records: []*schedule.ScheduleRecord{
+						{
+							Id:                  "foo-1",
+							Desc:                "this is a test schedule",
+							Cron:                "* * * * *",
+							PromiseId:           "foo.{{.timestamp}}",
+							PromiseParamHeaders: []byte("{}"),
+							PromiseParamData:    []byte("Created Durable Promise"),
+							PromiseTimeout:      1000000,
+							LastRunTime:         nil,
+							NextRunTime:         1000,
+							CreatedOn:           500,
+							IdempotencyKey:      nil,
+						},
+						{
+							Id:                  "foo-2",
+							Desc:                "this is a test schedule",
+							Cron:                "* * * * *",
+							PromiseId:           "foo.{{.timestamp}}",
+							PromiseParamHeaders: []byte("{}"),
+							PromiseParamData:    []byte("Created Durable Promise"),
+							PromiseTimeout:      1000000,
+							LastRunTime:         nil,
+							NextRunTime:         2000,
+							CreatedOn:           500,
+							IdempotencyKey:      nil,
+						},
+					},
+				},
+			},
+		},
+	},
+
+	// TIMEOUTS
+
 	{
 		name: "CreateTimeout",
 		commands: []*t_aio.Command{

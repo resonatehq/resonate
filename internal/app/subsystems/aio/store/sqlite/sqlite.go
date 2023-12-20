@@ -48,7 +48,7 @@ const (
 
 	CREATE TABLE IF NOT EXISTS schedules (
 		id                         TEXT PRIMARY KEY,
-		desc                       TEXT,
+		description                TEXT,
 		cron                       TEXT,
 		promise_id                 TEXT,
 		promise_param_headers      BLOB,
@@ -139,7 +139,7 @@ const (
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
-		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
 	FROM
 		schedules
 	WHERE
@@ -147,7 +147,7 @@ const (
 
 	SCHEDULE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
 	FROM
 		schedules
 	WHERE
@@ -155,7 +155,7 @@ const (
 
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules
-		(id, desc, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
+		(id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
 	VALUES
 		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
