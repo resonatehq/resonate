@@ -39,21 +39,24 @@ type Promise struct {
 	Id                        string             `json:"id"`
 	IdempotencyKeyForComplete *string            `json:"idempotencyKeyForComplete,omitempty"`
 	IdempotencyKeyForCreate   *string            `json:"idempotencyKeyForCreate,omitempty"`
-	Param                     *Value             `json:"param,omitempty"`
+	Param                     *PromiseValue      `json:"param,omitempty"`
 	State                     *PromiseState      `json:"state,omitempty"`
 	Tags                      *map[string]string `json:"tags,omitempty"`
 	Timeout                   int64              `json:"timeout"`
-	Value                     *Value             `json:"value,omitempty"`
+	Value                     *PromiseValue      `json:"value,omitempty"`
 }
 
 // PromiseCompleteRequest defines model for PromiseCompleteRequest.
 type PromiseCompleteRequest struct {
 	State *PromiseStateComplete `json:"state,omitempty"`
-	Value *Value                `json:"value,omitempty"`
+	Value *PromiseValue         `json:"value,omitempty"`
 }
 
-// PromiseList defines model for PromiseList.
-type PromiseList = []Promise
+// PromiseSearchResponse defines model for PromiseSearchResponse.
+type PromiseSearchResponse struct {
+	Cursor   *string    `json:"cursor,omitempty"`
+	Promises *[]Promise `json:"promises,omitempty"`
+}
 
 // PromiseState defines model for PromiseState.
 type PromiseState string
@@ -61,8 +64,8 @@ type PromiseState string
 // PromiseStateComplete defines model for PromiseStateComplete.
 type PromiseStateComplete string
 
-// Value defines model for Value.
-type Value struct {
+// PromiseValue defines model for PromiseValue.
+type PromiseValue struct {
 	Data    *string            `json:"data,omitempty"`
 	Headers *map[string]string `json:"headers,omitempty"`
 }
@@ -601,7 +604,7 @@ type ClientWithResponsesInterface interface {
 type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *PromiseList
+	JSON200      *PromiseSearchResponse
 }
 
 // Status returns HTTPResponse.Status
@@ -754,7 +757,7 @@ func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest PromiseList
+		var dest PromiseSearchResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

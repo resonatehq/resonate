@@ -5,37 +5,44 @@ import (
 	"os"
 	"strings"
 
-	"github.com/resonatehq/resonate/cmd/promise"
-	"github.com/resonatehq/resonate/cmd/schedule"
+	"github.com/resonatehq/resonate/cmd/dst"
+	"github.com/resonatehq/resonate/cmd/promises"
+	"github.com/resonatehq/resonate/cmd/schedules"
+	"github.com/resonatehq/resonate/cmd/serve"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
-var API string = "http://0.0.0.0:8001"
+var server string = "http://127.0.0.1:8001"
 
 var cfgFile string
 
 var rootCmd = &cobra.Command{
-	Use:     "resonate",
-	Aliases: []string{"res"},
-	Short:   "Durable promises and executions",
+	Use:   "resonate",
+	Short: "Durable promises",
 }
 
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&API, "api", API, "API server address")
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (defaults to resonate.yml)")
-	rootCmd.PersistentFlags().String("log-level", "info", "log level, Options: debug, info, warn, error.")
+	rootCmd.PersistentFlags().StringVarP(&server, "server", "", server, "Durable server address")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "Config file (default \"resonate.yml\")")
+	rootCmd.PersistentFlags().StringP("log-level", "", "info", "Log level, can be one of: debug, info, warn, error")
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 
-	c := client.NewOrDie(API)
+	c := client.NewOrDie(server)
 
 	// Add Subcommands
-	rootCmd.AddCommand(promise.NewCmd(c))
-	rootCmd.AddCommand(schedule.NewCmd(c))
+	rootCmd.AddCommand(promises.NewCmd(c))
+	rootCmd.AddCommand(schedules.NewCmd(c))
+	rootCmd.AddCommand(dst.NewCmd())
+	rootCmd.AddCommand(serve.ServeCmd())
+
+	// Set default output
+	rootCmd.SetOut(os.Stdout)
+	rootCmd.SetErr(os.Stderr)
 }
 
 func initConfig() {

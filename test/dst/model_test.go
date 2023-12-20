@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestModelStep(t *testing.T) {
@@ -55,9 +55,9 @@ func TestModelStep(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.m.Step(tc.req, tc.res, tc.err)
 			if tc.wantErr {
-				require.Error(t, err)
+				assert.Error(t, err)
 			} else {
-				require.NoError(t, err)
+				assert.NoError(t, err)
 			}
 		})
 	}
