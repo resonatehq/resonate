@@ -98,10 +98,11 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.call(`${this.url}/promises/${id}/create`, isDurablePromise, {
+    const promise = await this.call(`${this.url}/promises`, isDurablePromise, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
+        id: id,
         param: {
           headers: headers,
           data: data ? this.encode(data) : undefined,
@@ -131,10 +132,11 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.call(`${this.url}/promises/${id}/cancel`, isCompletedPromise, {
-      method: "POST",
+    const promise = await this.call(`${this.url}/promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
+        state: "REJECTED_CANCELED",
         value: {
           headers: headers,
           data: data ? this.encode(data) : undefined,
@@ -162,10 +164,11 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.call(`${this.url}/promises/${id}/resolve`, isCompletedPromise, {
-      method: "POST",
+    const promise = await this.call(`${this.url}/promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
+        state: "RESOLVED",
         value: {
           headers: headers,
           data: data ? this.encode(data) : undefined,
@@ -193,10 +196,11 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.call(`${this.url}/promises/${id}/reject`, isCompletedPromise, {
-      method: "POST",
+    const promise = await this.call(`${this.url}/promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
+        state: "REJECTED",
         value: {
           headers: headers,
           data: data ? this.encode(data) : undefined,
