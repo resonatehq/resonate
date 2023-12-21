@@ -42,13 +42,13 @@ func New(api api.API, config *Config) api.Subsystem {
 	// Promises API
 	r.POST("/promises", s.createPromise)
 	r.GET("/promises", s.searchPromises)
-	r.GET("/promises/:id", s.readPromise)
-	r.PATCH("/promises/:id", s.completePromise)
+	r.GET("/promises/*id", s.readPromise)
+	r.PATCH("/promises/*id", s.completePromise)
 
 	// Schedules API
 	r.POST("/schedules", s.createSchedule)
-	r.GET("/schedules/:id", s.readSchedule)
-	r.DELETE("/schedules/:id", s.deleteSchedule)
+	r.GET("/schedules/*id", s.readSchedule)
+	r.DELETE("/schedules/*id", s.deleteSchedule)
 
 	return &Http{
 		config: config,
