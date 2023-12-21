@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/resonatehq/resonate/pkg/client/promises"
 	"github.com/spf13/cobra"
@@ -72,7 +71,7 @@ func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 				}
 
 				body := promises.PromiseCompleteRequest{
-					State: util.Unwrap(state.State),
+					State: &state.State,
 					Value: value,
 				}
 

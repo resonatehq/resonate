@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/resonatehq/resonate/cmd/util"
-
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/resonatehq/resonate/pkg/client/promises"
 	"github.com/spf13/cobra"
@@ -30,6 +28,7 @@ resonate promise search "*" --state rejected`
 func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 	var (
 		state  string
+		tags   map[string]string
 		limit  int
 		cursor string
 		output string
@@ -47,13 +46,32 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 
 			id := args[0]
 
+			filters := &promises.QueryFilters{
+				Id:    &id,
+				Limit: &limit,
+			}
+
+			if cmd.Flag("state").Changed {
+				filters.State = &state
+			}
+
+			if cmd.Flag("tag").Changed {
+				t, err := json.Marshal(tags)
+				if err != nil {
+					cmd.PrintErr(err)
+					return
+				}
+
+				serializedTags := string(t)
+				filters.Tags = &serializedTags
+			}
+
+			if cmd.Flag("cursor").Changed {
+				filters.Cursor = &cursor
+			}
+
 			params := &promises.SearchPromisesParams{
-				Filters: &promises.QueryFilters{
-					Id:     util.Unwrap(id),
-					State:  util.Unwrap(promises.PromiseState(state)),
-					Limit:  util.Unwrap(limit),
-					Cursor: util.Unwrap(cursor),
-				},
+				Filters: filters,
 			}
 
 			resp, err := c.PromisesV1Alpha1().SearchPromisesWithResponse(context.Background(), params)
@@ -84,9 +102,10 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVarP(&state, "state", "s", "", "State of the promise")
-	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "Limit the number of results (default: 100)")
-	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "Cursor to use for pagination")
+	cmd.Flags().StringVarP(&state, "state", "s", "", "Promise state")
+	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "Promise tags")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "Number of results per request (default: 100)")
+	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "Pagination cursor")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format, can be one of: json")
 
 	return cmd
