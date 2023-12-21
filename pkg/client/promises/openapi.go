@@ -32,6 +32,13 @@ const (
 	PromiseStateCompleteRESOLVED         PromiseStateComplete = "RESOLVED"
 )
 
+// Defines values for SearchPromisesParamsFiltersState.
+const (
+	Pending  SearchPromisesParamsFiltersState = "pending"
+	Rejected SearchPromisesParamsFiltersState = "rejected"
+	Resolved SearchPromisesParamsFiltersState = "resolved"
+)
+
 // Promise defines model for Promise.
 type Promise struct {
 	CompletedOn               *int               `json:"completedOn,omitempty"`
@@ -90,8 +97,11 @@ type QueryFilters struct {
 	Id *string `json:"id,omitempty"`
 
 	// Limit Number of results
-	Limit *int          `json:"limit,omitempty"`
-	State *PromiseState `json:"state,omitempty"`
+	Limit *int    `json:"limit,omitempty"`
+	State *string `json:"state,omitempty"`
+
+	// Tags Serialized tags that must be matched
+	Tags *string `json:"tags,omitempty"`
 }
 
 // RequestId defines model for RequestId.
@@ -104,6 +114,9 @@ type Strict = bool
 type SearchPromisesParams struct {
 	Filters *QueryFilters `form:"filters,omitempty" json:"filters,omitempty"`
 }
+
+// SearchPromisesParamsFiltersState defines parameters for SearchPromises.
+type SearchPromisesParamsFiltersState string
 
 // CreatePromiseParams defines parameters for CreatePromise.
 type CreatePromiseParams struct {

@@ -151,7 +151,14 @@ components:
               - "abc123*" - Would match ID "abc123def" 
               - "pro*fil" - Would match IDs containing "pro123file"
           state:
-            $ref: "#/components/schemas/PromiseState"
+            type: string
+            enum:
+              - pending
+              - resolved
+              - rejected
+          tags:
+            type: string
+            description: Serialized tags that must be matched
           limit:
             type: integer
             description: Number of results
