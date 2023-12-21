@@ -17,6 +17,12 @@ type CallBackFn = func(*t_api.Response, error)
 
 func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
+		if req.CreateSchedule.PromiseParam.Headers == nil {
+			req.CreateSchedule.PromiseParam.Headers = map[string]string{}
+		}
+		if req.CreateSchedule.PromiseParam.Data == nil {
+			req.CreateSchedule.PromiseParam.Data = []byte{}
+		}
 
 		// check if it already exists.
 

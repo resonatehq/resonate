@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestHandleResonateError(t *testing.T) {
@@ -52,7 +52,7 @@ func TestHandleResonateError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := HandleResonateError(tc.inputError)
 
-			require.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
+			assert.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
 		})
 	}
 }
@@ -99,7 +99,7 @@ func TestHandleRequestError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := HandleRequestError(tc.inputError)
 
-			require.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
+			assert.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
 		})
 	}
 }
@@ -136,7 +136,7 @@ func TestIsRequestError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := IsRequestError(tc.inputError)
 
-			require.Equal(t, tc.expectedResult, result)
+			assert.Equal(t, tc.expectedResult, result)
 		})
 	}
 }
@@ -238,9 +238,9 @@ func TestValidationError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			result := HandleValidationError(tc.inputErr)
 
-			require.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
-			require.Equal(t, tc.expectedErrMsg, result.APIError.Message)
-			require.Equal(t, tc.expectedDetail, result.APIError.Details[0].Message)
+			assert.Equal(t, tc.expectedCode, result.APIError.Code.HTTP())
+			assert.Equal(t, tc.expectedErrMsg, result.APIError.Message)
+			assert.Equal(t, tc.expectedDetail, result.APIError.Details[0].Message)
 		})
 	}
 }

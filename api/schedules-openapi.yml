@@ -59,6 +59,7 @@ components:
         - id
         - cron
         - promiseId
+        - promiseTimeout
       properties:
         id:
           type: string
@@ -68,11 +69,11 @@ components:
           type: string
         promiseId:
           type: string
-        promiseParam:
-          $ref: "#/components/schemas/Value"
         promiseTimeout:
           type: integer
           format: int64
+        promiseParam:
+          $ref: "#/components/schemas/ScheduleValue"
         lastRunTime:
           type: integer
           readOnly: true
@@ -89,7 +90,7 @@ components:
           type: string
           readOnly: true
 
-    Value:
+    ScheduleValue:
       type: object
       properties:
         data:

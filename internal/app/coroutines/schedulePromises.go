@@ -106,7 +106,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 								Id:             id,
 								State:          state,
 								Param:          schedule.PromiseParam,
-								Timeout:        schedule.PromiseTimeout,
+								Timeout:        crontime + schedule.PromiseTimeout,
 								IdempotencyKey: nil,
 								Tags: map[string]string{
 									"resonate:invocation": "true",

@@ -1,4 +1,4 @@
-package cmd
+package util
 
 import (
 	"fmt"
@@ -82,7 +82,7 @@ type configDST struct {
 }
 
 type APIConfigDST struct {
-	Size *rangeIntFlag
+	Size *RangeIntFlag
 }
 
 func (c *APIConfigDST) Resolve(r *rand.Rand) *APIConfig {
@@ -92,7 +92,7 @@ func (c *APIConfigDST) Resolve(r *rand.Rand) *APIConfig {
 }
 
 type AIOConfigDST struct {
-	Size       *rangeIntFlag
+	Size       *RangeIntFlag
 	Subsystems *AIOSubsystems
 }
 
@@ -104,10 +104,10 @@ func (c *AIOConfigDST) Resolve(r *rand.Rand) *AIOConfig {
 }
 
 type SystemConfigDST struct {
-	TimeoutCacheSize      *rangeIntFlag
-	NotificationCacheSize *rangeIntFlag
-	SubmissionBatchSize   *rangeIntFlag
-	CompletionBatchSize   *rangeIntFlag
+	TimeoutCacheSize      *RangeIntFlag
+	NotificationCacheSize *RangeIntFlag
+	SubmissionBatchSize   *RangeIntFlag
+	CompletionBatchSize   *RangeIntFlag
 }
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
