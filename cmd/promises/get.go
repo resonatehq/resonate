@@ -48,9 +48,10 @@ func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
 				}
 
 				cmd.Println(string(promise))
-			} else {
-				prettyPrintPromise(cmd, resp.JSON200)
+				return
 			}
+
+			prettyPrintPromise(cmd, resp.JSON200)
 		},
 	}
 

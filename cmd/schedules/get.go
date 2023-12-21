@@ -49,9 +49,10 @@ func GetScheduleCmd(c client.ResonateClient) *cobra.Command {
 				}
 
 				cmd.Println(string(schedule))
-			} else {
-				prettyPrintSchedule(cmd, resp.JSON200)
+				return
 			}
+
+			prettyPrintSchedule(cmd, resp.JSON200)
 		},
 	}
 

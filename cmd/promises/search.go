@@ -77,9 +77,10 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 
 					cmd.Println(string(promise))
 				}
-			} else {
-				prettyPrintPromises(cmd, *resp.JSON200.Promises...)
+				return
 			}
+
+			prettyPrintPromises(cmd, *resp.JSON200.Promises...)
 		},
 	}
 

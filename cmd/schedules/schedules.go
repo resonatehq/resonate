@@ -35,7 +35,7 @@ func prettyPrintSchedule(cmd *cobra.Command, schedule *schedules.Schedule) {
 	fmt.Fprintf(w, "Desc:\t%s\n", util.SafeDerefToString(schedule.Desc))
 	fmt.Fprintf(w, "Cron:\t%s\n", schedule.Cron)
 	fmt.Fprintf(w, "Last run time:\t%s\n", util.SafeDerefToString(schedule.LastRunTime))
-	fmt.Fprintf(w, "Next run time:\t%s\n", util.SafeDerefToString(schedule.LastRunTime))
+	fmt.Fprintf(w, "Next run time:\t%s\n", util.SafeDerefToString(schedule.NextRunTime))
 
 	w.Flush()
 }
