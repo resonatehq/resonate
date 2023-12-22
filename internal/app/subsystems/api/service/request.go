@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -12,22 +13,22 @@ type Header struct {
 
 type SearchPromiseParams struct {
 	Id     *string           `form:"id" json:"id,omitempty" binding:"omitempty,min=1"`
-	State  string            `form:"state" json:"state,omitempty" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
+	State  *string           `form:"state" json:"state,omitempty" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
 	Tags   map[string]string `form:"tags" json:"tags,omitempty"`
 	Limit  *int              `form:"limit" json:"limit,omitempty" binding:"omitempty,gt=0,lte=100"`
-	Cursor string            `form:"cursor" json:"cursor,omitempty"`
+	Cursor *string           `form:"cursor" json:"cursor,omitempty"`
 }
 
 type CreatePromiseHeader struct {
-	RequestId      string                  `header:"request-id"`
-	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
-	Strict         bool                    `header:"strict"`
+	RequestId      string           `header:"request-id"`
+	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
+	Strict         bool             `header:"strict"`
 }
 
 type CompletePromiseHeader struct {
-	RequestId      string                  `header:"request-id"`
-	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key,omitempty"`
-	Strict         bool                    `header:"strict"`
+	RequestId      string           `header:"request-id"`
+	IdempotencyKey *idempotency.Key `header:"idempotency-key,omitempty"`
+	Strict         bool             `header:"strict"`
 }
 
 type CompletePromiseBody struct {
@@ -38,8 +39,8 @@ type CompletePromiseBody struct {
 // SCHEDULE
 
 type CreateScheduleHeader struct {
-	RequestId      string                  `header:"request-id"`
-	IdempotencyKey *promise.IdempotencyKey `header:"idempotency-key"`
+	RequestId      string           `header:"request-id"`
+	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 }
 
 type CreateScheduleBody struct {

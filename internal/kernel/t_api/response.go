@@ -11,7 +11,7 @@ import (
 type Response struct {
 	Kind Kind
 
-	// Promise
+	// Promises
 	CreatePromise  *CreatePromiseResponse
 	ReadPromise    *ReadPromiseResponse
 	SearchPromises *SearchPromisesResponse
@@ -19,37 +19,22 @@ type Response struct {
 	ResolvePromise *CompletePromiseResponse
 	RejectPromise  *CompletePromiseResponse
 
+	// Schedules
+	CreateSchedule  *CreateScheduleResponse
+	SearchSchedules *SearchSchedulesResponse
+	ReadSchedule    *ReadScheduleResponse
+	DeleteSchedule  *DeleteScheduleResponse
+
 	// Subscriptions
 
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
 
-	// Schedules
-	CreateSchedule *CreateScheduleResponse
-	ReadSchedule   *ReadScheduleResponse
-	DeleteSchedule *DeleteScheduleResponse
-
 	Echo *EchoResponse
 }
 
-// Schedule
-
-type CreateScheduleResponse struct {
-	Status   ResponseStatus     `json:"status"`
-	Schedule *schedule.Schedule `json:"schedule,omitempty"`
-}
-
-type ReadScheduleResponse struct {
-	Status   ResponseStatus     `json:"status"`
-	Schedule *schedule.Schedule `json:"schedule,omitempty"`
-}
-
-type DeleteScheduleResponse struct {
-	Status ResponseStatus `json:"status"`
-}
-
-// PROMISES
+// Promises
 
 type CreatePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
@@ -72,7 +57,29 @@ type CompletePromiseResponse struct {
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
-// SUBSCRIPTIONS
+// Schedules
+
+type CreateScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type SearchSchedulesResponse struct {
+	Status    ResponseStatus                  `json:"status"`
+	Cursor    *Cursor[SearchSchedulesRequest] `json:"cursor,omitempty"`
+	Schedules []*schedule.Schedule            `json:"promises,omitempty"`
+}
+
+type ReadScheduleResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+type DeleteScheduleResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+// Subscriptions
 
 type ReadSubscriptionsResponse struct {
 	Status        ResponseStatus                    `json:"status"`
@@ -132,6 +139,30 @@ func (r *Response) String() string {
 			r.RejectPromise.Status,
 			r.RejectPromise.Promise,
 		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(status=%d, schedule=%s)",
+			r.ReadSchedule.Status,
+			r.ReadSchedule.Schedule,
+		)
+	case SearchSchedules:
+		return fmt.Sprintf(
+			"SearchSchedules(status=%d, cursor=%s, schedules=%s)",
+			r.SearchSchedules.Status,
+			r.SearchSchedules.Cursor,
+			r.SearchSchedules.Schedules,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(status=%d, schedule=%s)",
+			r.CreateSchedule.Status,
+			r.CreateSchedule.Schedule,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(status=%d)",
+			r.DeleteSchedule.Status,
+		)
 	case ReadSubscriptions:
 		return fmt.Sprintf(
 			"ReadSubscriptions(status=%d, subscriptions=%s)",
@@ -148,23 +179,6 @@ func (r *Response) String() string {
 		return fmt.Sprintf(
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
-		)
-	case CreateSchedule:
-		return fmt.Sprintf(
-			"CreateSchedule(status=%d, schedule=%s)",
-			r.CreateSchedule.Status,
-			r.CreateSchedule.Schedule,
-		)
-	case ReadSchedule:
-		return fmt.Sprintf(
-			"ReadSchedule(status=%d, schedule=%s)",
-			r.ReadSchedule.Status,
-			r.ReadSchedule.Schedule,
-		)
-	case DeleteSchedule:
-		return fmt.Sprintf(
-			"DeleteSchedule(status=%d)",
-			r.DeleteSchedule.Status,
 		)
 	case Echo:
 		return fmt.Sprintf(

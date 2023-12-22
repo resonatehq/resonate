@@ -32,37 +32,25 @@ const (
 	PromiseStateCompleteRESOLVED         PromiseStateComplete = "RESOLVED"
 )
 
-// Defines values for SearchPromisesParamsFiltersState.
+// Defines values for SearchPromisesParamsState.
 const (
-	Pending  SearchPromisesParamsFiltersState = "pending"
-	Rejected SearchPromisesParamsFiltersState = "rejected"
-	Resolved SearchPromisesParamsFiltersState = "resolved"
+	Pending  SearchPromisesParamsState = "pending"
+	Rejected SearchPromisesParamsState = "rejected"
+	Resolved SearchPromisesParamsState = "resolved"
 )
 
 // Promise defines model for Promise.
 type Promise struct {
-	CompletedOn               *int               `json:"completedOn,omitempty"`
-	CreatedOn                 *int               `json:"createdOn,omitempty"`
-	Id                        string             `json:"id"`
-	IdempotencyKeyForComplete *string            `json:"idempotencyKeyForComplete,omitempty"`
-	IdempotencyKeyForCreate   *string            `json:"idempotencyKeyForCreate,omitempty"`
-	Param                     *PromiseValue      `json:"param,omitempty"`
-	State                     *PromiseState      `json:"state,omitempty"`
-	Tags                      *map[string]string `json:"tags,omitempty"`
-	Timeout                   int64              `json:"timeout"`
-	Value                     *PromiseValue      `json:"value,omitempty"`
-}
-
-// PromiseCompleteRequest defines model for PromiseCompleteRequest.
-type PromiseCompleteRequest struct {
-	State *PromiseStateComplete `json:"state,omitempty"`
-	Value *PromiseValue         `json:"value,omitempty"`
-}
-
-// PromiseSearchResponse defines model for PromiseSearchResponse.
-type PromiseSearchResponse struct {
-	Cursor   *string    `json:"cursor,omitempty"`
-	Promises *[]Promise `json:"promises,omitempty"`
+	CompletedOn               *int              `json:"completedOn,omitempty"`
+	CreatedOn                 *int              `json:"createdOn,omitempty"`
+	Id                        string            `json:"id"`
+	IdempotencyKeyForComplete *string           `json:"idempotencyKeyForComplete,omitempty"`
+	IdempotencyKeyForCreate   *string           `json:"idempotencyKeyForCreate,omitempty"`
+	Param                     PromiseValue      `json:"param"`
+	State                     PromiseState      `json:"state"`
+	Tags                      map[string]string `json:"tags"`
+	Timeout                   int64             `json:"timeout"`
+	Value                     PromiseValue      `json:"value"`
 }
 
 // PromiseState defines model for PromiseState.
@@ -83,27 +71,6 @@ type Id = string
 // IdempotencyKey defines model for IdempotencyKey.
 type IdempotencyKey = string
 
-// QueryFilters defines model for QueryFilters.
-type QueryFilters struct {
-	// Cursor Cursor for pagination
-	Cursor *string `json:"cursor,omitempty"`
-
-	// Id Fuzzy search query string to find promises via fuzzy IDs. This string will be matched flexibly
-	// against IDs in the system, so it does not need to exactly match the full ID.
-	//
-	// Some examples of valid fuzzy ID strings:
-	// - "abc123*" - Would match ID "abc123def"
-	// - "pro*fil" - Would match IDs containing "pro123file"
-	Id *string `json:"id,omitempty"`
-
-	// Limit Number of results
-	Limit *int    `json:"limit,omitempty"`
-	State *string `json:"state,omitempty"`
-
-	// Tags Serialized tags that must be matched
-	Tags *string `json:"tags,omitempty"`
-}
-
 // RequestId defines model for RequestId.
 type RequestId = string
 
@@ -112,22 +79,52 @@ type Strict = bool
 
 // SearchPromisesParams defines parameters for SearchPromises.
 type SearchPromisesParams struct {
-	Filters *QueryFilters `form:"filters,omitempty" json:"filters,omitempty"`
+	// Id Search promises for matching IDs, can include wildcards.
+	//
+	// For example:
+	// - "foo/*" matches all IDs starting with "foo/"
+	// - "*/bar" matches all IDs starting with "bar/"
+	// - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+	Id *string `form:"id,omitempty" json:"id,omitempty"`
+
+	// State Search promises for matching states
+	State *SearchPromisesParamsState `form:"state,omitempty" json:"state,omitempty"`
+	Tags  *map[string]string         `json:"tags,omitempty"`
+
+	// Limit Number of results
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Cursor for pagination
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
-// SearchPromisesParamsFiltersState defines parameters for SearchPromises.
-type SearchPromisesParamsFiltersState string
+// SearchPromisesParamsState defines parameters for SearchPromises.
+type SearchPromisesParamsState string
+
+// CreatePromiseJSONBody defines parameters for CreatePromise.
+type CreatePromiseJSONBody struct {
+	Id      string             `json:"id"`
+	Param   *PromiseValue      `json:"param,omitempty"`
+	Tags    *map[string]string `json:"tags,omitempty"`
+	Timeout int64              `json:"timeout"`
+}
 
 // CreatePromiseParams defines parameters for CreatePromise.
 type CreatePromiseParams struct {
-	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
-
 	// IdempotencyKey Deduplicates multiple requests
 	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
 
-	// Strict If true, deduplicates only when promise is pending
+	// Strict If true, deduplicates only when promise state matches the request
 	Strict *Strict `json:"strict,omitempty"`
+
+	// RequestId Unique ID for each request
+	RequestId *RequestId `json:"request-id,omitempty"`
+}
+
+// PatchPromisesIdJSONBody defines parameters for PatchPromisesId.
+type PatchPromisesIdJSONBody struct {
+	State PromiseStateComplete `json:"state"`
+	Value *PromiseValue        `json:"value,omitempty"`
 }
 
 // PatchPromisesIdParams defines parameters for PatchPromisesId.
@@ -138,15 +135,15 @@ type PatchPromisesIdParams struct {
 	// IdempotencyKey Deduplicates multiple requests
 	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
 
-	// Strict If true, deduplicates only when promise is pending
+	// Strict If true, deduplicates only when promise state matches the request
 	Strict *Strict `json:"strict,omitempty"`
 }
 
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
-type CreatePromiseJSONRequestBody = Promise
+type CreatePromiseJSONRequestBody CreatePromiseJSONBody
 
 // PatchPromisesIdJSONRequestBody defines body for PatchPromisesId for application/json ContentType.
-type PatchPromisesIdJSONRequestBody = PromiseCompleteRequest
+type PatchPromisesIdJSONRequestBody PatchPromisesIdJSONBody
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -332,9 +329,73 @@ func NewSearchPromisesRequest(server string, params *SearchPromisesParams) (*htt
 	if params != nil {
 		queryValues := queryURL.Query()
 
-		if params.Filters != nil {
+		if params.Id != nil {
 
-			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "filters", runtime.ParamLocationQuery, *params.Filters); err != nil {
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "id", runtime.ParamLocationQuery, *params.Id); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "state", runtime.ParamLocationQuery, *params.State); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Tags != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("deepObject", true, "tags", runtime.ParamLocationQuery, *params.Tags); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err
@@ -398,37 +459,37 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 
 	if params != nil {
 
-		if params.RequestId != nil {
+		if params.IdempotencyKey != nil {
 			var headerParam0 string
 
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("request-id", headerParam0)
-		}
-
-		if params.IdempotencyKey != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("idempotency-key", headerParam1)
+			req.Header.Set("idempotency-key", headerParam0)
 		}
 
 		if params.Strict != nil {
-			var headerParam2 string
+			var headerParam1 string
 
-			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
+			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("strict", headerParam2)
+			req.Header.Set("strict", headerParam1)
+		}
+
+		if params.RequestId != nil {
+			var headerParam2 string
+
+			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam2)
 		}
 
 	}
@@ -617,7 +678,10 @@ type ClientWithResponsesInterface interface {
 type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *PromiseSearchResponse
+	JSON200      *struct {
+		Cursor   *string    `json:"cursor,omitempty"`
+		Promises *[]Promise `json:"promises,omitempty"`
+	}
 }
 
 // Status returns HTTPResponse.Status
@@ -770,7 +834,10 @@ func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest PromiseSearchResponse
+		var dest struct {
+			Cursor   *string    `json:"cursor,omitempty"`
+			Promises *[]Promise `json:"promises,omitempty"`
+		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

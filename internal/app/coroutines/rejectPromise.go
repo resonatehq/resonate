@@ -163,7 +163,7 @@ func RejectPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := util.GetForbiddenStatus(p.State)
+				status := t_api.ForbiddenStatus(p.State)
 				strict := req.RejectPromise.Strict && p.State != promise.Rejected
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.RejectPromise.IdempotencyKey) {

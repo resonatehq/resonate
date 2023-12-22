@@ -40,7 +40,7 @@ func (s *server) createSchedule(c *gin.Context) {
 // READ
 
 func (s *server) readSchedule(c *gin.Context) {
-	id := ExtractId(c.Param("id"))
+	id := extractId(c.Param("id"))
 
 	res, err := s.service.ReadSchedule(id)
 	if err != nil {
@@ -62,7 +62,7 @@ func (s *server) readSchedule(c *gin.Context) {
 // DELETE
 
 func (s *server) deleteSchedule(c *gin.Context) {
-	id := ExtractId(c.Param("id"))
+	id := extractId(c.Param("id"))
 
 	res, err := s.service.DeleteSchedule(id)
 	if err != nil {

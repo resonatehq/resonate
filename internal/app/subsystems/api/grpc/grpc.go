@@ -12,6 +12,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -107,11 +108,11 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	}
 
 	params := &service.SearchPromiseParams{
-		Id:     util.ToPointer(req.Id),
+		Id:     &req.Id,
 		State:  searchState(req.State),
 		Tags:   req.Tags,
 		Limit:  util.ToPointer(int(req.Limit)),
-		Cursor: req.Cursor,
+		Cursor: &req.Cursor,
 	}
 
 	resp, err := s.service.SearchPromises(header, params)
@@ -142,10 +143,9 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 }
 
 func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
-	var idempotencyKey *promise.IdempotencyKey
+	var idempotencyKey *idempotency.Key
 	if req.IdempotencyKey != "" {
-		i := promise.IdempotencyKey(req.IdempotencyKey)
-		idempotencyKey = &i
+		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
 	}
 
 	var headers map[string]string
@@ -193,10 +193,9 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 }
 
 func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRequest) (*grpcApi.CancelPromiseResponse, error) {
-	var idempotencyKey *promise.IdempotencyKey
+	var idempotencyKey *idempotency.Key
 	if req.IdempotencyKey != "" {
-		i := promise.IdempotencyKey(req.IdempotencyKey)
-		idempotencyKey = &i
+		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
 	}
 
 	var headers map[string]string
@@ -235,10 +234,9 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 }
 
 func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromiseRequest) (*grpcApi.ResolvePromiseResponse, error) {
-	var idempotencyKey *promise.IdempotencyKey
+	var idempotencyKey *idempotency.Key
 	if req.IdempotencyKey != "" {
-		i := promise.IdempotencyKey(req.IdempotencyKey)
-		idempotencyKey = &i
+		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
 	}
 
 	var headers map[string]string
@@ -278,10 +276,9 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 }
 
 func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
-	var idempotencyKey *promise.IdempotencyKey
+	var idempotencyKey *idempotency.Key
 	if req.IdempotencyKey != "" {
-		i := promise.IdempotencyKey(req.IdempotencyKey)
-		idempotencyKey = &i
+		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
 	}
 
 	var headers map[string]string
@@ -370,16 +367,16 @@ func protoState(state promise.State) grpcApi.State {
 	}
 }
 
-func searchState(searchState grpcApi.SearchState) string {
+func searchState(searchState grpcApi.SearchState) *string {
 	switch searchState {
 	case grpcApi.SearchState_SEARCH_ALL:
-		return ""
+		return nil
 	case grpcApi.SearchState_SEARCH_RESOLVED:
-		return "resolved"
+		return util.ToPointer("resolved")
 	case grpcApi.SearchState_SEARCH_REJECTED:
-		return "rejected"
+		return util.ToPointer("rejected")
 	case grpcApi.SearchState_SEARCH_PENDING:
-		return "pending"
+		return util.ToPointer("pending")
 	default:
 		panic("invalid state")
 	}

@@ -59,20 +59,18 @@ func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 					params.IdempotencyKey = &idempotencyKey
 				}
 
-				value := &promises.PromiseValue{}
+				body := promises.PatchPromisesIdJSONRequestBody{
+					State: state.State,
+					Value: &promises.PromiseValue{},
+				}
 
 				if cmd.Flag("header").Changed {
-					value.Headers = &headers
+					body.Value.Headers = &headers
 				}
 
 				if cmd.Flag("data").Changed {
 					encoded := base64.StdEncoding.EncodeToString([]byte(data))
-					value.Data = &encoded
-				}
-
-				body := promises.PromiseCompleteRequest{
-					State: &state.State,
-					Value: value,
+					body.Value.Data = &encoded
 				}
 
 				resp, err := c.PromisesV1Alpha1().PatchPromisesIdWithResponse(context.TODO(), id, params, body)

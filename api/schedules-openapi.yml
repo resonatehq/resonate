@@ -10,7 +10,26 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Schedule"
+              type: object
+              required:
+                - id
+                - cron
+                - promiseId
+                - promiseTimeout
+              properties:
+                id:
+                  type: string
+                desc:
+                  type: string
+                cron:
+                  type: string
+                promiseId:
+                  type: string
+                promiseTimeout:
+                  type: integer
+                  format: int64
+                promiseParam:
+                  $ref: "#/components/schemas/PromiseValue"
         required: true
       responses:
         "200":
@@ -19,6 +38,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Schedule"
+
   /schedules/{id}:
     get:
       summary: Get a schedule
@@ -37,6 +57,7 @@ paths:
                 $ref: "#/components/schemas/Schedule"
         "404":
           description: Schedule not found
+
     delete:
       summary: Delete a schedule
       parameters:
@@ -57,9 +78,11 @@ components:
       type: object
       required:
         - id
+        - desc
         - cron
         - promiseId
         - promiseTimeout
+        - promiseParam
       properties:
         id:
           type: string
@@ -73,7 +96,7 @@ components:
           type: integer
           format: int64
         promiseParam:
-          $ref: "#/components/schemas/ScheduleValue"
+          $ref: "#/components/schemas/PromiseValue"
         lastRunTime:
           type: integer
           readOnly: true
@@ -82,15 +105,15 @@ components:
           type: integer
           readOnly: true
           format: int64
+        idempotencyKey:
+          type: string
+          readOnly: true
         createdOn:
           type: integer
           readOnly: true
           format: int64
-        idempotencyKeyForCreate:
-          type: string
-          readOnly: true
 
-    ScheduleValue:
+    PromiseValue:
       type: object
       properties:
         data:

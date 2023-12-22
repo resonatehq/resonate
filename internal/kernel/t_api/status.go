@@ -3,6 +3,7 @@ package t_api
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc/codes"
 )
 
@@ -76,6 +77,21 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.AlreadyExists
 	default:
 		panic(fmt.Sprintf("invalid status: %d", s))
+	}
+}
+
+func ForbiddenStatus(state promise.State) ResponseStatus {
+	switch state {
+	case promise.Resolved:
+		return StatusPromiseAlreadyResolved
+	case promise.Rejected:
+		return StatusPromiseAlreadyRejected
+	case promise.Canceled:
+		return StatusPromiseAlreadyCanceled
+	case promise.Timedout:
+		return StatusPromiseAlreadyTimedOut
+	default:
+		panic(fmt.Sprintf("invalid promise state: %s", state))
 	}
 }
 

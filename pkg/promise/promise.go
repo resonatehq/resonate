@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/resonatehq/resonate/pkg/idempotency"
 )
 
 type Promise struct {
@@ -12,8 +14,8 @@ type Promise struct {
 	Param                     Value             `json:"param,omitempty"`
 	Value                     Value             `json:"value,omitempty"`
 	Timeout                   int64             `json:"timeout"`
-	IdempotencyKeyForCreate   *IdempotencyKey   `json:"idempotencyKeyForCreate,omitempty"`
-	IdempotencyKeyForComplete *IdempotencyKey   `json:"idempotencyKeyForComplete,omitempty"`
+	IdempotencyKeyForCreate   *idempotency.Key  `json:"idempotencyKeyForCreate,omitempty"`
+	IdempotencyKeyForComplete *idempotency.Key  `json:"idempotencyKeyForComplete,omitempty"`
 	CreatedOn                 *int64            `json:"createdOn,omitempty"`
 	CompletedOn               *int64            `json:"completedOn,omitempty"`
 	Tags                      map[string]string `json:"tags,omitempty"`
@@ -25,8 +27,8 @@ func (p *Promise) String() string {
 		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s, tags=%s)",
 		p.Id,
 		p.State,
-		&p.Param,
-		&p.Value,
+		p.Param,
+		p.Value,
 		p.Timeout,
 		p.IdempotencyKeyForCreate,
 		p.IdempotencyKeyForComplete,
@@ -98,20 +100,10 @@ type Value struct {
 	Data    []byte            `json:"data,omitempty"`
 }
 
-func (v *Value) String() string {
+func (v Value) String() string {
 	return fmt.Sprintf(
 		"Value(headers=%s, data=%s)",
 		v.Headers,
 		string(v.Data),
 	)
-}
-
-type IdempotencyKey string
-
-func (i1 *IdempotencyKey) Match(i2 *IdempotencyKey) bool {
-	return i1 != nil && i2 != nil && *i1 == *i2
-}
-
-func (i *IdempotencyKey) String() string {
-	return string(*i)
 }

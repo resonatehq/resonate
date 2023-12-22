@@ -9,6 +9,8 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
+	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -195,7 +197,7 @@ func TestSearchPromises(t *testing.T) {
 		{
 			name: "SearchPromisesCursor",
 			grpcReq: &grpcApi.SearchPromisesRequest{
-				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
+				Cursor: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.XKusWO-Jl4v7QVIwh5Pn3oIElBvtpf0VPOLJkXPvQLk",
 			},
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -204,8 +206,9 @@ func TestSearchPromises(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  10,
-					SortId: test.Int64ToPointer(100),
+					SortId: util.ToPointer(int64(100)),
 				},
 			},
 			res: &t_api.Response{
@@ -387,7 +390,7 @@ func TestCreatePromise(t *testing.T) {
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Param: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -532,7 +535,7 @@ func TestCancelPromise(t *testing.T) {
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -672,7 +675,7 @@ func TestResolvePromise(t *testing.T) {
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -812,7 +815,7 @@ func TestRejectPromise(t *testing.T) {
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},

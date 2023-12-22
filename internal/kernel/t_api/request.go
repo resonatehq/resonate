@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
+
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
@@ -16,12 +18,13 @@ type Request struct {
 	CancelPromise      *CancelPromiseRequest
 	ResolvePromise     *ResolvePromiseRequest
 	RejectPromise      *RejectPromiseRequest
+	ReadSchedule       *ReadScheduleRequest
+	SearchSchedules    *SearchSchedulesRequest
+	CreateSchedule     *CreateScheduleRequest
+	DeleteSchedule     *DeleteScheduleRequest
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
-	CreateSchedule     *CreateScheduleRequest
-	ReadSchedule       *ReadScheduleRequest
-	DeleteSchedule     *DeleteScheduleRequest
 	Echo               *EchoRequest
 }
 
@@ -40,33 +43,33 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id             string                  `json:"id"`
-	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict         bool                    `json:"strict"`
-	Param          promise.Value           `json:"param,omitempty"`
-	Timeout        int64                   `json:"timeout"`
-	Tags           map[string]string       `json:"tags,omitempty"`
+	Id             string            `json:"id"`
+	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
+	Strict         bool              `json:"strict"`
+	Param          promise.Value     `json:"param,omitempty"`
+	Timeout        int64             `json:"timeout"`
+	Tags           map[string]string `json:"tags,omitempty"`
 }
 
 type CancelPromiseRequest struct {
-	Id             string                  `json:"id"`
-	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict         bool                    `json:"strict"`
-	Value          promise.Value           `json:"value,omitempty"`
+	Id             string           `json:"id"`
+	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	Strict         bool             `json:"strict"`
+	Value          promise.Value    `json:"value,omitempty"`
 }
 
 type ResolvePromiseRequest struct {
-	Id             string                  `json:"id"`
-	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict         bool                    `json:"strict"`
-	Value          promise.Value           `json:"value,omitempty"`
+	Id             string           `json:"id"`
+	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	Strict         bool             `json:"strict"`
+	Value          promise.Value    `json:"value,omitempty"`
 }
 
 type RejectPromiseRequest struct {
-	Id             string                  `json:"id"`
-	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
-	Strict         bool                    `json:"strict"`
-	Value          promise.Value           `json:"value,omitempty"`
+	Id             string           `json:"id"`
+	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	Strict         bool             `json:"strict"`
+	Value          promise.Value    `json:"value,omitempty"`
 }
 
 // Schedules
@@ -75,14 +78,23 @@ type ReadScheduleRequest struct {
 	Id string `json:"id"`
 }
 
+type SearchSchedulesRequest struct {
+	Id     string            `json:"id"`
+	Tags   map[string]string `json:"tags"`
+	Limit  int               `json:"limit"`
+	SortId *int64            `json:"sortId"`
+}
+
 type CreateScheduleRequest struct {
-	Id             string                  `json:"id"`
-	Desc           string                  `json:"desc,omitempty"`
-	Cron           string                  `json:"cron"`
-	PromiseId      string                  `json:"promiseId"`
-	PromiseParam   promise.Value           `json:"promiseParam,omitempty"`
-	PromiseTimeout int64                   `json:"promiseTimeout"`
-	IdempotencyKey *promise.IdempotencyKey `json:"idemptencyKey,omitempty"`
+	Id             string            `json:"id"`
+	Description    string            `json:"desc,omitempty"`
+	Cron           string            `json:"cron"`
+	Tags           map[string]string `json:"tags,omitempty"`
+	PromiseId      string            `json:"promiseId"`
+	PromiseTimeout int64             `json:"promiseTimeout"`
+	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
+	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
+	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
 }
 
 type DeleteScheduleRequest struct {
@@ -163,6 +175,23 @@ func (r *Request) String() string {
 			r.RejectPromise.IdempotencyKey,
 			r.RejectPromise.Strict,
 		)
+	case ReadSchedule:
+		return fmt.Sprintf(
+			"ReadSchedule(id=%s)",
+			r.ReadSchedule.Id,
+		)
+	case CreateSchedule:
+		return fmt.Sprintf(
+			"CreateSchedule(id=%s, description=%s, cron=%s)",
+			r.CreateSchedule.Id,
+			r.CreateSchedule.Description,
+			r.CreateSchedule.Cron,
+		)
+	case DeleteSchedule:
+		return fmt.Sprintf(
+			"DeleteSchedule(id=%s)",
+			r.DeleteSchedule.Id,
+		)
 	case ReadSubscriptions:
 		sortId := "<nil>"
 		if r.ReadSubscriptions.SortId != nil {
@@ -187,23 +216,6 @@ func (r *Request) String() string {
 			"DeleteSubscription(id=%s, promiseId=%s)",
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
-		)
-	case CreateSchedule:
-		return fmt.Sprintf(
-			"CreateSchedule(id=%s, desc=%s, cron=%s)",
-			r.CreateSchedule.Id,
-			r.CreateSchedule.Desc,
-			r.CreateSchedule.Cron,
-		)
-	case ReadSchedule:
-		return fmt.Sprintf(
-			"ReadSchedule(id=%s)",
-			r.ReadSchedule.Id,
-		)
-	case DeleteSchedule:
-		return fmt.Sprintf(
-			"DeleteSchedule(id=%s)",
-			r.DeleteSchedule.Id,
 		)
 	case Echo:
 		return fmt.Sprintf(

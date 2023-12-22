@@ -3,6 +3,7 @@ package t_aio
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -17,6 +18,12 @@ const (
 	SearchPromises
 	CreatePromise
 	UpdatePromise
+	ReadSchedule
+	ReadSchedules
+	SearchSchedules
+	CreateSchedule
+	UpdateSchedule
+	DeleteSchedule
 	ReadTimeouts
 	CreateTimeout
 	DeleteTimeout
@@ -32,11 +39,6 @@ const (
 	TimeoutPromises
 	TimeoutDeleteSubscriptions
 	TimeoutCreateNotifications
-	CreateSchedule
-	ReadSchedule
-	ReadSchedules
-	UpdateSchedule
-	DeleteSchedule
 )
 
 func (k StoreKind) String() string {
@@ -49,6 +51,18 @@ func (k StoreKind) String() string {
 		return "CreatePromise"
 	case UpdatePromise:
 		return "UpdatePromise"
+	case ReadSchedule:
+		return "ReadSchedule"
+	case ReadSchedules:
+		return "ReadSchedules"
+	case SearchSchedules:
+		return "SearchSchedules"
+	case CreateSchedule:
+		return "CreateSchedule"
+	case UpdateSchedule:
+		return "UpdateSchedule"
+	case DeleteSchedule:
+		return "DeleteSchedule"
 	case ReadTimeouts:
 		return "ReadTimeouts"
 	case CreateTimeout:
@@ -79,16 +93,6 @@ func (k StoreKind) String() string {
 		return "TimeoutDeleteSubscriptions"
 	case TimeoutCreateNotifications:
 		return "TimeoutCreateNotifications"
-	case CreateSchedule:
-		return "CreateSchedule"
-	case ReadSchedule:
-		return "ReadSchedule"
-	case ReadSchedules:
-		return "ReadSchedules"
-	case UpdateSchedule:
-		return "UpdateSchedule"
-	case DeleteSchedule:
-		return "DeleteSchedule"
 	default:
 		panic("invalid store kind")
 	}
@@ -122,6 +126,7 @@ type Command struct {
 	UpdatePromise              *UpdatePromiseCommand
 	ReadSchedule               *ReadScheduleCommand
 	ReadSchedules              *ReadSchedulesCommand
+	SearchSchedules            *SearchSchedulesCommand
 	CreateSchedule             *CreateScheduleCommand
 	UpdateSchedule             *UpdateScheduleCommand
 	DeleteSchedule             *DeleteScheduleCommand
@@ -154,6 +159,7 @@ type Result struct {
 	UpdatePromise              *AlterPromisesResult
 	ReadSchedule               *QuerySchedulesResult
 	ReadSchedules              *QuerySchedulesResult
+	SearchSchedules            *QuerySchedulesResult
 	CreateSchedule             *AlterSchedulesResult
 	UpdateSchedule             *AlterSchedulesResult
 	DeleteSchedule             *AlterSchedulesResult
@@ -197,7 +203,7 @@ type CreatePromiseCommand struct {
 	State          promise.State
 	Param          promise.Value
 	Timeout        int64
-	IdempotencyKey *promise.IdempotencyKey
+	IdempotencyKey *idempotency.Key
 	Subscriptions  []*CreateSubscriptionCommand
 	Tags           map[string]string
 	CreatedOn      int64
@@ -207,7 +213,7 @@ type UpdatePromiseCommand struct {
 	Id             string
 	State          promise.State
 	Value          promise.Value
-	IdempotencyKey *promise.IdempotencyKey
+	IdempotencyKey *idempotency.Key
 	CompletedOn    int64
 }
 
@@ -233,17 +239,25 @@ type ReadSchedulesCommand struct {
 	NextRunTime int64
 }
 
+type SearchSchedulesCommand struct {
+	Id     string
+	Tags   map[string]string
+	Limit  int
+	SortId *int64
+}
+
 type CreateScheduleCommand struct {
 	Id             string
-	Desc           string
+	Description    string
 	Cron           string
+	Tags           map[string]string
 	PromiseId      string
-	PromiseParam   promise.Value
 	PromiseTimeout int64
-	LastRunTime    *int64
+	PromiseParam   promise.Value
+	PromiseTags    map[string]string
 	NextRunTime    int64
+	IdempotencyKey *idempotency.Key
 	CreatedOn      int64
-	IdempotencyKey *promise.IdempotencyKey
 }
 
 type UpdateScheduleCommand struct {
@@ -260,6 +274,7 @@ type DeleteScheduleCommand struct {
 
 type QuerySchedulesResult struct {
 	RowsReturned int64
+	LastSortId   int64
 	Records      []*schedule.ScheduleRecord
 }
 

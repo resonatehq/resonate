@@ -47,9 +47,9 @@ func prettyPrintPromises(cmd *cobra.Command, promises ...promises.Promise) {
 	for _, promise := range promises {
 		formatted(
 			promise.Id,
-			util.SafeDerefToString(promise.State),
+			promise.State,
 			promise.Timeout,
-			strings.Join(prettyHeaders(promise.Tags, ":"), " "),
+			strings.Join(prettyHeaders(&promise.Tags, ":"), " "),
 		)
 	}
 
@@ -60,7 +60,7 @@ func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
 	fmt.Fprintf(w, "Id:\t%v\n", promise.Id)
-	fmt.Fprintf(w, "State:\t%s\n", util.SafeDerefToString(promise.State))
+	fmt.Fprintf(w, "State:\t%s\n", promise.State)
 	fmt.Fprintf(w, "Timeout:\t%d\n", promise.Timeout)
 	fmt.Fprintf(w, "\n")
 
@@ -91,7 +91,7 @@ func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
 	fmt.Fprintf(w, "\n")
 
 	fmt.Fprintf(w, "Tags:\n")
-	for _, tag := range prettyHeaders(promise.Tags, ":\t") {
+	for _, tag := range prettyHeaders(&promise.Tags, ":\t") {
 		fmt.Fprintf(w, "\t%s\n", tag)
 	}
 

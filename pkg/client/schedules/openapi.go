@@ -16,28 +16,38 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// Schedule defines model for Schedule.
-type Schedule struct {
-	CreatedOn               *int64         `json:"createdOn,omitempty"`
-	Cron                    string         `json:"cron"`
-	Desc                    *string        `json:"desc,omitempty"`
-	Id                      string         `json:"id"`
-	IdempotencyKeyForCreate *string        `json:"idempotencyKeyForCreate,omitempty"`
-	LastRunTime             *int64         `json:"lastRunTime,omitempty"`
-	NextRunTime             *int64         `json:"nextRunTime,omitempty"`
-	PromiseId               string         `json:"promiseId"`
-	PromiseParam            *ScheduleValue `json:"promiseParam,omitempty"`
-	PromiseTimeout          int64          `json:"promiseTimeout"`
-}
-
-// ScheduleValue defines model for ScheduleValue.
-type ScheduleValue struct {
+// PromiseValue defines model for PromiseValue.
+type PromiseValue struct {
 	Data    *string            `json:"data,omitempty"`
 	Headers *map[string]string `json:"headers,omitempty"`
 }
 
+// Schedule defines model for Schedule.
+type Schedule struct {
+	CreatedOn      *int64       `json:"createdOn,omitempty"`
+	Cron           string       `json:"cron"`
+	Desc           string       `json:"desc"`
+	Id             string       `json:"id"`
+	IdempotencyKey *string      `json:"idempotencyKey,omitempty"`
+	LastRunTime    *int64       `json:"lastRunTime,omitempty"`
+	NextRunTime    *int64       `json:"nextRunTime,omitempty"`
+	PromiseId      string       `json:"promiseId"`
+	PromiseParam   PromiseValue `json:"promiseParam"`
+	PromiseTimeout int64        `json:"promiseTimeout"`
+}
+
+// PostSchedulesJSONBody defines parameters for PostSchedules.
+type PostSchedulesJSONBody struct {
+	Cron           string        `json:"cron"`
+	Desc           *string       `json:"desc,omitempty"`
+	Id             string        `json:"id"`
+	PromiseId      string        `json:"promiseId"`
+	PromiseParam   *PromiseValue `json:"promiseParam,omitempty"`
+	PromiseTimeout int64         `json:"promiseTimeout"`
+}
+
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.
-type PostSchedulesJSONRequestBody = Schedule
+type PostSchedulesJSONRequestBody PostSchedulesJSONBody
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error

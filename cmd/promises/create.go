@@ -47,21 +47,19 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 				params.IdempotencyKey = &idempotencyKey
 			}
 
-			param := &promises.PromiseValue{}
+			body := promises.CreatePromiseJSONRequestBody{
+				Id:      id,
+				Timeout: time.Now().Add(timeout).UnixMilli(),
+				Param:   &promises.PromiseValue{},
+			}
 
 			if cmd.Flag("header").Changed {
-				param.Headers = &headers
+				body.Param.Headers = &headers
 			}
 
 			if cmd.Flag("data").Changed {
 				encoded := base64.StdEncoding.EncodeToString([]byte(data))
-				param.Data = &encoded
-			}
-
-			body := promises.Promise{
-				Id:      id,
-				Timeout: time.Now().Add(timeout).UnixMilli(),
-				Param:   param,
+				body.Param.Data = &encoded
 			}
 
 			if cmd.Flag("tag").Changed {

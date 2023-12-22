@@ -40,27 +40,25 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 			id = args[0]
 
-			param := &schedules.ScheduleValue{}
-
-			if cmd.Flag("header").Changed {
-				param.Headers = &promiseHeaders
-			}
-
-			if cmd.Flag("data").Changed {
-				encoded := base64.StdEncoding.EncodeToString([]byte(promiseData))
-				param.Data = &encoded
-			}
-
-			body := schedules.Schedule{
+			body := schedules.PostSchedulesJSONRequestBody{
 				Id:             id,
 				Cron:           cron,
 				PromiseId:      promiseId,
-				PromiseParam:   param,
+				PromiseParam:   &schedules.PromiseValue{},
 				PromiseTimeout: promiseTimeout.Milliseconds(),
 			}
 
 			if cmd.Flag("desc").Changed {
 				body.Desc = &desc
+			}
+
+			if cmd.Flag("header").Changed {
+				body.PromiseParam.Headers = &promiseHeaders
+			}
+
+			if cmd.Flag("data").Changed {
+				encoded := base64.StdEncoding.EncodeToString([]byte(promiseData))
+				body.PromiseParam.Data = &encoded
 			}
 
 			resp, err := c.SchedulesV1Alpha1().PostSchedulesWithResponse(context.TODO(), body)

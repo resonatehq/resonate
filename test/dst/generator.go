@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
@@ -13,7 +14,7 @@ import (
 type Generator struct {
 	ticks            int64
 	idSet            []string
-	idemotencyKeySet []*promise.IdempotencyKey
+	idemotencyKeySet []*idempotency.Key
 	headersSet       []map[string]string
 	dataSet          [][]byte
 	tagsSet          []map[string]string
@@ -30,10 +31,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		idSet[i] = strconv.Itoa(i)
 	}
 
-	idempotencyKeySet := []*promise.IdempotencyKey{}
+	idempotencyKeySet := []*idempotency.Key{}
 	for i := 0; i < config.IdempotencyKeys; i++ {
 		s := strconv.Itoa(i)
-		idempotencyKey := promise.IdempotencyKey(s)
+		idempotencyKey := idempotency.Key(s)
 		idempotencyKeySet = append(idempotencyKeySet, &idempotencyKey, nil) // half of all idempotencyKeys are nil
 	}
 
@@ -278,7 +279,7 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 		Kind: t_api.CreateSchedule,
 		CreateSchedule: &t_api.CreateScheduleRequest{
 			Id:             id,
-			Desc:           "",
+			Description:    "",
 			Cron:           cron,
 			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
 			PromiseParam:   promise.Value{Headers: headers, Data: data},
