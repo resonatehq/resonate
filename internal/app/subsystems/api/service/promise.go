@@ -48,9 +48,9 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 
 // Search Promise
 
-func (s *Service) SearchPromises(header *Header, params *SearchPromiseParams) (*t_api.SearchPromisesResponse, error) {
+func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (*t_api.SearchPromisesResponse, error) {
 	if params == nil {
-		params = &SearchPromiseParams{}
+		params = &SearchPromisesParams{}
 	}
 	var searchPromises *t_api.SearchPromisesRequest
 	if params.Cursor != nil && *params.Cursor != "" {

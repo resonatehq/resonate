@@ -107,7 +107,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
 	}
 
-	params := &service.SearchPromiseParams{
+	params := &service.SearchPromisesParams{
 		Id:     &req.Id,
 		State:  searchState(req.State),
 		Tags:   req.Tags,

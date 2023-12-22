@@ -12,10 +12,10 @@ import (
 
 var createPromiseExample = `
 # Create a promise
-resonate promise create foo --timeout 1h
+resonate promises create foo --timeout 1h
 
 # Create a promise with data and headers and tags
-resonate promise create foo --timeout 1h --data foo --header bar=bar --tag baz=baz`
+resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=baz`
 
 func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 	var (
@@ -54,7 +54,7 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			if cmd.Flag("header").Changed {
-				body.Param.Headers = &headers
+				body.Param.Headers = headers
 			}
 
 			if cmd.Flag("data").Changed {

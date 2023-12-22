@@ -11,11 +11,11 @@ import (
 )
 
 var completePromiseExample = `
-# %s a promise 
-resonate promise %s foo 
+# %s a promise
+resonate promises %s foo 
 
 # %s a promise with data and headers
-resonate promise %s foo --data foo --header bar=bar`
+resonate promises %s foo --data foo --header bar=bar`
 
 func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 	var (
@@ -65,7 +65,7 @@ func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 				}
 
 				if cmd.Flag("header").Changed {
-					body.Value.Headers = &headers
+					body.Value.Headers = headers
 				}
 
 				if cmd.Flag("data").Changed {

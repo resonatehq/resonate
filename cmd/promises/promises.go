@@ -1,7 +1,6 @@
 package promises
 
 import (
-	"encoding/base64"
 	"fmt"
 	"strings"
 	"text/tabwriter"
@@ -49,7 +48,7 @@ func prettyPrintPromises(cmd *cobra.Command, promises ...promises.Promise) {
 			promise.Id,
 			promise.State,
 			promise.Timeout,
-			strings.Join(prettyHeaders(&promise.Tags, ":"), " "),
+			strings.Join(util.PrettyHeaders(promise.Tags, ":"), " "),
 		)
 	}
 
@@ -70,56 +69,30 @@ func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
 
 	fmt.Fprintf(w, "Param:\n")
 	fmt.Fprintf(w, "\tHeaders:\n")
-	for _, tag := range prettyHeaders(promise.Param.Headers, ":\t") {
+	for _, tag := range util.PrettyHeaders(promise.Param.Headers, ":\t") {
 		fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
 	fmt.Fprintf(w, "\tData:\n")
 	if promise.Param.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", prettyData(promise.Param.Data))
+		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(promise.Param.Data))
 	}
 	fmt.Fprintf(w, "\n")
 
 	fmt.Fprintf(w, "Value:\n")
 	fmt.Fprintf(w, "\tHeaders:\n")
-	for _, tag := range prettyHeaders(promise.Value.Headers, ":\t") {
+	for _, tag := range util.PrettyHeaders(promise.Value.Headers, ":\t") {
 		fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
 	fmt.Fprintf(w, "\tData:\n")
 	if promise.Value.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", prettyData(promise.Value.Data))
+		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(promise.Value.Data))
 	}
 	fmt.Fprintf(w, "\n")
 
 	fmt.Fprintf(w, "Tags:\n")
-	for _, tag := range prettyHeaders(&promise.Tags, ":\t") {
+	for _, tag := range util.PrettyHeaders(promise.Tags, ":\t") {
 		fmt.Fprintf(w, "\t%s\n", tag)
 	}
 
 	w.Flush()
-}
-
-func prettyHeaders(headers *map[string]string, seperator string) []string {
-	if headers == nil || *headers == nil {
-		return []string{}
-	}
-
-	result := []string{}
-	for k, v := range *headers {
-		result = append(result, fmt.Sprintf("%s%s%s", k, seperator, v))
-	}
-
-	return result
-}
-
-func prettyData(data *string) string {
-	if data == nil {
-		return ""
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(*data)
-	if err != nil {
-		return *data
-	}
-
-	return string(decoded)
 }

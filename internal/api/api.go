@@ -102,18 +102,20 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.ResolvePromise.Status)
 			case t_api.RejectPromise:
 				status = int(res.RejectPromise.Status)
+			case t_api.ReadSchedule:
+				status = int(res.ReadSchedule.Status)
+			case t_api.SearchSchedules:
+				status = int(res.SearchSchedules.Status)
+			case t_api.CreateSchedule:
+				status = int(res.CreateSchedule.Status)
+			case t_api.DeleteSchedule:
+				status = int(res.DeleteSchedule.Status)
 			case t_api.ReadSubscriptions:
 				status = int(res.ReadSubscriptions.Status)
 			case t_api.CreateSubscription:
 				status = int(res.CreateSubscription.Status)
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
-			case t_api.CreateSchedule:
-				status = int(res.CreateSchedule.Status)
-			case t_api.ReadSchedule:
-				status = int(res.ReadSchedule.Status)
-			case t_api.DeleteSchedule:
-				status = int(res.DeleteSchedule.Status)
 			case t_api.Echo:
 				status = 2000
 			default:

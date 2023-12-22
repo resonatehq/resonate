@@ -74,6 +74,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		}
 
 		id, err := generatePromiseId(schedule.PromiseId, map[string]string{
+			"id":        schedule.Id,
 			"timestamp": fmt.Sprintf("%d", schedule.NextRunTime),
 		})
 		if err != nil {
@@ -87,6 +88,12 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		if schedule.PromiseParam.Data == nil {
 			schedule.PromiseParam.Data = []byte{}
 		}
+		if schedule.PromiseTags == nil {
+			schedule.PromiseTags = map[string]string{}
+		}
+
+		// add invocation tag
+		schedule.PromiseTags["resonate:invocation"] = "true"
 
 		// calculate timeout for promise
 
@@ -103,14 +110,11 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id:             id,
-								State:          state,
-								Param:          schedule.PromiseParam,
-								Timeout:        schedule.NextRunTime + schedule.PromiseTimeout,
-								IdempotencyKey: nil,
-								Tags: map[string]string{
-									"resonate:invocation": "true",
-								},
+								Id:        id,
+								State:     state,
+								Param:     schedule.PromiseParam,
+								Timeout:   schedule.NextRunTime + schedule.PromiseTimeout,
+								Tags:      schedule.PromiseTags,
 								CreatedOn: schedule.NextRunTime,
 							},
 						},

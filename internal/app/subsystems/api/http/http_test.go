@@ -632,6 +632,76 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
+			name:   "SearchSchedules",
+			path:   "schedules?id=*&limit=10",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesRequest{
+					Id:    "*",
+					Tags:  map[string]string{},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesResponse{
+					Status:    t_api.StatusOK,
+					Cursor:    nil,
+					Schedules: []*schedule.Schedule{},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "SearchSchedulesTags",
+			path:   "schedules?id=*&tags[foo]=bar&limit=10",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesRequest{
+					Id: "*",
+					Tags: map[string]string{
+						"foo": "bar",
+					},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesResponse{
+					Status:    t_api.StatusOK,
+					Cursor:    nil,
+					Schedules: []*schedule.Schedule{},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "SearchSchedulesInvalidQuery",
+			path:   "schedules?id=",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchSchedulesInvalidLimit",
+			path:   "schedules?id=*&limit=0",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchSchedulesInvalidTags",
+			path:   "schedules?id=*&tags=x",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
 			name:   "CreateSchedule",
 			path:   "schedules",
 			method: "POST",

@@ -257,6 +257,8 @@ components:
 
     PromiseValue:
       type: object
+      required:
+        - headers
       properties:
         headers:
           type: object

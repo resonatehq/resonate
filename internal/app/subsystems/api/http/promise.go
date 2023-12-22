@@ -46,7 +46,7 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
-	var params service.SearchPromiseParams
+	var params service.SearchPromisesParams
 	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return

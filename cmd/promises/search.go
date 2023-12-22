@@ -10,20 +10,20 @@ import (
 )
 
 var searchPromiseExample = `
-# Search for all promise
+# Search for all promises
 resonate promise search "*"
 
 # Search for promises that start with foo
-resonate promise search "foo.*"
+resonate promises search "foo.*"
 
 # Search for all pending promises
-resonate promise search "*" --state pending
+resonate promises search "*" --state pending
 
 # Search for all resolved promises
-resonate promise search "*" --state resolved
+resonate promises search "*" --state resolved
 
 # Search for all rejected promises
-resonate promise search "*" --state rejected`
+resonate promises search "*" --state rejected`
 
 func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 	var (

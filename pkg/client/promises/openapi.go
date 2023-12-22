@@ -61,8 +61,8 @@ type PromiseStateComplete string
 
 // PromiseValue defines model for PromiseValue.
 type PromiseValue struct {
-	Data    *string            `json:"data,omitempty"`
-	Headers *map[string]string `json:"headers,omitempty"`
+	Data    *string           `json:"data,omitempty"`
+	Headers map[string]string `json:"headers"`
 }
 
 // Id defines model for Id.
