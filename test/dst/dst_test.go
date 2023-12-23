@@ -54,12 +54,13 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
 	system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
 	system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
+	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
+	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
+	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
+	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
 	system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
 	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 	system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
-	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
-	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
-	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
 	system.AddOnTick(2, coroutines.SchedulePromises)
 	system.AddOnTick(2, coroutines.TimeoutPromises)
 	system.AddOnTick(10, coroutines.NotifySubscriptions)
@@ -74,15 +75,16 @@ func TestDST(t *testing.T) {
 		t_api.ResolvePromise,
 		t_api.RejectPromise,
 
+		// SCHEDULE
+		t_api.ReadSchedule,
+		t_api.SearchSchedules,
+		t_api.CreateSchedule,
+		t_api.DeleteSchedule,
+
 		// SUBSCRIPTION
 		t_api.ReadSubscriptions,
 		t_api.CreateSubscription,
 		t_api.DeleteSubscription,
-
-		// SCHEDULE
-		t_api.ReadSchedule,
-		t_api.CreateSchedule,
-		t_api.DeleteSchedule,
 	}
 
 	// start api/aio

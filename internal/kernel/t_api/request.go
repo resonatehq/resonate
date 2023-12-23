@@ -182,8 +182,9 @@ func (r *Request) String() string {
 		)
 	case CreateSchedule:
 		return fmt.Sprintf(
-			"CreateSchedule(id=%s, description=%s, cron=%s)",
+			"CreateSchedule(id=%s, idempotencyKey=%s, description=%s, cron=%s)",
 			r.CreateSchedule.Id,
+			r.CreateSchedule.IdempotencyKey,
 			r.CreateSchedule.Description,
 			r.CreateSchedule.Cron,
 		)

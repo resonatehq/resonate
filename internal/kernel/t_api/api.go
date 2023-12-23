@@ -42,6 +42,8 @@ func (k Kind) String() string {
 		return "reject-promise"
 	case ReadSchedule:
 		return "read-schedule"
+	case SearchSchedules:
+		return "search-schedules"
 	case CreateSchedule:
 		return "create-schedule"
 	case DeleteSchedule:

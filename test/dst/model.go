@@ -154,10 +154,10 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 
 	switch res.SearchPromises.Status {
 	case t_api.StatusOK:
+		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
+
 		for _, p := range res.SearchPromises.Promises {
 			pm := m.promises.Get(p.Id)
-
-			regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
 
 			states := map[promise.State]bool{}
 			for _, state := range req.SearchPromises.States {
@@ -376,6 +376,59 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 
 // SCHEDULES
 
+func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
+	sm := m.schedules.Get(req.ReadSchedule.Id)
+
+	switch res.ReadSchedule.Status {
+	case t_api.StatusOK:
+		sm.schedule = res.ReadSchedule.Schedule
+		return nil
+	case t_api.StatusScheduleNotFound:
+		if sm.schedule != nil {
+			return fmt.Errorf("schedule exists %s", sm.schedule)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
+	}
+}
+
+func (m *Model) ValidateSearchSchedules(req *t_api.Request, res *t_api.Response) error {
+	if res.SearchSchedules.Cursor != nil {
+		m.addCursor(&t_api.Request{
+			Kind:            t_api.SearchSchedules,
+			SearchSchedules: res.SearchSchedules.Cursor.Next,
+		})
+	}
+
+	switch res.SearchSchedules.Status {
+	case t_api.StatusOK:
+		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchSchedules.Id, "*", ".*")))
+
+		for _, s := range res.SearchSchedules.Schedules {
+			sm := m.schedules.Get(s.Id)
+
+			if !regex.MatchString(s.Id) {
+				return fmt.Errorf("schedule id '%s' does not match search query '%s'", s.Id, req.SearchSchedules.Id)
+			}
+			if req.SearchSchedules.SortId != nil && *req.SearchSchedules.SortId <= s.SortId {
+				return fmt.Errorf("unexpected sortId, schedule sortId %d is greater than the request sortId %d", *req.SearchSchedules.SortId, s.SortId)
+			}
+			for k, v := range req.SearchSchedules.Tags {
+				if _v, ok := s.Tags[k]; !ok || v != _v {
+					return fmt.Errorf("unexpected tag '%s:%s', expected '%s:%s'", k, _v, k, v)
+				}
+			}
+
+			// update schedule state
+			sm.schedule = s
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+	}
+}
+
 func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
@@ -397,23 +450,6 @@ func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) 
 		return fmt.Errorf("invalid response '%d' for create schedule request", res.CreateSchedule.Status)
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
-	}
-}
-
-func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.ReadSchedule.Id)
-
-	switch res.ReadSchedule.Status {
-	case t_api.StatusOK:
-		sm.schedule = res.ReadSchedule.Schedule
-		return nil
-	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil {
-			return fmt.Errorf("schedule exists %s", sm.schedule)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
 	}
 }
 

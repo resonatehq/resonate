@@ -159,7 +159,7 @@ const (
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
-		id, cron, tags, last_run_time, next_run_time, created_on, sort_id
+		id, cron, tags, last_run_time, next_run_time, idempotency_key, created_on, sort_id
 	FROM
 		schedules
 	WHERE
@@ -931,6 +931,7 @@ func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedul
 			&record.Tags,
 			&record.LastRunTime,
 			&record.NextRunTime,
+			&record.IdempotencyKey,
 			&record.CreatedOn,
 			&record.SortId,
 		); err != nil {
