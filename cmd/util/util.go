@@ -3,6 +3,8 @@ package util
 import (
 	"encoding/base64"
 	"fmt"
+
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 func SafeDerefToString[T any](val *T) string {
@@ -18,8 +20,8 @@ func PrettyHeaders(headers map[string]string, seperator string) []string {
 	}
 
 	result := []string{}
-	for k, v := range headers {
-		result = append(result, fmt.Sprintf("%s%s%s", k, seperator, v))
+	for _, header := range util.OrderedRangeKV(headers) {
+		result = append(result, fmt.Sprintf("%s%s%s", header.Key, seperator, header.Value))
 	}
 
 	return result
