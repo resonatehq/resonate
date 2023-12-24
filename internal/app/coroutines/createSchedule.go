@@ -17,11 +17,17 @@ type CallBackFn = func(*t_api.Response, error)
 
 func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
+		if req.CreateSchedule.Tags == nil {
+			req.CreateSchedule.Tags = map[string]string{}
+		}
 		if req.CreateSchedule.PromiseParam.Headers == nil {
 			req.CreateSchedule.PromiseParam.Headers = map[string]string{}
 		}
 		if req.CreateSchedule.PromiseParam.Data == nil {
 			req.CreateSchedule.PromiseParam.Data = []byte{}
+		}
+		if req.CreateSchedule.PromiseTags == nil {
+			req.CreateSchedule.PromiseTags = map[string]string{}
 		}
 
 		// check if it already exists.
@@ -71,13 +77,15 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 								Kind: t_aio.CreateSchedule,
 								CreateSchedule: &t_aio.CreateScheduleCommand{
 									Id:             req.CreateSchedule.Id,
+									Description:    req.CreateSchedule.Description,
 									Cron:           req.CreateSchedule.Cron,
-									Desc:           req.CreateSchedule.Desc,
+									Tags:           req.CreateSchedule.Tags,
 									PromiseId:      req.CreateSchedule.PromiseId,
-									PromiseParam:   req.CreateSchedule.PromiseParam,
 									PromiseTimeout: req.CreateSchedule.PromiseTimeout,
-									LastRunTime:    nil,
+									PromiseParam:   req.CreateSchedule.PromiseParam,
+									PromiseTags:    req.CreateSchedule.PromiseTags,
 									NextRunTime:    next,
+									IdempotencyKey: req.CreateSchedule.IdempotencyKey,
 									CreatedOn:      createdOn,
 								},
 							},
@@ -96,26 +104,26 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res(
-					&t_api.Response{
-						Kind: t_api.CreateSchedule,
-						CreateSchedule: &t_api.CreateScheduleResponse{
-							Status: t_api.StatusCreated,
-							Schedule: &schedule.Schedule{
-								Id:             req.CreateSchedule.Id,
-								Desc:           req.CreateSchedule.Desc,
-								Cron:           req.CreateSchedule.Cron,
-								PromiseId:      req.CreateSchedule.PromiseId,
-								PromiseParam:   req.CreateSchedule.PromiseParam,
-								PromiseTimeout: req.CreateSchedule.PromiseTimeout,
-								LastRunTime:    nil,
-								NextRunTime:    next,
-								CreatedOn:      createdOn,
-							},
+				res(&t_api.Response{
+					Kind: t_api.CreateSchedule,
+					CreateSchedule: &t_api.CreateScheduleResponse{
+						Status: t_api.StatusCreated,
+						Schedule: &schedule.Schedule{
+							Id:             req.CreateSchedule.Id,
+							Description:    req.CreateSchedule.Description,
+							Cron:           req.CreateSchedule.Cron,
+							Tags:           req.CreateSchedule.Tags,
+							PromiseId:      req.CreateSchedule.PromiseId,
+							PromiseTimeout: req.CreateSchedule.PromiseTimeout,
+							PromiseParam:   req.CreateSchedule.PromiseParam,
+							PromiseTags:    req.CreateSchedule.PromiseTags,
+							LastRunTime:    nil,
+							NextRunTime:    next,
+							IdempotencyKey: req.CreateSchedule.IdempotencyKey,
+							CreatedOn:      createdOn,
 						},
 					},
-					nil,
-				)
+				}, nil)
 			} else {
 				c.Scheduler.Add(CreateSchedule(metadata, req, res))
 			}
@@ -139,15 +147,12 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			status = t_api.StatusOK
 		}
 
-		res(
-			&t_api.Response{
-				Kind: t_api.CreateSchedule,
-				CreateSchedule: &t_api.CreateScheduleResponse{
-					Status:   status,
-					Schedule: s,
-				},
+		res(&t_api.Response{
+			Kind: t_api.CreateSchedule,
+			CreateSchedule: &t_api.CreateScheduleResponse{
+				Status:   status,
+				Schedule: s,
 			},
-			nil,
-		)
+		}, nil)
 	})
 }

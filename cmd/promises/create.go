@@ -12,10 +12,10 @@ import (
 
 var createPromiseExample = `
 # Create a promise
-resonate promise create foo --timeout 1h
+resonate promises create foo --timeout 1h
 
 # Create a promise with data and headers and tags
-resonate promise create foo --timeout 1h --data foo --header bar=bar --tag baz=baz`
+resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=baz`
 
 func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 	var (
@@ -47,21 +47,19 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 				params.IdempotencyKey = &idempotencyKey
 			}
 
-			param := &promises.PromiseValue{}
+			body := promises.CreatePromiseJSONRequestBody{
+				Id:      id,
+				Timeout: time.Now().Add(timeout).UnixMilli(),
+				Param:   &promises.PromiseValue{},
+			}
 
 			if cmd.Flag("header").Changed {
-				param.Headers = &headers
+				body.Param.Headers = headers
 			}
 
 			if cmd.Flag("data").Changed {
 				encoded := base64.StdEncoding.EncodeToString([]byte(data))
-				param.Data = &encoded
-			}
-
-			body := promises.Promise{
-				Id:      id,
-				Timeout: time.Now().Add(timeout).UnixMilli(),
-				Param:   param,
+				body.Param.Data = &encoded
 			}
 
 			if cmd.Flag("tag").Changed {

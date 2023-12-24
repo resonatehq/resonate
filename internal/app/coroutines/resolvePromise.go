@@ -162,7 +162,7 @@ func ResolvePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t
 					}
 				}
 			} else {
-				status := util.GetForbiddenStatus(p.State)
+				status := t_api.ForbiddenStatus(p.State)
 				strict := req.ResolvePromise.Strict && p.State != promise.Resolved
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.ResolvePromise.IdempotencyKey) {

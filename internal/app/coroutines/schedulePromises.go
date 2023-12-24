@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
@@ -74,6 +75,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		}
 
 		id, err := generatePromiseId(schedule.PromiseId, map[string]string{
+			"id":        schedule.Id,
 			"timestamp": fmt.Sprintf("%d", schedule.NextRunTime),
 		})
 		if err != nil {
@@ -87,6 +89,13 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		if schedule.PromiseParam.Data == nil {
 			schedule.PromiseParam.Data = []byte{}
 		}
+		if schedule.PromiseTags == nil {
+			schedule.PromiseTags = map[string]string{}
+		}
+
+		// add invocation tag
+		schedule.PromiseTags["resonate:invocation"] = "true"
+		schedule.PromiseTags["resonate:schedule"] = schedule.Id
 
 		// calculate timeout for promise
 
@@ -94,6 +103,11 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		if c.Time() >= schedule.PromiseTimeout+schedule.NextRunTime {
 			state = promise.Timedout
 		}
+
+		// set promise idempotency key to the promise id,
+		// this way the key is non nil and we can
+		// "create" idempotently when picked up by the sdk
+		idempotencyKey := idempotency.Key(id)
 
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
@@ -104,14 +118,12 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
 								Id:             id,
+								IdempotencyKey: &idempotencyKey,
 								State:          state,
 								Param:          schedule.PromiseParam,
 								Timeout:        schedule.NextRunTime + schedule.PromiseTimeout,
-								IdempotencyKey: nil,
-								Tags: map[string]string{
-									"resonate:invocation": "true",
-								},
-								CreatedOn: schedule.NextRunTime,
+								Tags:           schedule.PromiseTags,
+								CreatedOn:      schedule.NextRunTime,
 							},
 						},
 						{

@@ -10,7 +10,7 @@ import (
 
 var getPromiseExample = `
 # Get a promise
-resonate promise foo`
+resonate promises foo`
 
 func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
 	var (

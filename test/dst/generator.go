@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/subscription"
 )
@@ -13,7 +14,7 @@ import (
 type Generator struct {
 	ticks            int64
 	idSet            []string
-	idemotencyKeySet []*promise.IdempotencyKey
+	idemotencyKeySet []*idempotency.Key
 	headersSet       []map[string]string
 	dataSet          [][]byte
 	tagsSet          []map[string]string
@@ -30,10 +31,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		idSet[i] = strconv.Itoa(i)
 	}
 
-	idempotencyKeySet := []*promise.IdempotencyKey{}
+	idempotencyKeySet := []*idempotency.Key{}
 	for i := 0; i < config.IdempotencyKeys; i++ {
 		s := strconv.Itoa(i)
-		idempotencyKey := promise.IdempotencyKey(s)
+		idempotencyKey := idempotency.Key(s)
 		idempotencyKeySet = append(idempotencyKeySet, &idempotencyKey, nil) // half of all idempotencyKeys are nil
 	}
 
@@ -266,23 +267,51 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 	}
 }
 
+func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Request {
+	limit := RangeIntn(r, 1, 11)
+
+	var id string
+	switch r.Intn(2) {
+	case 0:
+		id = fmt.Sprintf("*%d", r.Intn(10))
+	default:
+		id = fmt.Sprintf("%d*", r.Intn(10))
+	}
+
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
+
+	return &t_api.Request{
+		Kind: t_api.SearchSchedules,
+		SearchSchedules: &t_api.SearchSchedulesRequest{
+			Id:    id,
+			Tags:  tags,
+			Limit: limit,
+		},
+	}
+}
+
 func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 	cron := fmt.Sprintf("%d %d * * *", r.Intn(60), r.Intn(24))
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	timeout := RangeInt63n(r, t, g.ticks)
+
+	promiseTimeout := RangeInt63n(r, t, g.ticks)
+	promiseHeaders := g.headersSet[r.Intn(len(g.headersSet))]
+	promiseData := g.dataSet[r.Intn(len(g.dataSet))]
+	promiseTags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
 	return &t_api.Request{
 		Kind: t_api.CreateSchedule,
 		CreateSchedule: &t_api.CreateScheduleRequest{
 			Id:             id,
-			Desc:           "",
+			Description:    "",
 			Cron:           cron,
+			Tags:           tags,
 			PromiseId:      fmt.Sprintf("%s.{{.timestamp}}", id),
-			PromiseParam:   promise.Value{Headers: headers, Data: data},
-			PromiseTimeout: timeout,
+			PromiseTimeout: promiseTimeout,
+			PromiseParam:   promise.Value{Headers: promiseHeaders, Data: promiseData},
+			PromiseTags:    promiseTags,
 			IdempotencyKey: idempotencyKey,
 		},
 	}

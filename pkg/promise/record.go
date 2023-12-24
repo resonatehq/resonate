@@ -2,6 +2,8 @@ package promise
 
 import (
 	"encoding/json"
+
+	"github.com/resonatehq/resonate/pkg/idempotency"
 )
 
 type PromiseRecord struct {
@@ -12,8 +14,8 @@ type PromiseRecord struct {
 	ValueHeaders              []byte
 	ValueData                 []byte
 	Timeout                   int64
-	IdempotencyKeyForCreate   *IdempotencyKey
-	IdempotencyKeyForComplete *IdempotencyKey
+	IdempotencyKeyForCreate   *idempotency.Key
+	IdempotencyKeyForComplete *idempotency.Key
 	CreatedOn                 *int64
 	CompletedOn               *int64
 	Tags                      []byte
@@ -21,17 +23,17 @@ type PromiseRecord struct {
 }
 
 func (r *PromiseRecord) Promise() (*Promise, error) {
-	param, err := r.param()
+	paramHeaders, err := bytesToMap(r.ParamHeaders)
 	if err != nil {
 		return nil, err
 	}
 
-	value, err := r.value()
+	valueHeaders, err := bytesToMap(r.ValueHeaders)
 	if err != nil {
 		return nil, err
 	}
 
-	tags, err := r.tags()
+	tags, err := bytesToMap(r.Tags)
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +41,8 @@ func (r *PromiseRecord) Promise() (*Promise, error) {
 	return &Promise{
 		Id:                        r.Id,
 		State:                     r.State,
-		Param:                     param,
-		Value:                     value,
+		Param:                     Value{Headers: paramHeaders, Data: r.ParamData},
+		Value:                     Value{Headers: valueHeaders, Data: r.ValueData},
 		Timeout:                   r.Timeout,
 		IdempotencyKeyForCreate:   r.IdempotencyKeyForCreate,
 		IdempotencyKeyForComplete: r.IdempotencyKeyForComplete,
@@ -51,44 +53,14 @@ func (r *PromiseRecord) Promise() (*Promise, error) {
 	}, nil
 }
 
-func (r *PromiseRecord) param() (Value, error) {
-	var headers map[string]string
+func bytesToMap(b []byte) (map[string]string, error) {
+	m := map[string]string{}
 
-	if r.ParamHeaders != nil {
-		if err := json.Unmarshal(r.ParamHeaders, &headers); err != nil {
-			return Value{}, err
-		}
-	}
-
-	return Value{
-		Headers: headers,
-		Data:    r.ParamData,
-	}, nil
-}
-
-func (r *PromiseRecord) value() (Value, error) {
-	var headers map[string]string
-
-	if r.ValueHeaders != nil {
-		if err := json.Unmarshal(r.ValueHeaders, &headers); err != nil {
-			return Value{}, err
-		}
-	}
-
-	return Value{
-		Headers: headers,
-		Data:    r.ValueData,
-	}, nil
-}
-
-func (r *PromiseRecord) tags() (map[string]string, error) {
-	var tags map[string]string
-
-	if r.Tags != nil {
-		if err := json.Unmarshal(r.Tags, &tags); err != nil {
+	if b != nil {
+		if err := json.Unmarshal(b, &m); err != nil {
 			return nil, err
 		}
 	}
 
-	return tags, nil
+	return m, nil
 }

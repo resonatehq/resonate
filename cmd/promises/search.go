@@ -10,20 +10,20 @@ import (
 )
 
 var searchPromiseExample = `
-# Search for all promise
+# Search for all promises
 resonate promise search "*"
 
 # Search for promises that start with foo
-resonate promise search "foo.*"
+resonate promises search "foo.*"
 
 # Search for all pending promises
-resonate promise search "*" --state pending
+resonate promises search "*" --state pending
 
 # Search for all resolved promises
-resonate promise search "*" --state resolved
+resonate promises search "*" --state resolved
 
 # Search for all rejected promises
-resonate promise search "*" --state rejected`
+resonate promises search "*" --state rejected`
 
 func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 	var (
@@ -44,34 +44,22 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 				return
 			}
 
-			id := args[0]
-
-			filters := &promises.QueryFilters{
-				Id:    &id,
+			params := &promises.SearchPromisesParams{
+				Id:    &args[0],
 				Limit: &limit,
 			}
 
 			if cmd.Flag("state").Changed {
-				filters.State = &state
+				s := promises.SearchPromisesParamsState(state)
+				params.State = &s
 			}
 
 			if cmd.Flag("tag").Changed {
-				t, err := json.Marshal(tags)
-				if err != nil {
-					cmd.PrintErr(err)
-					return
-				}
-
-				serializedTags := string(t)
-				filters.Tags = &serializedTags
+				params.Tags = &tags
 			}
 
 			if cmd.Flag("cursor").Changed {
-				filters.Cursor = &cursor
-			}
-
-			params := &promises.SearchPromisesParams{
-				Filters: filters,
+				params.Cursor = &cursor
 			}
 
 			resp, err := c.PromisesV1Alpha1().SearchPromisesWithResponse(context.Background(), params)

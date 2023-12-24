@@ -16,7 +16,7 @@ import (
 // Read Promise
 
 func (s *server) readPromise(c *gin.Context) {
-	id := ExtractId(c.Param("id"))
+	id := extractId(c.Param("id"))
 
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
@@ -46,11 +46,15 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
-	var params service.SearchPromiseParams
+	var params service.SearchPromisesParams
 	if err := c.ShouldBindQuery(&params); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
+
+	// tags needs to be parsed manually
+	// see: https://github.com/gin-gonic/gin/issues/2606
+	params.Tags = c.QueryMap("tags")
 
 	resp, err := s.service.SearchPromises(&header, &params)
 	if err != nil {
@@ -99,7 +103,7 @@ func (s *server) createPromise(c *gin.Context) {
 // Complete Promise
 
 func (s *server) completePromise(c *gin.Context) {
-	id := ExtractId(c.Param("id"))
+	id := extractId(c.Param("id"))
 
 	var header service.CompletePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {

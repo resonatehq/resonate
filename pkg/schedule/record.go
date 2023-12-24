@@ -3,53 +3,68 @@ package schedule
 import (
 	"encoding/json"
 
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
 type ScheduleRecord struct {
 	Id                  string
-	Desc                string
+	Description         string
 	Cron                string
+	Tags                []byte
 	PromiseId           string
+	PromiseTimeout      int64
 	PromiseParamHeaders []byte
 	PromiseParamData    []byte
-	PromiseTimeout      int64
+	PromiseTags         []byte
 	LastRunTime         *int64
 	NextRunTime         int64
+	IdempotencyKey      *idempotency.Key
 	CreatedOn           int64
-	IdempotencyKey      *promise.IdempotencyKey
+	SortId              int64
 }
 
 func (r *ScheduleRecord) Schedule() (*Schedule, error) {
-	param, err := r.param()
+	tags, err := bytesToMap(r.Tags)
+	if err != nil {
+		return nil, err
+	}
+
+	promiseParamHeaders, err := bytesToMap(r.PromiseParamHeaders)
+	if err != nil {
+		return nil, err
+	}
+
+	promiseTags, err := bytesToMap(r.PromiseTags)
 	if err != nil {
 		return nil, err
 	}
 
 	return &Schedule{
 		Id:             r.Id,
-		Desc:           r.Desc,
+		Description:    r.Description,
 		Cron:           r.Cron,
+		Tags:           tags,
 		PromiseId:      r.PromiseId,
-		PromiseParam:   param,
 		PromiseTimeout: r.PromiseTimeout,
+		PromiseParam:   promise.Value{Headers: promiseParamHeaders, Data: r.PromiseParamData},
+		PromiseTags:    promiseTags,
 		LastRunTime:    r.LastRunTime,
 		NextRunTime:    r.NextRunTime,
+		IdempotencyKey: r.IdempotencyKey,
 		CreatedOn:      r.CreatedOn,
+		SortId:         r.SortId,
 	}, nil
 }
 
-func (r *ScheduleRecord) param() (promise.Value, error) {
-	var headers map[string]string
+func bytesToMap(b []byte) (map[string]string, error) {
+	m := map[string]string{}
 
-	if r.PromiseParamHeaders != nil {
-		if err := json.Unmarshal(r.PromiseParamHeaders, &headers); err != nil {
-			return promise.Value{}, err
+	if b != nil {
+		if err := json.Unmarshal(b, &m); err != nil {
+			return nil, err
 		}
 	}
 
-	return promise.Value{
-		Headers: headers,
-		Data:    r.PromiseParamData,
-	}, nil
+	return m, nil
 }

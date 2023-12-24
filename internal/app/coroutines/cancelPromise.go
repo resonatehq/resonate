@@ -165,7 +165,7 @@ func CancelPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}
 				}
 			} else {
-				status := util.GetForbiddenStatus(p.State)
+				status := t_api.ForbiddenStatus(p.State)
 				strict := req.CancelPromise.Strict && p.State != promise.Canceled
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CancelPromise.IdempotencyKey) {

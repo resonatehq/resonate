@@ -47,6 +47,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Schedules API
 	r.POST("/schedules", s.createSchedule)
+	r.GET("/schedules", s.searchSchedules)
 	r.GET("/schedules/*id", s.readSchedule)
 	r.DELETE("/schedules/*id", s.deleteSchedule)
 

@@ -11,6 +11,8 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/stretchr/testify/assert"
@@ -140,6 +142,7 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -155,7 +158,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesCursor",
-			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sImxpbWl0IjoxMCwic29ydElkIjoxMDB9fQ.VbqZxXyDuuOb6o-8CmraefFtDDnmThSopiRT_A-N__0",
+			path:   "promises?cursor=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJOZXh0Ijp7ImlkIjoiKiIsInN0YXRlcyI6WyJQRU5ESU5HIl0sInRhZ3MiOnt9LCJsaW1pdCI6MTAsInNvcnRJZCI6MTAwfX0.XKusWO-Jl4v7QVIwh5Pn3oIElBvtpf0VPOLJkXPvQLk",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -164,8 +167,9 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:   map[string]string{},
 					Limit:  10,
-					SortId: test.Int64ToPointer(100),
+					SortId: util.ToPointer(int64(100)),
 				},
 			},
 			res: &t_api.Response{
@@ -189,6 +193,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Pending,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -213,6 +218,7 @@ func TestHttpServer(t *testing.T) {
 					States: []promise.State{
 						promise.Resolved,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -239,6 +245,7 @@ func TestHttpServer(t *testing.T) {
 						promise.Timedout,
 						promise.Canceled,
 					},
+					Tags:  map[string]string{},
 					Limit: 10,
 				},
 			},
@@ -254,7 +261,7 @@ func TestHttpServer(t *testing.T) {
 		},
 		{
 			name:   "SearchPromisesTags",
-			path:   "promises?id=*&tags=%7B%22resonate%3Ainvocation%22%3A%22true%22%7D&limit=10",
+			path:   "promises?id=*&tags[resonate:invocation]=true&limit=10",
 			method: "GET",
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
@@ -335,7 +342,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: t_api.CreatePromise,
 				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo/bar",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Param: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -408,7 +415,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: t_api.CancelPromise,
 				CancelPromise: &t_api.CancelPromiseRequest{
 					Id:             "foo/bar",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -478,7 +485,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: t_api.ResolvePromise,
 				ResolvePromise: &t_api.ResolvePromiseRequest{
 					Id:             "foo/bar",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -548,7 +555,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: t_api.RejectPromise,
 				RejectPromise: &t_api.RejectPromiseRequest{
 					Id:             "foo/bar",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Strict:         true,
 					Value: promise.Value{
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
@@ -615,7 +622,7 @@ func TestHttpServer(t *testing.T) {
 					Status: t_api.StatusOK,
 					Schedule: &schedule.Schedule{
 						Id:             "foo",
-						Desc:           "",
+						Description:    "",
 						Cron:           "* * * * * *",
 						PromiseId:      "foo.{{.timestamp}}",
 						PromiseTimeout: 1000000,
@@ -623,6 +630,76 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			status: 200,
+		},
+		{
+			name:   "SearchSchedules",
+			path:   "schedules?id=*&limit=10",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesRequest{
+					Id:    "*",
+					Tags:  map[string]string{},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesResponse{
+					Status:    t_api.StatusOK,
+					Cursor:    nil,
+					Schedules: []*schedule.Schedule{},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "SearchSchedulesTags",
+			path:   "schedules?id=*&tags[foo]=bar&limit=10",
+			method: "GET",
+			req: &t_api.Request{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesRequest{
+					Id: "*",
+					Tags: map[string]string{
+						"foo": "bar",
+					},
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesResponse{
+					Status:    t_api.StatusOK,
+					Cursor:    nil,
+					Schedules: []*schedule.Schedule{},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "SearchSchedulesInvalidQuery",
+			path:   "schedules?id=",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchSchedulesInvalidLimit",
+			path:   "schedules?id=*&limit=0",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
+			name:   "SearchSchedulesInvalidTags",
+			path:   "schedules?id=*&tags=x",
+			method: "GET",
+			req:    nil,
+			res:    nil,
+			status: 400,
 		},
 		{
 			name:   "CreateSchedule",
@@ -642,7 +719,7 @@ func TestHttpServer(t *testing.T) {
 				Kind: t_api.CreateSchedule,
 				CreateSchedule: &t_api.CreateScheduleRequest{
 					Id:             "foo",
-					IdempotencyKey: test.IdempotencyKeyToPointer("bar"),
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 					Cron:           "* * * * * *",
 					PromiseId:      "foo.{{.timestamp}}",
 					PromiseTimeout: 1000000,
@@ -654,7 +731,7 @@ func TestHttpServer(t *testing.T) {
 					Status: t_api.StatusCreated,
 					Schedule: &schedule.Schedule{
 						Id:             "foo",
-						Desc:           "",
+						Description:    "",
 						Cron:           "* * * * * *",
 						PromiseId:      "foo.{{.timestamp}}",
 						PromiseTimeout: 1000000,

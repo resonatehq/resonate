@@ -5,12 +5,41 @@ info:
 paths:
   /schedules:
     post:
+      tags:
+        - Schedules
       summary: Create a new schedule
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Schedule"
+              type: object
+              required:
+                - id
+                - cron
+                - promiseId
+                - promiseTimeout
+              properties:
+                id:
+                  type: string
+                description:
+                  type: string
+                cron:
+                  type: string
+                tags:
+                  type: object
+                  additionalProperties:
+                    type: string
+                promiseId:
+                  type: string
+                promiseTimeout:
+                  type: integer
+                  format: int64
+                promiseParam:
+                  $ref: "#/components/schemas/PromiseValue"
+                promiseTags:
+                  type: object
+                  additionalProperties:
+                    type: string
         required: true
       responses:
         "200":
@@ -19,8 +48,63 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Schedule"
+
+    get:
+      tags:
+        - Schedules
+      summary: Search schedules
+      operationId: searchSchedules
+      parameters:
+        - name: id
+          in: query
+          description: |
+            Search schedules for matching IDs, can include wildcards.
+
+            For example:
+            - "foo/*" matches all IDs starting with "foo/"
+            - "*/bar" matches all IDs starting with "bar/"
+            - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+          schema:
+            type: string
+        - name: tags
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+        - name: limit
+          in: query
+          description: Number of results
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: Cursor for pagination
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cursor:
+                    type: string
+                  schedules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Schedule"
+        400:
+          description: Invalid request
+
   /schedules/{id}:
     get:
+      tags:
+        - Schedules
       summary: Get a schedule
       parameters:
         - in: path
@@ -37,7 +121,10 @@ paths:
                 $ref: "#/components/schemas/Schedule"
         "404":
           description: Schedule not found
+
     delete:
+      tags:
+        - Schedules
       summary: Delete a schedule
       parameters:
         - in: path
@@ -57,23 +144,35 @@ components:
       type: object
       required:
         - id
+        - description
         - cron
+        - tags
         - promiseId
         - promiseTimeout
+        - promiseParam
+        - promiseTags
       properties:
         id:
           type: string
-        desc:
+        description:
           type: string
         cron:
           type: string
+        tags:
+          type: object
+          additionalProperties:
+            type: string
         promiseId:
           type: string
         promiseTimeout:
           type: integer
           format: int64
         promiseParam:
-          $ref: "#/components/schemas/ScheduleValue"
+          $ref: "#/components/schemas/PromiseValue"
+        promiseTags:
+          type: object
+          additionalProperties:
+            type: string
         lastRunTime:
           type: integer
           readOnly: true
@@ -82,16 +181,18 @@ components:
           type: integer
           readOnly: true
           format: int64
+        idempotencyKey:
+          type: string
+          readOnly: true
         createdOn:
           type: integer
           readOnly: true
           format: int64
-        idempotencyKeyForCreate:
-          type: string
-          readOnly: true
 
-    ScheduleValue:
+    PromiseValue:
       type: object
+      required:
+        - headers
       properties:
         data:
           type: string

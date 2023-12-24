@@ -11,15 +11,30 @@ paths:
       summary: Create a promise
       operationId: createPromise
       parameters:
-        - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/IdempotencyKey"
         - $ref: "#/components/parameters/Strict"
+        - $ref: "#/components/parameters/RequestId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Promise"
+              type: object
+              required:
+                - id
+                - timeout
+              properties:
+                id:
+                  type: string
+                timeout:
+                  type: integer
+                  format: int64
+                param:
+                  $ref: "#/components/schemas/PromiseValue"
+                tags:
+                  type: object
+                  additionalProperties:
+                    type: string
       responses:
         200:
           description: Operation deduplicated, Promise fetched successfully
@@ -46,14 +61,58 @@ paths:
       summary: Search promises
       operationId: searchPromises
       parameters:
-        - $ref: "#/components/parameters/QueryFilters"
+        - name: id
+          in: query
+          description: |
+            Search promises for matching IDs, can include wildcards.
+
+            For example:
+            - "foo/*" matches all IDs starting with "foo/"
+            - "*/bar" matches all IDs starting with "bar/"
+            - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Search promises for matching states
+          schema:
+            type: string
+            enum:
+              - pending
+              - resolved
+              - rejected
+        - name: tags
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+        - name: limit
+          in: query
+          description: Number of results
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: Cursor for pagination
+          schema:
+            type: string
       responses:
         200:
           description: OK
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PromiseSearchResponse"
+                type: object
+                properties:
+                  cursor:
+                    type: string
+                  promises:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Promise"
         400:
           description: Invalid request
 
@@ -91,7 +150,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/PromiseCompleteRequest"
+              type: object
+              required:
+                - state
+              properties:
+                state:
+                  $ref: "#/components/schemas/PromiseStateComplete"
+                value:
+                  $ref: "#/components/schemas/PromiseValue"
       responses:
         200:
           description: OK
@@ -124,7 +190,7 @@ components:
     Strict:
       name: strict
       in: header
-      description: If true, deduplicates only when promise is pending
+      description: If true, deduplicates only when promise state matches the request
       schema:
         type: boolean
     RequestId:
@@ -133,45 +199,17 @@ components:
       description: Unique ID for each request
       schema:
         type: string
-    QueryFilters:
-      name: filters
-      in: query
-      style: form
-      explode: true
-      schema:
-        type: object
-        properties:
-          id:
-            type: string
-            description: |
-              Fuzzy search query string to find promises via fuzzy IDs. This string will be matched flexibly 
-              against IDs in the system, so it does not need to exactly match the full ID.
-
-              Some examples of valid fuzzy ID strings:
-              - "abc123*" - Would match ID "abc123def" 
-              - "pro*fil" - Would match IDs containing "pro123file"
-          state:
-            type: string
-            enum:
-              - pending
-              - resolved
-              - rejected
-          tags:
-            type: string
-            description: Serialized tags that must be matched
-          limit:
-            type: integer
-            description: Number of results
-          cursor:
-            type: string
-            description: Cursor for pagination
 
   schemas:
     Promise:
       type: object
       required:
         - id
+        - state
         - timeout
+        - param
+        - value
+        - tags
       properties:
         id:
           type: string
@@ -190,16 +228,16 @@ components:
         idempotencyKeyForComplete:
           type: string
           readOnly: true
+        tags:
+          type: object
+          additionalProperties:
+            type: string
         createdOn:
           type: integer
           readOnly: true
         completedOn:
           type: integer
           readOnly: true
-        tags:
-          type: object
-          additionalProperties:
-            type: string
 
     PromiseState:
       type: string
@@ -219,28 +257,12 @@ components:
 
     PromiseValue:
       type: object
+      required:
+        - headers
       properties:
-        data:
-          type: string
         headers:
           type: object
           additionalProperties:
             type: string
-
-    PromiseCompleteRequest:
-      type: object
-      properties:
-        state:
-          $ref: "#/components/schemas/PromiseStateComplete"
-        value:
-          $ref: "#/components/schemas/PromiseValue"
-
-    PromiseSearchResponse:
-      type: object
-      properties:
-        cursor:
+        data:
           type: string
-        promises:
-          type: array
-          items:
-            $ref: "#/components/schemas/Promise"

@@ -11,15 +11,16 @@ const (
 	ResolvePromise
 	RejectPromise
 
+	// Schedule
+	ReadSchedule
+	SearchSchedules
+	CreateSchedule
+	DeleteSchedule
+
 	// Subscription
 	ReadSubscriptions
 	CreateSubscription
 	DeleteSubscription
-
-	// Schedule
-	CreateSchedule
-	ReadSchedule
-	DeleteSchedule
 
 	// Echo
 	Echo
@@ -39,18 +40,20 @@ func (k Kind) String() string {
 		return "resolve-promise"
 	case RejectPromise:
 		return "reject-promise"
+	case ReadSchedule:
+		return "read-schedule"
+	case SearchSchedules:
+		return "search-schedules"
+	case CreateSchedule:
+		return "create-schedule"
+	case DeleteSchedule:
+		return "delete-schedule"
 	case ReadSubscriptions:
 		return "read-subscriptions"
 	case CreateSubscription:
 		return "create-subscription"
 	case DeleteSubscription:
 		return "delete-subscription"
-	case CreateSchedule:
-		return "create-schedule"
-	case ReadSchedule:
-		return "read-schedule"
-	case DeleteSchedule:
-		return "delete-schedule"
 	default:
 		panic("invalid api")
 	}

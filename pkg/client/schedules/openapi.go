@@ -16,28 +16,60 @@ import (
 	"github.com/oapi-codegen/runtime"
 )
 
-// Schedule defines model for Schedule.
-type Schedule struct {
-	CreatedOn               *int64         `json:"createdOn,omitempty"`
-	Cron                    string         `json:"cron"`
-	Desc                    *string        `json:"desc,omitempty"`
-	Id                      string         `json:"id"`
-	IdempotencyKeyForCreate *string        `json:"idempotencyKeyForCreate,omitempty"`
-	LastRunTime             *int64         `json:"lastRunTime,omitempty"`
-	NextRunTime             *int64         `json:"nextRunTime,omitempty"`
-	PromiseId               string         `json:"promiseId"`
-	PromiseParam            *ScheduleValue `json:"promiseParam,omitempty"`
-	PromiseTimeout          int64          `json:"promiseTimeout"`
+// PromiseValue defines model for PromiseValue.
+type PromiseValue struct {
+	Data    *string           `json:"data,omitempty"`
+	Headers map[string]string `json:"headers"`
 }
 
-// ScheduleValue defines model for ScheduleValue.
-type ScheduleValue struct {
-	Data    *string            `json:"data,omitempty"`
-	Headers *map[string]string `json:"headers,omitempty"`
+// Schedule defines model for Schedule.
+type Schedule struct {
+	CreatedOn      *int64            `json:"createdOn,omitempty"`
+	Cron           string            `json:"cron"`
+	Description    string            `json:"description"`
+	Id             string            `json:"id"`
+	IdempotencyKey *string           `json:"idempotencyKey,omitempty"`
+	LastRunTime    *int64            `json:"lastRunTime,omitempty"`
+	NextRunTime    *int64            `json:"nextRunTime,omitempty"`
+	PromiseId      string            `json:"promiseId"`
+	PromiseParam   PromiseValue      `json:"promiseParam"`
+	PromiseTags    map[string]string `json:"promiseTags"`
+	PromiseTimeout int64             `json:"promiseTimeout"`
+	Tags           map[string]string `json:"tags"`
+}
+
+// SearchSchedulesParams defines parameters for SearchSchedules.
+type SearchSchedulesParams struct {
+	// Id Search schedules for matching IDs, can include wildcards.
+	//
+	// For example:
+	// - "foo/*" matches all IDs starting with "foo/"
+	// - "*/bar" matches all IDs starting with "bar/"
+	// - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+	Id   *string            `form:"id,omitempty" json:"id,omitempty"`
+	Tags *map[string]string `json:"tags,omitempty"`
+
+	// Limit Number of results
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor Cursor for pagination
+	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// PostSchedulesJSONBody defines parameters for PostSchedules.
+type PostSchedulesJSONBody struct {
+	Cron           string             `json:"cron"`
+	Description    *string            `json:"description,omitempty"`
+	Id             string             `json:"id"`
+	PromiseId      string             `json:"promiseId"`
+	PromiseParam   *PromiseValue      `json:"promiseParam,omitempty"`
+	PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
+	PromiseTimeout int64              `json:"promiseTimeout"`
+	Tags           *map[string]string `json:"tags,omitempty"`
 }
 
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.
-type PostSchedulesJSONRequestBody = Schedule
+type PostSchedulesJSONRequestBody PostSchedulesJSONBody
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -112,6 +144,9 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
+	// SearchSchedules request
+	SearchSchedules(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PostSchedulesWithBody request with any body
 	PostSchedulesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -122,6 +157,18 @@ type ClientInterface interface {
 
 	// GetSchedulesId request
 	GetSchedulesId(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+}
+
+func (c *Client) SearchSchedules(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSearchSchedulesRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
 }
 
 func (c *Client) PostSchedulesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -170,6 +217,103 @@ func (c *Client) GetSchedulesId(ctx context.Context, id string, reqEditors ...Re
 		return nil, err
 	}
 	return c.Client.Do(req)
+}
+
+// NewSearchSchedulesRequest generates requests for SearchSchedules
+func NewSearchSchedulesRequest(server string, params *SearchSchedulesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/schedules")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if params.Id != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "id", runtime.ParamLocationQuery, *params.Id); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Tags != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("deepObject", true, "tags", runtime.ParamLocationQuery, *params.Tags); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "limit", runtime.ParamLocationQuery, *params.Limit); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithLocation("form", true, "cursor", runtime.ParamLocationQuery, *params.Cursor); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
 }
 
 // NewPostSchedulesRequest calls the generic PostSchedules builder with application/json body
@@ -323,6 +467,9 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
+	// SearchSchedulesWithResponse request
+	SearchSchedulesWithResponse(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*SearchSchedulesResponse, error)
+
 	// PostSchedulesWithBodyWithResponse request with any body
 	PostSchedulesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
 
@@ -333,6 +480,31 @@ type ClientWithResponsesInterface interface {
 
 	// GetSchedulesIdWithResponse request
 	GetSchedulesIdWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error)
+}
+
+type SearchSchedulesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Cursor    *string     `json:"cursor,omitempty"`
+		Schedules *[]Schedule `json:"schedules,omitempty"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r SearchSchedulesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SearchSchedulesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
 }
 
 type PostSchedulesResponse struct {
@@ -400,6 +572,15 @@ func (r GetSchedulesIdResponse) StatusCode() int {
 	return 0
 }
 
+// SearchSchedulesWithResponse request returning *SearchSchedulesResponse
+func (c *ClientWithResponses) SearchSchedulesWithResponse(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*SearchSchedulesResponse, error) {
+	rsp, err := c.SearchSchedules(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSearchSchedulesResponse(rsp)
+}
+
 // PostSchedulesWithBodyWithResponse request with arbitrary body returning *PostSchedulesResponse
 func (c *ClientWithResponses) PostSchedulesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error) {
 	rsp, err := c.PostSchedulesWithBody(ctx, contentType, body, reqEditors...)
@@ -433,6 +614,35 @@ func (c *ClientWithResponses) GetSchedulesIdWithResponse(ctx context.Context, id
 		return nil, err
 	}
 	return ParseGetSchedulesIdResponse(rsp)
+}
+
+// ParseSearchSchedulesResponse parses an HTTP response from a SearchSchedulesWithResponse call
+func ParseSearchSchedulesResponse(rsp *http.Response) (*SearchSchedulesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SearchSchedulesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Cursor    *string     `json:"cursor,omitempty"`
+			Schedules *[]Schedule `json:"schedules,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	}
+
+	return response, nil
 }
 
 // ParsePostSchedulesResponse parses an HTTP response from a PostSchedulesWithResponse call

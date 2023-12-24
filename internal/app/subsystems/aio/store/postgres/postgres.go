@@ -49,20 +49,24 @@ const (
 
 	CREATE TABLE IF NOT EXISTS schedules (
 		id                    TEXT,
+		sort_id               SERIAL,
 		description           TEXT,
 		cron                  TEXT,
+		tags                  JSONB,
 		promise_id            TEXT,
+		promise_timeout       BIGINT,
 		promise_param_headers JSONB,
 		promise_param_data    BYTEA,
-		promise_timeout       BIGINT,
+		promise_tags          JSONB,
 		last_run_time         BIGINT,
 		next_run_time         BIGINT,
+		idempotency_key       TEXT,
 		created_on            BIGINT,
-		idempotency_key       TEXT, 
 		PRIMARY KEY(id)
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_next_run_time ON schedules (next_run_time);
+	CREATE INDEX IF NOT EXISTS idx_schedules_sort_id ON schedules(sort_id);
+	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
@@ -95,6 +99,7 @@ const (
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE notifications;
 	DROP TABLE subscriptions;
+	DROP TABLE schedules;
 	DROP TABLE timeouts;
 	DROP TABLE promises;`
 
@@ -147,7 +152,7 @@ const (
 
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
-		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, idempotency_key, created_on
 	FROM
 		schedules
 	WHERE
@@ -155,17 +160,31 @@ const (
 
 	SCHEDULE_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key
+		id, cron, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time
 	FROM
 		schedules
 	WHERE
 		next_run_time <= $1`
 
+	SCHEDULE_SEARCH_STATEMENT = `
+	SELECT
+		id, cron, tags, last_run_time, next_run_time, idempotency_key, created_on, sort_id
+	FROM
+		schedules
+	WHERE
+		($1::int IS NULL OR sort_id < $1) AND
+		id LIKE $2 AND
+		($3::jsonb IS NULL OR tags @> $3)
+	ORDER BY
+		sort_id DESC
+	LIMIT
+		$4`
+
 	SCHEDULE_INSERT_STATEMENT = `
 	INSERT INTO schedules
-		(id, description, cron, promise_id, promise_param_headers, promise_param_data, promise_timeout, last_run_time, next_run_time, created_on, idempotency_key)
+		(id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, next_run_time, idempotency_key, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	ON CONFLICT(id) DO NOTHING`
 
 	SCHEDULE_UPDATE_STATEMENT = `
@@ -516,6 +535,26 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
 				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
+			// Schedule
+			case t_aio.ReadSchedule:
+				util.Assert(command.ReadSchedule != nil, "command must not be nil")
+				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
+			case t_aio.ReadSchedules:
+				util.Assert(command.ReadSchedules != nil, "command must not be nil")
+				results[i][j], err = w.readSchedules(tx, command.ReadSchedules)
+			case t_aio.SearchSchedules:
+				util.Assert(command.SearchSchedules != nil, "command must not be nil")
+				results[i][j], err = w.searchSchedules(tx, command.SearchSchedules)
+			case t_aio.CreateSchedule:
+				util.Assert(command.CreateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
+			case t_aio.UpdateSchedule:
+				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
+				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
+			case t_aio.DeleteSchedule:
+				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
+				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
+
 			// Timeout
 			case t_aio.ReadTimeouts:
 				util.Assert(command.ReadTimeouts != nil, "command must not be nil")
@@ -563,23 +602,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			case t_aio.TimeoutCreateNotifications:
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
-
-			// Schedule
-			case t_aio.ReadSchedule:
-				util.Assert(command.ReadSchedule != nil, "command must not be nil")
-				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
-			case t_aio.ReadSchedules:
-				util.Assert(command.ReadSchedules != nil, "command must not be nil")
-				results[i][j], err = w.readSchedules(tx, command.ReadSchedules)
-			case t_aio.CreateSchedule:
-				util.Assert(command.CreateSchedule != nil, "command must not be nil")
-				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
-			case t_aio.UpdateSchedule:
-				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
-				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
-			case t_aio.DeleteSchedule:
-				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
-				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
 
 			default:
 				panic("invalid command")
@@ -810,16 +832,18 @@ func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCo
 
 	if err := row.Scan(
 		&record.Id,
-		&record.Desc,
+		&record.Description,
 		&record.Cron,
+		&record.Tags,
 		&record.PromiseId,
+		&record.PromiseTimeout,
 		&record.PromiseParamHeaders,
 		&record.PromiseParamData,
-		&record.PromiseTimeout,
+		&record.PromiseTags,
 		&record.LastRunTime,
 		&record.NextRunTime,
-		&record.CreatedOn,
 		&record.IdempotencyKey,
+		&record.CreatedOn,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
@@ -856,16 +880,14 @@ func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedules
 		record := &schedule.ScheduleRecord{}
 		if err := rows.Scan(
 			&record.Id,
-			&record.Desc,
 			&record.Cron,
 			&record.PromiseId,
+			&record.PromiseTimeout,
 			&record.PromiseParamHeaders,
 			&record.PromiseParamData,
-			&record.PromiseTimeout,
+			&record.PromiseTags,
 			&record.LastRunTime,
 			&record.NextRunTime,
-			&record.CreatedOn,
-			&record.IdempotencyKey,
 		); err != nil {
 			return nil, err
 		}
@@ -883,13 +905,95 @@ func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedules
 	}, nil
 }
 
+func (w *PostgresStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedulesCommand) (*t_aio.Result, error) {
+	util.Assert(cmd.Id != "", "query cannot be empty")
+	util.Assert(cmd.Tags != nil, "tags cannot be empty")
+
+	// convert query
+	id := strings.ReplaceAll(cmd.Id, "*", "%")
+
+	// tags
+	var tags *string
+	if len(cmd.Tags) > 0 {
+		t, err := json.Marshal(cmd.Tags)
+		if err != nil {
+			return nil, err
+		}
+
+		tags = util.ToPointer(string(t))
+	}
+
+	// select
+	rows, err := tx.Query(SCHEDULE_SEARCH_STATEMENT, cmd.SortId, id, tags, cmd.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*schedule.ScheduleRecord
+	var lastSortId int64
+
+	for rows.Next() {
+		record := &schedule.ScheduleRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Cron,
+			&record.Tags,
+			&record.LastRunTime,
+			&record.NextRunTime,
+			&record.IdempotencyKey,
+			&record.CreatedOn,
+			&record.SortId,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.SearchSchedules,
+		SearchSchedules: &t_aio.QuerySchedulesResult{
+			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
+			Records:      records,
+		},
+	}, nil
+}
+
 func (w *PostgresStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
-	headers, err := json.Marshal(cmd.PromiseParam.Headers)
+	tags, err := json.Marshal(cmd.Tags)
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Id, cmd.Desc, cmd.Cron, cmd.PromiseId, headers, cmd.PromiseParam.Data, cmd.PromiseTimeout, cmd.LastRunTime, cmd.NextRunTime, cmd.CreatedOn, cmd.IdempotencyKey)
+	promiseParamHeaders, err := json.Marshal(cmd.PromiseParam.Headers)
+	if err != nil {
+		return nil, err
+	}
+
+	promiseTags, err := json.Marshal(cmd.PromiseTags)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(
+		cmd.Id,
+		cmd.Description,
+		cmd.Cron,
+		tags,
+		cmd.PromiseId,
+		cmd.PromiseTimeout,
+		promiseParamHeaders,
+		cmd.PromiseParam.Data,
+		promiseTags,
+		cmd.NextRunTime,
+		cmd.IdempotencyKey,
+		cmd.CreatedOn,
+	)
 	if err != nil {
 		return nil, err
 	}
