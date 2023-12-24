@@ -95,6 +95,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 
 		// add invocation tag
 		schedule.PromiseTags["resonate:invocation"] = "true"
+		schedule.PromiseTags["resonate:schedule"] = schedule.Id
 
 		// calculate timeout for promise
 
