@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
@@ -102,6 +103,11 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 			state = promise.Timedout
 		}
 
+		// set promise idempotency key to the promise id,
+		// this way the key is non nil and we can
+		// "create" idempotently when picked up by the sdk
+		idempotencyKey := idempotency.Key(id)
+
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -110,12 +116,13 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 						{
 							Kind: t_aio.CreatePromise,
 							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id:        id,
-								State:     state,
-								Param:     schedule.PromiseParam,
-								Timeout:   schedule.NextRunTime + schedule.PromiseTimeout,
-								Tags:      schedule.PromiseTags,
-								CreatedOn: schedule.NextRunTime,
+								Id:             id,
+								IdempotencyKey: &idempotencyKey,
+								State:          state,
+								Param:          schedule.PromiseParam,
+								Timeout:        schedule.NextRunTime + schedule.PromiseTimeout,
+								Tags:           schedule.PromiseTags,
+								CreatedOn:      schedule.NextRunTime,
 							},
 						},
 						{
