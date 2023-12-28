@@ -38,6 +38,15 @@ type Schedule struct {
 	Tags           map[string]string `json:"tags"`
 }
 
+// Id defines model for Id.
+type Id = string
+
+// IdempotencyKey defines model for IdempotencyKey.
+type IdempotencyKey = string
+
+// RequestId defines model for RequestId.
+type RequestId = string
+
 // SearchSchedulesParams defines parameters for SearchSchedules.
 type SearchSchedulesParams struct {
 	// Id Search schedules for matching IDs, can include wildcards.
@@ -66,6 +75,27 @@ type PostSchedulesJSONBody struct {
 	PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
 	PromiseTimeout int64              `json:"promiseTimeout"`
 	Tags           *map[string]string `json:"tags,omitempty"`
+}
+
+// PostSchedulesParams defines parameters for PostSchedules.
+type PostSchedulesParams struct {
+	// IdempotencyKey Deduplicates multiple requests
+	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
+
+	// RequestId Unique ID for each request
+	RequestId *RequestId `json:"request-id,omitempty"`
+}
+
+// DeleteSchedulesIdParams defines parameters for DeleteSchedulesId.
+type DeleteSchedulesIdParams struct {
+	// RequestId Unique ID for each request
+	RequestId *RequestId `json:"request-id,omitempty"`
+}
+
+// GetSchedulesIdParams defines parameters for GetSchedulesId.
+type GetSchedulesIdParams struct {
+	// RequestId Unique ID for each request
+	RequestId *RequestId `json:"request-id,omitempty"`
 }
 
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.
@@ -148,15 +178,15 @@ type ClientInterface interface {
 	SearchSchedules(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PostSchedulesWithBody request with any body
-	PostSchedulesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PostSchedulesWithBody(ctx context.Context, params *PostSchedulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PostSchedules(ctx context.Context, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PostSchedules(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteSchedulesId request
-	DeleteSchedulesId(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	DeleteSchedulesId(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSchedulesId request
-	GetSchedulesId(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetSchedulesId(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) SearchSchedules(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -171,8 +201,8 @@ func (c *Client) SearchSchedules(ctx context.Context, params *SearchSchedulesPar
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostSchedulesWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostSchedulesRequestWithBody(c.Server, contentType, body)
+func (c *Client) PostSchedulesWithBody(ctx context.Context, params *PostSchedulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSchedulesRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +213,8 @@ func (c *Client) PostSchedulesWithBody(ctx context.Context, contentType string, 
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostSchedules(ctx context.Context, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostSchedulesRequest(c.Server, body)
+func (c *Client) PostSchedules(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostSchedulesRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -195,8 +225,8 @@ func (c *Client) PostSchedules(ctx context.Context, body PostSchedulesJSONReques
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteSchedulesId(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewDeleteSchedulesIdRequest(c.Server, id)
+func (c *Client) DeleteSchedulesId(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteSchedulesIdRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
 	}
@@ -207,8 +237,8 @@ func (c *Client) DeleteSchedulesId(ctx context.Context, id string, reqEditors ..
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSchedulesId(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetSchedulesIdRequest(c.Server, id)
+func (c *Client) GetSchedulesId(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetSchedulesIdRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
 	}
@@ -317,18 +347,18 @@ func NewSearchSchedulesRequest(server string, params *SearchSchedulesParams) (*h
 }
 
 // NewPostSchedulesRequest calls the generic PostSchedules builder with application/json body
-func NewPostSchedulesRequest(server string, body PostSchedulesJSONRequestBody) (*http.Request, error) {
+func NewPostSchedulesRequest(server string, params *PostSchedulesParams, body PostSchedulesJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewPostSchedulesRequestWithBody(server, "application/json", bodyReader)
+	return NewPostSchedulesRequestWithBody(server, params, "application/json", bodyReader)
 }
 
 // NewPostSchedulesRequestWithBody generates requests for PostSchedules with any type of body
-func NewPostSchedulesRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+func NewPostSchedulesRequestWithBody(server string, params *PostSchedulesParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -353,11 +383,37 @@ func NewPostSchedulesRequestWithBody(server string, contentType string, body io.
 
 	req.Header.Add("Content-Type", contentType)
 
+	if params != nil {
+
+		if params.IdempotencyKey != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("idempotency-key", headerParam0)
+		}
+
+		if params.RequestId != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam1)
+		}
+
+	}
+
 	return req, nil
 }
 
 // NewDeleteSchedulesIdRequest generates requests for DeleteSchedulesId
-func NewDeleteSchedulesIdRequest(server string, id string) (*http.Request, error) {
+func NewDeleteSchedulesIdRequest(server string, id Id, params *DeleteSchedulesIdParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -387,11 +443,26 @@ func NewDeleteSchedulesIdRequest(server string, id string) (*http.Request, error
 		return nil, err
 	}
 
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
 	return req, nil
 }
 
 // NewGetSchedulesIdRequest generates requests for GetSchedulesId
-func NewGetSchedulesIdRequest(server string, id string) (*http.Request, error) {
+func NewGetSchedulesIdRequest(server string, id Id, params *GetSchedulesIdParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -419,6 +490,21 @@ func NewGetSchedulesIdRequest(server string, id string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
 	}
 
 	return req, nil
@@ -471,15 +557,15 @@ type ClientWithResponsesInterface interface {
 	SearchSchedulesWithResponse(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*SearchSchedulesResponse, error)
 
 	// PostSchedulesWithBodyWithResponse request with any body
-	PostSchedulesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
+	PostSchedulesWithBodyWithResponse(ctx context.Context, params *PostSchedulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
 
-	PostSchedulesWithResponse(ctx context.Context, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
+	PostSchedulesWithResponse(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
 
 	// DeleteSchedulesIdWithResponse request
-	DeleteSchedulesIdWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error)
+	DeleteSchedulesIdWithResponse(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error)
 
 	// GetSchedulesIdWithResponse request
-	GetSchedulesIdWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error)
+	GetSchedulesIdWithResponse(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error)
 }
 
 type SearchSchedulesResponse struct {
@@ -582,16 +668,16 @@ func (c *ClientWithResponses) SearchSchedulesWithResponse(ctx context.Context, p
 }
 
 // PostSchedulesWithBodyWithResponse request with arbitrary body returning *PostSchedulesResponse
-func (c *ClientWithResponses) PostSchedulesWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error) {
-	rsp, err := c.PostSchedulesWithBody(ctx, contentType, body, reqEditors...)
+func (c *ClientWithResponses) PostSchedulesWithBodyWithResponse(ctx context.Context, params *PostSchedulesParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error) {
+	rsp, err := c.PostSchedulesWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
 	return ParsePostSchedulesResponse(rsp)
 }
 
-func (c *ClientWithResponses) PostSchedulesWithResponse(ctx context.Context, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error) {
-	rsp, err := c.PostSchedules(ctx, body, reqEditors...)
+func (c *ClientWithResponses) PostSchedulesWithResponse(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error) {
+	rsp, err := c.PostSchedules(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -599,8 +685,8 @@ func (c *ClientWithResponses) PostSchedulesWithResponse(ctx context.Context, bod
 }
 
 // DeleteSchedulesIdWithResponse request returning *DeleteSchedulesIdResponse
-func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error) {
-	rsp, err := c.DeleteSchedulesId(ctx, id, reqEditors...)
+func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error) {
+	rsp, err := c.DeleteSchedulesId(ctx, id, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -608,8 +694,8 @@ func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context,
 }
 
 // GetSchedulesIdWithResponse request returning *GetSchedulesIdResponse
-func (c *ClientWithResponses) GetSchedulesIdWithResponse(ctx context.Context, id string, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error) {
-	rsp, err := c.GetSchedulesId(ctx, id, reqEditors...)
+func (c *ClientWithResponses) GetSchedulesIdWithResponse(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error) {
+	rsp, err := c.GetSchedulesId(ctx, id, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}

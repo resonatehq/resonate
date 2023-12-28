@@ -32,6 +32,10 @@ func (c *ClientSet) SetSchedulesV1Alpha1(client schedules.ClientWithResponsesInt
 }
 
 func (c *ClientSet) PromisesV1Alpha1() promises.ClientWithResponsesInterface {
+	if c.promisesV1alpha1 != nil {
+		return c.promisesV1alpha1
+	}
+
 	var err error
 	c.promisesV1alpha1, err = promises.NewClientWithResponses(*c.Server)
 	if err != nil {
@@ -41,6 +45,10 @@ func (c *ClientSet) PromisesV1Alpha1() promises.ClientWithResponsesInterface {
 }
 
 func (c *ClientSet) SchedulesV1Alpha1() schedules.ClientWithResponsesInterface {
+	if c.schedulesV1alpha1 != nil {
+		return c.schedulesV1alpha1
+	}
+
 	var err error
 	c.schedulesV1alpha1, err = schedules.NewClientWithResponses(*c.Server)
 	if err != nil {

@@ -28,6 +28,7 @@ message Schedule {
 
 message CreateScheduleRequest {
     Schedule schedule = 1; 
+    string requestId = 2;
 } 
 
 message CreatedScheduleResponse {
@@ -39,6 +40,7 @@ message CreatedScheduleResponse {
 
 message ReadScheduleRequest {
     string id = 1; 
+    string requestId = 2;
 } 
 
 message ReadScheduleResponse {
@@ -52,6 +54,7 @@ message SearchSchedulesRequest {
     map<string, string> tags = 2;
     int32 limit = 3; 
     string cursor = 4; 
+    string requestId = 5;
 }
 
 message SearchSchedulesResponse {
@@ -63,6 +66,7 @@ message SearchSchedulesResponse {
 
 message DeleteScheduleRequest {
     string id = 1; 
+    string requestId = 2;
 } 
 
 message DeleteScheduleResponse {} 

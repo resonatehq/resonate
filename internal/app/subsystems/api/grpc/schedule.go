@@ -48,7 +48,9 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 // READ
 
 func (s *server) ReadSchedule(ctx context.Context, req *grpcApi.ReadScheduleRequest) (*grpcApi.ReadScheduleResponse, error) {
-	resp, err := s.service.ReadSchedule(req.Id)
+	header := service.Header{}
+
+	resp, err := s.service.ReadSchedule(req.Id, &header)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be an api error")
@@ -107,7 +109,9 @@ func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedul
 // DELETE
 
 func (s *server) DeleteSchedule(ctx context.Context, req *grpcApi.DeleteScheduleRequest) (*grpcApi.DeleteScheduleResponse, error) {
-	_, err := s.service.DeleteSchedule(req.Id)
+	header := service.Header{}
+
+	_, err := s.service.DeleteSchedule(req.Id, &header)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be an api error")

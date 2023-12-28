@@ -14,7 +14,13 @@ import (
 func (s *server) readSchedule(c *gin.Context) {
 	id := extractId(c.Param("id"))
 
-	res, err := s.service.ReadSchedule(id)
+	var header service.Header
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		return
+	}
+
+	res, err := s.service.ReadSchedule(id, &header)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
@@ -99,7 +105,13 @@ func (s *server) createSchedule(c *gin.Context) {
 func (s *server) deleteSchedule(c *gin.Context) {
 	id := extractId(c.Param("id"))
 
-	res, err := s.service.DeleteSchedule(id)
+	var header service.Header
+	if err := c.ShouldBindHeader(&header); err != nil {
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		return
+	}
+
+	res, err := s.service.DeleteSchedule(id, &header)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {
