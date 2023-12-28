@@ -12,6 +12,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/schedule"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -23,10 +24,11 @@ import (
 
 type grpcTest struct {
 	*test.API
-	subsystem api.Subsystem
-	errors    chan error
-	conn      *grpc.ClientConn
-	client    grpcApi.PromiseServiceClient
+	subsystem      api.Subsystem
+	errors         chan error
+	conn           *grpc.ClientConn
+	client         grpcApi.PromiseServiceClient
+	scheduleClient grpcApi.SchedulesClient
 }
 
 func setup() (*grpcTest, error) {
@@ -46,11 +48,12 @@ func setup() (*grpcTest, error) {
 	}
 
 	return &grpcTest{
-		API:       api,
-		subsystem: subsystem,
-		errors:    errors,
-		conn:      conn,
-		client:    grpcApi.NewPromiseServiceClient(conn),
+		API:            api,
+		subsystem:      subsystem,
+		errors:         errors,
+		conn:           conn,
+		client:         grpcApi.NewPromiseServiceClient(conn),
+		scheduleClient: grpcApi.NewSchedulesClient(conn),
 	}, nil
 }
 
@@ -63,6 +66,8 @@ func (t *grpcTest) teardown() error {
 
 	return t.subsystem.Stop()
 }
+
+// PROMISE
 
 func TestReadPromise(t *testing.T) {
 	grpcTest, err := setup()
@@ -912,6 +917,301 @@ func TestRejectPromise(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.noop, res.Noop)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// SCHEDULE
+
+func TestCreateSchedule(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name        string
+		grpcReq     *grpcApi.CreateScheduleRequest
+		req         *t_api.Request
+		res         *t_api.Response
+		noop        bool
+		expectedErr codes.Code
+	}{
+		{
+			name: "CreateSchedule",
+			grpcReq: &grpcApi.CreateScheduleRequest{
+				Schedule: &grpcApi.Schedule{
+					Id:             "foo",
+					Description:    "bar",
+					Cron:           "* * * * *",
+					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+					PromiseId:      "foo",
+					PromiseTimeout: 1,
+					PromiseParam: &grpcApi.PromiseValue{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+					LastRunTime:    0,
+					NextRunTime:    0,
+					IdempotencyKey: "bar",
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreateSchedule,
+				CreateSchedule: &t_api.CreateScheduleRequest{
+					Id:             "foo",
+					Description:    "bar",
+					Cron:           "* * * * *",
+					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+					PromiseId:      "foo",
+					PromiseTimeout: 1,
+					PromiseParam: promise.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+					PromiseTags: map[string]string{"a": "a", "b": "b", "c": "c"},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateSchedule,
+				CreateSchedule: &t_api.CreateScheduleResponse{
+					Status: t_api.StatusCreated,
+					Schedule: &schedule.Schedule{
+						Id:          "foo",
+						Description: "bar",
+					},
+				},
+			},
+			noop: false,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			resp, err := grpcTest.scheduleClient.CreateSchedule(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.expectedErr, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.noop, resp.Noop)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadSchedule(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.ReadScheduleRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "ReadSchedule",
+			grpcReq: &grpcApi.ReadScheduleRequest{
+				Id: "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.ReadSchedule,
+				ReadSchedule: &t_api.ReadScheduleRequest{
+					Id: "foo",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ReadSchedule,
+				ReadSchedule: &t_api.ReadScheduleResponse{
+					Status: t_api.StatusOK,
+					Schedule: &schedule.Schedule{
+						Id:          "foo",
+						Description: "bar",
+					},
+				},
+			},
+			code: codes.OK,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.scheduleClient.ReadSchedule(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchSchedule(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.SearchSchedulesRequest
+		req     *t_api.Request
+		res     *t_api.Response
+	}{
+		{
+			name: "SearchPromises",
+			grpcReq: &grpcApi.SearchSchedulesRequest{
+				Id:    "*",
+				Limit: 10,
+			},
+			req: &t_api.Request{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesRequest{
+					Id:    "*",
+					Limit: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.SearchSchedules,
+				SearchSchedules: &t_api.SearchSchedulesResponse{
+					Status:    t_api.StatusOK,
+					Cursor:    nil,
+					Schedules: []*schedule.Schedule{},
+				},
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.scheduleClient.SearchSchedules(ctx, tc.grpcReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteSchedule(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.DeleteScheduleRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "DeleteSchedule",
+			grpcReq: &grpcApi.DeleteScheduleRequest{
+				Id: "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.DeleteSchedule,
+				DeleteSchedule: &t_api.DeleteScheduleRequest{
+					Id: "foo",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.DeleteSchedule,
+				DeleteSchedule: &t_api.DeleteScheduleResponse{
+					Status: t_api.StatusNoContent,
+				},
+			},
+			code: codes.OK,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.scheduleClient.DeleteSchedule(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
 
 			select {
 			case err := <-grpcTest.errors:

@@ -33,6 +33,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromiseServiceServer(server, s)
+	grpcApi.RegisterSchedulesServer(server, s)
 
 	return &Grpc{
 		config: config,
@@ -66,6 +67,7 @@ func (g *Grpc) String() string {
 
 type server struct {
 	grpcApi.UnimplementedPromiseServiceServer
+	grpcApi.UnimplementedSchedulesServer
 	service *service.Service
 }
 

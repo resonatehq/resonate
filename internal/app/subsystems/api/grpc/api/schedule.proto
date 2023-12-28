@@ -4,14 +4,30 @@ package schedule;
 
 option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
 
+message PromiseValue {
+    bytes data = 1; 
+    map<string, string> headers = 2;   
+}
+
 message Schedule {
-    
+    string id = 1;
+    string description = 2; 
+    string cron = 3;
+    map<string, string> tags = 4;
+    string promiseId = 5;
+    int64 promiseTimeout = 6;
+    PromiseValue promiseParam = 7;
+    map<string, string> promiseTags = 8;
+    int64 lastRunTime = 9;
+    int64 nextRunTime = 10; 
+    string idempotencyKey = 11;
+    int64 createdOn = 12;    
 }
 
 // CREATE 
 
 message CreateScheduleRequest {
-    string idempotency_key = 2; 
+    Schedule schedule = 1; 
 } 
 
 message CreatedScheduleResponse {
@@ -19,7 +35,7 @@ message CreatedScheduleResponse {
     Schedule schedule = 2; 
 } 
 
-// READ -- is it search now ? 
+// READ
 
 message ReadScheduleRequest {
     string id = 1; 
@@ -29,20 +45,33 @@ message ReadScheduleResponse {
     Schedule schedule = 1; 
 } 
 
+// SEARCH 
+
+message SearchSchedulesRequest {
+    string id = 1; 
+    map<string, string> tags = 2;
+    int32 limit = 3; 
+    string cursor = 4; 
+}
+
+message SearchSchedulesResponse {
+    string cursor = 1; 
+    repeated Schedule schedules = 2; 
+}
+
 // DELETE 
 
 message DeleteScheduleRequest {
     string id = 1; 
-    string idempotency_key = 2; 
 } 
 
-message DeleteScheduleResponse {
-    bool noop = 1; 
-    Schedule schedule = 2; 
-} 
+message DeleteScheduleResponse {} 
 
-service ScheduleService {
-    rpc CreateSchedule(CreateScheduleRequest) returns (CreatedScheduleResponse) {}
-    rpc ReadSchedule(ReadScheduleRequest) returns (ReadScheduleResponse) {}
-    rpc DeleteSchedule(DeleteScheduleRequest) returns (DeleteScheduleResponse) {}
+// SERVICE 
+
+service Schedules {
+    rpc CreateSchedule (CreateScheduleRequest) returns (CreatedScheduleResponse) {}
+    rpc ReadSchedule (ReadScheduleRequest) returns (ReadScheduleResponse) {}
+    rpc SearchSchedules (SearchSchedulesRequest) returns (SearchSchedulesResponse) {}
+    rpc DeleteSchedule (DeleteScheduleRequest) returns (DeleteScheduleResponse) {}
 }
