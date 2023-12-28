@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package schedule;
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+
+message Schedule {
+    
+}
+
+// CREATE 
+
+message CreateScheduleRequest {
+    string idempotency_key = 2; 
+} 
+
+message CreatedScheduleResponse {
+    bool noop = 1; 
+    Schedule schedule = 2; 
+} 
+
+// READ -- is it search now ? 
+
+message ReadScheduleRequest {
+    string id = 1; 
+} 
+
+message ReadScheduleResponse {
+    Schedule schedule = 1; 
+} 
+
+// DELETE 
+
+message DeleteScheduleRequest {
+    string id = 1; 
+    string idempotency_key = 2; 
+} 
+
+message DeleteScheduleResponse {
+    bool noop = 1; 
+    Schedule schedule = 2; 
+} 
+
+service ScheduleService {
+    rpc CreateSchedule(CreateScheduleRequest) returns (CreatedScheduleResponse) {}
+    rpc ReadSchedule(ReadScheduleRequest) returns (ReadScheduleResponse) {}
+    rpc DeleteSchedule(DeleteScheduleRequest) returns (DeleteScheduleResponse) {}
+}
