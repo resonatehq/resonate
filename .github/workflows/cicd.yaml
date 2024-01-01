@@ -120,7 +120,7 @@ jobs:
 
   deploy-linux-binary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build, scan]
+    needs: [build, test, scan]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -156,7 +156,7 @@ jobs:
           destination: resonate-release/linux-aarch64
   deploy-darwin-binary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [build, scan]
+    needs: [build, test, scan]
     runs-on: macos-latest
     steps:
       - name: Checkout repository
