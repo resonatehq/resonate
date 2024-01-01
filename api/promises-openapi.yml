@@ -105,14 +105,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  cursor:
-                    type: string
-                  promises:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Promise"
+                $ref: "#/components/schemas/SearchPromisesResponseObj"
         400:
           description: Invalid request
 
@@ -266,3 +259,13 @@ components:
             type: string
         data:
           type: string
+
+    SearchPromisesResponseObj:
+      type: object
+      properties:
+        cursor:
+          type: string
+        promises:
+          type: array
+          items:
+            $ref: "#/components/schemas/Promise"

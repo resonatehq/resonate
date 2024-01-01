@@ -65,6 +65,12 @@ type PromiseValue struct {
 	Headers map[string]string `json:"headers"`
 }
 
+// SearchPromisesResponseObj defines model for SearchPromisesResponseObj.
+type SearchPromisesResponseObj struct {
+	Cursor   *string    `json:"cursor,omitempty"`
+	Promises *[]Promise `json:"promises,omitempty"`
+}
+
 // Id defines model for Id.
 type Id = string
 
@@ -678,10 +684,7 @@ type ClientWithResponsesInterface interface {
 type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *struct {
-		Cursor   *string    `json:"cursor,omitempty"`
-		Promises *[]Promise `json:"promises,omitempty"`
-	}
+	JSON200      *SearchPromisesResponseObj
 }
 
 // Status returns HTTPResponse.Status
@@ -834,10 +837,7 @@ func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Cursor   *string    `json:"cursor,omitempty"`
-			Promises *[]Promise `json:"promises,omitempty"`
-		}
+		var dest SearchPromisesResponseObj
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
