@@ -61,7 +61,7 @@ func prettyPrintSchedule(cmd *cobra.Command, schedule *schedules.Schedule) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
 	fmt.Fprintf(w, "Id:\t%v\n", schedule.Id)
-	fmt.Fprintf(w, "Description:\t%s\n", schedule.Description)
+	fmt.Fprintf(w, "Description:\t%s\n", util.SafeDeref(schedule.Description))
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "Cron:\t%s\n", schedule.Cron)
 	fmt.Fprintf(w, "Last run time:\t%s\n", util.SafeDerefToString(schedule.LastRunTime))
