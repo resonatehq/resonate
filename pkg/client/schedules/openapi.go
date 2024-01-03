@@ -38,8 +38,8 @@ type Schedule struct {
 	Tags           *map[string]string `json:"tags,omitempty"`
 }
 
-// SearchSchedulesResponseObj defines model for SearchSchedulesResponseObj.
-type SearchSchedulesResponseObj struct {
+// SearchSchedulesResp defines model for SearchSchedulesResp.
+type SearchSchedulesResp struct {
 	Cursor    *string     `json:"cursor,omitempty"`
 	Schedules *[]Schedule `json:"schedules,omitempty"`
 }
@@ -583,7 +583,7 @@ type ClientWithResponsesInterface interface {
 type SearchSchedulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SearchSchedulesResponseObj
+	JSON200      *SearchSchedulesResp
 }
 
 // Status returns HTTPResponse.Status
@@ -727,7 +727,7 @@ func ParseSearchSchedulesResponse(rsp *http.Response) (*SearchSchedulesResponse,
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SearchSchedulesResponseObj
+		var dest SearchSchedulesResp
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

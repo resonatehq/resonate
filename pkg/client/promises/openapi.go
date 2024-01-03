@@ -47,10 +47,10 @@ type CompletePromiseReq struct {
 
 // CreatePromiseReq defines model for CreatePromiseReq.
 type CreatePromiseReq struct {
-	Id      *string            `json:"id,omitempty"`
+	Id      string             `json:"id"`
 	Param   *PromiseValue      `json:"param,omitempty"`
 	Tags    *map[string]string `json:"tags,omitempty"`
-	Timeout *int64             `json:"timeout,omitempty"`
+	Timeout int64              `json:"timeout"`
 }
 
 // Promise defines model for Promise.

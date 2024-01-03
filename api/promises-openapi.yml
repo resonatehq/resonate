@@ -245,7 +245,7 @@ components:
 
     CreatePromiseReq:
       type: object
-      reuired:
+      required:
         - id
         - timeout
       properties:

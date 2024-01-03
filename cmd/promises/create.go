@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"time"
 
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/resonatehq/resonate/pkg/client/promises"
 	"github.com/spf13/cobra"
@@ -49,8 +48,8 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			body := promises.CreatePromiseJSONRequestBody{
-				Id:      &id,
-				Timeout: util.ToPointer(time.Now().Add(timeout).UnixMilli()),
+				Id:      id,
+				Timeout: time.Now().Add(timeout).UnixMilli(),
 				Param:   &promises.PromiseValue{},
 			}
 
