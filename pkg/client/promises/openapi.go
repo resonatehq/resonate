@@ -39,6 +39,20 @@ const (
 	Resolved SearchPromisesParamsState = "resolved"
 )
 
+// CompletePromiseReq defines model for CompletePromiseReq.
+type CompletePromiseReq struct {
+	State PromiseStateComplete `json:"state"`
+	Value *PromiseValue        `json:"value,omitempty"`
+}
+
+// CreatePromiseReq defines model for CreatePromiseReq.
+type CreatePromiseReq struct {
+	Id      string             `json:"id"`
+	Param   *PromiseValue      `json:"param,omitempty"`
+	Tags    *map[string]string `json:"tags,omitempty"`
+	Timeout int64              `json:"timeout"`
+}
+
 // Promise defines model for Promise.
 type Promise struct {
 	CompletedOn               *int              `json:"completedOn,omitempty"`
@@ -65,17 +79,23 @@ type PromiseValue struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// Id defines model for Id.
-type Id = string
+// SearchPromisesResp defines model for SearchPromisesResp.
+type SearchPromisesResp struct {
+	Cursor   *string    `json:"cursor,omitempty"`
+	Promises *[]Promise `json:"promises,omitempty"`
+}
 
-// IdempotencyKey defines model for IdempotencyKey.
-type IdempotencyKey = string
+// IdPath defines model for IdPath.
+type IdPath = string
 
-// RequestId defines model for RequestId.
-type RequestId = string
+// IdempotencyKeyHeader defines model for IdempotencyKeyHeader.
+type IdempotencyKeyHeader = string
 
-// Strict defines model for Strict.
-type Strict = bool
+// RequestIdHeader defines model for RequestIdHeader.
+type RequestIdHeader = string
+
+// StrictHeader defines model for StrictHeader.
+type StrictHeader = bool
 
 // SearchPromisesParams defines parameters for SearchPromises.
 type SearchPromisesParams struct {
@@ -96,54 +116,49 @@ type SearchPromisesParams struct {
 
 	// Cursor Cursor for pagination
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
+
+	// RequestId Unique ID for each request
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 }
 
 // SearchPromisesParamsState defines parameters for SearchPromises.
 type SearchPromisesParamsState string
 
-// CreatePromiseJSONBody defines parameters for CreatePromise.
-type CreatePromiseJSONBody struct {
-	Id      string             `json:"id"`
-	Param   *PromiseValue      `json:"param,omitempty"`
-	Tags    *map[string]string `json:"tags,omitempty"`
-	Timeout int64              `json:"timeout"`
-}
-
 // CreatePromiseParams defines parameters for CreatePromise.
 type CreatePromiseParams struct {
+	// RequestId Unique ID for each request
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
+
 	// IdempotencyKey Deduplicates multiple requests
-	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
+	IdempotencyKey *IdempotencyKeyHeader `json:"idempotency-key,omitempty"`
 
 	// Strict If true, deduplicates only when promise state matches the request
-	Strict *Strict `json:"strict,omitempty"`
-
-	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
+	Strict *StrictHeader `json:"strict,omitempty"`
 }
 
-// PatchPromisesIdJSONBody defines parameters for PatchPromisesId.
-type PatchPromisesIdJSONBody struct {
-	State PromiseStateComplete `json:"state"`
-	Value *PromiseValue        `json:"value,omitempty"`
+// GetPromiseParams defines parameters for GetPromise.
+type GetPromiseParams struct {
+	// RequestId Unique ID for each request
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 }
 
 // PatchPromisesIdParams defines parameters for PatchPromisesId.
 type PatchPromisesIdParams struct {
 	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 
 	// IdempotencyKey Deduplicates multiple requests
-	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
+	IdempotencyKey *IdempotencyKeyHeader `json:"idempotency-key,omitempty"`
 
 	// Strict If true, deduplicates only when promise state matches the request
-	Strict *Strict `json:"strict,omitempty"`
+	Strict *StrictHeader `json:"strict,omitempty"`
 }
 
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
-type CreatePromiseJSONRequestBody CreatePromiseJSONBody
+type CreatePromiseJSONRequestBody = CreatePromiseReq
 
 // PatchPromisesIdJSONRequestBody defines body for PatchPromisesId for application/json ContentType.
-type PatchPromisesIdJSONRequestBody PatchPromisesIdJSONBody
+type PatchPromisesIdJSONRequestBody = CompletePromiseReq
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -227,12 +242,12 @@ type ClientInterface interface {
 	CreatePromise(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPromise request
-	GetPromise(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetPromise(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PatchPromisesIdWithBody request with any body
-	PatchPromisesIdWithBody(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchPromisesIdWithBody(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	PatchPromisesId(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PatchPromisesId(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -271,8 +286,8 @@ func (c *Client) CreatePromise(ctx context.Context, params *CreatePromiseParams,
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetPromise(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetPromiseRequest(c.Server, id)
+func (c *Client) GetPromise(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPromiseRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
 	}
@@ -283,7 +298,7 @@ func (c *Client) GetPromise(ctx context.Context, id Id, reqEditors ...RequestEdi
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchPromisesIdRequestWithBody(c.Server, id, params, contentType, body)
 	if err != nil {
 		return nil, err
@@ -295,7 +310,7 @@ func (c *Client) PatchPromisesIdWithBody(ctx context.Context, id Id, params *Pat
 	return c.Client.Do(req)
 }
 
-func (c *Client) PatchPromisesId(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) PatchPromisesId(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPatchPromisesIdRequest(c.Server, id, params, body)
 	if err != nil {
 		return nil, err
@@ -417,6 +432,21 @@ func NewSearchPromisesRequest(server string, params *SearchPromisesParams) (*htt
 		return nil, err
 	}
 
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
 	return req, nil
 }
 
@@ -459,37 +489,37 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 
 	if params != nil {
 
-		if params.IdempotencyKey != nil {
+		if params.RequestId != nil {
 			var headerParam0 string
 
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("idempotency-key", headerParam0)
+			req.Header.Set("request-id", headerParam0)
+		}
+
+		if params.IdempotencyKey != nil {
+			var headerParam1 string
+
+			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("idempotency-key", headerParam1)
 		}
 
 		if params.Strict != nil {
-			var headerParam1 string
-
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("strict", headerParam1)
-		}
-
-		if params.RequestId != nil {
 			var headerParam2 string
 
-			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			headerParam2, err = runtime.StyleParamWithLocation("simple", false, "strict", runtime.ParamLocationHeader, *params.Strict)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("request-id", headerParam2)
+			req.Header.Set("strict", headerParam2)
 		}
 
 	}
@@ -498,7 +528,7 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 }
 
 // NewGetPromiseRequest generates requests for GetPromise
-func NewGetPromiseRequest(server string, id Id) (*http.Request, error) {
+func NewGetPromiseRequest(server string, id IdPath, params *GetPromiseParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -528,11 +558,26 @@ func NewGetPromiseRequest(server string, id Id) (*http.Request, error) {
 		return nil, err
 	}
 
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
 	return req, nil
 }
 
 // NewPatchPromisesIdRequest calls the generic PatchPromisesId builder with application/json body
-func NewPatchPromisesIdRequest(server string, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody) (*http.Request, error) {
+func NewPatchPromisesIdRequest(server string, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
@@ -543,7 +588,7 @@ func NewPatchPromisesIdRequest(server string, id Id, params *PatchPromisesIdPara
 }
 
 // NewPatchPromisesIdRequestWithBody generates requests for PatchPromisesId with any type of body
-func NewPatchPromisesIdRequestWithBody(server string, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader) (*http.Request, error) {
+func NewPatchPromisesIdRequestWithBody(server string, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -667,21 +712,18 @@ type ClientWithResponsesInterface interface {
 	CreatePromiseWithResponse(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseResponse, error)
 
 	// GetPromiseWithResponse request
-	GetPromiseWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error)
+	GetPromiseWithResponse(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error)
 
 	// PatchPromisesIdWithBodyWithResponse request with any body
-	PatchPromisesIdWithBodyWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
+	PatchPromisesIdWithBodyWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
 
-	PatchPromisesIdWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
+	PatchPromisesIdWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error)
 }
 
 type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *struct {
-		Cursor   *string    `json:"cursor,omitempty"`
-		Promises *[]Promise `json:"promises,omitempty"`
-	}
+	JSON200      *SearchPromisesResp
 }
 
 // Status returns HTTPResponse.Status
@@ -794,8 +836,8 @@ func (c *ClientWithResponses) CreatePromiseWithResponse(ctx context.Context, par
 }
 
 // GetPromiseWithResponse request returning *GetPromiseResponse
-func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
-	rsp, err := c.GetPromise(ctx, id, reqEditors...)
+func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
+	rsp, err := c.GetPromise(ctx, id, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -803,7 +845,7 @@ func (c *ClientWithResponses) GetPromiseWithResponse(ctx context.Context, id Id,
 }
 
 // PatchPromisesIdWithBodyWithResponse request with arbitrary body returning *PatchPromisesIdResponse
-func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	rsp, err := c.PatchPromisesIdWithBody(ctx, id, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -811,7 +853,7 @@ func (c *ClientWithResponses) PatchPromisesIdWithBodyWithResponse(ctx context.Co
 	return ParsePatchPromisesIdResponse(rsp)
 }
 
-func (c *ClientWithResponses) PatchPromisesIdWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (c *ClientWithResponses) PatchPromisesIdWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	rsp, err := c.PatchPromisesId(ctx, id, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -834,10 +876,7 @@ func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Cursor   *string    `json:"cursor,omitempty"`
-			Promises *[]Promise `json:"promises,omitempty"`
-		}
+		var dest SearchPromisesResp
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

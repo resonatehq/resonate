@@ -27,7 +27,7 @@ func DeleteScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 			id = args[0]
 
-			resp, err := c.SchedulesV1Alpha1().DeleteSchedulesIdWithResponse(context.TODO(), id)
+			resp, err := c.SchedulesV1Alpha1().DeleteSchedulesIdWithResponse(context.TODO(), id, nil)
 			if err != nil {
 				cmd.PrintErr(err)
 				return

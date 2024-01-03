@@ -14,9 +14,9 @@ import (
 	"github.com/spf13/viper"
 )
 
-var server string = "http://127.0.0.1:8001"
-
-var cfgFile string
+var (
+	server, cfgFile string
+)
 
 var rootCmd = &cobra.Command{
 	Use:   "resonate",
@@ -26,13 +26,14 @@ var rootCmd = &cobra.Command{
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVarP(&server, "server", "", server, "Durable server address")
+	c := client.NewOrDie(&server)
+
+	// Flags
+	rootCmd.PersistentFlags().StringVarP(&server, "server", "", "http://127.0.0.1:8001", "Server address used by the client")
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "Config file (default \"resonate.yml\")")
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "Log level, can be one of: debug, info, warn, error")
 	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
-
-	c := client.NewOrDie(server)
 
 	// Add Subcommands
 	rootCmd.AddCommand(promises.NewCmd(c))

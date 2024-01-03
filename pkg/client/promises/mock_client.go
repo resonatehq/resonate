@@ -115,9 +115,9 @@ func (mr *MockClientInterfaceMockRecorder) CreatePromiseWithBody(ctx, params, co
 }
 
 // GetPromise mocks base method.
-func (m *MockClientInterface) GetPromise(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (m *MockClientInterface) GetPromise(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{ctx, id}
+	varargs := []interface{}{ctx, id, params}
 	for _, a := range reqEditors {
 		varargs = append(varargs, a)
 	}
@@ -128,14 +128,14 @@ func (m *MockClientInterface) GetPromise(ctx context.Context, id Id, reqEditors 
 }
 
 // GetPromise indicates an expected call of GetPromise.
-func (mr *MockClientInterfaceMockRecorder) GetPromise(ctx, id interface{}, reqEditors ...interface{}) *gomock.Call {
+func (mr *MockClientInterfaceMockRecorder) GetPromise(ctx, id, params interface{}, reqEditors ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{ctx, id}, reqEditors...)
+	varargs := append([]interface{}{ctx, id, params}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPromise", reflect.TypeOf((*MockClientInterface)(nil).GetPromise), varargs...)
 }
 
 // PatchPromisesId mocks base method.
-func (m *MockClientInterface) PatchPromisesId(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (m *MockClientInterface) PatchPromisesId(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
 	varargs := []interface{}{ctx, id, params, body}
 	for _, a := range reqEditors {
@@ -155,7 +155,7 @@ func (mr *MockClientInterfaceMockRecorder) PatchPromisesId(ctx, id, params, body
 }
 
 // PatchPromisesIdWithBody mocks base method.
-func (m *MockClientInterface) PatchPromisesIdWithBody(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (m *MockClientInterface) PatchPromisesIdWithBody(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
 	varargs := []interface{}{ctx, id, params, contentType, body}
 	for _, a := range reqEditors {
@@ -258,9 +258,9 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseWithRespons
 }
 
 // GetPromiseWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) GetPromiseWithResponse(ctx context.Context, id Id, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
+func (m *MockClientWithResponsesInterface) GetPromiseWithResponse(ctx context.Context, id IdPath, params *GetPromiseParams, reqEditors ...RequestEditorFn) (*GetPromiseResponse, error) {
 	m.ctrl.T.Helper()
-	varargs := []interface{}{ctx, id}
+	varargs := []interface{}{ctx, id, params}
 	for _, a := range reqEditors {
 		varargs = append(varargs, a)
 	}
@@ -271,14 +271,14 @@ func (m *MockClientWithResponsesInterface) GetPromiseWithResponse(ctx context.Co
 }
 
 // GetPromiseWithResponse indicates an expected call of GetPromiseWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) GetPromiseWithResponse(ctx, id interface{}, reqEditors ...interface{}) *gomock.Call {
+func (mr *MockClientWithResponsesInterfaceMockRecorder) GetPromiseWithResponse(ctx, id, params interface{}, reqEditors ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	varargs := append([]interface{}{ctx, id}, reqEditors...)
+	varargs := append([]interface{}{ctx, id, params}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPromiseWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).GetPromiseWithResponse), varargs...)
 }
 
 // PatchPromisesIdWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (m *MockClientWithResponsesInterface) PatchPromisesIdWithBodyWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	m.ctrl.T.Helper()
 	varargs := []interface{}{ctx, id, params, contentType, body}
 	for _, a := range reqEditors {
@@ -298,7 +298,7 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) PatchPromisesIdWithBodyW
 }
 
 // PatchPromisesIdWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) PatchPromisesIdWithResponse(ctx context.Context, id Id, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
+func (m *MockClientWithResponsesInterface) PatchPromisesIdWithResponse(ctx context.Context, id IdPath, params *PatchPromisesIdParams, body PatchPromisesIdJSONRequestBody, reqEditors ...RequestEditorFn) (*PatchPromisesIdResponse, error) {
 	m.ctrl.T.Helper()
 	varargs := []interface{}{ctx, id, params, body}
 	for _, a := range reqEditors {

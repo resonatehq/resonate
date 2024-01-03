@@ -12,11 +12,11 @@ import (
 
 // READ
 
-func (s *Service) ReadSchedule(id string) (*t_api.ReadScheduleResponse, error) {
+func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata("header.RequestId", "read-schedule"),
+		Metadata: s.metadata(header.RequestId, "read-schedule"),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadSchedule,
 			ReadSchedule: &t_api.ReadScheduleRequest{
@@ -150,11 +150,11 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 
 // DELETE
 
-func (s *Service) DeleteSchedule(id string) (*t_api.DeleteScheduleResponse, error) {
+func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata("header.RequestId", "delete-schedule"),
+		Metadata: s.metadata(header.RequestId, "delete-schedule"),
 		Submission: &t_api.Request{
 			Kind: t_api.DeleteSchedule,
 			DeleteSchedule: &t_api.DeleteScheduleRequest{

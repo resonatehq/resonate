@@ -30,7 +30,7 @@ func GetScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 			id = args[0]
 
-			resp, err := c.SchedulesV1Alpha1().GetSchedulesIdWithResponse(context.TODO(), id)
+			resp, err := c.SchedulesV1Alpha1().GetSchedulesIdWithResponse(context.TODO(), id, nil)
 			if err != nil {
 				cmd.PrintErr(err)
 				return

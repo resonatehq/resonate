@@ -71,7 +71,7 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 				body.PromiseTags = &promiseTags
 			}
 
-			resp, err := c.SchedulesV1Alpha1().PostSchedulesWithResponse(context.TODO(), body)
+			resp, err := c.SchedulesV1Alpha1().PostSchedulesWithResponse(context.TODO(), nil, body)
 			if err != nil {
 				cmd.PrintErr(err)
 				return
