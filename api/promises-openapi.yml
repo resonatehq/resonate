@@ -11,30 +11,15 @@ paths:
       summary: Create a promise
       operationId: createPromise
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/Strict"
-        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+        - $ref: "#/components/parameters/StrictHeader"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - id
-                - timeout
-              properties:
-                id:
-                  type: string
-                timeout:
-                  type: integer
-                  format: int64
-                param:
-                  $ref: "#/components/schemas/PromiseValue"
-                tags:
-                  type: object
-                  additionalProperties:
-                    type: string
+              $ref: "#/components/schemas/Promise"
       responses:
         200:
           description: Operation deduplicated, Promise fetched successfully
@@ -61,6 +46,7 @@ paths:
       summary: Search promises
       operationId: searchPromises
       parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
         - name: id
           in: query
           description: |
@@ -116,7 +102,8 @@ paths:
       summary: Get a promise
       operationId: getPromise
       parameters:
-        - $ref: "#/components/parameters/Id"
+        - $ref: "#/components/parameters/IdPath"
+        - $ref: "#/components/parameters/RequestIdHeader"
       responses:
         200:
           description: OK
@@ -134,23 +121,16 @@ paths:
         - Promises
       summary: Complete a promise
       parameters:
-        - $ref: "#/components/parameters/Id"
-        - $ref: "#/components/parameters/RequestId"
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/Strict"
+        - $ref: "#/components/parameters/IdPath"
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+        - $ref: "#/components/parameters/StrictHeader"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - state
-              properties:
-                state:
-                  $ref: "#/components/schemas/PromiseStateComplete"
-                value:
-                  $ref: "#/components/schemas/PromiseValue"
+              $ref: "#/components/schemas/CompletePromiseRequest"
       responses:
         200:
           description: OK
@@ -167,26 +147,29 @@ paths:
 
 components:
   parameters:
-    Id:
+    # PATH PARAMETERS
+    IdPath:
       name: id
       in: path
       required: true
       description: The promise ID
       schema:
         type: string
-    IdempotencyKey:
+
+    # HEADER PARAMETERS
+    IdempotencyKeyHeader:
       name: idempotency-key
       in: header
       description: Deduplicates multiple requests
       schema:
         type: string
-    Strict:
+    StrictHeader:
       name: strict
       in: header
       description: If true, deduplicates only when promise state matches the request
       schema:
         type: boolean
-    RequestId:
+    RequestIdHeader:
       name: request-id
       in: header
       description: Unique ID for each request
@@ -200,9 +183,6 @@ components:
         - id
         - state
         - timeout
-        - param
-        - value
-        - tags
       properties:
         id:
           type: string
@@ -259,6 +239,16 @@ components:
             type: string
         data:
           type: string
+
+    CompletePromiseRequest:
+      type: object
+      required:
+        - state
+      properties:
+        state:
+          $ref: "#/components/schemas/PromiseStateComplete"
+        value:
+          $ref: "#/components/schemas/PromiseValue"
 
     SearchPromisesResponseObj:
       type: object

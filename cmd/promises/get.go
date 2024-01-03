@@ -29,7 +29,7 @@ func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
 
 			id := args[0]
 
-			resp, err := c.PromisesV1Alpha1().GetPromiseWithResponse(context.Background(), id)
+			resp, err := c.PromisesV1Alpha1().GetPromiseWithResponse(context.Background(), id, nil)
 			if err != nil {
 				cmd.PrintErr(err)
 				return

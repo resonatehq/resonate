@@ -14,6 +14,14 @@ func SafeDerefToString[T any](val *T) string {
 	return fmt.Sprintf("%v", *val)
 }
 
+func SafeDeref[T any](val *T) T {
+	if val == nil {
+		var zero T
+		return zero
+	}
+	return *val
+}
+
 func PrettyHeaders(headers map[string]string, seperator string) []string {
 	if headers == nil {
 		return []string{}

@@ -24,28 +24,34 @@ type PromiseValue struct {
 
 // Schedule defines model for Schedule.
 type Schedule struct {
-	CreatedOn      *int64            `json:"createdOn,omitempty"`
-	Cron           string            `json:"cron"`
-	Description    string            `json:"description"`
-	Id             string            `json:"id"`
-	IdempotencyKey *string           `json:"idempotencyKey,omitempty"`
-	LastRunTime    *int64            `json:"lastRunTime,omitempty"`
-	NextRunTime    *int64            `json:"nextRunTime,omitempty"`
-	PromiseId      string            `json:"promiseId"`
-	PromiseParam   PromiseValue      `json:"promiseParam"`
-	PromiseTags    map[string]string `json:"promiseTags"`
-	PromiseTimeout int64             `json:"promiseTimeout"`
-	Tags           map[string]string `json:"tags"`
+	CreatedOn      *int64             `json:"createdOn,omitempty"`
+	Cron           string             `json:"cron"`
+	Description    *string            `json:"description,omitempty"`
+	Id             string             `json:"id"`
+	IdempotencyKey *string            `json:"idempotencyKey,omitempty"`
+	LastRunTime    *int64             `json:"lastRunTime,omitempty"`
+	NextRunTime    *int64             `json:"nextRunTime,omitempty"`
+	PromiseId      string             `json:"promiseId"`
+	PromiseParam   *PromiseValue      `json:"promiseParam,omitempty"`
+	PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
+	PromiseTimeout int64              `json:"promiseTimeout"`
+	Tags           *map[string]string `json:"tags,omitempty"`
 }
 
-// Id defines model for Id.
-type Id = string
+// SearchSchedulesResponseObj defines model for SearchSchedulesResponseObj.
+type SearchSchedulesResponseObj struct {
+	Cursor    *string     `json:"cursor,omitempty"`
+	Schedules *[]Schedule `json:"schedules,omitempty"`
+}
 
-// IdempotencyKey defines model for IdempotencyKey.
-type IdempotencyKey = string
+// IdPath defines model for IdPath.
+type IdPath = string
 
-// RequestId defines model for RequestId.
-type RequestId = string
+// IdempotencyKeyHeader defines model for IdempotencyKeyHeader.
+type IdempotencyKeyHeader = string
+
+// RequestIdHeader defines model for RequestIdHeader.
+type RequestIdHeader = string
 
 // SearchSchedulesParams defines parameters for SearchSchedules.
 type SearchSchedulesParams struct {
@@ -63,43 +69,34 @@ type SearchSchedulesParams struct {
 
 	// Cursor Cursor for pagination
 	Cursor *string `form:"cursor,omitempty" json:"cursor,omitempty"`
-}
 
-// PostSchedulesJSONBody defines parameters for PostSchedules.
-type PostSchedulesJSONBody struct {
-	Cron           string             `json:"cron"`
-	Description    *string            `json:"description,omitempty"`
-	Id             string             `json:"id"`
-	PromiseId      string             `json:"promiseId"`
-	PromiseParam   *PromiseValue      `json:"promiseParam,omitempty"`
-	PromiseTags    *map[string]string `json:"promiseTags,omitempty"`
-	PromiseTimeout int64              `json:"promiseTimeout"`
-	Tags           *map[string]string `json:"tags,omitempty"`
+	// RequestId Unique ID for each request
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 }
 
 // PostSchedulesParams defines parameters for PostSchedules.
 type PostSchedulesParams struct {
-	// IdempotencyKey Deduplicates multiple requests
-	IdempotencyKey *IdempotencyKey `json:"idempotency-key,omitempty"`
-
 	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
+
+	// IdempotencyKey Deduplicates multiple requests
+	IdempotencyKey *IdempotencyKeyHeader `json:"idempotency-key,omitempty"`
 }
 
 // DeleteSchedulesIdParams defines parameters for DeleteSchedulesId.
 type DeleteSchedulesIdParams struct {
 	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 }
 
 // GetSchedulesIdParams defines parameters for GetSchedulesId.
 type GetSchedulesIdParams struct {
 	// RequestId Unique ID for each request
-	RequestId *RequestId `json:"request-id,omitempty"`
+	RequestId *RequestIdHeader `json:"request-id,omitempty"`
 }
 
 // PostSchedulesJSONRequestBody defines body for PostSchedules for application/json ContentType.
-type PostSchedulesJSONRequestBody PostSchedulesJSONBody
+type PostSchedulesJSONRequestBody = Schedule
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -183,10 +180,10 @@ type ClientInterface interface {
 	PostSchedules(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteSchedulesId request
-	DeleteSchedulesId(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	DeleteSchedulesId(ctx context.Context, id IdPath, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetSchedulesId request
-	GetSchedulesId(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+	GetSchedulesId(ctx context.Context, id IdPath, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
 
 func (c *Client) SearchSchedules(ctx context.Context, params *SearchSchedulesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -225,7 +222,7 @@ func (c *Client) PostSchedules(ctx context.Context, params *PostSchedulesParams,
 	return c.Client.Do(req)
 }
 
-func (c *Client) DeleteSchedulesId(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) DeleteSchedulesId(ctx context.Context, id IdPath, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeleteSchedulesIdRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
@@ -237,7 +234,7 @@ func (c *Client) DeleteSchedulesId(ctx context.Context, id Id, params *DeleteSch
 	return c.Client.Do(req)
 }
 
-func (c *Client) GetSchedulesId(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+func (c *Client) GetSchedulesId(ctx context.Context, id IdPath, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetSchedulesIdRequest(c.Server, id, params)
 	if err != nil {
 		return nil, err
@@ -343,6 +340,21 @@ func NewSearchSchedulesRequest(server string, params *SearchSchedulesParams) (*h
 		return nil, err
 	}
 
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
 	return req, nil
 }
 
@@ -385,26 +397,26 @@ func NewPostSchedulesRequestWithBody(server string, params *PostSchedulesParams,
 
 	if params != nil {
 
-		if params.IdempotencyKey != nil {
+		if params.RequestId != nil {
 			var headerParam0 string
 
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("idempotency-key", headerParam0)
+			req.Header.Set("request-id", headerParam0)
 		}
 
-		if params.RequestId != nil {
+		if params.IdempotencyKey != nil {
 			var headerParam1 string
 
-			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			headerParam1, err = runtime.StyleParamWithLocation("simple", false, "idempotency-key", runtime.ParamLocationHeader, *params.IdempotencyKey)
 			if err != nil {
 				return nil, err
 			}
 
-			req.Header.Set("request-id", headerParam1)
+			req.Header.Set("idempotency-key", headerParam1)
 		}
 
 	}
@@ -413,7 +425,7 @@ func NewPostSchedulesRequestWithBody(server string, params *PostSchedulesParams,
 }
 
 // NewDeleteSchedulesIdRequest generates requests for DeleteSchedulesId
-func NewDeleteSchedulesIdRequest(server string, id Id, params *DeleteSchedulesIdParams) (*http.Request, error) {
+func NewDeleteSchedulesIdRequest(server string, id IdPath, params *DeleteSchedulesIdParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -462,7 +474,7 @@ func NewDeleteSchedulesIdRequest(server string, id Id, params *DeleteSchedulesId
 }
 
 // NewGetSchedulesIdRequest generates requests for GetSchedulesId
-func NewGetSchedulesIdRequest(server string, id Id, params *GetSchedulesIdParams) (*http.Request, error) {
+func NewGetSchedulesIdRequest(server string, id IdPath, params *GetSchedulesIdParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -562,19 +574,16 @@ type ClientWithResponsesInterface interface {
 	PostSchedulesWithResponse(ctx context.Context, params *PostSchedulesParams, body PostSchedulesJSONRequestBody, reqEditors ...RequestEditorFn) (*PostSchedulesResponse, error)
 
 	// DeleteSchedulesIdWithResponse request
-	DeleteSchedulesIdWithResponse(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error)
+	DeleteSchedulesIdWithResponse(ctx context.Context, id IdPath, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error)
 
 	// GetSchedulesIdWithResponse request
-	GetSchedulesIdWithResponse(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error)
+	GetSchedulesIdWithResponse(ctx context.Context, id IdPath, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error)
 }
 
 type SearchSchedulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *struct {
-		Cursor    *string     `json:"cursor,omitempty"`
-		Schedules *[]Schedule `json:"schedules,omitempty"`
-	}
+	JSON200      *SearchSchedulesResponseObj
 }
 
 // Status returns HTTPResponse.Status
@@ -597,6 +606,7 @@ type PostSchedulesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *Schedule
+	JSON201      *Schedule
 }
 
 // Status returns HTTPResponse.Status
@@ -685,7 +695,7 @@ func (c *ClientWithResponses) PostSchedulesWithResponse(ctx context.Context, par
 }
 
 // DeleteSchedulesIdWithResponse request returning *DeleteSchedulesIdResponse
-func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context, id Id, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error) {
+func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context, id IdPath, params *DeleteSchedulesIdParams, reqEditors ...RequestEditorFn) (*DeleteSchedulesIdResponse, error) {
 	rsp, err := c.DeleteSchedulesId(ctx, id, params, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -694,7 +704,7 @@ func (c *ClientWithResponses) DeleteSchedulesIdWithResponse(ctx context.Context,
 }
 
 // GetSchedulesIdWithResponse request returning *GetSchedulesIdResponse
-func (c *ClientWithResponses) GetSchedulesIdWithResponse(ctx context.Context, id Id, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error) {
+func (c *ClientWithResponses) GetSchedulesIdWithResponse(ctx context.Context, id IdPath, params *GetSchedulesIdParams, reqEditors ...RequestEditorFn) (*GetSchedulesIdResponse, error) {
 	rsp, err := c.GetSchedulesId(ctx, id, params, reqEditors...)
 	if err != nil {
 		return nil, err
@@ -717,10 +727,7 @@ func ParseSearchSchedulesResponse(rsp *http.Response) (*SearchSchedulesResponse,
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Cursor    *string     `json:"cursor,omitempty"`
-			Schedules *[]Schedule `json:"schedules,omitempty"`
-		}
+		var dest SearchSchedulesResponseObj
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -751,6 +758,13 @@ func ParsePostSchedulesResponse(rsp *http.Response) (*PostSchedulesResponse, err
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Schedule
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	}
 

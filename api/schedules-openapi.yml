@@ -10,55 +10,40 @@ paths:
       summary: Create a new schedule
       operationdId: createSchedule
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/RequestIdHeader"
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
       requestBody:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - id
-                - cron
-                - promiseId
-                - promiseTimeout
-              properties:
-                id:
-                  type: string
-                description:
-                  type: string
-                cron:
-                  type: string
-                tags:
-                  type: object
-                  additionalProperties:
-                    type: string
-                promiseId:
-                  type: string
-                promiseTimeout:
-                  type: integer
-                  format: int64
-                promiseParam:
-                  $ref: "#/components/schemas/PromiseValue"
-                promiseTags:
-                  type: object
-                  additionalProperties:
-                    type: string
+              $ref: "#/components/schemas/Schedule"
         required: true
       responses:
-        "200":
-          description: Successfully created a schedule
+        200:
+          description: Operation deduplicated, Schedule fetched successfully
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Schedule"
-
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Schedule already exists
     get:
       tags:
         - Schedules
       summary: Search schedules
       operationId: searchSchedules
       parameters:
+        - $ref: "#/components/parameters/RequestIdHeader"
         - name: id
           in: query
           description: |
@@ -94,14 +79,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  cursor:
-                    type: string
-                  schedules:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Schedule"
+                $ref: "#/components/schemas/SearchSchedulesResponseObj"
         400:
           description: Invalid request
 
@@ -112,8 +90,8 @@ paths:
       summary: Get a schedule
       operationdId: getSchedule
       parameters:
-        - $ref: "#/components/parameters/Id"
-        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdPath"
+        - $ref: "#/components/parameters/RequestIdHeader"
       responses:
         "200":
           description: Successfully retrieved the schedule
@@ -130,8 +108,8 @@ paths:
       summary: Delete a schedule
       operationdId: deleteSchedule
       parameters:
-        - $ref: "#/components/parameters/Id"
-        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/IdPath"
+        - $ref: "#/components/parameters/RequestIdHeader"
       responses:
         "204":
           description: Successfully deleted the schedule
@@ -140,26 +118,23 @@ paths:
 
 components:
   parameters:
-    Id:
+    # PATH PARAMETERS
+    IdPath:
       name: id
       in: path
       required: true
-      description: The promise ID
+      description: The schedule ID
       schema:
         type: string
-    IdempotencyKey:
+
+    # HEADER PARAMETERS
+    IdempotencyKeyHeader:
       name: idempotency-key
       in: header
       description: Deduplicates multiple requests
       schema:
         type: string
-    Strict:
-      name: strict
-      in: header
-      description: If true, deduplicates only when promise state matches the request
-      schema:
-        type: boolean
-    RequestId:
+    RequestIdHeader:
       name: request-id
       in: header
       description: Unique ID for each request
@@ -171,13 +146,9 @@ components:
       type: object
       required:
         - id
-        - description
         - cron
-        - tags
         - promiseId
         - promiseTimeout
-        - promiseParam
-        - promiseTags
       properties:
         id:
           type: string
@@ -227,3 +198,13 @@ components:
           type: object
           additionalProperties:
             type: string
+
+    SearchSchedulesResponseObj:
+      type: object
+      properties:
+        cursor:
+          type: string
+        schedules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Schedule"

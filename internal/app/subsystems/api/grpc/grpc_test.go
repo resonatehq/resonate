@@ -1112,7 +1112,7 @@ func TestSearchSchedule(t *testing.T) {
 		res     *t_api.Response
 	}{
 		{
-			name: "SearchPromises",
+			name: "SearchSchedules",
 			grpcReq: &grpcApi.SearchSchedulesRequest{
 				Id:    "*",
 				Limit: 10,
