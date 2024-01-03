@@ -950,22 +950,18 @@ func TestCreateSchedule(t *testing.T) {
 		{
 			name: "CreateSchedule",
 			grpcReq: &grpcApi.CreateScheduleRequest{
-				Schedule: &grpcApi.Schedule{
-					Id:             "foo",
-					Description:    "bar",
-					Cron:           "* * * * *",
-					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
-					PromiseId:      "foo",
-					PromiseTimeout: 1,
-					PromiseParam: &grpcApi.PromiseValue{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("pending"),
-					},
-					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
-					LastRunTime:    0,
-					NextRunTime:    0,
-					IdempotencyKey: "bar",
+				Id:             "foo",
+				Description:    "bar",
+				Cron:           "* * * * *",
+				Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+				PromiseId:      "foo",
+				PromiseTimeout: 1,
+				PromiseParam: &grpcApi.PromiseValue{
+					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+					Data:    []byte("pending"),
 				},
+				PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+				IdempotencyKey: "bar",
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreateSchedule,

@@ -20,17 +20,17 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 	header := service.CreateScheduleHeader{}
 
 	body := service.CreateScheduleBody{
-		Id:             req.Schedule.Id,
-		Description:    req.Schedule.Description,
-		Cron:           req.Schedule.Cron,
-		Tags:           req.Schedule.Tags,
-		PromiseId:      req.Schedule.PromiseId,
-		PromiseTimeout: req.Schedule.PromiseTimeout,
+		Id:             req.Id,
+		Description:    req.Description,
+		Cron:           req.Cron,
+		Tags:           req.Tags,
+		PromiseId:      req.PromiseId,
+		PromiseTimeout: req.PromiseTimeout,
 		PromiseParam: promise.Value{
-			Headers: req.Schedule.PromiseParam.Headers,
-			Data:    []byte(req.Schedule.PromiseParam.Data),
+			Headers: req.PromiseParam.Headers,
+			Data:    []byte(req.PromiseParam.Data),
 		},
-		PromiseTags: req.Schedule.PromiseTags,
+		PromiseTags: req.PromiseTags,
 	}
 
 	resp, err := s.service.CreateSchedule(header, &body)

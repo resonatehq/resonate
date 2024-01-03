@@ -39,24 +39,32 @@ const (
 	Resolved SearchPromisesParamsState = "resolved"
 )
 
-// CompletePromiseRequest defines model for CompletePromiseRequest.
-type CompletePromiseRequest struct {
+// CompletePromiseReq defines model for CompletePromiseReq.
+type CompletePromiseReq struct {
 	State PromiseStateComplete `json:"state"`
 	Value *PromiseValue        `json:"value,omitempty"`
 }
 
+// CreatePromiseReq defines model for CreatePromiseReq.
+type CreatePromiseReq struct {
+	Id      *string            `json:"id,omitempty"`
+	Param   *PromiseValue      `json:"param,omitempty"`
+	Tags    *map[string]string `json:"tags,omitempty"`
+	Timeout *int64             `json:"timeout,omitempty"`
+}
+
 // Promise defines model for Promise.
 type Promise struct {
-	CompletedOn               *int               `json:"completedOn,omitempty"`
-	CreatedOn                 *int               `json:"createdOn,omitempty"`
-	Id                        string             `json:"id"`
-	IdempotencyKeyForComplete *string            `json:"idempotencyKeyForComplete,omitempty"`
-	IdempotencyKeyForCreate   *string            `json:"idempotencyKeyForCreate,omitempty"`
-	Param                     *PromiseValue      `json:"param,omitempty"`
-	State                     PromiseState       `json:"state"`
-	Tags                      *map[string]string `json:"tags,omitempty"`
-	Timeout                   int64              `json:"timeout"`
-	Value                     *PromiseValue      `json:"value,omitempty"`
+	CompletedOn               *int              `json:"completedOn,omitempty"`
+	CreatedOn                 *int              `json:"createdOn,omitempty"`
+	Id                        string            `json:"id"`
+	IdempotencyKeyForComplete *string           `json:"idempotencyKeyForComplete,omitempty"`
+	IdempotencyKeyForCreate   *string           `json:"idempotencyKeyForCreate,omitempty"`
+	Param                     PromiseValue      `json:"param"`
+	State                     PromiseState      `json:"state"`
+	Tags                      map[string]string `json:"tags"`
+	Timeout                   int64             `json:"timeout"`
+	Value                     PromiseValue      `json:"value"`
 }
 
 // PromiseState defines model for PromiseState.
@@ -71,8 +79,8 @@ type PromiseValue struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// SearchPromisesResponseObj defines model for SearchPromisesResponseObj.
-type SearchPromisesResponseObj struct {
+// SearchPromisesResp defines model for SearchPromisesResp.
+type SearchPromisesResp struct {
 	Cursor   *string    `json:"cursor,omitempty"`
 	Promises *[]Promise `json:"promises,omitempty"`
 }
@@ -147,10 +155,10 @@ type PatchPromisesIdParams struct {
 }
 
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
-type CreatePromiseJSONRequestBody = Promise
+type CreatePromiseJSONRequestBody = CreatePromiseReq
 
 // PatchPromisesIdJSONRequestBody defines body for PatchPromisesId for application/json ContentType.
-type PatchPromisesIdJSONRequestBody = CompletePromiseRequest
+type PatchPromisesIdJSONRequestBody = CompletePromiseReq
 
 // RequestEditorFn  is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -715,7 +723,7 @@ type ClientWithResponsesInterface interface {
 type SearchPromisesResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
-	JSON200      *SearchPromisesResponseObj
+	JSON200      *SearchPromisesResp
 }
 
 // Status returns HTTPResponse.Status
@@ -868,7 +876,7 @@ func ParseSearchPromisesResponse(rsp *http.Response) (*SearchPromisesResponse, e
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest SearchPromisesResponseObj
+		var dest SearchPromisesResp
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}

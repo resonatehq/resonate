@@ -19,7 +19,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/Promise"
+              $ref: "#/components/schemas/CreatePromiseReq"
       responses:
         200:
           description: Operation deduplicated, Promise fetched successfully
@@ -91,7 +91,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SearchPromisesResponseObj"
+                $ref: "#/components/schemas/SearchPromisesResp"
         400:
           description: Invalid request
 
@@ -130,7 +130,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/CompletePromiseRequest"
+              $ref: "#/components/schemas/CompletePromiseReq"
       responses:
         200:
           description: OK
@@ -183,6 +183,9 @@ components:
         - id
         - state
         - timeout
+        - param
+        - value
+        - tags
       properties:
         id:
           type: string
@@ -240,7 +243,25 @@ components:
         data:
           type: string
 
-    CompletePromiseRequest:
+    CreatePromiseReq:
+      type: object
+      reuired:
+        - id
+        - timeout
+      properties:
+        id:
+          type: string
+        timeout:
+          type: integer
+          format: int64
+        param:
+          $ref: "#/components/schemas/PromiseValue"
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+
+    CompletePromiseReq:
       type: object
       required:
         - state
@@ -250,7 +271,7 @@ components:
         value:
           $ref: "#/components/schemas/PromiseValue"
 
-    SearchPromisesResponseObj:
+    SearchPromisesResp:
       type: object
       properties:
         cursor:
