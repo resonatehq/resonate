@@ -113,7 +113,7 @@ message RejectPromiseResponse {
   Promise promise = 2;
 }
 
-service PromiseService {
+service Promises {
   // Promise
   rpc ReadPromise(ReadPromiseRequest) returns (ReadPromiseResponse) {}
   rpc SearchPromises(SearchPromisesRequest) returns (SearchPromisesResponse) {}

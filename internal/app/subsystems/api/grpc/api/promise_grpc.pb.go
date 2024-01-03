@@ -18,10 +18,10 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// PromiseServiceClient is the client API for PromiseService service.
+// PromisesClient is the client API for Promises service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type PromiseServiceClient interface {
+type PromisesClient interface {
 	// Promise
 	ReadPromise(ctx context.Context, in *ReadPromiseRequest, opts ...grpc.CallOption) (*ReadPromiseResponse, error)
 	SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error)
@@ -31,72 +31,72 @@ type PromiseServiceClient interface {
 	RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error)
 }
 
-type promiseServiceClient struct {
+type promisesClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewPromiseServiceClient(cc grpc.ClientConnInterface) PromiseServiceClient {
-	return &promiseServiceClient{cc}
+func NewPromisesClient(cc grpc.ClientConnInterface) PromisesClient {
+	return &promisesClient{cc}
 }
 
-func (c *promiseServiceClient) ReadPromise(ctx context.Context, in *ReadPromiseRequest, opts ...grpc.CallOption) (*ReadPromiseResponse, error) {
+func (c *promisesClient) ReadPromise(ctx context.Context, in *ReadPromiseRequest, opts ...grpc.CallOption) (*ReadPromiseResponse, error) {
 	out := new(ReadPromiseResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/ReadPromise", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/ReadPromise", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *promiseServiceClient) SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error) {
+func (c *promisesClient) SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error) {
 	out := new(SearchPromisesResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/SearchPromises", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/SearchPromises", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *promiseServiceClient) CreatePromise(ctx context.Context, in *CreatePromiseRequest, opts ...grpc.CallOption) (*CreatePromiseResponse, error) {
+func (c *promisesClient) CreatePromise(ctx context.Context, in *CreatePromiseRequest, opts ...grpc.CallOption) (*CreatePromiseResponse, error) {
 	out := new(CreatePromiseResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/CreatePromise", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/CreatePromise", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *promiseServiceClient) CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error) {
+func (c *promisesClient) CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error) {
 	out := new(CancelPromiseResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/CancelPromise", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/CancelPromise", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *promiseServiceClient) ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error) {
+func (c *promisesClient) ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error) {
 	out := new(ResolvePromiseResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/ResolvePromise", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/ResolvePromise", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *promiseServiceClient) RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error) {
+func (c *promisesClient) RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error) {
 	out := new(RejectPromiseResponse)
-	err := c.cc.Invoke(ctx, "/promise.PromiseService/RejectPromise", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/promise.Promises/RejectPromise", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// PromiseServiceServer is the server API for PromiseService service.
-// All implementations must embed UnimplementedPromiseServiceServer
+// PromisesServer is the server API for Promises service.
+// All implementations must embed UnimplementedPromisesServer
 // for forward compatibility
-type PromiseServiceServer interface {
+type PromisesServer interface {
 	// Promise
 	ReadPromise(context.Context, *ReadPromiseRequest) (*ReadPromiseResponse, error)
 	SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error)
@@ -104,182 +104,182 @@ type PromiseServiceServer interface {
 	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
 	ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error)
 	RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error)
-	mustEmbedUnimplementedPromiseServiceServer()
+	mustEmbedUnimplementedPromisesServer()
 }
 
-// UnimplementedPromiseServiceServer must be embedded to have forward compatible implementations.
-type UnimplementedPromiseServiceServer struct {
+// UnimplementedPromisesServer must be embedded to have forward compatible implementations.
+type UnimplementedPromisesServer struct {
 }
 
-func (UnimplementedPromiseServiceServer) ReadPromise(context.Context, *ReadPromiseRequest) (*ReadPromiseResponse, error) {
+func (UnimplementedPromisesServer) ReadPromise(context.Context, *ReadPromiseRequest) (*ReadPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReadPromise not implemented")
 }
-func (UnimplementedPromiseServiceServer) SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error) {
+func (UnimplementedPromisesServer) SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchPromises not implemented")
 }
-func (UnimplementedPromiseServiceServer) CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error) {
+func (UnimplementedPromisesServer) CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePromise not implemented")
 }
-func (UnimplementedPromiseServiceServer) CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error) {
+func (UnimplementedPromisesServer) CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CancelPromise not implemented")
 }
-func (UnimplementedPromiseServiceServer) ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error) {
+func (UnimplementedPromisesServer) ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolvePromise not implemented")
 }
-func (UnimplementedPromiseServiceServer) RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error) {
+func (UnimplementedPromisesServer) RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RejectPromise not implemented")
 }
-func (UnimplementedPromiseServiceServer) mustEmbedUnimplementedPromiseServiceServer() {}
+func (UnimplementedPromisesServer) mustEmbedUnimplementedPromisesServer() {}
 
-// UnsafePromiseServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to PromiseServiceServer will
+// UnsafePromisesServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to PromisesServer will
 // result in compilation errors.
-type UnsafePromiseServiceServer interface {
-	mustEmbedUnimplementedPromiseServiceServer()
+type UnsafePromisesServer interface {
+	mustEmbedUnimplementedPromisesServer()
 }
 
-func RegisterPromiseServiceServer(s grpc.ServiceRegistrar, srv PromiseServiceServer) {
-	s.RegisterService(&PromiseService_ServiceDesc, srv)
+func RegisterPromisesServer(s grpc.ServiceRegistrar, srv PromisesServer) {
+	s.RegisterService(&Promises_ServiceDesc, srv)
 }
 
-func _PromiseService_ReadPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_ReadPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReadPromiseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).ReadPromise(ctx, in)
+		return srv.(PromisesServer).ReadPromise(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/ReadPromise",
+		FullMethod: "/promise.Promises/ReadPromise",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).ReadPromise(ctx, req.(*ReadPromiseRequest))
+		return srv.(PromisesServer).ReadPromise(ctx, req.(*ReadPromiseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_SearchPromises_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_SearchPromises_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SearchPromisesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).SearchPromises(ctx, in)
+		return srv.(PromisesServer).SearchPromises(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/SearchPromises",
+		FullMethod: "/promise.Promises/SearchPromises",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).SearchPromises(ctx, req.(*SearchPromisesRequest))
+		return srv.(PromisesServer).SearchPromises(ctx, req.(*SearchPromisesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_CreatePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_CreatePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreatePromiseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).CreatePromise(ctx, in)
+		return srv.(PromisesServer).CreatePromise(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/CreatePromise",
+		FullMethod: "/promise.Promises/CreatePromise",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).CreatePromise(ctx, req.(*CreatePromiseRequest))
+		return srv.(PromisesServer).CreatePromise(ctx, req.(*CreatePromiseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_CancelPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_CancelPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CancelPromiseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).CancelPromise(ctx, in)
+		return srv.(PromisesServer).CancelPromise(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/CancelPromise",
+		FullMethod: "/promise.Promises/CancelPromise",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).CancelPromise(ctx, req.(*CancelPromiseRequest))
+		return srv.(PromisesServer).CancelPromise(ctx, req.(*CancelPromiseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_ResolvePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_ResolvePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResolvePromiseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).ResolvePromise(ctx, in)
+		return srv.(PromisesServer).ResolvePromise(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/ResolvePromise",
+		FullMethod: "/promise.Promises/ResolvePromise",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).ResolvePromise(ctx, req.(*ResolvePromiseRequest))
+		return srv.(PromisesServer).ResolvePromise(ctx, req.(*ResolvePromiseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PromiseService_RejectPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _Promises_RejectPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RejectPromiseRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromiseServiceServer).RejectPromise(ctx, in)
+		return srv.(PromisesServer).RejectPromise(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/promise.PromiseService/RejectPromise",
+		FullMethod: "/promise.Promises/RejectPromise",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromiseServiceServer).RejectPromise(ctx, req.(*RejectPromiseRequest))
+		return srv.(PromisesServer).RejectPromise(ctx, req.(*RejectPromiseRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// PromiseService_ServiceDesc is the grpc.ServiceDesc for PromiseService service.
+// Promises_ServiceDesc is the grpc.ServiceDesc for Promises service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var PromiseService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "promise.PromiseService",
-	HandlerType: (*PromiseServiceServer)(nil),
+var Promises_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "promise.Promises",
+	HandlerType: (*PromisesServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "ReadPromise",
-			Handler:    _PromiseService_ReadPromise_Handler,
+			Handler:    _Promises_ReadPromise_Handler,
 		},
 		{
 			MethodName: "SearchPromises",
-			Handler:    _PromiseService_SearchPromises_Handler,
+			Handler:    _Promises_SearchPromises_Handler,
 		},
 		{
 			MethodName: "CreatePromise",
-			Handler:    _PromiseService_CreatePromise_Handler,
+			Handler:    _Promises_CreatePromise_Handler,
 		},
 		{
 			MethodName: "CancelPromise",
-			Handler:    _PromiseService_CancelPromise_Handler,
+			Handler:    _Promises_CancelPromise_Handler,
 		},
 		{
 			MethodName: "ResolvePromise",
-			Handler:    _PromiseService_ResolvePromise_Handler,
+			Handler:    _Promises_ResolvePromise_Handler,
 		},
 		{
 			MethodName: "RejectPromise",
-			Handler:    _PromiseService_RejectPromise_Handler,
+			Handler:    _Promises_RejectPromise_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

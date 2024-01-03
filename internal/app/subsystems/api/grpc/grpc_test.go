@@ -27,7 +27,7 @@ type grpcTest struct {
 	subsystem      api.Subsystem
 	errors         chan error
 	conn           *grpc.ClientConn
-	client         grpcApi.PromiseServiceClient
+	client         grpcApi.PromisesClient
 	scheduleClient grpcApi.SchedulesClient
 }
 
@@ -52,7 +52,7 @@ func setup() (*grpcTest, error) {
 		subsystem:      subsystem,
 		errors:         errors,
 		conn:           conn,
-		client:         grpcApi.NewPromiseServiceClient(conn),
+		client:         grpcApi.NewPromisesClient(conn),
 		scheduleClient: grpcApi.NewSchedulesClient(conn),
 	}, nil
 }
