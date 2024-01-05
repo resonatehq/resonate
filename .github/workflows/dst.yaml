@@ -61,10 +61,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
@@ -99,10 +95,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
@@ -147,10 +139,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
@@ -208,10 +196,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Run dst (seed=${{ needs.seed.outputs.seed }})
       run: |
         chmod +x resonate
@@ -232,10 +216,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Download logs from run 1
       uses: actions/download-artifact@v4
       with:
@@ -273,10 +253,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Download logs from run 1
       uses: actions/download-artifact@v4
       with:
@@ -314,10 +290,6 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    # - name: Download resonate binary
-    #   uses: actions/download-artifact@v4
-    #   with:
-    #     name: resonate
     - name: Download logs from run 1
       uses: actions/download-artifact@v4
       with:
