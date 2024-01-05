@@ -31,6 +31,8 @@ jobs:
           mv ./bin/linux-x86_64/resonate ./bin/resonate_linux_x86_64 
           mv ./bin/linux-aarch64/resonate ./bin/resonate_linux_aarch64
       - name: Upload Artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_x86_64 --clobber
           gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_aarch64 --clobber
@@ -59,6 +61,8 @@ jobs:
           mv ./bin/darwin-x86_64/resonate ./bin/resonate_darwin_x86_64 
           mv ./bin/darwin-aarch64/resonate ./bin/resonate_darwin_aarch64
       - name: Upload Artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
           gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
