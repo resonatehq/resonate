@@ -23,7 +23,7 @@ jobs:
         key: resonate-${{ github.sha }}
     - name: Check cache hit
       if: steps.cache.outputs.cache-hit == 'true'
-      run: exit 0
+      run: exit 1
     - name: Checkout repository
       uses: actions/checkout@v4
     - name: Set up Go
@@ -59,6 +59,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -96,6 +97,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -143,6 +145,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -203,6 +206,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -226,6 +230,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -266,6 +271,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
@@ -306,6 +312,7 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
+        fail-on-cache-miss: true
     # - name: Download resonate binary
     #   uses: actions/download-artifact@v4
     #   with:
