@@ -21,19 +21,20 @@ jobs:
       with:
         path: resonate
         key: resonate-${{ github.sha }}
-    - name: Check cache hit
-      if: steps.cache.outputs.cache-hit == 'true'
-      run: exit 1
     - name: Checkout repository
+      if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
     - name: Set up Go
+      if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/setup-go@v5
       with:
         go-version-file: go.mod
         cache: false
     - name: Build resonate
+      if: steps.cache.outputs.cache-hit != 'true'
       run: go build -o resonate
     - name: Cache resonate binary
+      if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v3
       with:
         path: resonate
