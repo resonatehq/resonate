@@ -41,7 +41,9 @@ function isG<A extends any[], R>(g: unknown): g is G<A, R> {
 
 type ResonateOpts = {
   url: string;
-  promiseStore: IPromiseStore;
+  namespace: string;
+  seperator: string;
+  store: IPromiseStore;
   storage: IStorage;
   logger: ILogger;
   timeout: number;
@@ -69,6 +71,15 @@ export class Resonate {
 
   readonly errorEncoder: DataEncoder;
 
+  readonly namespace: string;
+
+  readonly seperator: string;
+
+  readonly locks: Record<string, boolean> = {};
+
+  // TODO
+  // readonly processes: { promise : Promise<any>, context: Context }[] = [];
+
   /**
    * Instantiate a new Resonate instance.
    *
@@ -81,7 +92,9 @@ export class Resonate {
    */
   constructor({
     url,
-    promiseStore,
+    namespace = "",
+    seperator = "/",
+    store,
     storage,
     logger = new Logger(),
     timeout = 10000,
@@ -89,6 +102,9 @@ export class Resonate {
     bucket = new Bucket(),
     encoder = new JSONEncoder(),
   }: Partial<ResonateOpts> = {}) {
+    this.namespace = namespace;
+    this.seperator = seperator;
+
     this.logger = logger;
     this.defaultRetry = retry;
 
@@ -107,8 +123,8 @@ export class Resonate {
 
     // store
     let defaultStore: IPromiseStore;
-    if (promiseStore) {
-      defaultStore = promiseStore;
+    if (store) {
+      defaultStore = store;
     } else if (storage) {
       defaultStore = new LocalPromiseStore(storage);
     } else {
@@ -156,6 +172,15 @@ export class Resonate {
    */
   bucket(name: string): IBucket {
     return this.buckets[name];
+  }
+
+  /**
+   * Add a param encoder. Param encoders are used to encode and decode params pass to Resonate functions.
+   *
+   * @param encoder
+   */
+  addParamEncoder(encoder: IEncoder<any, string>) {
+    this.paramEncoder.add(encoder);
   }
 
   /**
@@ -221,11 +246,17 @@ export class Resonate {
       throw new Error(`Function ${name} not registered`);
     }
 
+    const _id = this.createId(this.namespace, name, id);
+
+    if (!this.acquireLock(_id)) {
+      throw new Error(`Function ${name} already running with id ${_id}`);
+    }
+
     const [args, opts] = splitArgs(argsWithOpts);
 
-    const context = new ResonateContext(this, {
-      id: id,
-      idempotencyKey: id,
+    const context = new ResonateContext(this, name, {
+      id: _id,
+      idempotencyKey: _id,
       timeout: 10000,
       store: "default",
       bucket: "default",
@@ -234,7 +265,12 @@ export class Resonate {
       ...opts,
     });
 
-    return context.execute(this.functions[name], args);
+    const run = context.execute(this.functions[name], args);
+
+    // TODO
+    return run.finally(() => {
+      this.releaseLock(_id);
+    });
   }
 
   /**
@@ -245,6 +281,45 @@ export class Resonate {
    */
   get(id: string, store: string = "default"): Promise<DurablePromise> {
     return this.store(store).get(id);
+  }
+
+  async start(store: string = "default") {
+    setTimeout(() => this.start(store), 1000);
+
+    const search = this.store(store).search(this.createId(this.namespace, "*"), "pending", {
+      "resonate:invocation": "true",
+    });
+
+    for await (const promises of search) {
+      for (const promise of promises) {
+        const { func, args } = decode<{ func: string; args: any[] }>(promise.param, this.paramEncoder);
+        try {
+          this.run(func, promise.id, ...args, {
+            id: promise.id,
+            idempotencyKey: promise.idempotencyKeyForCreate,
+          });
+        } catch (e: unknown) {
+          this.logger.warn(`Function ${func} with id ${promise.id} failed on the recovery path`, e);
+        }
+      }
+    }
+  }
+
+  createId(...parts: string[]): string {
+    return parts.filter((p) => p !== "").join(this.seperator);
+  }
+
+  private acquireLock(id: string): boolean {
+    if (this.locks[id]) {
+      return false;
+    }
+
+    this.locks[id] = true;
+    return true;
+  }
+
+  private releaseLock(id: string) {
+    this.locks[id] = false;
   }
 }
 
@@ -332,6 +407,7 @@ class ResonateContext implements Context {
 
   constructor(
     public readonly resonate: Resonate,
+    private readonly funcName: string,
     public readonly opts: Opts,
   ) {}
 
@@ -352,11 +428,17 @@ class ResonateContext implements Context {
     this.children.push(context);
   }
 
+  get isRoot(): boolean {
+    return this.parent === undefined;
+  }
+
   run<A extends any[], R>(func: DurableFunction<A, R> | string, ...argsWithOpts: WithOpts<A>): Promise<R> {
-    const id = `${this.opts.id}.${this.counter++}`;
+    const id = this.resonate.createId(this.opts.id, this.counter.toString());
+    this.counter++;
+
     const [args, opts] = splitArgs(argsWithOpts);
 
-    const context = new ResonateContext(this.resonate, {
+    const context = new ResonateContext(this.resonate, typeof func === "string" ? func : func.name, {
       id: id,
       idempotencyKey: id,
       timeout: 10000,
@@ -384,9 +466,9 @@ class ResonateContext implements Context {
       if (typeof func === "string") {
         invocation = new RInvocation(func, args, store, this.opts.retry);
       } else if (isF<A, R>(func)) {
-        invocation = new LInvocation(store, new AInvocation(func, args, bucket, this.opts.retry));
+        invocation = new LInvocation(this.funcName, args, store, new AInvocation(func, args, bucket, this.opts.retry));
       } else if (isG<A, R>(func)) {
-        invocation = new LInvocation(store, new GInvocation(func, args, bucket, this.opts.retry));
+        invocation = new LInvocation(this.funcName, args, store, new GInvocation(func, args, bucket, this.opts.retry));
       } else {
         throw new Error("Invalid function");
       }
@@ -430,6 +512,8 @@ class ResonateContext implements Context {
 
 class LInvocation<A extends any[], R> {
   constructor(
+    private func: string,
+    private args: A,
     private store: IPromiseStore,
     private invocation: Invocation<A, R>,
   ) {}
@@ -438,18 +522,40 @@ class LInvocation<A extends any[], R> {
     return new Promise(async (resolve, reject) => {
       // create durable promise
       try {
+        let headers: Record<string, string> | undefined;
+        let data: string | undefined;
+        let tags: Record<string, string> | undefined;
+
+        // encode the function and arguments if root context
+        // this information will be used to recover the invocation
+        // on the recovery path
+        if (context.isRoot) {
+          ({ headers, data } = encode({ func: this.func, args: this.args }, context.resonate.paramEncoder));
+          tags = {
+            "resonate:invocation": "true",
+          };
+        }
+
         const p = await this.store.create(
           context.id,
           context.idempotencyKey,
           false,
-          undefined,
-          undefined,
+          headers,
+          data,
           context.timeout,
-          undefined,
+          tags,
         );
 
         if (isPendingPromise(p)) {
           try {
+            // TODO
+            // decode the arguments from the promise
+            // if root context, this normalizes the information across
+            // the initial invocation and the recovery path
+            // if (context.isRoot) {
+            //   const { args } = decode<{ func: string; args: any[] }>(p.param, context.resonate.paramEncoder);
+            // }
+
             // invoke function
             const r = await this.invocation.invoke(context, trace);
 

@@ -50,6 +50,21 @@ export class IndexedDbStorage implements IStorage {
     return resultPromise;
   }
 
+  async *search(
+    id: string,
+    state: string | undefined,
+    tags: Record<string, string> | undefined,
+    limit: number | undefined,
+  ): AsyncGenerator<DurablePromise[], void> {
+    // for now WithTimeout will implement
+    // search logic
+    const db = await this.getDb();
+    const transaction = db.transaction(this.storeName, "readwrite");
+    const objectStore = transaction.objectStore(this.storeName);
+
+    yield this.getAllPromises(objectStore);
+  }
+
   private async getDb(): Promise<IDBDatabase> {
     return new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(this.dbName, 1);
@@ -64,6 +79,27 @@ export class IndexedDbStorage implements IStorage {
         }
         const db = request.result;
         resolve(db);
+      };
+    });
+  }
+
+  async getAllPromises(objectStore: IDBObjectStore): Promise<DurablePromise[]> {
+    return new Promise<DurablePromise[]>(async (resolve, reject) => {
+      if (!objectStore) {
+        const db = await this.getDb();
+        const transaction = db.transaction(this.storeName, "readonly");
+        objectStore = transaction.objectStore(this.storeName);
+      }
+
+      const request = objectStore.getAll();
+
+      request.onerror = () => {
+        reject(request.error);
+      };
+
+      request.onsuccess = () => {
+        const storedPromises = request.result as DurablePromise[];
+        resolve(storedPromises);
       };
     });
   }

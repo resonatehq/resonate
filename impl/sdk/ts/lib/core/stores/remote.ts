@@ -8,7 +8,7 @@ import {
   isDurablePromise,
   isCompletedPromise,
 } from "../promise";
-import { IPromiseStore } from "../store";
+import { IPromiseStore, isSearchPromiseResult } from "../store";
 import { IEncoder } from "../encoder";
 import { Base64Encoder } from "../encoders/base64";
 import { ErrorCodes, ResonateError } from "../error";
@@ -221,6 +221,49 @@ export class RemotePromiseStore implements IPromiseStore {
     });
 
     return this.decode(promise);
+  }
+
+  async *search(
+    id: string,
+    state: string | undefined,
+    tags: Record<string, string> | undefined,
+    limit: number | undefined,
+  ): AsyncGenerator<DurablePromise[], void> {
+    let cursor: string | null | undefined = undefined;
+
+    while (cursor !== null) {
+      const params = new URLSearchParams({ id });
+
+      if (state !== undefined) {
+        params.append("state", state);
+      }
+
+      for (const [k, v] of Object.entries(tags ?? {})) {
+        params.append(`tags[${k}]`, v);
+      }
+
+      if (limit !== undefined) {
+        params.append("limit", limit.toString());
+      }
+
+      if (cursor !== undefined) {
+        params.append("cursor", cursor);
+      }
+
+      const url = new URL(`${this.url}/promises`);
+      url.search = params.toString();
+
+      const res = await this.call(url.toString(), isSearchPromiseResult, {
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        method: "GET",
+      });
+
+      cursor = res.cursor;
+      yield res.promises.map((p) => this.decode(p));
+    }
   }
 
   private encode(value: string): string {

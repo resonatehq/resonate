@@ -8,7 +8,10 @@ import { LinearRetry } from "../lib/core/retries/linear";
 jest.setTimeout(10000);
 
 describe("Retry policies", () => {
-  const resonate = new Resonate({ timeout: Number.MAX_SAFE_INTEGER, retry: () => ExponentialRetry.atMostOnce() });
+  const resonate = new Resonate({
+    timeout: Number.MAX_SAFE_INTEGER,
+    retry: () => ExponentialRetry.atMostOnce(),
+  });
   resonate.register("async", foo);
   resonate.register("generator", bar);
 

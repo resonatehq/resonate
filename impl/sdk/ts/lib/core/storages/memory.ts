@@ -17,4 +17,15 @@ export class MemoryStorage implements IStorage {
 
     return promise;
   }
+
+  async *search(
+    id: string,
+    state: string | undefined,
+    tags: Record<string, string> | undefined,
+    limit: number | undefined,
+  ): AsyncGenerator<DurablePromise[], void> {
+    // for now WithTimeout will implement
+    // search logic
+    yield Object.values(this.promises);
+  }
 }

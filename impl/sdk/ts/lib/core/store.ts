@@ -5,7 +5,31 @@ import {
   RejectedPromise,
   CanceledPromise,
   TimedoutPromise,
+  isDurablePromise,
 } from "./promise";
+
+export interface SearchPromiseParams {
+  id: string;
+  state?: string;
+  tags?: Record<string, string>;
+  limit?: number;
+}
+
+export interface SearchPromiseResult {
+  cursor: string | null;
+  promises: DurablePromise[];
+}
+
+export function isSearchPromiseResult(obj: any): obj is SearchPromiseResult {
+  return (
+    obj !== undefined &&
+    obj.cursor !== undefined &&
+    (obj.cursor === null || typeof obj.cursor === "string") &&
+    obj.promises !== undefined &&
+    Array.isArray(obj.promises) &&
+    obj.promises.every(isDurablePromise)
+  );
+}
 
 /**
  * Promise Store API
@@ -94,4 +118,18 @@ export interface IPromiseStore {
    * @returns A durable promise that is pending, canceled, resolved, or rejected.
    */
   get(id: string): Promise<DurablePromise>;
+
+  /**
+   * Search for promises.
+   *
+   * @param id Ids to match, can include wildcards.
+   * @param tags Tags to match.
+   * @returns A list of Durable Promises.
+   */
+  search(
+    id: string,
+    state?: string,
+    tags?: Record<string, string>,
+    limit?: number,
+  ): AsyncGenerator<DurablePromise[], void>;
 }
