@@ -1,18 +1,12 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release"
-        required: true
-      commit:
-        description: "Commit to release (set to 'main' to release the latest commit on main)"
-        required: true
+  release:
+    types:
+      - created
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   release-linux-artifact:
@@ -37,12 +31,11 @@ jobs:
           mv ./bin/linux-x86_64/resonate ./bin/resonate_linux_x86_64 
           mv ./bin/linux-aarch64/resonate ./bin/resonate_linux_aarch64
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: linux-releases
-          path: |
-            ./bin/resonate_linux_x86_64
-            ./bin/resonate_linux_aarch64
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_x86_64 --clobber
+          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_aarch64 --clobber
 
   release-darwin-artifact:
     runs-on: macos-latest
@@ -62,35 +55,8 @@ jobs:
           mv ./bin/darwin-x86_64/resonate ./bin/resonate_darwin_x86_64 
           mv ./bin/darwin-aarch64/resonate ./bin/resonate_darwin_aarch64
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v2
-        with:
-          name: darwin-releases
-          path: |
-            ./bin/resonate_darwin_x86_64
-            ./bin/resonate_darwin_aarch64
-
-  release-create:
-    needs: [release-linux-artifact, release-darwin-artifact]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Download All Artifacts
-        uses: actions/download-artifact@v2
-        with:
-          path: artifacts
-          pattern: "*-releases"
-      - name: Create Release
         env:
-          GITHUB_TOKEN: ${{ secrets.github_token }}
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ github.event.inputs.tag }}
-          commit: ${{ github.event.inputs.commit }}
-          generateReleaseNotes: true
-          skipIfReleaseExists: true
-          artifacts: |
-            /home/runner/work/resonate/resonate/artifacts/linux-releases/resonate_linux_x86_64
-            /home/runner/work/resonate/resonate/artifacts/linux-releases/resonate_linux_aarch64
-            /home/runner/work/resonate/resonate/artifacts/darwin-releases/resonate_darwin_x86_64
-            /home/runner/work/resonate/resonate/artifacts/darwin-releases/resonate_darwin_aarch64
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
+          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
