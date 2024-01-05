@@ -18,7 +18,7 @@ jobs:
   release-linux-artifact:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repositoryclear
+      - name: Checkout repository
         uses: actions/checkout@v4
       - name: Set up Go 1.21
         uses: actions/setup-go@v5
