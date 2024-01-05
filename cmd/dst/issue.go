@@ -44,6 +44,8 @@ go run ./... dst run --seed %d --aio-store %s
 ~~~
 %s
 ~~~
+
+[more details](%s)
 `
 
 func CreateDSTIssueCmd() *cobra.Command {
@@ -54,6 +56,7 @@ func CreateDSTIssueCmd() *cobra.Command {
 		file   string
 		repo   string
 		commit string
+		url    string
 	)
 
 	cmd := &cobra.Command{
@@ -78,7 +81,7 @@ func CreateDSTIssueCmd() *cobra.Command {
 			// create github issue
 			issue := &Issue{
 				Title: fmt.Sprintf("DST: %d", seed),
-				Body:  fmt.Sprintf(issueFmt, reason, seed, store, commit, seed, store, logs),
+				Body:  fmt.Sprintf(issueFmt, reason, seed, store, commit, seed, store, logs, url),
 			}
 
 			return createGitHubIssue(repo, token, issue)
@@ -91,6 +94,7 @@ func CreateDSTIssueCmd() *cobra.Command {
 	cmd.Flags().StringVar(&file, "file", "", "dst logs file")
 	cmd.Flags().StringVar(&repo, "repo", "", "github repo")
 	cmd.Flags().StringVar(&commit, "commit", "", "git commit sha")
+	cmd.Flags().StringVar(&url, "url", "", "github action url")
 
 	return cmd
 }
