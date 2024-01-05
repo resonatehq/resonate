@@ -65,7 +65,8 @@ jobs:
           --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
     - uses: actions/upload-artifact@v4
       if: ${{ always() }}
       with:
@@ -138,7 +139,8 @@ jobs:
           --reason "DST run failed for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
           --file logs.txt \
           --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
     - uses: actions/upload-artifact@v4
       if: ${{ always() }}
       with:
@@ -219,7 +221,8 @@ jobs:
           --store sqlite \
           --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite." \
           --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
   dst-postgres-diff:
     runs-on: ubuntu-latest
@@ -253,7 +256,8 @@ jobs:
           --store postgres \
           --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=postgres." \
           --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
 
   dst-sqlite-postgres-diff:
     runs-on: ubuntu-latest
@@ -287,4 +291,5 @@ jobs:
           --store sqlite/postgres \
           --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }} and store=sqlite/postgres." \
           --repo $GITHUB_REPOSITORY \
-          --commit $GITHUB_SHA
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
