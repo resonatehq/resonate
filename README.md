@@ -39,9 +39,9 @@
 
 Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
 
-## What is Durable Async Await?
+## What is Distributed Async Await?
 
-Durable Async Await are Functions and Promises that maintain progress in durable storage.
+Distributed Async Await extends the async await programming model beyond the boundaries of a single process and makes distributed computing a first-class citizen.
 
 ## Install
 
@@ -62,7 +62,7 @@ Resonate makes it easy to get started creating and interacting with durable prom
 
    The resonate server supports `http` and `grpc` protocols as well as `sqlite` and `postgres` as a data store.
 
-   ```bash
+   ```console
    # Build
    go build -o resonate
 
@@ -72,7 +72,7 @@ Resonate makes it easy to get started creating and interacting with durable prom
 
    Once running, you'll see log output like:
 
-   ```bash
+   ```console
    time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting http server" addr=0.0.0.0:8001
    time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting grpc server" addr=0.0.0.0:50051
    time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting metrics server" addr=:9090
@@ -80,33 +80,36 @@ Resonate makes it easy to get started creating and interacting with durable prom
 
 2. **Create a Promise**
 
-   On separate terminal, create a durable promise with a unique identifier, timeout, and data.
+   On a separate terminal, create a durable promise.
 
-   ```bash
-   resonate promise create my-promise \
-   --timeout 2524608000000 \
-   --data 'Durable Promise Created'
+   ```console
+   # Create a promise with data, headers and tags
+   resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=baz
    ```
 
 3. **Complete a Promise**
 
-   Finally, complete the promise by resolving or rejecting it Pass the same ID and the completed state.
+   Finally, complete the promise by resolving or rejecting.
 
-   ```bash
-   resonate promise complete my-promise \
-   --state RESOLVED \
-   --data 'Durable Promise Resolved'
+   ```console
+   # Resolve a promise with data and headers 
+   resonate promises resolve foo --data foo --header bar=bar
    ```
 
-   ```bash
-   resonate promise complete my-promise \
-   --state REJECTED \
-   --data 'Durable Promise Rejected'
+   ```console
+   # Reject a promise with data and headers
+   resonate promises reject foo --data foo --header bar=bar
    ```
+
+## Clients  
+
+Resonate provides client SDKs for different programming languages to easily interact with the Resonate server and write elegant distributed async await applications. More are coming soon!
+
+- [TypeScript SDK](https://github.com/resonatehq/resonate-sdk-ts)
 
 ## Development
 
-```
+```console
 go run ./...
 go test -v ./...
 ```
