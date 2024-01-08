@@ -452,7 +452,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 			// time, this indicates a failure to execute the job and an error should be raised as this
 			// exceeds the allowed scheduling variance.
 			if nextRunTimeTick < currentTick-100 {
-				return fmt.Errorf("expected schedule %s toc run at tick %d, but system is already at tick %d", s.Id, nextRunTimeTick, currentTick)
+				return fmt.Errorf("expected schedule %s to run at tick %d, but system is already at tick %d", s.Id, nextRunTimeTick, currentTick)
 			}
 		}
 		return nil
