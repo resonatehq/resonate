@@ -32,23 +32,25 @@
   <br /><br />
 </div>
 
-An SDK for writing simple and elegant durable async await applications.
+An SDK for writing simple and elegant distributed async await applications.
 
 ## Why Resonate?
 Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
 
-## What is Durable Async Await?
+## What is Distributed Async Await?
 
-Durable Async Await are Functions and Promises that maintain progress in durable storage.
+Distributed Async Await extends the async await programming model beyond the boundaries of a single process and makes distributed computing a first-class citizen.
 
 ## Features
 
 Available now:
-- durable async await
-- volatile async await
 - retries
+- recovery
+- schedules
 - tracing
 - logging
+- volatile promise store
+- durable promise store
 
 Coming soon:
 - rate limiting
@@ -57,7 +59,7 @@ Coming soon:
 Let us know [features](https://github.com/resonatehq/resonate-sdk-ts/issues) you would like Resonate to support.
 
 ## Install
-```bash
+```console
 npm install -g ts-node
 npm install @resonatehq/sdk
 npm install express @types/express
@@ -127,12 +129,12 @@ app.listen(3000, () => {
 ```
 
 Start the server.
-```bash
+```console
 ts-node app.ts
 ```
 
 And call the endpoint providing a user and song id.
-```
+```console
 curl \
   -X POST \
   -H 'Content-Type: application/json' \
@@ -143,7 +145,7 @@ curl \
 See our [docs](https://docs.resonatehq.io) for more detailed information.
 
 ## Development
-```bash
+```console
 npm install
 npm run lint
 npm test
