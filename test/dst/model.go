@@ -42,7 +42,7 @@ type SubscriptionModel struct {
 type Promises map[string]*PromiseModel
 type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
-type ResponseValidator func(*t_api.Request, *t_api.Response) error
+type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
 	if _, ok := p[id]; !ok {
@@ -93,7 +93,7 @@ func (m *Model) addCursor(next *t_api.Request) {
 
 // Validation
 
-func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
+func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
 		if !errors.As(err, &resErr) {
@@ -114,7 +114,7 @@ func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
-		return f(req, res)
+		return f(t, req, res)
 	}
 
 	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
@@ -122,7 +122,7 @@ func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 
 // PROMISES
 
-func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
@@ -144,7 +144,7 @@ func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) err
 	}
 }
 
-func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchPromises.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:           t_api.SearchPromises,
@@ -191,7 +191,7 @@ func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) 
 	}
 }
 
-func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
@@ -227,7 +227,7 @@ func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) er
 	}
 }
 
-func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CancelPromise.Id)
 
 	switch res.CancelPromise.Status {
@@ -276,7 +276,7 @@ func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) e
 	}
 }
 
-func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateResolvePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ResolvePromise.Id)
 
 	switch res.ResolvePromise.Status {
@@ -325,7 +325,7 @@ func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) 
 	}
 }
 
-func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateRejectPromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.RejectPromise.Id)
 
 	switch res.RejectPromise.Status {
@@ -376,7 +376,7 @@ func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) e
 
 // SCHEDULES
 
-func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.ReadSchedule.Id)
 
 	switch res.ReadSchedule.Status {
@@ -393,7 +393,7 @@ func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) er
 	}
 }
 
-func (m *Model) ValidateSearchSchedules(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchSchedules.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:            t_api.SearchSchedules,
@@ -423,13 +423,45 @@ func (m *Model) ValidateSearchSchedules(req *t_api.Request, res *t_api.Response)
 			// update schedule state
 			sm.schedule = s
 		}
+
+		// validate that there are no outstanding schedules that didn't run on the expected time.
+
+		for _, s := range res.SearchSchedules.Schedules {
+			sm := m.schedules.Get(s.Id)
+			if sm.schedule == nil {
+				continue
+			}
+
+			currentTick := t
+			nextRunTimeTick := sm.schedule.NextRunTime
+
+			// The schedulePromise coroutine runs every 2 ticks/20ms to check if it's time to schedule the child
+			// coroutine. nextRunTimeTick keeps track of the logical clock for when the coroutine should run next.
+			// In a perfect world, it would always be greater than the currentTick since it represents a future
+			// execution time. But the schedule may miss ticks under heavy load or DST changes, but should catch up.
+			// A small amount of variance (100 ticks) where it runs in the next tick is expected.
+			//
+			// In production, 1 tick represents 10ms so:
+			// 100 ticks = 1 second
+			// 300 ticks = 3 seconds
+			//
+			// When the coroutine runs, it should update nextRunTimeTick to the next execution tick based on
+			// the schedule interval.
+			//
+			// If the coroutine has not run within 100 ticks of the next scheduled run
+			// time, this indicates a failure to execute the job and an error should be raised as this
+			// exceeds the allowed scheduling variance.
+			if nextRunTimeTick < currentTick-100 {
+				return fmt.Errorf("expected schedule %s toc run at tick %d, but system is already at tick %d", s.Id, nextRunTimeTick, currentTick)
+			}
+		}
 		return nil
 	default:
 		return fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
 	}
 }
 
-func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
 	switch res.CreateSchedule.Status {
@@ -453,7 +485,7 @@ func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) 
 	}
 }
 
-func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.DeleteSchedule.Id)
 
 	switch res.DeleteSchedule.Status {
@@ -469,7 +501,7 @@ func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) 
 
 // SUBSCRIPTIONS
 
-func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:              t_api.ReadSubscriptions,
@@ -496,7 +528,7 @@ func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Respons
 	}
 }
 
-func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreateSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
 
@@ -512,7 +544,7 @@ func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Respon
 	}
 }
 
-func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
 

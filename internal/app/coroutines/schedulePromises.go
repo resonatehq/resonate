@@ -16,6 +16,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
 
+var schedulesInflight = inflight{}
+
 func SchedulePromises(t int64, config *system.Config) *Coroutine {
 	metadata := metadata.New(fmt.Sprintf("tick:%d:schedule", t))
 	metadata.Tags.Set("name", "schedule-promises")
@@ -56,7 +58,9 @@ func SchedulePromises(t int64, config *system.Config) *Coroutine {
 				continue
 			}
 
-			c.Scheduler.Add(schedulePromise(metadata.TransactionId, schedule))
+			if !schedulesInflight.get(sid(schedule)) {
+				c.Scheduler.Add(schedulePromise(metadata.TransactionId, schedule))
+			}
 		}
 	})
 }
@@ -68,6 +72,10 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 	// handle creating promise (schedule run) and updating schedule record.
 
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+		// handle inflight cache
+		schedulesInflight.add(sid(schedule))
+		c.OnDone(func() { schedulesInflight.remove(sid(schedule)) })
+
 		next, err := util.Next(schedule.NextRunTime, schedule.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "err", err)
@@ -167,4 +175,8 @@ func generatePromiseId(id string, vars map[string]string) (string, error) {
 	}
 
 	return replaced.String(), nil
+}
+
+func sid(schedule *schedule.Schedule) string {
+	return fmt.Sprintf("%s:%d", schedule.Id, schedule.NextRunTime)
 }

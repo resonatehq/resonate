@@ -3,6 +3,7 @@ package schedule
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -34,7 +35,7 @@ func (s *Schedule) String() string {
 		s.PromiseTimeout,
 		s.PromiseParam,
 		s.PromiseTags,
-		s.LastRunTime,
+		util.SafeDeref(s.LastRunTime),
 		s.NextRunTime,
 		s.IdempotencyKey,
 		s.CreatedOn,

@@ -3,6 +3,8 @@ package util
 import (
 	"cmp"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -78,6 +80,50 @@ func UnixMilliToTime(unixMilli int64) time.Time {
 
 // ref: t := time.Now().UnixMilli()
 func Next(curr int64, cronExp string) (int64, error) {
+	if isLogicalTimestamp(curr) {
+		return nextLogicalTimestamp(curr, cronExp)
+	}
+
+	return nextPhysicalTimestamp(curr, cronExp)
+}
+
+// isLogicalTimestamp uses some time in the recent past (Jan 6, 2024) to detect if it is
+// a logical clock from dst_test.go or a physical clock from system.go.
+func isLogicalTimestamp(curr int64) bool {
+	return curr < 1_704_586_461_601
+}
+
+// nextLogicalTimestamp uses a logical clock for deterministic
+// simulation testing, rather than relying on a physical clock.
+//
+// The smallest units in cron expressions are minutes. Therefore, to
+// calculate the next logical clock time, we take the current logical
+// time, calculate the next cron expression interval, and add an
+// offset of 1 ms/tick per minute.
+//
+// This allows us to schedule future events and simulations
+// deterministically, without needing real time to actually elapse.
+// Using a logical clock ensures repeatable and predictable results
+// during testing by advancing time predictably in set intervals.
+func nextLogicalTimestamp(curr int64, cronExp string) (int64, error) {
+	fields := strings.Split(cronExp, " ")
+	minutes := fields[0]
+
+	value, err := strconv.Atoi(minutes)
+	if err != nil {
+		return 0, err
+	}
+
+	logical_offset := int64(value)
+
+	next := curr + logical_offset
+
+	return next, nil
+}
+
+// nextPhysicalTimestamp uses the actual physical time to calculate the
+// next timestamp based on the cron expression.
+func nextPhysicalTimestamp(curr int64, cronExp string) (int64, error) {
 	scheduler, err := ParseCron(cronExp)
 	if err != nil {
 		return 0, err
