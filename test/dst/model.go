@@ -420,40 +420,15 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
+			if s.NextRunTime < sm.schedule.NextRunTime {
+				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+			}
+			if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+				return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+			}
+
 			// update schedule state
 			sm.schedule = s
-		}
-
-		// validate that there are no outstanding schedules that didn't run on the expected time.
-
-		for _, s := range res.SearchSchedules.Schedules {
-			sm := m.schedules.Get(s.Id)
-			if sm.schedule == nil {
-				continue
-			}
-
-			currentTick := t
-			nextRunTimeTick := sm.schedule.NextRunTime
-
-			// The schedulePromise coroutine runs every 2 ticks/20ms to check if it's time to schedule the child
-			// coroutine. nextRunTimeTick keeps track of the logical clock for when the coroutine should run next.
-			// In a perfect world, it would always be greater than the currentTick since it represents a future
-			// execution time. But the schedule may miss ticks under heavy load or DST changes, but should catch up.
-			// A small amount of variance (100 ticks) where it runs in the next tick is expected.
-			//
-			// In production, 1 tick represents 10ms so:
-			// 100 ticks = 1 second
-			// 300 ticks = 3 seconds
-			//
-			// When the coroutine runs, it should update nextRunTimeTick to the next execution tick based on
-			// the schedule interval.
-			//
-			// If the coroutine has not run within 100 ticks of the next scheduled run
-			// time, this indicates a failure to execute the job and an error should be raised as this
-			// exceeds the allowed scheduling variance.
-			if nextRunTimeTick < currentTick-100 {
-				return fmt.Errorf("expected schedule %s to run at tick %d, but system is already at tick %d", s.Id, nextRunTimeTick, currentTick)
-			}
 		}
 		return nil
 	default:
