@@ -16,18 +16,25 @@ func TestNext(t *testing.T) {
 		expectedErr  error
 	}{
 		{
-			name:         "valid",
-			curr:         16551234321,
+			name:         "valid cron",
+			curr:         1704719383520,
 			cronExp:      "* * * * *",
-			expectedNext: 16551240000,
+			expectedNext: 1704719400000,
 			expectedErr:  nil,
 		},
 		{
 			name:         "invalid cron",
-			curr:         16551234321,
+			curr:         1704719383520,
 			cronExp:      "random",
 			expectedNext: 0,
 			expectedErr:  fmt.Errorf("expected 5 to 6 fields, found 1: [random]"),
+		},
+		{
+			name:         "valid cron (small)",
+			curr:         0,
+			cronExp:      "2 * * * *",
+			expectedNext: 120_000,
+			expectedErr:  nil,
 		},
 	}
 

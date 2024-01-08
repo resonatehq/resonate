@@ -67,7 +67,7 @@ type CreateScheduleResponse struct {
 type SearchSchedulesResponse struct {
 	Status    ResponseStatus                  `json:"status"`
 	Cursor    *Cursor[SearchSchedulesRequest] `json:"cursor,omitempty"`
-	Schedules []*schedule.Schedule            `json:"promises,omitempty"`
+	Schedules []*schedule.Schedule            `json:"schedules,omitempty"`
 }
 
 type ReadScheduleResponse struct {
