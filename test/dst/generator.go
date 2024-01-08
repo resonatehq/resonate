@@ -294,7 +294,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 
 func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
-	cron := fmt.Sprintf("%d * * * *", RangeIntn(r, 10, 60))
+	cron := fmt.Sprintf("%d * * * *", r.Intn(60))
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 

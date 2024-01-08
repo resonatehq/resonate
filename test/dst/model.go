@@ -42,7 +42,7 @@ type SubscriptionModel struct {
 type Promises map[string]*PromiseModel
 type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
-type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
+type ResponseValidator func(*t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
 	if _, ok := p[id]; !ok {
@@ -93,7 +93,7 @@ func (m *Model) addCursor(next *t_api.Request) {
 
 // Validation
 
-func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error) error {
+func (m *Model) Step(req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
 		if !errors.As(err, &resErr) {
@@ -114,7 +114,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
-		return f(t, req, res)
+		return f(req, res)
 	}
 
 	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
@@ -122,7 +122,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 
 // PROMISES
 
-func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
@@ -144,7 +144,7 @@ func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
-func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchPromises(req *t_api.Request, res *t_api.Response) error {
 	if res.SearchPromises.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:           t_api.SearchPromises,
@@ -191,7 +191,7 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidatCreatePromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
@@ -227,7 +227,7 @@ func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Res
 	}
 }
 
-func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCancelPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CancelPromise.Id)
 
 	switch res.CancelPromise.Status {
@@ -276,7 +276,7 @@ func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Re
 	}
 }
 
-func (m *Model) ValidateResolvePromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateResolvePromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ResolvePromise.Id)
 
 	switch res.ResolvePromise.Status {
@@ -325,7 +325,7 @@ func (m *Model) ValidateResolvePromise(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateRejectPromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateRejectPromise(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.RejectPromise.Id)
 
 	switch res.RejectPromise.Status {
@@ -376,7 +376,7 @@ func (m *Model) ValidateRejectPromise(t int64, req *t_api.Request, res *t_api.Re
 
 // SCHEDULES
 
-func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSchedule(req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.ReadSchedule.Id)
 
 	switch res.ReadSchedule.Status {
@@ -402,7 +402,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 	}
 }
 
-func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchSchedules(req *t_api.Request, res *t_api.Response) error {
 	if res.SearchSchedules.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:            t_api.SearchSchedules,
@@ -445,7 +445,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 	}
 }
 
-func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSchedule(req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
 	switch res.CreateSchedule.Status {
@@ -469,7 +469,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSchedule(req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.DeleteSchedule.Id)
 
 	switch res.DeleteSchedule.Status {
@@ -485,7 +485,7 @@ func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.R
 
 // SUBSCRIPTIONS
 
-func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSubscriptions(req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:              t_api.ReadSubscriptions,
@@ -512,7 +512,7 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 	}
 }
 
-func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSubscription(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreateSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
 
@@ -528,7 +528,7 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 	}
 }
 
-func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
 
