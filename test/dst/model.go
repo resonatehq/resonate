@@ -381,7 +381,16 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 
 	switch res.ReadSchedule.Status {
 	case t_api.StatusOK:
-		sm.schedule = res.ReadSchedule.Schedule
+		s := res.ReadSchedule.Schedule // schedule response
+
+		if s.NextRunTime < sm.schedule.NextRunTime {
+			return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+		}
+		if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+			return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+		}
+
+		sm.schedule = s
 		return nil
 	case t_api.StatusScheduleNotFound:
 		if sm.schedule != nil {
