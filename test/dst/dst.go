@@ -15,15 +15,16 @@ import (
 )
 
 type Config struct {
-	Ticks           int64
-	Reqs            func() int
-	Ids             int
-	IdempotencyKeys int
-	Headers         int
-	Data            int
-	Tags            int
-	Urls            int
-	Retries         int
+	Ticks              int64
+	TimeElapsedPerTick int64
+	Reqs               func() int
+	Ids                int
+	IdempotencyKeys    int
+	Headers            int
+	Data               int
+	Tags               int
+	Urls               int
+	Retries            int
 }
 
 type DST struct {
@@ -98,7 +99,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	var errs []error
 
 	// test loop
-	for t := int64(0); t < d.config.Ticks; t++ {
+	for t := int64(0); t < d.config.Ticks*d.config.TimeElapsedPerTick; t += d.config.TimeElapsedPerTick {
 		for _, req := range generator.Generate(r, t, d.config.Reqs(), model.cursors) {
 			req := req
 			reqTime := t
@@ -123,7 +124,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			i++
 		}
 
-		system.Tick(t*50_000, nil)
+		system.Tick(t, nil)
 
 		if len(errs) > 0 {
 			break

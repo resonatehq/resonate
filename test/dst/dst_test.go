@@ -96,15 +96,16 @@ func TestDST(t *testing.T) {
 	}
 
 	dst := New(&Config{
-		Ticks:           1000,
-		Reqs:            func() int { return 100 },
-		Ids:             100,
-		IdempotencyKeys: 100,
-		Headers:         100,
-		Data:            100,
-		Tags:            100,
-		Urls:            100,
-		Retries:         100,
+		Ticks:              1000,
+		TimeElapsedPerTick: 50_000, // milliseconds
+		Reqs:               func() int { return 100 },
+		Ids:                100,
+		IdempotencyKeys:    100,
+		Headers:            100,
+		Data:               100,
+		Tags:               100,
+		Urls:               100,
+		Retries:            100,
 	})
 
 	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {

@@ -12,15 +12,16 @@ import (
 )
 
 type Generator struct {
-	ticks            int64
-	idSet            []string
-	idemotencyKeySet []*idempotency.Key
-	headersSet       []map[string]string
-	dataSet          [][]byte
-	tagsSet          []map[string]string
-	urlSet           []string
-	retrySet         []int
-	requests         []RequestGenerator
+	ticks              int64
+	timeElapsedPerTick int64
+	idSet              []string
+	idemotencyKeySet   []*idempotency.Key
+	headersSet         []map[string]string
+	dataSet            [][]byte
+	tagsSet            []map[string]string
+	urlSet             []string
+	retrySet           []int
+	requests           []RequestGenerator
 }
 
 type RequestGenerator func(*rand.Rand, int64) *t_api.Request
@@ -74,14 +75,15 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 	}
 
 	return &Generator{
-		ticks:            config.Ticks,
-		idSet:            idSet,
-		idemotencyKeySet: idempotencyKeySet,
-		headersSet:       headersSet,
-		dataSet:          dataSet,
-		tagsSet:          tagsSet,
-		urlSet:           urlSet,
-		retrySet:         retrySet,
+		ticks:              config.Ticks,
+		timeElapsedPerTick: config.TimeElapsedPerTick,
+		idSet:              idSet,
+		idemotencyKeySet:   idempotencyKeySet,
+		headersSet:         headersSet,
+		dataSet:            dataSet,
+		tagsSet:            tagsSet,
+		urlSet:             urlSet,
+		retrySet:           retrySet,
 	}
 }
 
@@ -172,7 +174,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
-	timeout := RangeInt63n(r, t, g.ticks)
+	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	strict := r.Intn(2) == 0
 
 	return &t_api.Request{
@@ -296,7 +298,7 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 
-	promiseTimeout := RangeInt63n(r, t, g.ticks)
+	promiseTimeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	promiseHeaders := g.headersSet[r.Intn(len(g.headersSet))]
 	promiseData := g.dataSet[r.Intn(len(g.dataSet))]
 	promiseTags := g.tagsSet[r.Intn(len(g.tagsSet))]

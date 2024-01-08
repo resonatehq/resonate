@@ -16,24 +16,24 @@ func TestNext(t *testing.T) {
 		expectedErr  error
 	}{
 		{
-			name:         "valid cron (physical clock)",
+			name:         "valid cron",
 			curr:         1704719383520,
 			cronExp:      "* * * * *",
 			expectedNext: 1704719400000,
 			expectedErr:  nil,
 		},
 		{
-			name:         "invalid cron (physical clock)",
+			name:         "invalid cron",
 			curr:         1704719383520,
 			cronExp:      "random",
 			expectedNext: 0,
 			expectedErr:  fmt.Errorf("expected 5 to 6 fields, found 1: [random]"),
 		},
 		{
-			name:         "valid cron (logical clock)",
-			curr:         2,
+			name:         "valid cron (small)",
+			curr:         0,
 			cronExp:      "2 * * * *",
-			expectedNext: 4,
+			expectedNext: 120_000,
 			expectedErr:  nil,
 		},
 	}
