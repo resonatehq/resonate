@@ -123,7 +123,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			i++
 		}
 
-		system.Tick(t, nil)
+		system.Tick(t*50_000, nil)
 
 		if len(errs) > 0 {
 			break
