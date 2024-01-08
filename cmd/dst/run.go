@@ -146,7 +146,8 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			dst := dst.New(&dst.Config{
-				Ticks: ticks,
+				Ticks:              ticks,
+				TimeElapsedPerTick: 50_000, // milliseconds
 				Reqs: func() int {
 					return reqsPerTick.Resolve(r)
 				},
