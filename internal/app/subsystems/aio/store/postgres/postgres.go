@@ -164,7 +164,9 @@ const (
 	FROM
 		schedules
 	WHERE
-		next_run_time <= $1`
+		next_run_time <= $1
+	ORDER BY
+		next_run_time ASC, sort_id ASC`
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
