@@ -98,7 +98,13 @@ func (a *aio) Stop() error {
 	return nil
 }
 
-func (a *aio) Shutdown() {}
+func (a *aio) Shutdown() {
+
+	if subsytem, ok := a.subsystems[t_aio.Store]; ok {
+
+		subsytem.Reset()
+	}
+}
 
 func (a *aio) Errors() <-chan error {
 	return a.errors

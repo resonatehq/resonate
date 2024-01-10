@@ -296,6 +296,7 @@ const (
 type Config struct {
 	Path      string
 	TxTimeout time.Duration
+	Reset     bool
 }
 
 type SqliteStore struct {
@@ -336,6 +337,12 @@ func (s *SqliteStore) Stop() error {
 }
 
 func (s *SqliteStore) Reset() error {
+
+	if !s.config.Reset {
+
+		return nil
+	}
+
 	if _, err := os.Stat(s.config.Path); err != nil {
 		return nil
 	}

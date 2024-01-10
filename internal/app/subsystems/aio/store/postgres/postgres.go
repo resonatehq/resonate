@@ -306,6 +306,7 @@ type Config struct {
 	Password  string
 	Database  string
 	TxTimeout time.Duration
+	Reset     bool
 }
 
 type PostgresStore struct {
@@ -359,6 +360,12 @@ func (s *PostgresStore) Stop() error {
 }
 
 func (s *PostgresStore) Reset() error {
+
+	if !s.config.Reset {
+
+		return nil
+	}
+
 	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
 		return err
 	}
