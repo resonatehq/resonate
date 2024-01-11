@@ -42,7 +42,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	generator := NewGenerator(r, d.config)
 
 	// model
-	model := NewModel()
+	model := NewModel() // todo: pass in config
 
 	// add req/res
 	for _, req := range reqs {
@@ -91,7 +91,19 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.DeleteSubscription:
 			generator.AddRequest(generator.GenerateDeleteSubscription)
 			model.AddResponse(t_api.DeleteSubscription, model.ValidateDeleteSubscription)
+
+		// LOCK
+		case t_api.AcquireLock:
+			generator.AddRequest(generator.GenerateAcquireLock)
+			model.AddResponse(t_api.AcquireLock, model.ValidateAcquireLock)
+		case t_api.BulkHeartbeatLocks:
+			generator.AddRequest(generator.GenerateBulkHeartbeatLocks)
+			model.AddResponse(t_api.BulkHeartbeatLocks, model.ValidateBulkHeartbeatLocks)
+		case t_api.ReleaseLock:
+			generator.AddRequest(generator.GenerateReleaseLock)
+			model.AddResponse(t_api.ReleaseLock, model.ValidateReleaseLock)
 		}
+
 	}
 
 	// errors

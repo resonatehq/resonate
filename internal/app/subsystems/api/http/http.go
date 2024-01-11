@@ -51,6 +51,11 @@ func New(api api.API, config *Config) api.Subsystem {
 	r.GET("/schedules/*id", s.readSchedule)
 	r.DELETE("/schedules/*id", s.deleteSchedule)
 
+	// Distributed Locks API
+	r.POST("/locks/acquire", s.acquireLock)
+	r.POST("/locks/bulk-heartbeat", s.bulkHeartbeatLocks)
+	r.POST("/locks/release", s.releaseLock)
+
 	return &Http{
 		config: config,
 		server: &http.Server{

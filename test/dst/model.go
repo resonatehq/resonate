@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -19,6 +20,7 @@ import (
 type Model struct {
 	promises  Promises
 	schedules Schedules
+	locks     Locks
 	cursors   []*t_api.Request
 	responses map[t_api.Kind]ResponseValidator
 }
@@ -39,9 +41,15 @@ type SubscriptionModel struct {
 	subscription *subscription.Subscription
 }
 
+type LockModel struct {
+	id   string
+	lock *lock.Lock
+}
+
 type Promises map[string]*PromiseModel
 type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
+type Locks map[string]*LockModel
 type ResponseValidator func(*t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
@@ -75,10 +83,21 @@ func (s Subscriptions) Get(id string) *SubscriptionModel {
 	return s[id]
 }
 
+func (l Locks) Get(id string) *LockModel {
+	if _, ok := l[id]; !ok {
+		l[id] = &LockModel{
+			id: id,
+		}
+	}
+
+	return l[id]
+}
+
 func NewModel() *Model {
 	return &Model{
 		promises:  map[string]*PromiseModel{},
 		schedules: map[string]*ScheduleModel{},
+		locks:     map[string]*LockModel{},
 		responses: map[t_api.Kind]ResponseValidator{},
 	}
 }
@@ -543,6 +562,61 @@ func (m *Model) ValidateDeleteSubscription(req *t_api.Request, res *t_api.Respon
 		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSubscription.Status)
 	}
 }
+
+// LOCKS - single client. (modes: single client, multi-client) -- two models implementatiosn
+
+func (m *Model) ValidateAcquireLock(req *t_api.Request, res *t_api.Response) error {
+	lm := m.locks.Get(req.AcquireLock.ResourceId)
+
+	switch res.AcquireLock.Status {
+	case t_api.StatusOK:
+		return nil
+	case t_api.StatusCreated:
+		// if lm.lock != nil && lm.lock.Timeout > req.AcquireLock.Timeout { // todo: enforce this...
+		// 	// heartbeat should be higher timeout
+		// 	return fmt.Errorf("unexpected timeout, lock timeout %d is greater than the request timeout %d", lm.lock.Timeout, req.AcquireLock.Timeout)
+		// }
+		lm.lock = res.AcquireLock.Lock
+		return nil
+	case t_api.StatusLockAlreadyAcquired:
+		// if m.SingleClientMode &&
+		if lm.lock == nil {
+			return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.AcquireLock.Status)
+	}
+}
+
+func (m *Model) ValidateBulkHeartbeatLocks(req *t_api.Request, res *t_api.Response) error {
+	switch res.BulkHeartbeatLocks.Status {
+	case t_api.StatusLockNotFound:
+		return nil
+	case t_api.StatusOK:
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.BulkHeartbeatLocks.Status)
+	}
+}
+
+func (m *Model) ValidateReleaseLock(req *t_api.Request, res *t_api.Response) error {
+	switch res.ReleaseLock.Status {
+	case t_api.StatusNoContent:
+		return nil
+	case t_api.StatusLockNotFound:
+		// todo:
+		// invariant -- ( ... )
+		// distinguish between lock not found and lock already released via timeout.
+		// model can track that it had the lock -- but can't track that it was released via timeout.
+		// tombstone -- i deleted that... single client mode -- set to deleted.
+		return nil
+	default:
+		return fmt.Errorf("unexpected resonse status '%d'", res.ReleaseLock.Status)
+	}
+}
+
+// UTILS
 
 func (m *PromiseModel) idempotencyKeyForCreateMatch(promise *promise.Promise) bool {
 	return m.promise.IdempotencyKeyForCreate != nil && promise.IdempotencyKeyForCreate != nil && *m.promise.IdempotencyKeyForCreate == *promise.IdempotencyKeyForCreate

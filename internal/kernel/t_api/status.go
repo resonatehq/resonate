@@ -17,7 +17,9 @@ const (
 	StatusPromiseAlreadyRejected ResponseStatus = 4031
 	StatusPromiseAlreadyCanceled ResponseStatus = 4032
 	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
+	StatusLockAlreadyAcquired    ResponseStatus = 4034
 	StatusPromiseNotFound        ResponseStatus = 4040
+	StatusLockNotFound           ResponseStatus = 4040
 	StatusSubscriptionNotFound   ResponseStatus = 4041
 	StatusScheduleNotFound       ResponseStatus = 4042
 	StatusPromiseAlreadyExists   ResponseStatus = 4090

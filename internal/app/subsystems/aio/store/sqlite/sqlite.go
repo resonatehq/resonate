@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -26,6 +27,17 @@ import (
 
 const (
 	CREATE_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS locks (
+		resource_id   TEXT UNIQUE,
+		process_id    TEXT,
+		execution_id  TEXT, 
+		timeout       INTEGER
+	); 
+
+	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
+	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id); 
+	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
+
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT UNIQUE,
 		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,6 +105,39 @@ const (
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);`
+
+	LOCK_READ_STATEMENT = `
+	SELECT 
+		resource_id, process_id, execution_id, timeout
+	FROM
+		locks
+	WHERE
+		resource_id = ?`
+
+	LOCK_ACQUIRE_STATEMENT = `
+	INSERT INTO locks
+		(resource_id, process_id, execution_id, timeout)
+	VALUES
+		(?, ?, ?, ?)
+	ON CONFLICT(resource_id)
+	DO UPDATE SET 
+		timeout = excluded.timeout
+	WHERE
+		execution_id = excluded.execution_id`
+
+	LOCK_BULK_HEARTBEAT_STATEMENT = `
+	UPDATE
+		locks
+	SET
+		timeout = ?
+	WHERE
+		process_id = ?`
+
+	LOCK_RELEASE_STATEMENT = `
+	DELETE FROM locks WHERE resource_id = ? AND execution_id = ?`
+
+	LOCK_BULK_RELEASE_STATEMENT = `
+	DELETE FROM locks WHERE timeout <= ?`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -474,6 +519,32 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	}
 	defer notificationDeleteStmt.Close()
 
+	// LOCKS
+
+	lockAcquireStmt, err := tx.Prepare(LOCK_ACQUIRE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer lockAcquireStmt.Close()
+
+	lockBulkHeartbeatStmt, err := tx.Prepare(LOCK_BULK_HEARTBEAT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer lockBulkHeartbeatStmt.Close()
+
+	lockReleaseStmt, err := tx.Prepare(LOCK_RELEASE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer lockReleaseStmt.Close()
+
+	lockBulkReleaseStmt, err := tx.Prepare(LOCK_BULK_RELEASE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer lockBulkReleaseStmt.Close()
+
 	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
@@ -569,6 +640,23 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
 
+			// Lock
+			case t_aio.ReadLock:
+				util.Assert(command.ReadLock != nil, "command must not be nil")
+				results[i][j], err = w.readLock(tx, command.ReadLock)
+			case t_aio.AcquireLock:
+				util.Assert(command.AcquireLock != nil, "command must not be nil")
+				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
+			case t_aio.BulkHeartbeatLocks:
+				util.Assert(command.BulkHeartbeatLocks != nil, "command must not be nil")
+				results[i][j], err = w.bulkHearbeatLocks(tx, lockBulkHeartbeatStmt, command.BulkHeartbeatLocks)
+			case t_aio.ReleaseLock:
+				util.Assert(command.ReleaseLock != nil, "command must not be nil")
+				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
+			case t_aio.BulkReleaseLocks:
+				util.Assert(command.BulkReleaseLocks != nil, "command must not be nil")
+				results[i][j], err = w.bulkReleaseLocks(tx, lockBulkReleaseStmt, command.BulkReleaseLocks)
+
 			default:
 				panic("invalid command")
 			}
@@ -580,6 +668,121 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	}
 
 	return results, nil
+}
+
+// Locks
+
+func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t_aio.Result, error) {
+	// select
+	row := tx.QueryRow(LOCK_READ_STATEMENT, cmd.ResourceId)
+	record := &lock.LockRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.ResourceId,
+		&record.ProcessId,
+		&record.ExecutionId,
+		&record.Timeout,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*lock.LockRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadLock,
+		ReadLock: &t_aio.QueryLocksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
+	// insert
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.Timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.AcquireLock,
+		AcquireLock: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) bulkHearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.BulkHeartbeatLocksCommand) (*t_aio.Result, error) {
+	// update
+	res, err := stmt.Exec(cmd.Timeout, cmd.ProcessId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.BulkHeartbeatLocks,
+		BulkHeartbeatLocks: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.ReleaseLockCommand) (*t_aio.Result, error) {
+	// delete
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReleaseLock,
+		ReleaseLock: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) bulkReleaseLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.BulkReleaseLocksCommand) (*t_aio.Result, error) {
+	// delete
+	res, err := stmt.Exec(cmd.Timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.BulkReleaseLocks,
+		BulkReleaseLocks: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
 }
 
 // Promises

@@ -60,3 +60,22 @@ type CreateScheduleBody struct {
 	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
 }
+
+// LOCKS
+
+type AcquireLockBody struct {
+	ResourceId  string `json:"resourceId" binding:"required"`
+	ProcessId   string `json:"processId" binding:"required"`
+	ExecutionId string `json:"executionId" binding:"required"`
+	Timeout     int64  `json:"timeout" binding:"required"`
+}
+
+type BulkHeartbeatBody struct {
+	ProcessId string `json:"processId" binding:"required"`
+	Timeout   int64  `json:"timeout" binding:"required"`
+}
+
+type ReleaseLockBody struct {
+	ResourceId  string `json:"resourceId" binding:"required"`
+	ExecutionId string `json:"executionId" binding:"required"`
+}

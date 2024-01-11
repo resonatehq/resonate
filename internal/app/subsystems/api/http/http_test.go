@@ -758,6 +758,34 @@ func TestHttpServer(t *testing.T) {
 			},
 			status: 204,
 		},
+
+		// todo: Distributed Locks API
+		{
+			name:   "AcquireLock",
+			path:   "locks/acquire",
+			method: "POST",
+			body: []byte(`{
+				resource_id: "foo", 
+				process_id: "bar", 
+				execution_id: "baz",
+				timeout: 1000
+			}`),
+			req:    &t_api.Request{},
+			res:    &t_api.Response{},
+			status: 201,
+		},
+		{
+			name:   "BulkHeartbeatLocks",
+			req:    &t_api.Request{},
+			res:    &t_api.Response{},
+			status: 200,
+		},
+		{
+			name:   "ReleaseLock",
+			req:    &t_api.Request{},
+			res:    &t_api.Response{},
+			status: 200,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			httpTest.Load(t, tc.req, tc.res)
@@ -801,3 +829,5 @@ func TestHttpServer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// todo: Distributed Locks API

@@ -25,7 +25,33 @@ type Request struct {
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
-	Echo               *EchoRequest
+
+	// Lock
+	AcquireLock        *AcquireLockRequest
+	BulkHeartbeatLocks *BulkHeartbeatLocksRequest
+	ReleaseLock        *ReleaseLockRequest
+
+	// Echo
+	Echo *EchoRequest
+}
+
+// Locks
+
+type AcquireLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ProcessId   string `json:"processId"`
+	ExecutionId string `json:"executionId"`
+	Timeout     int64  `json:"timeout"`
+}
+
+type BulkHeartbeatLocksRequest struct {
+	ProcessId string `json:"processId"`
+	Timeout   int64  `json:"timeout"`
+}
+
+type ReleaseLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
 }
 
 // Promises
@@ -222,6 +248,29 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"Echo(data=%s)",
 			r.Echo.Data,
+		)
+
+	// Locks
+
+	case AcquireLock:
+		return fmt.Sprintf(
+			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, timeout=%d)",
+			r.AcquireLock.ResourceId,
+			r.AcquireLock.ProcessId,
+			r.AcquireLock.ExecutionId,
+			r.AcquireLock.Timeout,
+		)
+	case BulkHeartbeatLocks:
+		return fmt.Sprintf(
+			"BulkHeartbeatLocks(processId=%s)",
+			r.BulkHeartbeatLocks.ProcessId,
+		)
+
+	case ReleaseLock:
+		return fmt.Sprintf(
+			"ReleaseLock(resourceId=%s, executionId=%s)",
+			r.ReleaseLock.ResourceId,
+			r.ReleaseLock.ExecutionId,
 		)
 	default:
 		return "Request"

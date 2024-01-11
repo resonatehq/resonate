@@ -1,0 +1,97 @@
+openapi: 3.0.0
+info:
+  title: Distributed Lock API
+  description: Manage Distributed Locks
+  version: 1.0.0
+paths:
+  /locks/acquire:
+    post:
+      summary: Acquire lock
+      description: Acquire a distributed lock
+      operationId: acquireLock
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Lock"
+        required: true
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lock"
+
+  /locks/bulk-heartbeat:
+    post:
+      summary: Bulk heartbeat
+      description: Bulk update heartbeat for locks
+      operationId: bulkHeartbeat
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkHeartbeatRequest"
+        required: true
+      responses:
+        "200":
+          description: successful operation
+
+  /locks/release:
+    post:
+      summary: Release lock
+      description: Release a distributed lock
+      operationId: releaseLock
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReleaseLockRequest"
+        required: true
+      responses:
+        "200":
+          description: successful operation
+
+components:
+  schemas:
+    Lock:
+      type: object
+      properties:
+        resource_id:
+          type: string
+        process_id:
+          type: string
+        execution_id:
+          type: string
+        timeout:
+          type: integer
+          format: int64
+      required:
+        - resource_id
+        - process_id
+        - execution_id
+        - timeout
+
+    BulkHeartbeatRequest:
+      type: object
+      properties:
+        process_id:
+          type: string
+        timeout:
+          type: integer
+          format: int64
+      required:
+        - process_id
+        - timeout
+
+    ReleaseLockRequest:
+      type: object
+      properties:
+        resource_id:
+          type: string
+        execution_id:
+          type: string
+      required:
+        - resource_id
+        - execution_id

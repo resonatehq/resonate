@@ -3,6 +3,7 @@ package t_api
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -31,7 +32,28 @@ type Response struct {
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
 
+	// Locks
+
+	AcquireLock        *AcquireLockResponse
+	BulkHeartbeatLocks *BulkHeartbeatLocksResponse
+	ReleaseLock        *ReleaseLockResponse
+
 	Echo *EchoResponse
+}
+
+// Locks
+
+type AcquireLockResponse struct {
+	Status ResponseStatus `json:"status"`
+	Lock   *lock.Lock     `json:"lock,omitempty"`
+}
+
+type BulkHeartbeatLocksResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+type ReleaseLockResponse struct {
+	Status ResponseStatus `json:"status"`
 }
 
 // Promises
@@ -180,6 +202,7 @@ func (r *Response) String() string {
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
 		)
+	// DONT FORGET THIS
 	case Echo:
 		return fmt.Sprintf(
 			"Echo(data=%s)",

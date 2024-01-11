@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -39,6 +40,13 @@ const (
 	TimeoutPromises
 	TimeoutDeleteSubscriptions
 	TimeoutCreateNotifications
+
+	// LOCKS
+	ReadLock
+	AcquireLock
+	BulkHeartbeatLocks
+	ReleaseLock
+	BulkReleaseLocks
 )
 
 func (k StoreKind) String() string {
@@ -93,6 +101,18 @@ func (k StoreKind) String() string {
 		return "TimeoutDeleteSubscriptions"
 	case TimeoutCreateNotifications:
 		return "TimeoutCreateNotifications"
+
+	// LOCKS
+	case ReadLock:
+		return "ReadLock"
+	case AcquireLock:
+		return "AcquireLock"
+	case BulkHeartbeatLocks:
+		return "BulkHeartbeatLocks"
+	case ReleaseLock:
+		return "ReleaseLock"
+	case BulkReleaseLocks:
+		return "BulkReleaseLocks"
 	default:
 		panic("invalid store kind")
 	}
@@ -145,6 +165,13 @@ type Command struct {
 	TimeoutPromises            *TimeoutPromisesCommand
 	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
+
+	// LOCKS
+	ReadLock           *ReadLockCommand
+	AcquireLock        *AcquireLockCommand
+	BulkHeartbeatLocks *BulkHeartbeatLocksCommand
+	ReleaseLock        *ReleaseLockCommand
+	BulkReleaseLocks   *BulkReleaseLocksCommand
 }
 
 func (c *Command) String() string {
@@ -178,6 +205,13 @@ type Result struct {
 	TimeoutPromises            *AlterPromisesResult
 	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
+
+	// LOCKS
+	ReadLock           *QueryLocksResult
+	AcquireLock        *AlterLocksResult
+	BulkHeartbeatLocks *AlterLocksResult
+	ReleaseLock        *AlterLocksResult
+	BulkReleaseLocks   *AlterLocksResult
 }
 
 func (r *Result) String() string {
@@ -393,5 +427,43 @@ type QueryNotificationsResult struct {
 }
 
 type AlterNotificationsResult struct {
+	RowsAffected int64
+}
+
+// Lock commands
+
+type ReadLockCommand struct {
+	ResourceId string
+}
+
+type AcquireLockCommand struct {
+	ResourceId  string
+	ProcessId   string
+	ExecutionId string
+	Timeout     int64
+}
+
+type BulkHeartbeatLocksCommand struct {
+	ProcessId string
+	Timeout   int64
+}
+
+type ReleaseLockCommand struct {
+	ResourceId  string
+	ExecutionId string
+}
+
+type BulkReleaseLocksCommand struct {
+	Timeout int64
+}
+
+// Lock results
+
+type QueryLocksResult struct {
+	RowsReturned int64
+	Records      []*lock.LockRecord
+}
+
+type AlterLocksResult struct {
 	RowsAffected int64
 }

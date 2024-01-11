@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package lock;
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+
+service Locks {
+    rpc AcquireLock (AcquireLockRequest) returns (AcquireLockResponse) {}
+    rpc BulkHeartbeat (BulkHeartbeatRequest) returns (BulkHeartbeatResponse) {}
+    rpc ReleaseLock (ReleaseLockRequest) returns (ReleaseLockResponse) {}  
+}
+  
+message Lock {
+    string resource_id = 1;
+    string process_id = 2; 
+    string execution_id = 3;
+    int64 timeout = 4;  
+}
+
+message AcquireLockRequest {
+    Lock lock = 1;
+}
+  
+message AcquireLockResponse {
+    int32 status = 1;
+    Lock lock = 2;
+}
+  
+message BulkHeartbeatRequest {
+    string process_id = 1;
+    int64 timeout = 2;
+}
+  
+message BulkHeartbeatResponse { 
+    int32 status = 1;
+}
+  
+message ReleaseLockRequest {
+    string resource_id = 1;
+    string execution_id = 2;   
+}
+  
+message ReleaseLockResponse {
+    int32 status = 1;
+}
+  
