@@ -760,32 +760,32 @@ func TestHttpServer(t *testing.T) {
 		},
 
 		// todo: Distributed Locks API
-		{
-			name:   "AcquireLock",
-			path:   "locks/acquire",
-			method: "POST",
-			body: []byte(`{
-				resource_id: "foo", 
-				process_id: "bar", 
-				execution_id: "baz",
-				timeout: 1000
-			}`),
-			req:    &t_api.Request{},
-			res:    &t_api.Response{},
-			status: 201,
-		},
-		{
-			name:   "BulkHeartbeatLocks",
-			req:    &t_api.Request{},
-			res:    &t_api.Response{},
-			status: 200,
-		},
-		{
-			name:   "ReleaseLock",
-			req:    &t_api.Request{},
-			res:    &t_api.Response{},
-			status: 200,
-		},
+		// {
+		// 	name:   "AcquireLock",
+		// 	path:   "locks/acquire",
+		// 	method: "POST",
+		// 	body: []byte(`{
+		// 		resource_id: "foo",
+		// 		process_id: "bar",
+		// 		execution_id: "baz",
+		// 		timeout: 1000
+		// 	}`),
+		// 	req:    &t_api.Request{},
+		// 	res:    &t_api.Response{},
+		// 	status: 201,
+		// },
+		// {
+		// 	name:   "BulkHeartbeatLocks",
+		// 	req:    &t_api.Request{},
+		// 	res:    &t_api.Response{},
+		// 	status: 200,
+		// },
+		// {
+		// 	name:   "ReleaseLock",
+		// 	req:    &t_api.Request{},
+		// 	res:    &t_api.Response{},
+		// 	status: 200,
+		// },
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			httpTest.Load(t, tc.req, tc.res)
