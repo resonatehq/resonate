@@ -28,11 +28,11 @@ import (
 const (
 	// might need comma after fencing_token.
 	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE locks (
-		resource_id   TEXT UNIQUE,
+	CREATE TABLE IF NOT EXISTS locks (
+		resource_id   TEXT,
 		process_id    TEXT,
 		execution_id  TEXT,  
-		timeout       BIGINT
+		timeout       BIGINT, 
 		PRIMARY KEY(resource_id)
 	);
 	  
