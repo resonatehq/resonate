@@ -123,7 +123,7 @@ const (
 	FROM
 		locks
 	WHERE
-		resource_id = ?`
+		resource_id = $1`
 
 	LOCK_ACQUIRE_STATEMENT = `
   	INSERT INTO locks 
