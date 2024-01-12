@@ -121,9 +121,9 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 			system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-			system.AddOnRequest(t_api.BulkHeartbeatLocks, coroutines.BulkHeartbeatLocks)
+			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-			system.AddOnTick(2, coroutines.BulkReleaseLocks)
+			system.AddOnTick(2, coroutines.TimeoutLocks)
 			system.AddOnTick(2, coroutines.SchedulePromises)
 			system.AddOnTick(2, coroutines.TimeoutPromises)
 			system.AddOnTick(10, coroutines.NotifySubscriptions)
@@ -150,7 +150,7 @@ func RunDSTCmd() *cobra.Command {
 
 				// LOCK
 				t_api.AcquireLock,
-				t_api.BulkHeartbeatLocks,
+				t_api.HeartbeatLocks,
 				t_api.ReleaseLock,
 			}
 

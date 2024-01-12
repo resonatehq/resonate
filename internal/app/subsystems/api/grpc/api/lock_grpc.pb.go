@@ -23,7 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LocksClient interface {
 	AcquireLock(ctx context.Context, in *AcquireLockRequest, opts ...grpc.CallOption) (*AcquireLockResponse, error)
-	BulkHeartbeat(ctx context.Context, in *BulkHeartbeatRequest, opts ...grpc.CallOption) (*BulkHeartbeatResponse, error)
+	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 	ReleaseLock(ctx context.Context, in *ReleaseLockRequest, opts ...grpc.CallOption) (*ReleaseLockResponse, error)
 }
 
@@ -44,9 +44,9 @@ func (c *locksClient) AcquireLock(ctx context.Context, in *AcquireLockRequest, o
 	return out, nil
 }
 
-func (c *locksClient) BulkHeartbeat(ctx context.Context, in *BulkHeartbeatRequest, opts ...grpc.CallOption) (*BulkHeartbeatResponse, error) {
-	out := new(BulkHeartbeatResponse)
-	err := c.cc.Invoke(ctx, "/lock.Locks/BulkHeartbeat", in, out, opts...)
+func (c *locksClient) Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error) {
+	out := new(HeartbeatResponse)
+	err := c.cc.Invoke(ctx, "/lock.Locks/Heartbeat", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (c *locksClient) ReleaseLock(ctx context.Context, in *ReleaseLockRequest, o
 // for forward compatibility
 type LocksServer interface {
 	AcquireLock(context.Context, *AcquireLockRequest) (*AcquireLockResponse, error)
-	BulkHeartbeat(context.Context, *BulkHeartbeatRequest) (*BulkHeartbeatResponse, error)
+	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	ReleaseLock(context.Context, *ReleaseLockRequest) (*ReleaseLockResponse, error)
 	mustEmbedUnimplementedLocksServer()
 }
@@ -79,8 +79,8 @@ type UnimplementedLocksServer struct {
 func (UnimplementedLocksServer) AcquireLock(context.Context, *AcquireLockRequest) (*AcquireLockResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcquireLock not implemented")
 }
-func (UnimplementedLocksServer) BulkHeartbeat(context.Context, *BulkHeartbeatRequest) (*BulkHeartbeatResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BulkHeartbeat not implemented")
+func (UnimplementedLocksServer) Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Heartbeat not implemented")
 }
 func (UnimplementedLocksServer) ReleaseLock(context.Context, *ReleaseLockRequest) (*ReleaseLockResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseLock not implemented")
@@ -116,20 +116,20 @@ func _Locks_AcquireLock_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Locks_BulkHeartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BulkHeartbeatRequest)
+func _Locks_Heartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(LocksServer).BulkHeartbeat(ctx, in)
+		return srv.(LocksServer).Heartbeat(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/lock.Locks/BulkHeartbeat",
+		FullMethod: "/lock.Locks/Heartbeat",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LocksServer).BulkHeartbeat(ctx, req.(*BulkHeartbeatRequest))
+		return srv.(LocksServer).Heartbeat(ctx, req.(*HeartbeatRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -164,8 +164,8 @@ var Locks_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Locks_AcquireLock_Handler,
 		},
 		{
-			MethodName: "BulkHeartbeat",
-			Handler:    _Locks_BulkHeartbeat_Handler,
+			MethodName: "Heartbeat",
+			Handler:    _Locks_Heartbeat_Handler,
 		},
 		{
 			MethodName: "ReleaseLock",

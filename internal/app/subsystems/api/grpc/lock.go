@@ -34,22 +34,22 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 	}, nil
 }
 
-func (s *server) BulkHeartbeatLock(ctx context.Context, req *grpcApi.BulkHeartbeatRequest) (*grpcApi.BulkHeartbeatResponse, error) {
+func (s *server) HeartbeatLock(ctx context.Context, req *grpcApi.HeartbeatRequest) (*grpcApi.HeartbeatResponse, error) {
 	header := &service.Header{}
 
-	body := &service.BulkHeartbeatBody{
+	body := &service.HeartbeatBody{
 		ProcessId: req.ProcessId,
 		Timeout:   req.Timeout,
 	}
 
-	_, err := s.service.BulkHeartbeat(header, body)
+	_, err := s.service.Heartbeat(header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be an api error")
 		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
-	return &grpcApi.BulkHeartbeatResponse{}, nil
+	return &grpcApi.HeartbeatResponse{}, nil
 }
 
 func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockRequest) (*grpcApi.ReleaseLockResponse, error) {

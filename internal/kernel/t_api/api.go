@@ -24,7 +24,7 @@ const (
 
 	// Lock
 	AcquireLock
-	BulkHeartbeatLocks
+	HeartbeatLocks
 	ReleaseLock
 
 	// Echo
@@ -62,8 +62,8 @@ func (k Kind) String() string {
 	// Lock
 	case AcquireLock:
 		return "acquire-lock"
-	case BulkHeartbeatLocks:
-		return "bulk-heartbeat-locks"
+	case HeartbeatLocks:
+		return "heartbeat-locks"
 	case ReleaseLock:
 		return "release-lock"
 	default:

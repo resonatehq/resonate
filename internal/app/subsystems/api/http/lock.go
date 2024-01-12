@@ -37,22 +37,22 @@ func (s *server) acquireLock(c *gin.Context) {
 	c.JSON(resp.Status.HTTP(), resp.Lock)
 }
 
-// BULK HEARTBEAT
+// HEARTBEAT
 
-func (s *server) bulkHeartbeatLocks(c *gin.Context) {
+func (s *server) heartbeatLocks(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	var body *service.BulkHeartbeatBody
+	var body *service.HeartbeatBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
 		return
 	}
 
-	resp, err := s.service.BulkHeartbeat(&header, body)
+	resp, err := s.service.Heartbeat(&header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

@@ -53,7 +53,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Distributed Locks API
 	r.POST("/locks/acquire", s.acquireLock)
-	r.POST("/locks/bulk-heartbeat", s.bulkHeartbeatLocks)
+	r.POST("/locks/heartbeat", s.heartbeatLocks)
 	r.POST("/locks/release", s.releaseLock)
 
 	return &Http{

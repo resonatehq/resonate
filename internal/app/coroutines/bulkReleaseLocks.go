@@ -11,21 +11,21 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func BulkReleaseLocks(t int64, config *system.Config) *Coroutine {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:bulkReleaseLock", t))
-	metadata.Tags.Set("name", "bulk-release-locks")
+func TimeoutLocks(t int64, config *system.Config) *Coroutine {
+	metadata := metadata.New(fmt.Sprintf("tick:%d:timeoutLock", t))
+	metadata.Tags.Set("name", "Timeout-locks")
 
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
 
-		// Try to bulk release all expired locks.
+		// Try to timeout all expired locks.
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
-							Kind: t_aio.BulkReleaseLocks,
-							BulkReleaseLocks: &t_aio.BulkReleaseLocksCommand{
+							Kind: t_aio.TimeoutLocks,
+							TimeoutLocks: &t_aio.TimeoutLocksCommand{
 								Timeout: c.Time(),
 							},
 						},
@@ -34,7 +34,7 @@ func BulkReleaseLocks(t int64, config *system.Config) *Coroutine {
 			},
 		})
 		if err != nil {
-			slog.Error("failed to bulk release lcoks", "err", err)
+			slog.Error("failed to timeout expired locks", "err", err)
 			return
 		}
 

@@ -27,9 +27,9 @@ type Request struct {
 	DeleteSubscription *DeleteSubscriptionRequest
 
 	// Lock
-	AcquireLock        *AcquireLockRequest
-	BulkHeartbeatLocks *BulkHeartbeatLocksRequest
-	ReleaseLock        *ReleaseLockRequest
+	AcquireLock    *AcquireLockRequest
+	HeartbeatLocks *HeartbeatLocksRequest
+	ReleaseLock    *ReleaseLockRequest
 
 	// Echo
 	Echo *EchoRequest
@@ -44,7 +44,7 @@ type AcquireLockRequest struct {
 	Timeout     int64  `json:"timeout"`
 }
 
-type BulkHeartbeatLocksRequest struct {
+type HeartbeatLocksRequest struct {
 	ProcessId string `json:"processId"`
 	Timeout   int64  `json:"timeout"`
 }
@@ -260,10 +260,10 @@ func (r *Request) String() string {
 			r.AcquireLock.ExecutionId,
 			r.AcquireLock.Timeout,
 		)
-	case BulkHeartbeatLocks:
+	case HeartbeatLocks:
 		return fmt.Sprintf(
-			"BulkHeartbeatLocks(processId=%s)",
-			r.BulkHeartbeatLocks.ProcessId,
+			"HeartbeatLocks(processId=%s)",
+			r.HeartbeatLocks.ProcessId,
 		)
 
 	case ReleaseLock:

@@ -46,10 +46,10 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 	return cqe.Completion.AcquireLock, nil
 }
 
-// BULK HEARTBEAT
+// HEARTBEAT
 
-func (s *Service) BulkHeartbeat(header *Header, body *BulkHeartbeatBody) (*t_api.BulkHeartbeatLocksResponse, error) {
-	BulkHeartbeatLocks := &t_api.BulkHeartbeatLocksRequest{
+func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, error) {
+	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
 		ProcessId: body.ProcessId,
 		Timeout:   body.Timeout,
 	}
@@ -57,10 +57,10 @@ func (s *Service) BulkHeartbeat(header *Header, body *BulkHeartbeatBody) (*t_api
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "bulk-heartbeat"),
+		Metadata: s.metadata(header.RequestId, "heartbeat-locks"),
 		Submission: &t_api.Request{
-			Kind:               t_api.BulkHeartbeatLocks,
-			BulkHeartbeatLocks: BulkHeartbeatLocks,
+			Kind:           t_api.HeartbeatLocks,
+			HeartbeatLocks: HeartbeatLocks,
 		},
 		Callback: s.sendOrPanic(cq),
 	})
@@ -72,13 +72,13 @@ func (s *Service) BulkHeartbeat(header *Header, body *BulkHeartbeatBody) (*t_api
 		return nil, resErr
 	}
 
-	util.Assert(cqe.Completion.BulkHeartbeatLocks != nil, "response must not be nil")
+	util.Assert(cqe.Completion.HeartbeatLocks != nil, "response must not be nil")
 
-	if api.IsRequestError(cqe.Completion.BulkHeartbeatLocks.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.BulkHeartbeatLocks.Status)
+	if api.IsRequestError(cqe.Completion.HeartbeatLocks.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.HeartbeatLocks.Status)
 	}
 
-	return cqe.Completion.BulkHeartbeatLocks, nil
+	return cqe.Completion.HeartbeatLocks, nil
 }
 
 // RELEASE

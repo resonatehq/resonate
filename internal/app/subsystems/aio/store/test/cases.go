@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -96,6 +97,306 @@ func (c *testCase) Panic() bool {
 }
 
 var TestCases = []*testCase{
+
+	// LOCKS
+	{
+		name: "AcquireLock: duplicate requests",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+	{
+		name: "AcquireLock: reacquire lock with same execution id, but different process id",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "barUpdated",
+					ExecutionId: "baz",
+					Timeout:     1736571700000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+	{
+		name: "AcquireLock: fail to acquire lock",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz1",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz2",
+					Timeout:     1736571600000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "HeartbeatLock",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo-1",
+					ProcessId:   "a",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo-2",
+					ProcessId:   "a",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo-3",
+					ProcessId:   "b",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatLocks,
+				HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
+					ProcessId: "a",
+					Timeout:   1736572500000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatLocks,
+				HeartbeatLocks: &t_aio.AlterLocksResult{
+					RowsAffected: 2,
+				},
+			},
+		},
+	},
+	{
+		name: "ReleaseLock: success",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.ReadLock,
+				ReadLock: &t_aio.ReadLockCommand{
+					ResourceId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.ReleaseLockCommand{
+					ResourceId:  "foo",
+					ExecutionId: "baz",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadLock,
+				ReadLock: &t_aio.QueryLocksResult{
+					RowsReturned: 1,
+					Records: []*lock.LockRecord{{
+						ResourceId:  "foo",
+						ProcessId:   "bar",
+						ExecutionId: "baz",
+						Timeout:     1736571600000,
+					}},
+				},
+			},
+			{
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+	{
+		name: "ReleaseLock: lock exists, but not owned by execution id or does not exist at all (no-op)",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.ReleaseLockCommand{
+					ResourceId:  "foo",
+					ExecutionId: "bazOther",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.AlterLocksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "TimeoutLocks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.TimeoutLocks,
+				TimeoutLocks: &t_aio.TimeoutLocksCommand{
+					Timeout: 1736571700000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.TimeoutLocks,
+				TimeoutLocks: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
 
 	// PROMISES
 

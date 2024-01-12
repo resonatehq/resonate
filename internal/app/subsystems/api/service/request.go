@@ -70,7 +70,7 @@ type AcquireLockBody struct {
 	Timeout     int64  `json:"timeout" binding:"required"`
 }
 
-type BulkHeartbeatBody struct {
+type HeartbeatBody struct {
 	ProcessId string `json:"processId" binding:"required"`
 	Timeout   int64  `json:"timeout" binding:"required"`
 }

@@ -27,7 +27,7 @@ func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 								ResourceId:  req.AcquireLock.ResourceId,
 								ProcessId:   req.AcquireLock.ProcessId,
 								ExecutionId: req.AcquireLock.ExecutionId,
-								Timeout:     req.AcquireLock.Timeout, // todo: timeout larger... ???????? -- clean query ?? enforce there ?
+								Timeout:     req.AcquireLock.Timeout,
 							},
 						},
 					},

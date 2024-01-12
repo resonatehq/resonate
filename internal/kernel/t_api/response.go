@@ -34,9 +34,9 @@ type Response struct {
 
 	// Locks
 
-	AcquireLock        *AcquireLockResponse
-	BulkHeartbeatLocks *BulkHeartbeatLocksResponse
-	ReleaseLock        *ReleaseLockResponse
+	AcquireLock    *AcquireLockResponse
+	HeartbeatLocks *HeartbeatLocksResponse
+	ReleaseLock    *ReleaseLockResponse
 
 	Echo *EchoResponse
 }
@@ -48,7 +48,7 @@ type AcquireLockResponse struct {
 	Lock   *lock.Lock     `json:"lock,omitempty"`
 }
 
-type BulkHeartbeatLocksResponse struct {
+type HeartbeatLocksResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 

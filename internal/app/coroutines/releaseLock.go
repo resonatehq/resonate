@@ -40,8 +40,8 @@ func ReleaseLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 		result := completion.Store.Results[0].ReleaseLock
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-		// ReleaseLock only competes with the bulk release lock coroutine when the client
-		// tries to unlock a lock that expired. In this case, the bulk release lock coroutine
+		// ReleaseLock only competes with the timeout release lock coroutine when the client
+		// tries to unlock a lock that expired. In this case, the timeout release lock coroutine
 		// Delete operations are already idempotent.
 		// If rows affected is 0, then lock was already released or was never acquired by that executionId.
 		if result.RowsAffected == 0 {

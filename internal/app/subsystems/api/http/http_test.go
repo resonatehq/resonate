@@ -759,7 +759,7 @@ func TestHttpServer(t *testing.T) {
 			status: 204,
 		},
 
-		// todo: Distributed Locks API
+		// Distributed Locks API
 		// {
 		// 	name:   "AcquireLock",
 		// 	path:   "locks/acquire",
@@ -775,7 +775,7 @@ func TestHttpServer(t *testing.T) {
 		// 	status: 201,
 		// },
 		// {
-		// 	name:   "BulkHeartbeatLocks",
+		// 	name:   "HeartbeatLocks",
 		// 	req:    &t_api.Request{},
 		// 	res:    &t_api.Response{},
 		// 	status: 200,

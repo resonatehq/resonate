@@ -67,6 +67,10 @@ func (t *grpcTest) teardown() error {
 	return t.subsystem.Stop()
 }
 
+// LOCK
+
+// todo: test here
+
 // PROMISE
 
 func TestReadPromise(t *testing.T) {

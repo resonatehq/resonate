@@ -6,7 +6,7 @@ option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/
 
 service Locks {
     rpc AcquireLock (AcquireLockRequest) returns (AcquireLockResponse) {}
-    rpc BulkHeartbeat (BulkHeartbeatRequest) returns (BulkHeartbeatResponse) {}
+    rpc Heartbeat (HeartbeatRequest) returns (HeartbeatResponse) {}
     rpc ReleaseLock (ReleaseLockRequest) returns (ReleaseLockResponse) {}  
 }
   
@@ -26,12 +26,12 @@ message AcquireLockResponse {
     Lock lock = 2;
 }
   
-message BulkHeartbeatRequest {
+message HeartbeatRequest {
     string process_id = 1;
     int64 timeout = 2;
 }
   
-message BulkHeartbeatResponse { 
+message HeartbeatResponse { 
     int32 status = 1;
 }
   

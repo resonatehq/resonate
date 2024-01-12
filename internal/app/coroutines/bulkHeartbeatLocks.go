@@ -10,7 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func BulkHeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
+func HeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
 
 		// Try to update all locks that belong to this process.
@@ -20,11 +20,10 @@ func BulkHeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res Cal
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
-							Kind: t_aio.BulkHeartbeatLocks,
-							BulkHeartbeatLocks: &t_aio.BulkHeartbeatLocksCommand{
-								ProcessId: req.BulkHeartbeatLocks.ProcessId,
-								// todo: risk of lock expiring unexpectedly.
-								Timeout: req.BulkHeartbeatLocks.Timeout,
+							Kind: t_aio.HeartbeatLocks,
+							HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
+								ProcessId: req.HeartbeatLocks.ProcessId,
+								Timeout:   req.HeartbeatLocks.Timeout,
 							},
 						},
 					},
@@ -38,14 +37,14 @@ func BulkHeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res Cal
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
-		result := completion.Store.Results[0].BulkHeartbeatLocks
+		result := completion.Store.Results[0].HeartbeatLocks
 
 		// If rows affected is 0, the the process does not own any locks.
 		if result.RowsAffected == 0 {
 			res(&t_api.Response{
-				Kind: t_api.BulkHeartbeatLocks,
-				BulkHeartbeatLocks: &t_api.BulkHeartbeatLocksResponse{
-					Status: t_api.StatusLockNotFound, // todo: correct behavior.
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
+					Status: t_api.StatusProcessIdHasNoLocks,
 				},
 			}, nil)
 			return
@@ -53,8 +52,8 @@ func BulkHeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res Cal
 
 		// If rows affected is greater than 0, then the lock's leases were renewed for the processId.
 		res(&t_api.Response{
-			Kind: t_api.BulkHeartbeatLocks,
-			BulkHeartbeatLocks: &t_api.BulkHeartbeatLocksResponse{
+			Kind: t_api.HeartbeatLocks,
+			HeartbeatLocks: &t_api.HeartbeatLocksResponse{
 				Status: t_api.StatusOK,
 			},
 		}, nil)

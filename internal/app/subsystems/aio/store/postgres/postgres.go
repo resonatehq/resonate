@@ -132,10 +132,11 @@ const (
 		($1, $2, $3, $4)
   	ON CONFLICT(resource_id)
 	DO UPDATE SET 
+	  process_id = EXCLUDED.process_id,
 	  timeout = EXCLUDED.timeout
   	WHERE locks.execution_id = EXCLUDED.execution_id`
 
-	LOCK_BULK_HEARTBEAT_STATEMENT = `
+	LOCK_HEARTBEAT_STATEMENT = `
   	UPDATE 
 		locks 
   	SET 
@@ -146,7 +147,7 @@ const (
 	LOCK_RELEASE_STATEMENT = `
 	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
 
-	LOCK_BULK_RELEASE_STATEMENT = `
+	LOCK_TIMEOUT_STATEMENT = `
 	DELETE FROM locks
 	WHERE timeout <= $1`
 
@@ -565,11 +566,11 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 	defer lockAcquireStmt.Close()
 
-	lockBulkHeartbeatStmt, err := tx.Prepare(LOCK_BULK_HEARTBEAT_STATEMENT)
+	lockHeartbeatStmt, err := tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
 	if err != nil {
 		return nil, err
 	}
-	defer lockBulkHeartbeatStmt.Close()
+	defer lockHeartbeatStmt.Close()
 
 	lockReleaseStmt, err := tx.Prepare(LOCK_RELEASE_STATEMENT)
 	if err != nil {
@@ -577,11 +578,11 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 	defer lockReleaseStmt.Close()
 
-	lockBulkReleaseStmt, err := tx.Prepare(LOCK_BULK_RELEASE_STATEMENT)
+	lockTimeoutStmt, err := tx.Prepare(LOCK_TIMEOUT_STATEMENT)
 	if err != nil {
 		return nil, err
 	}
-	defer lockBulkReleaseStmt.Close()
+	defer lockTimeoutStmt.Close()
 
 	results := make([][]*t_aio.Result, len(transactions))
 
@@ -685,15 +686,15 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			case t_aio.AcquireLock:
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
 				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
-			case t_aio.BulkHeartbeatLocks:
-				util.Assert(command.BulkHeartbeatLocks != nil, "command must not be nil")
-				results[i][j], err = w.bulkHearbeatLocks(tx, lockBulkHeartbeatStmt, command.BulkHeartbeatLocks)
+			case t_aio.HeartbeatLocks:
+				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
+				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.ReleaseLock:
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
 				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
-			case t_aio.BulkReleaseLocks:
-				util.Assert(command.BulkReleaseLocks != nil, "command must not be nil")
-				results[i][j], err = w.bulkReleaseLocks(tx, lockBulkReleaseStmt, command.BulkReleaseLocks)
+			case t_aio.TimeoutLocks:
+				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
+				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
 			default:
 				panic("invalid command")
@@ -763,7 +764,7 @@ func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}, nil
 }
 
-func (w *PostgresStoreWorker) bulkHearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.BulkHeartbeatLocksCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
 	// update
 	res, err := stmt.Exec(cmd.Timeout, cmd.ProcessId)
 	if err != nil {
@@ -776,8 +777,8 @@ func (w *PostgresStoreWorker) bulkHearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd 
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.BulkHeartbeatLocks,
-		BulkHeartbeatLocks: &t_aio.AlterLocksResult{
+		Kind: t_aio.HeartbeatLocks,
+		HeartbeatLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -803,7 +804,7 @@ func (w *PostgresStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}, nil
 }
 
-func (w *PostgresStoreWorker) bulkReleaseLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.BulkReleaseLocksCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutLocksCommand) (*t_aio.Result, error) {
 	// delete
 	res, err := stmt.Exec(cmd.Timeout)
 	if err != nil {
@@ -816,8 +817,8 @@ func (w *PostgresStoreWorker) bulkReleaseLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.BulkReleaseLocks,
-		BulkReleaseLocks: &t_aio.AlterLocksResult{
+		Kind: t_aio.TimeoutLocks,
+		TimeoutLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

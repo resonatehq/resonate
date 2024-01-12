@@ -44,9 +44,9 @@ const (
 	// LOCKS
 	ReadLock
 	AcquireLock
-	BulkHeartbeatLocks
+	HeartbeatLocks
 	ReleaseLock
-	BulkReleaseLocks
+	TimeoutLocks
 )
 
 func (k StoreKind) String() string {
@@ -107,12 +107,12 @@ func (k StoreKind) String() string {
 		return "ReadLock"
 	case AcquireLock:
 		return "AcquireLock"
-	case BulkHeartbeatLocks:
-		return "BulkHeartbeatLocks"
+	case HeartbeatLocks:
+		return "HeartbeatLocks"
 	case ReleaseLock:
 		return "ReleaseLock"
-	case BulkReleaseLocks:
-		return "BulkReleaseLocks"
+	case TimeoutLocks:
+		return "TimeoutLocks"
 	default:
 		panic("invalid store kind")
 	}
@@ -167,11 +167,11 @@ type Command struct {
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
 
 	// LOCKS
-	ReadLock           *ReadLockCommand
-	AcquireLock        *AcquireLockCommand
-	BulkHeartbeatLocks *BulkHeartbeatLocksCommand
-	ReleaseLock        *ReleaseLockCommand
-	BulkReleaseLocks   *BulkReleaseLocksCommand
+	ReadLock       *ReadLockCommand
+	AcquireLock    *AcquireLockCommand
+	HeartbeatLocks *HeartbeatLocksCommand
+	ReleaseLock    *ReleaseLockCommand
+	TimeoutLocks   *TimeoutLocksCommand
 }
 
 func (c *Command) String() string {
@@ -207,11 +207,11 @@ type Result struct {
 	TimeoutCreateNotifications *AlterNotificationsResult
 
 	// LOCKS
-	ReadLock           *QueryLocksResult
-	AcquireLock        *AlterLocksResult
-	BulkHeartbeatLocks *AlterLocksResult
-	ReleaseLock        *AlterLocksResult
-	BulkReleaseLocks   *AlterLocksResult
+	ReadLock       *QueryLocksResult
+	AcquireLock    *AlterLocksResult
+	HeartbeatLocks *AlterLocksResult
+	ReleaseLock    *AlterLocksResult
+	TimeoutLocks   *AlterLocksResult
 }
 
 func (r *Result) String() string {
@@ -443,7 +443,7 @@ type AcquireLockCommand struct {
 	Timeout     int64
 }
 
-type BulkHeartbeatLocksCommand struct {
+type HeartbeatLocksCommand struct {
 	ProcessId string
 	Timeout   int64
 }
@@ -453,7 +453,7 @@ type ReleaseLockCommand struct {
 	ExecutionId string
 }
 
-type BulkReleaseLocksCommand struct {
+type TimeoutLocksCommand struct {
 	Timeout int64
 }
 

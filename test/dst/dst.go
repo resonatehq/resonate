@@ -96,9 +96,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.AcquireLock:
 			generator.AddRequest(generator.GenerateAcquireLock)
 			model.AddResponse(t_api.AcquireLock, model.ValidateAcquireLock)
-		case t_api.BulkHeartbeatLocks:
-			generator.AddRequest(generator.GenerateBulkHeartbeatLocks)
-			model.AddResponse(t_api.BulkHeartbeatLocks, model.ValidateBulkHeartbeatLocks)
+		case t_api.HeartbeatLocks:
+			generator.AddRequest(generator.GenerateHeartbeatLocks)
+			model.AddResponse(t_api.HeartbeatLocks, model.ValidateHeartbeatLocks)
 		case t_api.ReleaseLock:
 			generator.AddRequest(generator.GenerateReleaseLock)
 			model.AddResponse(t_api.ReleaseLock, model.ValidateReleaseLock)
@@ -124,7 +124,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					modelErr := model.Step(req, res, err)
+					modelErr := model.Step(reqTime, req, res, err) // reqTime or t ? ?
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}

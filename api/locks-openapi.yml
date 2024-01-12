@@ -23,16 +23,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/Lock"
 
-  /locks/bulk-heartbeat:
+  /locks/heartbeat:
     post:
-      summary: Bulk heartbeat
-      description: Bulk update heartbeat for locks
-      operationId: bulkHeartbeat
+      summary: heartbeat
+      description: update heartbeat for all locks that match the process_id
+      operationId: heartbeat
       requestBody:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BulkHeartbeatRequest"
+              $ref: "#/components/schemas/heartbeatRequest"
         required: true
       responses:
         "200":
@@ -73,7 +73,7 @@ components:
         - execution_id
         - timeout
 
-    BulkHeartbeatRequest:
+    heartbeatRequest:
       type: object
       properties:
         process_id:
