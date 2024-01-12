@@ -64,7 +64,7 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-	system.AddOnTick(2, coroutines.TimeoutLocks) // this is problematic...
+	system.AddOnTick(2, coroutines.TimeoutLocks)
 	system.AddOnTick(2, coroutines.SchedulePromises)
 	system.AddOnTick(2, coroutines.TimeoutPromises)
 	system.AddOnTick(10, coroutines.NotifySubscriptions)

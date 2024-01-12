@@ -42,7 +42,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	generator := NewGenerator(r, d.config)
 
 	// model
-	model := NewModel() // todo: pass in config
+	model := NewModel()
 
 	// add req/res
 	for _, req := range reqs {
@@ -124,7 +124,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					modelErr := model.Step(t, req, res, err) // todo: pass req and res time.
+					modelErr := model.Step(t, req, res, err)
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}

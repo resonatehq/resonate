@@ -26,7 +26,6 @@ import (
 )
 
 const (
-	// might need comma after fencing_token.
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS locks (
 		resource_id   TEXT,
