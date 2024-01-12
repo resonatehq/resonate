@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 
@@ -29,6 +30,7 @@ type grpcTest struct {
 	conn           *grpc.ClientConn
 	client         grpcApi.PromisesClient
 	scheduleClient grpcApi.SchedulesClient
+	lockClient     grpcApi.LocksClient
 }
 
 func setup() (*grpcTest, error) {
@@ -54,6 +56,7 @@ func setup() (*grpcTest, error) {
 		conn:           conn,
 		client:         grpcApi.NewPromisesClient(conn),
 		scheduleClient: grpcApi.NewSchedulesClient(conn),
+		lockClient:     grpcApi.NewLocksClient(conn),
 	}, nil
 }
 
@@ -1202,6 +1205,223 @@ func TestDeleteSchedule(t *testing.T) {
 			defer cancel()
 
 			_, err := grpcTest.scheduleClient.DeleteSchedule(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// LOCKS
+
+func TestAcquireLock(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.AcquireLockRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "AcquireLock",
+			grpcReq: &grpcApi.AcquireLockRequest{
+				Lock: &grpcApi.Lock{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1,
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.AcquireLock,
+				AcquireLock: &t_api.AcquireLockRequest{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.AcquireLock,
+				AcquireLock: &t_api.AcquireLockResponse{
+					Status: t_api.StatusCreated,
+					Lock: &lock.Lock{
+						ResourceId:  "foo",
+						ProcessId:   "bar",
+						ExecutionId: "baz",
+						Timeout:     1,
+					},
+				},
+			},
+			code: codes.OK,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.lockClient.AcquireLock(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHeartbeatLocks(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.HeartbeatLocksRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "HeartbeatLocks",
+			grpcReq: &grpcApi.HeartbeatLocksRequest{
+				ProcessId: "foo",
+				Timeout:   1,
+			},
+			req: &t_api.Request{
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+					ProcessId: "foo",
+					Timeout:   1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
+					Status: t_api.StatusOK,
+				},
+			},
+			code: codes.OK,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.lockClient.HeartbeatLocks(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReleaseLock(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.ReleaseLockRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "ReleaseLock",
+			grpcReq: &grpcApi.ReleaseLockRequest{
+				ResourceId:  "foo",
+				ExecutionId: "bar",
+			},
+			req: &t_api.Request{
+				Kind: t_api.ReleaseLock,
+				ReleaseLock: &t_api.ReleaseLockRequest{
+					ResourceId:  "foo",
+					ExecutionId: "bar",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ReleaseLock,
+				ReleaseLock: &t_api.ReleaseLockResponse{
+					Status: t_api.StatusOK,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.lockClient.ReleaseLock(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {

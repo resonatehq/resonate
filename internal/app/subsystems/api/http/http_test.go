@@ -13,6 +13,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/stretchr/testify/assert"
@@ -760,32 +761,85 @@ func TestHttpServer(t *testing.T) {
 		},
 
 		// Distributed Locks API
-		// {
-		// 	name:   "AcquireLock",
-		// 	path:   "locks/acquire",
-		// 	method: "POST",
-		// 	body: []byte(`{
-		// 		resource_id: "foo",
-		// 		process_id: "bar",
-		// 		execution_id: "baz",
-		// 		timeout: 1000
-		// 	}`),
-		// 	req:    &t_api.Request{},
-		// 	res:    &t_api.Response{},
-		// 	status: 201,
-		// },
-		// {
-		// 	name:   "HeartbeatLocks",
-		// 	req:    &t_api.Request{},
-		// 	res:    &t_api.Response{},
-		// 	status: 200,
-		// },
-		// {
-		// 	name:   "ReleaseLock",
-		// 	req:    &t_api.Request{},
-		// 	res:    &t_api.Response{},
-		// 	status: 200,
-		// },
+		{
+			name:   "AcquireLock",
+			path:   "locks/acquire",
+			method: "POST",
+			body: []byte(`{
+				"resourceId": "foo",
+				"processId": "bar",
+				"executionId": "baz",
+				"timeout": 1736571600000
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.AcquireLock,
+				AcquireLock: &t_api.AcquireLockRequest{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.AcquireLock,
+				AcquireLock: &t_api.AcquireLockResponse{
+					Status: t_api.StatusCreated,
+					Lock: &lock.Lock{
+						ResourceId:  "foo",
+						ProcessId:   "bar",
+						ExecutionId: "baz",
+						Timeout:     1736571600000,
+					},
+				},
+			},
+			status: 201,
+		},
+		{
+			name:   "HeartbeatLocks",
+			path:   "locks/heartbeat",
+			method: "POST",
+			body: []byte(`{
+				"processId": "bar",
+				"timeout": 1736571600000
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+					ProcessId: "bar",
+					Timeout:   1736571600000,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
+					Status: t_api.StatusOK,
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "ReleaseLock",
+			path:   "locks/release",
+			method: "POST",
+			body: []byte(`{
+				"resourceId": "foo",
+				"executionId": "baz"
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.ReleaseLock,
+				ReleaseLock: &t_api.ReleaseLockRequest{
+					ResourceId:  "foo",
+					ExecutionId: "baz",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ReleaseLock,
+				ReleaseLock: &t_api.ReleaseLockResponse{
+					Status: t_api.StatusNoContent,
+				},
+			},
+			status: 204,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			httpTest.Load(t, tc.req, tc.res)

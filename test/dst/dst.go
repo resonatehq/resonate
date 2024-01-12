@@ -124,7 +124,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					modelErr := model.Step(reqTime, req, res, err) // reqTime or t ? ?
+					modelErr := model.Step(t, req, res, err) // todo: pass req and res time.
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}

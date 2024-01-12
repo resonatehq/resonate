@@ -34,7 +34,7 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 	}, nil
 }
 
-func (s *server) HeartbeatLock(ctx context.Context, req *grpcApi.HeartbeatRequest) (*grpcApi.HeartbeatResponse, error) {
+func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocksRequest) (*grpcApi.HeartbeatLocksResponse, error) {
 	header := &service.Header{}
 
 	body := &service.HeartbeatBody{
@@ -49,7 +49,7 @@ func (s *server) HeartbeatLock(ctx context.Context, req *grpcApi.HeartbeatReques
 		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
-	return &grpcApi.HeartbeatResponse{}, nil
+	return &grpcApi.HeartbeatLocksResponse{}, nil
 }
 
 func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockRequest) (*grpcApi.ReleaseLockResponse, error) {
