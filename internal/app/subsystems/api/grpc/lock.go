@@ -9,11 +9,30 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
 func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockRequest) (*grpcApi.AcquireLockResponse, error) {
-	header := &service.Header{}
+	header := &service.Header{
+		RequestId: req.RequestId,
+	}
+
+	if req.Lock == nil {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock must be provided")
+	}
+	if req.Lock.ResourceId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.resource_id must be provided")
+	}
+	if req.Lock.ProcessId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.process_id must be provided")
+	}
+	if req.Lock.ExecutionId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.execution_id must be provided")
+	}
+	if req.Lock.Timeout == 0 {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.timeout must be provided")
+	}
 
 	body := &service.AcquireLockBody{
 		ResourceId:  req.Lock.ResourceId,
@@ -35,7 +54,16 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 }
 
 func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocksRequest) (*grpcApi.HeartbeatLocksResponse, error) {
-	header := &service.Header{}
+	header := &service.Header{
+		RequestId: req.RequestId,
+	}
+
+	if req.ProcessId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "process_id must be provided")
+	}
+	if req.Timeout == 0 {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "timeout must be provided")
+	}
 
 	body := &service.HeartbeatBody{
 		ProcessId: req.ProcessId,
@@ -53,7 +81,16 @@ func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocks
 }
 
 func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockRequest) (*grpcApi.ReleaseLockResponse, error) {
-	header := &service.Header{}
+	header := &service.Header{
+		RequestId: req.RequestId,
+	}
+
+	if req.ResourceId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "resource_id must be provided")
+	}
+	if req.ExecutionId == "" {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "execution_id must be provided")
+	}
 
 	body := &service.ReleaseLockBody{
 		ResourceId:  req.ResourceId,

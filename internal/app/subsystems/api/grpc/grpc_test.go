@@ -983,7 +983,8 @@ func TestCreateSchedule(t *testing.T) {
 						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 						Data:    []byte("pending"),
 					},
-					PromiseTags: map[string]string{"a": "a", "b": "b", "c": "c"},
+					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				},
 			},
 			res: &t_api.Response{
