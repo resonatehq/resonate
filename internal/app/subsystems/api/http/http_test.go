@@ -795,6 +795,20 @@ func TestHttpServer(t *testing.T) {
 			status: 201,
 		},
 		{
+			name:   "AcquireLock missing resourceId",
+			path:   "locks/acquire",
+			method: "POST",
+			body: []byte(`{
+				"resourceId": "foo",
+				"processId": "bar",
+				"executionId": "",
+				"timeout": 1736571600000
+			}`),
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
 			name:   "HeartbeatLocks",
 			path:   "locks/heartbeat",
 			method: "POST",
@@ -818,6 +832,18 @@ func TestHttpServer(t *testing.T) {
 			status: 200,
 		},
 		{
+			name:   "HeartbeatLocks missing processId",
+			path:   "locks/heartbeat",
+			method: "POST",
+			body: []byte(`{
+				"processId": "",
+				"timeout": 1736571600000
+			}`),
+			req:    nil,
+			res:    nil,
+			status: 400,
+		},
+		{
 			name:   "ReleaseLock",
 			path:   "locks/release",
 			method: "POST",
@@ -839,6 +865,18 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			status: 204,
+		},
+		{
+			name:   "ReleaseLock missing resourceId",
+			path:   "locks/release",
+			method: "POST",
+			body: []byte(`{
+				"resourceId": "",
+				"executionId": "baz"
+			}`),
+			req:    nil,
+			res:    nil,
+			status: 400,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
