@@ -115,7 +115,8 @@ const (
 	DROP TABLE subscriptions;
 	DROP TABLE schedules;
 	DROP TABLE timeouts;
-	DROP TABLE promises;`
+	DROP TABLE promises;
+	DROP TABLE locks;`
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
