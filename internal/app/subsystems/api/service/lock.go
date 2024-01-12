@@ -12,6 +12,11 @@ import (
 // ACQUIRE
 
 func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, error) {
+	util.Assert(body.ResourceId != "", "lock.resource_id must be provided")
+	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
+	util.Assert(body.ExecutionId != "", "lock.execution_id must be provided")
+	util.Assert(body.Timeout != 0, "lock.timeout must be provided")
+
 	acquireLock := &t_api.AcquireLockRequest{
 		ResourceId:  body.ResourceId,
 		ProcessId:   body.ProcessId,
@@ -49,6 +54,9 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 // HEARTBEAT
 
 func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, error) {
+	util.Assert(body.ProcessId != "", "process_id must be provided")
+	util.Assert(body.Timeout != 0, "timeout must be provided")
+
 	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
 		ProcessId: body.ProcessId,
 		Timeout:   body.Timeout,
@@ -84,6 +92,9 @@ func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.Heartbe
 // RELEASE
 
 func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.ReleaseLockResponse, error) {
+	util.Assert(body.ResourceId != "", "resource_id must be provided")
+	util.Assert(body.ExecutionId != "", "execution_id must be provided")
+
 	releaseLock := &t_api.ReleaseLockRequest{
 		ResourceId:  body.ResourceId,
 		ExecutionId: body.ExecutionId,

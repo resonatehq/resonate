@@ -1278,6 +1278,62 @@ func TestAcquireLock(t *testing.T) {
 			},
 			code: codes.OK,
 		},
+		{
+			name: "AcquireLock missing resource id",
+			grpcReq: &grpcApi.AcquireLockRequest{
+				Lock: &grpcApi.Lock{
+					ResourceId:  "",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1,
+				},
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "AcquireLock missing process id",
+			grpcReq: &grpcApi.AcquireLockRequest{
+				Lock: &grpcApi.Lock{
+					ResourceId:  "foo",
+					ProcessId:   "",
+					ExecutionId: "baz",
+					Timeout:     1,
+				},
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "AcquireLock missing execution id",
+			grpcReq: &grpcApi.AcquireLockRequest{
+				Lock: &grpcApi.Lock{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "",
+					Timeout:     1,
+				},
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "AcquireLock missing timeout",
+			grpcReq: &grpcApi.AcquireLockRequest{
+				Lock: &grpcApi.Lock{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     0,
+				},
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
 	}
 
 	for _, tc := range tcs {
@@ -1346,6 +1402,26 @@ func TestHeartbeatLocks(t *testing.T) {
 			},
 			code: codes.OK,
 		},
+		{
+			name: "HeartbeatLocks missing process id",
+			grpcReq: &grpcApi.HeartbeatLocksRequest{
+				ProcessId: "",
+				Timeout:   1,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "HeartbeatLocks missing timeout",
+			grpcReq: &grpcApi.HeartbeatLocksRequest{
+				ProcessId: "foo",
+				Timeout:   0,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
 	}
 
 	for _, tc := range tcs {
@@ -1412,6 +1488,26 @@ func TestReleaseLock(t *testing.T) {
 					Status: t_api.StatusOK,
 				},
 			},
+		},
+		{
+			name: "ReleaseLock missing resource id",
+			grpcReq: &grpcApi.ReleaseLockRequest{
+				ResourceId:  "",
+				ExecutionId: "bar",
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "ReleaseLock missing execution id",
+			grpcReq: &grpcApi.ReleaseLockRequest{
+				ResourceId:  "foo",
+				ExecutionId: "",
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
 		},
 	}
 
