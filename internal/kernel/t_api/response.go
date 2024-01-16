@@ -40,21 +40,6 @@ type Response struct {
 	Echo *EchoResponse
 }
 
-// Locks
-
-type AcquireLockResponse struct {
-	Status ResponseStatus `json:"status"`
-	Lock   *lock.Lock     `json:"lock,omitempty"`
-}
-
-type HeartbeatLocksResponse struct {
-	Status ResponseStatus `json:"status"`
-}
-
-type ReleaseLockResponse struct {
-	Status ResponseStatus `json:"status"`
-}
-
 // Promises
 
 type CreatePromiseResponse struct {
@@ -119,6 +104,21 @@ type DeleteSubscriptionResponse struct {
 
 type EchoResponse struct {
 	Data string `json:"data"`
+}
+
+// Locks
+
+type AcquireLockResponse struct {
+	Status ResponseStatus `json:"status"`
+	Lock   *lock.Lock     `json:"lock,omitempty"`
+}
+
+type HeartbeatLocksResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+type ReleaseLockResponse struct {
+	Status ResponseStatus `json:"status"`
 }
 
 func (r *Response) String() string {

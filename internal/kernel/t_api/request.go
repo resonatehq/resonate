@@ -41,25 +41,6 @@ type Request struct {
 	Echo *EchoRequest
 }
 
-// Locks
-
-type AcquireLockRequest struct {
-	ResourceId  string `json:"resourceId"`
-	ProcessId   string `json:"processId"`
-	ExecutionId string `json:"executionId"`
-	Timeout     int64  `json:"timeout"`
-}
-
-type HeartbeatLocksRequest struct {
-	ProcessId string `json:"processId"`
-	Timeout   int64  `json:"timeout"`
-}
-
-type ReleaseLockRequest struct {
-	ResourceId  string `json:"resourceId"`
-	ExecutionId string `json:"executionId"`
-}
-
 // Promises
 
 type ReadPromiseRequest struct {
@@ -155,6 +136,25 @@ type DeleteSubscriptionRequest struct {
 
 type EchoRequest struct {
 	Data string `json:"data"`
+}
+
+// Locks
+
+type AcquireLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ProcessId   string `json:"processId"`
+	ExecutionId string `json:"executionId"`
+	Timeout     int64  `json:"timeout"`
+}
+
+type HeartbeatLocksRequest struct {
+	ProcessId string `json:"processId"`
+	Timeout   int64  `json:"timeout"`
+}
+
+type ReleaseLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
 }
 
 func (r *Request) String() string {
