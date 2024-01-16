@@ -11,21 +11,34 @@ import (
 )
 
 type Request struct {
-	Kind               Kind
-	ReadPromise        *ReadPromiseRequest
-	SearchPromises     *SearchPromisesRequest
-	CreatePromise      *CreatePromiseRequest
-	CancelPromise      *CancelPromiseRequest
-	ResolvePromise     *ResolvePromiseRequest
-	RejectPromise      *RejectPromiseRequest
-	ReadSchedule       *ReadScheduleRequest
-	SearchSchedules    *SearchSchedulesRequest
-	CreateSchedule     *CreateScheduleRequest
-	DeleteSchedule     *DeleteScheduleRequest
+	Kind Kind
+
+	// PROMISES
+	ReadPromise    *ReadPromiseRequest
+	SearchPromises *SearchPromisesRequest
+	CreatePromise  *CreatePromiseRequest
+	CancelPromise  *CancelPromiseRequest
+	ResolvePromise *ResolvePromiseRequest
+	RejectPromise  *RejectPromiseRequest
+
+	// SCHEDULES
+	ReadSchedule    *ReadScheduleRequest
+	SearchSchedules *SearchSchedulesRequest
+	CreateSchedule  *CreateScheduleRequest
+	DeleteSchedule  *DeleteScheduleRequest
+
+	// SUBSCRIPTIONS
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
-	Echo               *EchoRequest
+
+	// LOCKS
+	AcquireLock    *AcquireLockRequest
+	HeartbeatLocks *HeartbeatLocksRequest
+	ReleaseLock    *ReleaseLockRequest
+
+	// ECHO
+	Echo *EchoRequest
 }
 
 // Promises
@@ -125,8 +138,28 @@ type EchoRequest struct {
 	Data string `json:"data"`
 }
 
+// Locks
+
+type AcquireLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ProcessId   string `json:"processId"`
+	ExecutionId string `json:"executionId"`
+	Timeout     int64  `json:"timeout"`
+}
+
+type HeartbeatLocksRequest struct {
+	ProcessId string `json:"processId"`
+	Timeout   int64  `json:"timeout"`
+}
+
+type ReleaseLockRequest struct {
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
+}
+
 func (r *Request) String() string {
 	switch r.Kind {
+	// PROMISES
 	case ReadPromise:
 		return fmt.Sprintf(
 			"ReadPromise(id=%s)",
@@ -175,6 +208,7 @@ func (r *Request) String() string {
 			r.RejectPromise.IdempotencyKey,
 			r.RejectPromise.Strict,
 		)
+	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(
 			"ReadSchedule(id=%s)",
@@ -193,6 +227,8 @@ func (r *Request) String() string {
 			"DeleteSchedule(id=%s)",
 			r.DeleteSchedule.Id,
 		)
+
+	// SUBSCRIPTIONS
 	case ReadSubscriptions:
 		sortId := "<nil>"
 		if r.ReadSubscriptions.SortId != nil {
@@ -218,6 +254,30 @@ func (r *Request) String() string {
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
 		)
+
+	// LOCKS
+	case AcquireLock:
+		return fmt.Sprintf(
+			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, timeout=%d)",
+			r.AcquireLock.ResourceId,
+			r.AcquireLock.ProcessId,
+			r.AcquireLock.ExecutionId,
+			r.AcquireLock.Timeout,
+		)
+	case HeartbeatLocks:
+		return fmt.Sprintf(
+			"HeartbeatLocks(processId=%s)",
+			r.HeartbeatLocks.ProcessId,
+		)
+
+	case ReleaseLock:
+		return fmt.Sprintf(
+			"ReleaseLock(resourceId=%s, executionId=%s)",
+			r.ReleaseLock.ResourceId,
+			r.ReleaseLock.ExecutionId,
+		)
+
+	// ECHO
 	case Echo:
 		return fmt.Sprintf(
 			"Echo(data=%s)",

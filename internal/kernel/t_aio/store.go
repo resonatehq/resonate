@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -14,35 +15,52 @@ import (
 type StoreKind int
 
 const (
+	// PROMISES
 	ReadPromise StoreKind = iota
 	SearchPromises
 	CreatePromise
 	UpdatePromise
+	TimeoutPromises
+
+	// SCHEDULES
 	ReadSchedule
 	ReadSchedules
 	SearchSchedules
 	CreateSchedule
 	UpdateSchedule
 	DeleteSchedule
-	ReadTimeouts
-	CreateTimeout
-	DeleteTimeout
+
+	// SUBSCRIPTIONS
 	ReadSubscription
 	ReadSubscriptions
 	CreateSubscription
 	DeleteSubscription
 	DeleteSubscriptions
+	TimeoutDeleteSubscriptions
+
+	// NOTIFICATIONS
 	ReadNotifications
 	CreateNotifications
 	UpdateNotification
 	DeleteNotification
-	TimeoutPromises
-	TimeoutDeleteSubscriptions
 	TimeoutCreateNotifications
+
+	// TIMEOUTS
+	ReadTimeouts
+	CreateTimeout
+	DeleteTimeout
+
+	// LOCKS
+	ReadLock
+	AcquireLock
+	HeartbeatLocks
+	ReleaseLock
+	TimeoutLocks
 )
 
 func (k StoreKind) String() string {
 	switch k {
+	// PROMISES
 	case ReadPromise:
 		return "ReadPromise"
 	case SearchPromises:
@@ -51,6 +69,10 @@ func (k StoreKind) String() string {
 		return "CreatePromise"
 	case UpdatePromise:
 		return "UpdatePromise"
+	case TimeoutPromises:
+		return "TimeoutPromises"
+
+	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
 	case ReadSchedules:
@@ -63,12 +85,8 @@ func (k StoreKind) String() string {
 		return "UpdateSchedule"
 	case DeleteSchedule:
 		return "DeleteSchedule"
-	case ReadTimeouts:
-		return "ReadTimeouts"
-	case CreateTimeout:
-		return "CreateTimeout"
-	case DeleteTimeout:
-		return "DeleteTimeout"
+
+	// SUBSCRIPTIONS
 	case ReadSubscription:
 		return "ReadSubscription"
 	case ReadSubscriptions:
@@ -79,6 +97,10 @@ func (k StoreKind) String() string {
 		return "DeleteSubscription"
 	case DeleteSubscriptions:
 		return "DeleteSubscriptions"
+	case TimeoutDeleteSubscriptions:
+		return "TimeoutDeleteSubscriptions"
+
+	// NOTIFICATIONS
 	case ReadNotifications:
 		return "ReadNotifications"
 	case CreateNotifications:
@@ -87,12 +109,28 @@ func (k StoreKind) String() string {
 		return "UpdateNotification"
 	case DeleteNotification:
 		return "DeleteNotification"
-	case TimeoutPromises:
-		return "TimeoutPromises"
-	case TimeoutDeleteSubscriptions:
-		return "TimeoutDeleteSubscriptions"
 	case TimeoutCreateNotifications:
 		return "TimeoutCreateNotifications"
+
+	// TIMEOUTS
+	case ReadTimeouts:
+		return "ReadTimeouts"
+	case CreateTimeout:
+		return "CreateTimeout"
+	case DeleteTimeout:
+		return "DeleteTimeout"
+
+	// LOCKS
+	case ReadLock:
+		return "ReadLock"
+	case AcquireLock:
+		return "AcquireLock"
+	case HeartbeatLocks:
+		return "HeartbeatLocks"
+	case ReleaseLock:
+		return "ReleaseLock"
+	case TimeoutLocks:
+		return "TimeoutLocks"
 	default:
 		panic("invalid store kind")
 	}
@@ -119,32 +157,49 @@ type Transaction struct {
 }
 
 type Command struct {
-	Kind                       StoreKind
-	ReadPromise                *ReadPromiseCommand
-	SearchPromises             *SearchPromisesCommand
-	CreatePromise              *CreatePromiseCommand
-	UpdatePromise              *UpdatePromiseCommand
-	ReadSchedule               *ReadScheduleCommand
-	ReadSchedules              *ReadSchedulesCommand
-	SearchSchedules            *SearchSchedulesCommand
-	CreateSchedule             *CreateScheduleCommand
-	UpdateSchedule             *UpdateScheduleCommand
-	DeleteSchedule             *DeleteScheduleCommand
-	ReadTimeouts               *ReadTimeoutsCommand
-	CreateTimeout              *CreateTimeoutCommand
-	DeleteTimeout              *DeleteTimeoutCommand
+	Kind StoreKind
+
+	// PROMISES
+	ReadPromise     *ReadPromiseCommand
+	SearchPromises  *SearchPromisesCommand
+	CreatePromise   *CreatePromiseCommand
+	UpdatePromise   *UpdatePromiseCommand
+	TimeoutPromises *TimeoutPromisesCommand
+
+	// SCHEDULES
+	ReadSchedule    *ReadScheduleCommand
+	ReadSchedules   *ReadSchedulesCommand
+	SearchSchedules *SearchSchedulesCommand
+	CreateSchedule  *CreateScheduleCommand
+	UpdateSchedule  *UpdateScheduleCommand
+	DeleteSchedule  *DeleteScheduleCommand
+
+	// SUBSCRIPTIONS
 	ReadSubscription           *ReadSubscriptionCommand
 	ReadSubscriptions          *ReadSubscriptionsCommand
 	CreateSubscription         *CreateSubscriptionCommand
 	DeleteSubscription         *DeleteSubscriptionCommand
 	DeleteSubscriptions        *DeleteSubscriptionsCommand
+	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
+
+	// NOTIFICATIONS
 	ReadNotifications          *ReadNotificationsCommand
 	CreateNotifications        *CreateNotificationsCommand
 	UpdateNotification         *UpdateNotificationCommand
 	DeleteNotification         *DeleteNotificationCommand
-	TimeoutPromises            *TimeoutPromisesCommand
-	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
 	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
+
+	// TIMEOUTS
+	ReadTimeouts  *ReadTimeoutsCommand
+	CreateTimeout *CreateTimeoutCommand
+	DeleteTimeout *DeleteTimeoutCommand
+
+	// LOCKS
+	ReadLock       *ReadLockCommand
+	AcquireLock    *AcquireLockCommand
+	HeartbeatLocks *HeartbeatLocksCommand
+	ReleaseLock    *ReleaseLockCommand
+	TimeoutLocks   *TimeoutLocksCommand
 }
 
 func (c *Command) String() string {
@@ -152,32 +207,49 @@ func (c *Command) String() string {
 }
 
 type Result struct {
-	Kind                       StoreKind
-	ReadPromise                *QueryPromisesResult
-	SearchPromises             *QueryPromisesResult
-	CreatePromise              *AlterPromisesResult
-	UpdatePromise              *AlterPromisesResult
-	ReadSchedule               *QuerySchedulesResult
-	ReadSchedules              *QuerySchedulesResult
-	SearchSchedules            *QuerySchedulesResult
-	CreateSchedule             *AlterSchedulesResult
-	UpdateSchedule             *AlterSchedulesResult
-	DeleteSchedule             *AlterSchedulesResult
-	ReadTimeouts               *QueryTimeoutsResult
-	CreateTimeout              *AlterTimeoutsResult
-	DeleteTimeout              *AlterTimeoutsResult
+	Kind StoreKind
+
+	// PROMISES
+	ReadPromise     *QueryPromisesResult
+	SearchPromises  *QueryPromisesResult
+	CreatePromise   *AlterPromisesResult
+	UpdatePromise   *AlterPromisesResult
+	TimeoutPromises *AlterPromisesResult
+
+	// SCHEDULES
+	ReadSchedule    *QuerySchedulesResult
+	ReadSchedules   *QuerySchedulesResult
+	SearchSchedules *QuerySchedulesResult
+	CreateSchedule  *AlterSchedulesResult
+	UpdateSchedule  *AlterSchedulesResult
+	DeleteSchedule  *AlterSchedulesResult
+
+	// SUBSCRIPTIONS
 	ReadSubscription           *QuerySubscriptionsResult
 	ReadSubscriptions          *QuerySubscriptionsResult
 	CreateSubscription         *AlterSubscriptionsResult
 	DeleteSubscription         *AlterSubscriptionsResult
 	DeleteSubscriptions        *AlterSubscriptionsResult
+	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
+
+	// NOTIFICATIONS
 	ReadNotifications          *QueryNotificationsResult
 	CreateNotifications        *AlterNotificationsResult
 	UpdateNotification         *AlterNotificationsResult
 	DeleteNotification         *AlterNotificationsResult
-	TimeoutPromises            *AlterPromisesResult
-	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
 	TimeoutCreateNotifications *AlterNotificationsResult
+
+	// TIMEOUTS
+	ReadTimeouts  *QueryTimeoutsResult
+	CreateTimeout *AlterTimeoutsResult
+	DeleteTimeout *AlterTimeoutsResult
+
+	// LOCKS
+	ReadLock       *QueryLocksResult
+	AcquireLock    *AlterLocksResult
+	HeartbeatLocks *AlterLocksResult
+	ReleaseLock    *AlterLocksResult
+	TimeoutLocks   *AlterLocksResult
 }
 
 func (r *Result) String() string {
@@ -393,5 +465,43 @@ type QueryNotificationsResult struct {
 }
 
 type AlterNotificationsResult struct {
+	RowsAffected int64
+}
+
+// Lock commands
+
+type ReadLockCommand struct {
+	ResourceId string
+}
+
+type AcquireLockCommand struct {
+	ResourceId  string
+	ProcessId   string
+	ExecutionId string
+	Timeout     int64
+}
+
+type HeartbeatLocksCommand struct {
+	ProcessId string
+	Timeout   int64
+}
+
+type ReleaseLockCommand struct {
+	ResourceId  string
+	ExecutionId string
+}
+
+type TimeoutLocksCommand struct {
+	Timeout int64
+}
+
+// Lock results
+
+type QueryLocksResult struct {
+	RowsReturned int64
+	Records      []*lock.LockRecord
+}
+
+type AlterLocksResult struct {
 	RowsAffected int64
 }

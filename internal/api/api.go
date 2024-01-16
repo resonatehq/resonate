@@ -116,6 +116,12 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.CreateSubscription.Status)
 			case t_api.DeleteSubscription:
 				status = int(res.DeleteSubscription.Status)
+			case t_api.AcquireLock:
+				status = int(res.AcquireLock.Status)
+			case t_api.HeartbeatLocks:
+				status = int(res.HeartbeatLocks.Status)
+			case t_api.ReleaseLock:
+				status = int(res.ReleaseLock.Status)
 			case t_api.Echo:
 				status = 2000
 			default:

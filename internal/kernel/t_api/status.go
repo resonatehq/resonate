@@ -17,9 +17,11 @@ const (
 	StatusPromiseAlreadyRejected ResponseStatus = 4031
 	StatusPromiseAlreadyCanceled ResponseStatus = 4032
 	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
+	StatusLockAlreadyAcquired    ResponseStatus = 4034
 	StatusPromiseNotFound        ResponseStatus = 4040
 	StatusSubscriptionNotFound   ResponseStatus = 4041
 	StatusScheduleNotFound       ResponseStatus = 4042
+	StatusLockNotFound           ResponseStatus = 4043
 	StatusPromiseAlreadyExists   ResponseStatus = 4090
 	StatusScheduleAlreadyExists  ResponseStatus = 4091
 )
@@ -52,6 +54,10 @@ func (s ResponseStatus) String() string {
 		return "A promise with this identifier already exists"
 	case StatusScheduleAlreadyExists:
 		return "A schedule with this identifier already exists"
+	case StatusLockAlreadyAcquired:
+		return "The lock is already acquired"
+	case StatusLockNotFound:
+		return "The specified lock was not found"
 	default:
 		panic(fmt.Sprintf("unknown status code %d", s))
 	}
@@ -75,6 +81,12 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.NotFound
 	case StatusPromiseAlreadyExists:
 		return codes.AlreadyExists
+	case StatusScheduleAlreadyExists:
+		return codes.AlreadyExists
+	case StatusLockAlreadyAcquired:
+		return codes.PermissionDenied
+	case StatusLockNotFound:
+		return codes.NotFound
 	default:
 		panic(fmt.Sprintf("invalid status: %d", s))
 	}

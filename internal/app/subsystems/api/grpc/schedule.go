@@ -8,6 +8,7 @@ import (
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"google.golang.org/grpc/codes"
@@ -17,7 +18,12 @@ import (
 // CREATE
 
 func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateScheduleRequest) (*grpcApi.CreatedScheduleResponse, error) {
-	header := service.CreateScheduleHeader{}
+	ikey := idempotency.Key(req.IdempotencyKey)
+
+	header := service.CreateScheduleHeader{
+		RequestId:      req.RequestId,
+		IdempotencyKey: &ikey,
+	}
 
 	body := service.CreateScheduleBody{
 		Id:             req.Id,
@@ -48,7 +54,9 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 // READ
 
 func (s *server) ReadSchedule(ctx context.Context, req *grpcApi.ReadScheduleRequest) (*grpcApi.ReadScheduleResponse, error) {
-	header := service.Header{}
+	header := service.Header{
+		RequestId: req.RequestId,
+	}
 
 	resp, err := s.service.ReadSchedule(req.Id, &header)
 	if err != nil {
@@ -65,7 +73,9 @@ func (s *server) ReadSchedule(ctx context.Context, req *grpcApi.ReadScheduleRequ
 // SEARCH
 
 func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedulesRequest) (*grpcApi.SearchSchedulesResponse, error) {
-	headers := &service.Header{}
+	headers := &service.Header{
+		RequestId: req.RequestId,
+	}
 
 	if req.Limit > 100 || req.Limit < 0 {
 		err := api.HandleValidationError(errors.New("field limit must be greater than 0 and less than or equal to 100"))
@@ -109,7 +119,9 @@ func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedul
 // DELETE
 
 func (s *server) DeleteSchedule(ctx context.Context, req *grpcApi.DeleteScheduleRequest) (*grpcApi.DeleteScheduleResponse, error) {
-	header := service.Header{}
+	header := service.Header{
+		RequestId: req.RequestId,
+	}
 
 	_, err := s.service.DeleteSchedule(req.Id, &header)
 	if err != nil {

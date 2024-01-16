@@ -376,3 +376,48 @@ func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *t_api.Req
 		},
 	}
 }
+
+// LOCK
+
+func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
+	resourceId := g.idSet[r.Intn(len(g.idSet))]
+	processId := g.idSet[r.Intn(len(g.idSet))]
+	executionId := g.idSet[r.Intn(len(g.idSet))]
+	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+
+	return &t_api.Request{
+		Kind: t_api.AcquireLock,
+		AcquireLock: &t_api.AcquireLockRequest{
+			ResourceId:  resourceId,
+			ProcessId:   processId,
+			ExecutionId: executionId,
+			Timeout:     timeout,
+		},
+	}
+}
+
+func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request {
+	processId := g.idSet[r.Intn(len(g.idSet))]
+	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+
+	return &t_api.Request{
+		Kind: t_api.HeartbeatLocks,
+		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+			ProcessId: processId,
+			Timeout:   timeout,
+		},
+	}
+}
+
+func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
+	resourceId := g.idSet[r.Intn(len(g.idSet))]
+	executionId := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.ReleaseLock,
+		ReleaseLock: &t_api.ReleaseLockRequest{
+			ResourceId:  resourceId,
+			ExecutionId: executionId,
+		},
+	}
+}

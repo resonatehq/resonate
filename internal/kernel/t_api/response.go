@@ -3,6 +3,7 @@ package t_api
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
@@ -11,7 +12,7 @@ import (
 type Response struct {
 	Kind Kind
 
-	// Promises
+	// PROMISES
 	CreatePromise  *CreatePromiseResponse
 	ReadPromise    *ReadPromiseResponse
 	SearchPromises *SearchPromisesResponse
@@ -19,18 +20,23 @@ type Response struct {
 	ResolvePromise *CompletePromiseResponse
 	RejectPromise  *CompletePromiseResponse
 
-	// Schedules
+	// SCHEDULES
 	CreateSchedule  *CreateScheduleResponse
 	SearchSchedules *SearchSchedulesResponse
 	ReadSchedule    *ReadScheduleResponse
 	DeleteSchedule  *DeleteScheduleResponse
 
-	// Subscriptions
-
+	// SUBSCRIPTIONS
 	ReadSubscriptions  *ReadSubscriptionsResponse
 	CreateSubscription *CreateSubscriptionResponse
 	DeleteSubscription *DeleteSubscriptionResponse
 
+	// LOCKS
+	AcquireLock    *AcquireLockResponse
+	HeartbeatLocks *HeartbeatLocksResponse
+	ReleaseLock    *ReleaseLockResponse
+
+	// ECHO
 	Echo *EchoResponse
 }
 
@@ -100,8 +106,25 @@ type EchoResponse struct {
 	Data string `json:"data"`
 }
 
+// Locks
+
+type AcquireLockResponse struct {
+	Status ResponseStatus `json:"status"`
+	Lock   *lock.Lock     `json:"lock,omitempty"`
+}
+
+type HeartbeatLocksResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+type ReleaseLockResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
 func (r *Response) String() string {
 	switch r.Kind {
+
+	// PROMISES
 	case ReadPromise:
 		return fmt.Sprintf(
 			"ReadPromise(status=%d, promise=%s)",
@@ -139,6 +162,8 @@ func (r *Response) String() string {
 			r.RejectPromise.Status,
 			r.RejectPromise.Promise,
 		)
+
+	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(
 			"ReadSchedule(status=%d, schedule=%s)",
@@ -163,6 +188,8 @@ func (r *Response) String() string {
 			"DeleteSchedule(status=%d)",
 			r.DeleteSchedule.Status,
 		)
+
+	// SUBSCRIPTIONS
 	case ReadSubscriptions:
 		return fmt.Sprintf(
 			"ReadSubscriptions(status=%d, subscriptions=%s)",
@@ -180,6 +207,26 @@ func (r *Response) String() string {
 			"DeleteSubscription(status=%d)",
 			r.DeleteSubscription.Status,
 		)
+
+	// LOCKS
+	case AcquireLock:
+		return fmt.Sprintf(
+			"AcquireLock(status=%d, lock=%s)",
+			r.AcquireLock.Status,
+			r.AcquireLock.Lock,
+		)
+	case HeartbeatLocks:
+		return fmt.Sprintf(
+			"HeartbeatLocks(status=%d)",
+			r.HeartbeatLocks.Status,
+		)
+	case ReleaseLock:
+		return fmt.Sprintf(
+			"ReleaseLock(status=%d)",
+			r.ReleaseLock.Status,
+		)
+
+	// ECHO
 	case Echo:
 		return fmt.Sprintf(
 			"Echo(data=%s)",
