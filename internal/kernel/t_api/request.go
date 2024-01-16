@@ -11,27 +11,33 @@ import (
 )
 
 type Request struct {
-	Kind               Kind
-	ReadPromise        *ReadPromiseRequest
-	SearchPromises     *SearchPromisesRequest
-	CreatePromise      *CreatePromiseRequest
-	CancelPromise      *CancelPromiseRequest
-	ResolvePromise     *ResolvePromiseRequest
-	RejectPromise      *RejectPromiseRequest
-	ReadSchedule       *ReadScheduleRequest
-	SearchSchedules    *SearchSchedulesRequest
-	CreateSchedule     *CreateScheduleRequest
-	DeleteSchedule     *DeleteScheduleRequest
+	Kind Kind
+
+	// PROMISES
+	ReadPromise    *ReadPromiseRequest
+	SearchPromises *SearchPromisesRequest
+	CreatePromise  *CreatePromiseRequest
+	CancelPromise  *CancelPromiseRequest
+	ResolvePromise *ResolvePromiseRequest
+	RejectPromise  *RejectPromiseRequest
+
+	// SCHEDULES
+	ReadSchedule    *ReadScheduleRequest
+	SearchSchedules *SearchSchedulesRequest
+	CreateSchedule  *CreateScheduleRequest
+	DeleteSchedule  *DeleteScheduleRequest
+
+	// SUBSCRIPTIONS
 	ReadSubscriptions  *ReadSubscriptionsRequest
 	CreateSubscription *CreateSubscriptionRequest
 	DeleteSubscription *DeleteSubscriptionRequest
 
-	// Lock
+	// LOCKS
 	AcquireLock    *AcquireLockRequest
 	HeartbeatLocks *HeartbeatLocksRequest
 	ReleaseLock    *ReleaseLockRequest
 
-	// Echo
+	// ECHO
 	Echo *EchoRequest
 }
 
@@ -153,6 +159,7 @@ type EchoRequest struct {
 
 func (r *Request) String() string {
 	switch r.Kind {
+	// PROMISES
 	case ReadPromise:
 		return fmt.Sprintf(
 			"ReadPromise(id=%s)",
@@ -201,6 +208,7 @@ func (r *Request) String() string {
 			r.RejectPromise.IdempotencyKey,
 			r.RejectPromise.Strict,
 		)
+	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(
 			"ReadSchedule(id=%s)",
@@ -219,6 +227,8 @@ func (r *Request) String() string {
 			"DeleteSchedule(id=%s)",
 			r.DeleteSchedule.Id,
 		)
+
+	// SUBSCRIPTIONS
 	case ReadSubscriptions:
 		sortId := "<nil>"
 		if r.ReadSubscriptions.SortId != nil {
@@ -244,14 +254,8 @@ func (r *Request) String() string {
 			r.DeleteSubscription.Id,
 			r.DeleteSubscription.PromiseId,
 		)
-	case Echo:
-		return fmt.Sprintf(
-			"Echo(data=%s)",
-			r.Echo.Data,
-		)
 
-	// Locks
-
+	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
 			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, timeout=%d)",
@@ -271,6 +275,13 @@ func (r *Request) String() string {
 			"ReleaseLock(resourceId=%s, executionId=%s)",
 			r.ReleaseLock.ResourceId,
 			r.ReleaseLock.ExecutionId,
+		)
+
+	// ECHO
+	case Echo:
+		return fmt.Sprintf(
+			"Echo(data=%s)",
+			r.Echo.Data,
 		)
 	default:
 		return "Request"

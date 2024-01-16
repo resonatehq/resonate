@@ -44,7 +44,7 @@ func HeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			res(&t_api.Response{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-					Status: t_api.StatusProcessIdHasNoLocks,
+					Status: t_api.StatusLockNotFound,
 				},
 			}, nil)
 			return

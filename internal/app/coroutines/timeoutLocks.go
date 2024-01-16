@@ -13,7 +13,7 @@ import (
 
 func TimeoutLocks(t int64, config *system.Config) *Coroutine {
 	metadata := metadata.New(fmt.Sprintf("tick:%d:timeoutLock", t))
-	metadata.Tags.Set("name", "Timeout-locks")
+	metadata.Tags.Set("name", "timeout-locks")
 
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
 

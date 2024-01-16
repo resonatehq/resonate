@@ -22,7 +22,6 @@ const (
 	StatusSubscriptionNotFound   ResponseStatus = 4041
 	StatusScheduleNotFound       ResponseStatus = 4042
 	StatusLockNotFound           ResponseStatus = 4043
-	StatusProcessIdHasNoLocks    ResponseStatus = 4044
 	StatusPromiseAlreadyExists   ResponseStatus = 4090
 	StatusScheduleAlreadyExists  ResponseStatus = 4091
 )
@@ -57,8 +56,6 @@ func (s ResponseStatus) String() string {
 		return "A schedule with this identifier already exists"
 	case StatusLockAlreadyAcquired:
 		return "The lock is already acquired"
-	case StatusProcessIdHasNoLocks:
-		return "The processId does not own any locks"
 	case StatusLockNotFound:
 		return "The specified lock was not found"
 	default:
@@ -88,7 +85,7 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.AlreadyExists
 	case StatusLockAlreadyAcquired:
 		return codes.PermissionDenied
-	case StatusProcessIdHasNoLocks, StatusLockNotFound:
+	case StatusLockNotFound:
 		return codes.NotFound
 	default:
 		panic(fmt.Sprintf("invalid status: %d", s))

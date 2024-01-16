@@ -584,7 +584,7 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 
 func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response) error {
 	switch res.HeartbeatLocks.Status {
-	case t_api.StatusProcessIdHasNoLocks:
+	case t_api.StatusLockNotFound:
 		for _, l := range m.locks {
 			if l.lock == nil {
 				continue
@@ -606,7 +606,7 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			}
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
-				owned := m.locks.Get(l.lock.ResourceId) //
+				owned := m.locks.Get(l.lock.ResourceId)
 				owned.lock.ProcessId = req.HeartbeatLocks.ProcessId
 				owned.lock.Timeout = req.HeartbeatLocks.Timeout
 				count++
