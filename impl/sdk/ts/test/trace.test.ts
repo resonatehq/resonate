@@ -237,8 +237,8 @@ describe("Resonate SDK Trace Tests", () => {
 
     suite.addDurableExecution(transactionAsyncAsync, 1, 1);
     suite.addDurableExecution(transactionAsyncGenerator, 1, 1);
-    suite.addDurableExecution(transactionGeneratorGenerator, 1, 1);
     suite.addDurableExecution(transactionGeneratorAsync, 1, 1);
+    suite.addDurableExecution(transactionGeneratorGenerator, 1, 1);
 
     await suite.run();
     expect(suite.validate()).toBe(true);

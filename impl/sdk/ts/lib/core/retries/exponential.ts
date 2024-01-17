@@ -1,13 +1,15 @@
 import { Context } from "../../resonate";
-import { IRetry } from "../retry";
+import { IRetry, IterableRetry } from "../retry";
 
-export class ExponentialRetry implements IRetry {
+export class ExponentialRetry extends IterableRetry implements IRetry {
   constructor(
     private maxAttempts: number,
     private maxDelay: number,
     private initialDelay: number,
     private backoffFactor: number,
-  ) {}
+  ) {
+    super();
+  }
 
   static atMostOnce(): ExponentialRetry {
     return new ExponentialRetry(1, 0, 0, 0);
@@ -22,16 +24,21 @@ export class ExponentialRetry implements IRetry {
     return new ExponentialRetry(maxAttempts, maxDelay, initialDelay, backoffFactor);
   }
 
-  next(context: Context): { done: boolean; delay?: number } {
-    if (Date.now() >= context.timeout || context.attempt >= this.maxAttempts) {
+  next(ctx: Context): { done: boolean; delay?: number } {
+    // attempt 0: 0ms delay
+    // attampt n: {initial * factor^(attempt-1)}ms delay (or max delay)
+    const delay = Math.min(
+      Math.min(ctx.attempt, 1) * this.initialDelay * Math.pow(this.backoffFactor, ctx.attempt - 1),
+      this.maxDelay,
+    );
+
+    if (Date.now() + delay >= ctx.timeout || ctx.attempt >= this.maxAttempts) {
       return { done: true };
     }
 
-    const delay = Math.min(context.attempt, 1) * this.initialDelay * Math.pow(this.backoffFactor, context.attempt - 1);
-
     return {
       done: false,
-      delay: Math.min(delay, this.maxDelay),
+      delay: delay,
     };
   }
 }
