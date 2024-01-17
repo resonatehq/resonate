@@ -62,7 +62,9 @@ func (s *server) heartbeatLocks(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), struct{ int64 }{resp.LocksAffected})
+	c.JSON(resp.Status.HTTP(), gin.H{
+		"locksAffected": resp.LocksAffected,
+	})
 }
 
 // RELEASE
