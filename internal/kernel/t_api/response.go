@@ -114,7 +114,8 @@ type AcquireLockResponse struct {
 }
 
 type HeartbeatLocksResponse struct {
-	Status ResponseStatus `json:"status"`
+	Status        ResponseStatus `json:"status"`
+	LocksAffected int64          `json:"locksAffected"`
 }
 
 type ReleaseLockResponse struct {

@@ -576,30 +576,38 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		if lm.lock == nil {
 			return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
 		}
+		if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
+			return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.AcquireLock.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.AcquireLock.Status)
 	}
 }
 
 func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response) error {
 	switch res.HeartbeatLocks.Status {
-	case t_api.StatusLockNotFound:
+	case t_api.StatusOK:
+		if res.HeartbeatLocks.LocksAffected == 0 {
+			return nil
+		}
+
+		var count int64
 		for _, l := range m.locks {
 			if l.lock == nil {
 				continue
 			}
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
-				// check if it could have been deleted.
-				if l.lock.Timeout > t {
-					return fmt.Errorf("processId %s has locks", req.HeartbeatLocks.ProcessId)
-				}
-				l.lock = nil
+				count++
 			}
 		}
-		return nil
-	case t_api.StatusOK:
-		var count int
+
+		if res.HeartbeatLocks.LocksAffected != count {
+			// best we can do.
+			return nil
+		}
+
+		// update local model for processId's locks
 		for _, l := range m.locks {
 			if l.lock == nil {
 				continue
@@ -607,17 +615,13 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
 				owned := m.locks.Get(l.lock.ResourceId)
-				owned.lock.ProcessId = req.HeartbeatLocks.ProcessId
 				owned.lock.Timeout = req.HeartbeatLocks.Timeout
-				count++
 			}
 		}
-		if count == 0 {
-			return fmt.Errorf("processId %s has no locks", req.HeartbeatLocks.ProcessId)
-		}
+
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.HeartbeatLocks.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.HeartbeatLocks.Status)
 	}
 }
 
@@ -632,19 +636,23 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if lm.lock == nil {
-			return nil
-		}
-		// it exists locally, check if it is timedout or belonged to another executionId.
-		if lm.lock.ExecutionId == req.ReleaseLock.ExecutionId {
-			if lm.lock.Timeout > t {
-				return fmt.Errorf("executionId %s has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+		if lm.lock != nil {
+			if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
+				return nil
 			}
+
+			// if lock belongs to the same executionId it must have timedout.
+			if lm.lock.Timeout > t {
+				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+			}
+			// can't know if it was actually released or not ??
 			lm.lock = nil
 		}
+
+		// ok cause lock does not exist at all for this resourceId.
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReleaseLock.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.ReleaseLock.Status)
 	}
 }
 

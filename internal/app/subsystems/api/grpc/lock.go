@@ -70,14 +70,16 @@ func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocks
 		Timeout:   req.Timeout,
 	}
 
-	_, err := s.service.Heartbeat(header, body)
+	res, err := s.service.Heartbeat(header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be an api error")
 		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
 	}
 
-	return &grpcApi.HeartbeatLocksResponse{}, nil
+	return &grpcApi.HeartbeatLocksResponse{
+		LocksAffected: int32(res.LocksAffected),
+	}, nil
 }
 
 func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockRequest) (*grpcApi.ReleaseLockResponse, error) {
