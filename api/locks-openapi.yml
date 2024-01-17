@@ -37,6 +37,10 @@ paths:
       responses:
         "200":
           description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HeartbeatResponse"
 
   /locks/release:
     post:
@@ -84,6 +88,13 @@ components:
       required:
         - process_id
         - timeout
+
+    HeartbeatResponse:
+      type: object
+      properties:
+        locksAffected:
+          type: integer
+          format: int64
 
     ReleaseLockRequest:
       type: object
