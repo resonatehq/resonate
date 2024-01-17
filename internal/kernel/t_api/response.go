@@ -114,7 +114,8 @@ type AcquireLockResponse struct {
 }
 
 type HeartbeatLocksResponse struct {
-	Status ResponseStatus `json:"status"`
+	Status        ResponseStatus `json:"status"`
+	LocksAffected int64          `json:"locksAffected"`
 }
 
 type ReleaseLockResponse struct {
@@ -217,8 +218,9 @@ func (r *Response) String() string {
 		)
 	case HeartbeatLocks:
 		return fmt.Sprintf(
-			"HeartbeatLocks(status=%d)",
+			"HeartbeatLocks(status=%d, rowsAffected=%d)",
 			r.HeartbeatLocks.Status,
+			r.HeartbeatLocks.LocksAffected,
 		)
 	case ReleaseLock:
 		return fmt.Sprintf(

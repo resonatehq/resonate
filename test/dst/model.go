@@ -159,7 +159,7 @@ func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Resp
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReadPromise.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.ReadPromise.Status)
 	}
 }
 
@@ -206,7 +206,7 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.SearchPromises.Status)
 	}
 }
 
@@ -242,7 +242,7 @@ func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Res
 	case t_api.StatusPromiseNotFound:
 		return fmt.Errorf("invalid response '%d' for create promise request", res.CreatePromise.Status)
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CreatePromise.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.CreatePromise.Status)
 	}
 }
 
@@ -291,7 +291,7 @@ func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Re
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CancelPromise.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.CancelPromise.Status)
 	}
 }
 
@@ -340,7 +340,7 @@ func (m *Model) ValidateResolvePromise(t int64, req *t_api.Request, res *t_api.R
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ResolvePromise.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.ResolvePromise.Status)
 	}
 }
 
@@ -389,7 +389,7 @@ func (m *Model) ValidateRejectPromise(t int64, req *t_api.Request, res *t_api.Re
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.RejectPromise.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.RejectPromise.Status)
 	}
 }
 
@@ -417,7 +417,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.ReadSchedule.Status)
 	}
 }
 
@@ -460,7 +460,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.SearchPromises.Status)
 	}
 }
 
@@ -484,7 +484,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 	case t_api.StatusScheduleNotFound:
 		return fmt.Errorf("invalid response '%d' for create schedule request", res.CreateSchedule.Status)
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.CreateSchedule.Status)
 	}
 }
 
@@ -498,7 +498,7 @@ func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.R
 	case t_api.StatusScheduleNotFound:
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.DeleteSchedule.Status)
 	}
 }
 
@@ -527,7 +527,7 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.SearchPromises.Status)
 	}
 }
 
@@ -543,7 +543,7 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 		sm.subscription = res.CreateSubscription.Subscription
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CreateSubscription.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.CreateSubscription.Status)
 	}
 }
 
@@ -559,7 +559,7 @@ func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_a
 		sm.subscription = nil
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.DeleteSubscription.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.DeleteSubscription.Status)
 	}
 }
 
@@ -576,30 +576,38 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		if lm.lock == nil {
 			return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
 		}
+		if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
+			return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+		}
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.AcquireLock.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.AcquireLock.Status)
 	}
 }
 
 func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response) error {
 	switch res.HeartbeatLocks.Status {
-	case t_api.StatusLockNotFound:
+	case t_api.StatusOK:
+		if res.HeartbeatLocks.LocksAffected == 0 {
+			return nil
+		}
+
+		var count int64
 		for _, l := range m.locks {
 			if l.lock == nil {
 				continue
 			}
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
-				// check if it could have been deleted.
-				if l.lock.Timeout > t {
-					return fmt.Errorf("processId %s has locks", req.HeartbeatLocks.ProcessId)
-				}
-				l.lock = nil
+				count++
 			}
 		}
-		return nil
-	case t_api.StatusOK:
-		var count int
+
+		if res.HeartbeatLocks.LocksAffected != count {
+			// best we can do.
+			return nil
+		}
+
+		// update local model for processId's locks
 		for _, l := range m.locks {
 			if l.lock == nil {
 				continue
@@ -607,17 +615,13 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
 				owned := m.locks.Get(l.lock.ResourceId)
-				owned.lock.ProcessId = req.HeartbeatLocks.ProcessId
 				owned.lock.Timeout = req.HeartbeatLocks.Timeout
-				count++
 			}
 		}
-		if count == 0 {
-			return fmt.Errorf("processId %s has no locks", req.HeartbeatLocks.ProcessId)
-		}
+
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.HeartbeatLocks.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.HeartbeatLocks.Status)
 	}
 }
 
@@ -632,19 +636,23 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if lm.lock == nil {
-			return nil
-		}
-		// it exists locally, check if it is timedout or belonged to another executionId.
-		if lm.lock.ExecutionId == req.ReleaseLock.ExecutionId {
-			if lm.lock.Timeout > t {
-				return fmt.Errorf("executionId %s has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+		if lm.lock != nil {
+			if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
+				return nil
 			}
+
+			// if lock belongs to the same executionId it must have timedout.
+			if lm.lock.Timeout > t {
+				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+			}
+			// can't know if it was actually released or not ??
 			lm.lock = nil
 		}
+
+		// ok cause lock does not exist at all for this resourceId.
 		return nil
 	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.ReleaseLock.Status)
+		return fmt.Errorf("unexpected response status '%d'", res.ReleaseLock.Status)
 	}
 }
 

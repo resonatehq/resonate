@@ -39,22 +39,12 @@ func HeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		result := completion.Store.Results[0].HeartbeatLocks
 
-		// If rows affected is 0, the the process does not own any locks.
-		if result.RowsAffected == 0 {
-			res(&t_api.Response{
-				Kind: t_api.HeartbeatLocks,
-				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-					Status: t_api.StatusLockNotFound,
-				},
-			}, nil)
-			return
-		}
-
 		// If rows affected is greater than 0, then the lock's leases were renewed for the processId.
 		res(&t_api.Response{
 			Kind: t_api.HeartbeatLocks,
 			HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-				Status: t_api.StatusOK,
+				Status:        t_api.StatusOK,
+				LocksAffected: result.RowsAffected,
 			},
 		}, nil)
 	})
