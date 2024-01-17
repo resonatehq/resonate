@@ -826,7 +826,8 @@ func TestHttpServer(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-					Status: t_api.StatusOK,
+					Status:        t_api.StatusOK,
+					LocksAffected: 0,
 				},
 			},
 			status: 200,

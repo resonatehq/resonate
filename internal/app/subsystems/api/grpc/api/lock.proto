@@ -23,8 +23,7 @@ message AcquireLockRequest {
 }
   
 message AcquireLockResponse {
-    int32 status = 1;
-    Lock lock = 2;
+    Lock lock = 1;
 }
   
 message HeartbeatLocksRequest {
@@ -34,7 +33,7 @@ message HeartbeatLocksRequest {
 }
   
 message HeartbeatLocksResponse { 
-    int32 status = 1;
+    int32 locksAffected = 1;
 }
   
 message ReleaseLockRequest {
@@ -43,7 +42,5 @@ message ReleaseLockRequest {
     string request_id = 3;
 }
   
-message ReleaseLockResponse {
-    int32 status = 1;
-}
+message ReleaseLockResponse {}
   
