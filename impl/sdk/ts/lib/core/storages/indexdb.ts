@@ -1,8 +1,9 @@
-import { IStorage } from "../storage";
+import { IPromiseStorage } from "../storage";
 import { DurablePromise, isDurablePromise } from "../promise";
 import { ResonateError, ErrorCodes } from "../error";
+import { Schedule } from "../schedule";
 
-export class IndexedDbStorage implements IStorage {
+export class IndexedDbStorage implements IPromiseStorage {
   private dbName = "resonateDB";
   private readonly storeName = "promises";
   private db: Promise<IDBDatabase>;
@@ -32,7 +33,7 @@ export class IndexedDbStorage implements IStorage {
     }
   }
 
-  async rmw<P extends DurablePromise | undefined>(
+  async rmw<P extends DurablePromise | Schedule | undefined>(
     id: string,
     f: (promise: DurablePromise | undefined) => P,
   ): Promise<P> {
@@ -43,7 +44,7 @@ export class IndexedDbStorage implements IStorage {
     const storedPromise: DurablePromise | undefined = await this.getPromiseById(objectStore, id);
     const resultPromise = f(storedPromise);
 
-    if (resultPromise) {
+    if (isDurablePromise(resultPromise)) {
       await this.savePromise(objectStore, resultPromise);
     }
 
@@ -63,6 +64,11 @@ export class IndexedDbStorage implements IStorage {
     const objectStore = transaction.objectStore(this.storeName);
 
     yield this.getAllPromises(objectStore);
+  }
+
+  async deleteSchedule(id: string): Promise<boolean> {
+    // TODO: To be implemented
+    return true;
   }
 
   private async getDb(): Promise<IDBDatabase> {

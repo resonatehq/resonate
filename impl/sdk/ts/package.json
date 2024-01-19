@@ -37,6 +37,7 @@
     },
     "dependencies": {
         "@opentelemetry/api": "^1.7.0",
+        "cron-parser": "^4.9.0",
         "jest": "^29.7.0",
         "puppeteer": "^21.7.0"
     }

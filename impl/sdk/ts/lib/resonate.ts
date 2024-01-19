@@ -9,8 +9,8 @@ import { RemotePromiseStore } from "./core/stores/remote";
 import { ILogger, ITrace } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { JSONEncoder } from "./core/encoders/json";
+import { IPromiseStorage } from "./core/storage";
 import { ResonateError } from "./core/error";
-import { IStorage } from "./core/storage";
 import { ILock } from "./core/lock";
 import { LocalLock } from "./core/locks/local";
 import { ICache } from "./core/cache";
@@ -44,7 +44,7 @@ type ResonateOpts = {
   namespace: string;
   seperator: string;
   store: IPromiseStore;
-  storage: IStorage;
+  storage: IPromiseStorage;
   bucket: IBucket;
   lock: ILock;
   logger: ILogger;

@@ -134,3 +134,15 @@ export function isCompletedPromise(
 ): p is ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise {
   return isDurablePromise(p) && ["RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes(p.state);
 }
+
+export function searchStates(state: string | undefined): string[] {
+  if (state?.toLowerCase() == "pending") {
+    return ["PENDING"];
+  } else if (state?.toLowerCase() == "resolved") {
+    return ["RESOLVED"];
+  } else if (state?.toLowerCase() == "rejected") {
+    return ["REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"];
+  } else {
+    return ["PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"];
+  }
+}
