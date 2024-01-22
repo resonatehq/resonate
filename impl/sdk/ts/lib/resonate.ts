@@ -1,18 +1,15 @@
 import { Opts } from "./core/opts";
-import { IPromiseStore } from "./core/store";
+import { IStore } from "./core/store";
 import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
 import { ExponentialRetry } from "./core/retries/exponential";
 import { IBucket } from "./core/bucket";
 import { Bucket } from "./core/buckets/bucket";
-import { LocalPromiseStore } from "./core/stores/local";
-import { RemotePromiseStore } from "./core/stores/remote";
+import { LocalStore } from "./core/stores/local";
+import { RemoteStore } from "./core/stores/remote";
 import { ILogger, ITrace } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { JSONEncoder } from "./core/encoders/json";
-import { IPromiseStorage } from "./core/storage";
 import { ResonateError } from "./core/error";
-import { ILock } from "./core/lock";
-import { LocalLock } from "./core/locks/local";
 import { ICache } from "./core/cache";
 import { Cache } from "./core/caches/cache";
 
@@ -43,10 +40,8 @@ type ResonateOpts = {
   pid: string;
   namespace: string;
   seperator: string;
-  store: IPromiseStore;
-  storage: IPromiseStorage;
+  store: IStore;
   bucket: IBucket;
-  lock: ILock;
   logger: ILogger;
 };
 
@@ -55,11 +50,9 @@ export class Resonate {
 
   private cache: ICache<Promise<any>> = new Cache();
 
-  private stores: Record<string, IPromiseStore> = {};
+  private stores: Record<string, IStore> = {};
 
   private buckets: Record<string, IBucket> = {};
-
-  private locks: Record<string, ILock> = {};
 
   readonly logger: ILogger;
 
@@ -85,10 +78,8 @@ export class Resonate {
     namespace = "",
     seperator = "/",
     store,
-    storage,
     logger = new Logger(),
     bucket = new Bucket(),
-    lock = new LocalLock(),
   }: Partial<ResonateOpts> = {}) {
     this.pid = pid;
     this.namespace = namespace;
@@ -97,18 +88,17 @@ export class Resonate {
     this.logger = logger;
 
     // store
-    let defaultStore: IPromiseStore;
+    let defaultStore: IStore;
     if (store) {
       defaultStore = store;
-    } else if (storage) {
-      defaultStore = new LocalPromiseStore(storage);
+    } else if (url) {
+      defaultStore = new RemoteStore(url, logger);
     } else {
-      defaultStore = url ? new RemotePromiseStore(url, logger) : new LocalPromiseStore();
+      defaultStore = new LocalStore(logger);
     }
 
     this.addStore("default", defaultStore);
     this.addBucket("default", bucket);
-    this.addLock("default", lock);
   }
 
   /**
@@ -117,7 +107,7 @@ export class Resonate {
    * @param name
    * @param store
    */
-  addStore(name: string, store: IPromiseStore) {
+  addStore(name: string, store: IStore) {
     this.stores[name] = store;
   }
 
@@ -127,7 +117,7 @@ export class Resonate {
    * @param name
    * @returns instance of IPromiseStore
    */
-  store(name: string): IPromiseStore {
+  store(name: string): IStore {
     return this.stores[name];
   }
 
@@ -149,26 +139,6 @@ export class Resonate {
    */
   bucket(name: string): IBucket {
     return this.buckets[name];
-  }
-
-  /**
-   * Add a lock store.
-   *
-   * @param name
-   * @param lock
-   */
-  addLock(name: string, lock: ILock) {
-    this.locks[name] = lock;
-  }
-
-  /**
-   * Get a lock store by name.
-   *
-   * @param name
-   * @returns instance of IBucket
-   */
-  lock(name: string): ILock {
-    return this.locks[name];
   }
 
   /**
@@ -196,7 +166,6 @@ export class Resonate {
         timeout: 10000,
         store: "default",
         bucket: "default",
-        lock: "default",
         retry: ExponentialRetry.atLeastOnce(),
         encoder: new JSONEncoder(),
         eid: randomId(),
@@ -239,12 +208,12 @@ export class Resonate {
     id = this.id(this.namespace, name, opts.id ?? id);
     const idempotencyKey = opts.idempotencyKey ?? id;
 
-    const lock = this.lock(opts.lock);
+    const locks = this.store(opts.store).locks;
 
     if (!this.cache.has(id)) {
       const promise = new Promise(async (resolve, reject) => {
         // lock
-        while (!lock.tryAcquire(id, this.pid, opts.eid)) {
+        while (!locks.tryAcquire(id, this.pid, opts.eid)) {
           // sleep
           await new Promise((r) => setTimeout(r, 1000));
         }
@@ -256,7 +225,7 @@ export class Resonate {
         } catch (e) {
           reject(e);
         } finally {
-          lock.release(id, opts.eid);
+          locks.release(id, opts.eid);
         }
       });
 
@@ -266,22 +235,12 @@ export class Resonate {
     return this.cache.get(id);
   }
 
-  /**
-   * Get a promise from the store
-   * @param id
-   * @param store
-   * @returns a durable promise
-   */
-  get(id: string, store: string = "default"): Promise<DurablePromise> {
-    return this.store(store).get(id);
-  }
-
   async start(store: string = "default") {
     setTimeout(() => this.start(store), 1000);
 
     const encoder = new JSONEncoder();
 
-    const search = this.store(store).search(this.id(this.namespace, "*"), "pending", {
+    const search = this.store(store).promises.search(this.id(this.namespace, "*"), "pending", {
       "resonate:invocation": "true",
     });
 
@@ -392,7 +351,7 @@ class ResonateContext implements Context {
 
   private traces: ITrace[] = [];
 
-  private store: IPromiseStore;
+  private store: IStore;
 
   private bucket: IBucket;
 
@@ -501,7 +460,15 @@ class ResonateContext implements Context {
     const tags = this.isRoot ? { "resonate:invocation": "true" } : undefined;
 
     // create durable promise
-    const promise = yield this.store.create(this.id, this.idempotencyKey, false, undefined, data, this.timeout, tags);
+    const promise = yield this.store.promises.create(
+      this.id,
+      this.idempotencyKey,
+      false,
+      undefined,
+      data,
+      this.timeout,
+      tags,
+    );
 
     if (isPendingPromise(promise)) {
       try {
@@ -517,13 +484,13 @@ class ResonateContext implements Context {
         const data = this.opts.encoder.encode(r);
 
         // resolve durable promise
-        return yield this.store.resolve(this.id, this.idempotencyKey, false, undefined, data);
+        return yield this.store.promises.resolve(this.id, this.idempotencyKey, false, undefined, data);
       } catch (e: unknown) {
         // encode error
         const data = this.opts.encoder.encode(e);
 
         // reject durable promise
-        return yield this.store.reject(this.id, this.idempotencyKey, false, undefined, data);
+        return yield this.store.promises.reject(this.id, this.idempotencyKey, false, undefined, data);
       }
     }
 
@@ -537,13 +504,21 @@ class ResonateContext implements Context {
     const data = this.opts.encoder.encode(args);
 
     // create durable promise
-    let promise = yield this.store.create(func, this.idempotencyKey, false, undefined, data, this.timeout, undefined);
+    let promise = yield this.store.promises.create(
+      func,
+      this.idempotencyKey,
+      false,
+      undefined,
+      data,
+      this.timeout,
+      undefined,
+    );
 
     while (isPendingPromise(promise)) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       try {
-        promise = await this.store.get(func);
+        promise = await this.store.promises.get(func);
       } catch (e: unknown) {
         // TODO
       }

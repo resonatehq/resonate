@@ -5,43 +5,17 @@ import {
   RejectedPromise,
   CanceledPromise,
   TimedoutPromise,
-  isDurablePromise,
 } from "./promise";
 
-import { Schedule, isSchedule } from "./schedule";
+import { Schedule } from "./schedule";
 
-export interface SearchPromiseParams {
-  id: string;
-  state?: string;
-  tags?: Record<string, string>;
-  limit?: number;
-}
-
-export interface SearchPromiseResult {
-  cursor: string | null;
-  promises: DurablePromise[];
-}
-
-export function isSearchPromiseResult(obj: any): obj is SearchPromiseResult {
-  return (
-    obj !== undefined &&
-    obj.cursor !== undefined &&
-    (obj.cursor === null || typeof obj.cursor === "string") &&
-    obj.promises !== undefined &&
-    Array.isArray(obj.promises) &&
-    obj.promises.every(isDurablePromise)
-  );
-}
-
-export function isSearchSchedulesResult(obj: any): obj is { cursor: string; schedules: Schedule[] } {
-  return (
-    obj !== undefined &&
-    obj.cursor !== undefined &&
-    (obj.cursor === null || typeof obj.cursor === "string") &&
-    obj.schedules !== undefined &&
-    Array.isArray(obj.schedules) &&
-    obj.schedules.every(isSchedule)
-  );
+/**
+ * Store Interface
+ */
+export interface IStore {
+  readonly promises: IPromiseStore;
+  readonly schedules: IScheduleStore;
+  readonly locks: ILockStore;
 }
 
 /**
@@ -141,12 +115,15 @@ export interface IPromiseStore {
    */
   search(
     id: string,
-    state?: string,
-    tags?: Record<string, string>,
+    state: string | undefined,
+    tags: Record<string, string> | undefined,
     limit?: number,
   ): AsyncGenerator<DurablePromise[], void>;
 }
 
+/**
+ * Schedule Store API
+ */
 export interface IScheduleStore {
   /**
    * Creates a new schedule.
@@ -198,5 +175,13 @@ export interface IScheduleStore {
    * @param tags Tags to match.
    * @returns A list of promise schedules.
    */
-  search(id: string, tags?: Record<string, string>, limit?: number): AsyncGenerator<Schedule[], void>;
+  search(id: string, tags: Record<string, string> | undefined, limit?: number): AsyncGenerator<Schedule[], void>;
+}
+
+/**
+ * Lock Store API
+ */
+export interface ILockStore {
+  tryAcquire(id: string, pid: string, eid: string): boolean;
+  release(id: string, eid: string): void;
 }

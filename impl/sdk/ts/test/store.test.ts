@@ -1,7 +1,6 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
-import { Logger } from "../lib/core/loggers/logger";
-import { RemotePromiseStore, RemoteScheduleStore, RemoteStore } from "../lib/core/stores/remote";
+import { RemotePromiseStore } from "../lib/core/stores/remote";
 import { LocalPromiseStore } from "../lib/core/stores/local";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
@@ -11,11 +10,7 @@ describe("Resonate Server Tests", () => {
   const useDurable = process.env.USE_DURABLE === "true";
   const url = process.env.RESONATE_URL || "http://localhost:8001";
 
-  const remotePromiseStore = new RemotePromiseStore(url, new Logger());
-  const remoteScheduleStore = new RemoteScheduleStore(url, new Logger());
-  const remotestore = new RemoteStore(remotePromiseStore, remoteScheduleStore);
-
-  const store = useDurable ? remotestore.promises : new LocalPromiseStore();
+  const store = useDurable ? new RemotePromiseStore(url) : new LocalPromiseStore();
 
   describe("State Transition Tests", () => {
     test("Test Case 0: transitions from Init to Pending via Create", async () => {

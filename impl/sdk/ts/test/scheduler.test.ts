@@ -1,20 +1,13 @@
 import { Schedule } from "../lib/core/schedule";
-import { MemoryPromiseStorage, MemoryScheduleStorage } from "../lib/core/storages/memory";
-import { LocalPromiseStore, LocalScheduleStore, LocalStore } from "../lib/core/stores/local";
+import { LocalStore } from "../lib/core/stores/local";
 import { describe, beforeEach, test, expect } from "@jest/globals";
 
 describe("LocalPromiseStore", () => {
   let store: LocalStore;
 
   beforeEach(() => {
-    const promiseStorage = new MemoryPromiseStorage();
-    const scheduleStorage = new MemoryScheduleStorage();
-
-    const promiseStore = new LocalPromiseStore(promiseStorage);
-    const scheduleStore = new LocalScheduleStore(scheduleStorage);
-
     // Initialize a new LocalPromiseStore with a MemoryStorage for testing
-    store = new LocalStore(promiseStore, scheduleStore);
+    store = new LocalStore();
   });
 
   test("creates a schedule", async () => {

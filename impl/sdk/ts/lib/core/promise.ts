@@ -14,9 +14,9 @@ export type PendingPromise = {
   };
   createdOn: number;
   completedOn: undefined;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: undefined;
-  tags?: Record<string, string>;
+  idempotencyKeyForCreate: string | undefined;
+  idempotencyKeyForComplete: undefined;
+  tags: Record<string, string> | undefined;
 };
 
 export type ResolvedPromise = {
@@ -33,9 +33,9 @@ export type ResolvedPromise = {
   };
   createdOn: number;
   completedOn: number;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: string;
-  tags?: Record<string, string>;
+  idempotencyKeyForCreate: string | undefined;
+  idempotencyKeyForComplete: string | undefined;
+  tags: Record<string, string> | undefined;
 };
 
 export type RejectedPromise = {
@@ -52,9 +52,9 @@ export type RejectedPromise = {
   };
   createdOn: number;
   completedOn: number;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: string;
-  tags?: Record<string, string>;
+  idempotencyKeyForCreate: string | undefined;
+  idempotencyKeyForComplete: string | undefined;
+  tags: Record<string, string> | undefined;
 };
 
 export type CanceledPromise = {
@@ -71,9 +71,9 @@ export type CanceledPromise = {
   };
   createdOn: number;
   completedOn: number;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: string;
-  tags?: Record<string, string>;
+  idempotencyKeyForCreate: string | undefined;
+  idempotencyKeyForComplete: string | undefined;
+  tags: Record<string, string> | undefined;
 };
 
 export type TimedoutPromise = {
@@ -90,10 +90,12 @@ export type TimedoutPromise = {
   };
   createdOn: number;
   completedOn: number;
-  idempotencyKeyForCreate?: string;
-  idempotencyKeyForComplete?: undefined;
-  tags?: Record<string, string>;
+  idempotencyKeyForCreate: string | undefined;
+  idempotencyKeyForComplete: undefined;
+  tags: Record<string, string> | undefined;
 };
+
+// Type guards
 
 export function isDurablePromise(p: unknown): p is DurablePromise {
   if (
@@ -134,6 +136,8 @@ export function isCompletedPromise(
 ): p is ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise {
   return isDurablePromise(p) && ["RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes(p.state);
 }
+
+// Utils
 
 export function searchStates(state: string | undefined): string[] {
   if (state?.toLowerCase() == "pending") {

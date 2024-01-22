@@ -1,6 +1,7 @@
 import { jest, describe, test, expect } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
-import { LocalLock } from "../lib/core/locks/local";
+import { LocalStore } from "../lib/core/stores/local";
+import { MemoryLockStore } from "../lib/core/storages/memory";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
@@ -18,9 +19,9 @@ function write(context: Context, id: string, final: boolean = false) {
 }
 
 describe("Lock", () => {
-  const lock = new LocalLock();
-  const r1 = new Resonate({ lock: lock });
-  const r2 = new Resonate({ lock: lock });
+  const store = new LocalStore(undefined, undefined, undefined, new MemoryLockStore());
+  const r1 = new Resonate({ store });
+  const r2 = new Resonate({ store });
 
   r1.register("write", write);
   r2.register("write", write);
@@ -35,7 +36,7 @@ describe("Lock", () => {
     expect(sharedResource.length).toBe(1);
 
     // release lock so p2 can run
-    lock.release("write/id", sharedResource[0]);
+    store.locks.release("write/id", sharedResource[0]);
 
     const r = await p2;
 

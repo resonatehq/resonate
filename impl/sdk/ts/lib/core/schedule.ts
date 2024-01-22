@@ -1,24 +1,22 @@
 export type Schedule = {
   id: string;
-  description?: string;
+  description: string | undefined;
   cron: string;
-  tags?: Record<string, string>;
+  tags: Record<string, string> | undefined;
   promiseId: string;
   promiseTimeout: number;
-  promiseParam?: {
-    data?: string;
-    headers: Record<string, string>;
+  promiseParam: {
+    data: string | undefined;
+    headers: Record<string, string> | undefined;
   };
-  promiseTags?: Record<string, string>;
-  lastRunTime?: number;
-  nextRunTime?: number;
-  idempotencyKey?: string;
-  createdOn?: number;
+  promiseTags: Record<string, string> | undefined;
+  lastRunTime: number | undefined;
+  nextRunTime: number;
+  idempotencyKey: string | undefined;
+  createdOn: number;
 };
 
-// Function to check if the response matches the Schedule type
 export function isSchedule(obj: any): obj is Schedule {
-  // You may need to adjust this based on the actual structure of your Schedule type
   return (
     obj !== undefined &&
     typeof obj.id === "string" &&

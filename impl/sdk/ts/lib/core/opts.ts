@@ -28,11 +28,6 @@ export type Opts = {
   bucket: string;
 
   /**
-   * Overrides the default bucket.
-   */
-  lock: string;
-
-  /**
    * Overrides the default retry policy.
    */
   retry: IRetry;
