@@ -266,8 +266,9 @@ func (r *Request) String() string {
 		)
 	case HeartbeatLocks:
 		return fmt.Sprintf(
-			"HeartbeatLocks(processId=%s)",
+			"HeartbeatLocks(processId=%s, timeout=%d)",
 			r.HeartbeatLocks.ProcessId,
+			r.HeartbeatLocks.Timeout,
 		)
 
 	case ReleaseLock:
