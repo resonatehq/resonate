@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - id: cache
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -35,7 +35,7 @@ jobs:
       run: go build -o resonate
     - name: Cache resonate binary
       if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -56,7 +56,7 @@ jobs:
 
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -90,7 +90,7 @@ jobs:
     timeout-minutes: 150
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -134,7 +134,7 @@ jobs:
 
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -191,7 +191,7 @@ jobs:
 
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -211,7 +211,7 @@ jobs:
     needs: [build, seed, dst-sqlite-1, dst-sqlite-2]
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -248,7 +248,7 @@ jobs:
     needs: [build, seed, dst-postgres-1, dst-postgres-2]
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
@@ -285,7 +285,7 @@ jobs:
     needs: [build, seed, dst-sqlite-1, dst-postgres-1]
     steps:
     - name: Restore resonate binary
-      uses: actions/cache/restore@v3
+      uses: actions/cache/restore@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}

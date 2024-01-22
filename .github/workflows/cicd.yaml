@@ -66,7 +66,7 @@ jobs:
         run: go build -o resonate
 
       - name: Cache resonate binary
-        uses: actions/cache/save@v3
+        uses: actions/cache/save@v4
         with:
           path: resonate
           key: resonate-${{ github.sha }}
@@ -76,7 +76,7 @@ jobs:
     needs: [build]
     steps:
       - name: Restore resonate binary
-        uses: actions/cache/restore@v3
+        uses: actions/cache/restore@v4
         with:
           path: resonate
           key: resonate-${{ github.sha }}
