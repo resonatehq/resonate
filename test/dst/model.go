@@ -641,11 +641,11 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 				return nil
 			}
 
+			// todo: come back to once expand dst knowledge.
 			// if lock belongs to the same executionId it must have timedout.
-			if lm.lock.Timeout > t {
-				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
-			}
-			// can't know if it was actually released or not ??
+			// if lm.lock.Timeout > t {
+			// 	return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+			// }
 			lm.lock = nil
 		}
 
