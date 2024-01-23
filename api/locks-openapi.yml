@@ -68,26 +68,26 @@ components:
           type: string
         execution_id:
           type: string
-        timeout:
+        expiry_in_seconds:
           type: integer
           format: int64
       required:
         - resource_id
         - process_id
         - execution_id
-        - timeout
+        - expiry_in_seconds
 
     HeartbeatRequest:
       type: object
       properties:
         process_id:
           type: string
-        timeout:
+        expiry_in_seconds:
           type: integer
           format: int64
       required:
         - process_id
-        - timeout
+        - expiry_in_seconds
 
     HeartbeatResponse:
       type: object

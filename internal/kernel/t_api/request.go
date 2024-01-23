@@ -141,15 +141,15 @@ type EchoRequest struct {
 // Locks
 
 type AcquireLockRequest struct {
-	ResourceId  string `json:"resourceId"`
-	ProcessId   string `json:"processId"`
-	ExecutionId string `json:"executionId"`
-	Timeout     int64  `json:"timeout"`
+	ResourceId      string `json:"resourceId"`
+	ProcessId       string `json:"processId"`
+	ExecutionId     string `json:"executionId"`
+	ExpiryInSeconds int64  `json:"expiryInSeconds"`
 }
 
 type HeartbeatLocksRequest struct {
-	ProcessId string `json:"processId"`
-	Timeout   int64  `json:"timeout"`
+	ProcessId       string `json:"processId"`
+	ExpiryInSeconds int64  `json:"expiryInSeconds"`
 }
 
 type ReleaseLockRequest struct {
@@ -258,17 +258,17 @@ func (r *Request) String() string {
 	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
-			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, timeout=%d)",
+			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, expiryInSeconds=%d)",
 			r.AcquireLock.ResourceId,
 			r.AcquireLock.ProcessId,
 			r.AcquireLock.ExecutionId,
-			r.AcquireLock.Timeout,
+			r.AcquireLock.ExpiryInSeconds,
 		)
 	case HeartbeatLocks:
 		return fmt.Sprintf(
-			"HeartbeatLocks(processId=%s, timeout=%d)",
+			"HeartbeatLocks(processId=%s, expiryInSeconds=%d)",
 			r.HeartbeatLocks.ProcessId,
-			r.HeartbeatLocks.Timeout,
+			r.HeartbeatLocks.ExpiryInSeconds,
 		)
 
 	case ReleaseLock:

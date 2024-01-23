@@ -1249,19 +1249,19 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 1,
 				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
 				AcquireLock: &t_api.AcquireLockRequest{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 1,
 				},
 			},
 			res: &t_api.Response{
@@ -1269,10 +1269,10 @@ func TestAcquireLock(t *testing.T) {
 				AcquireLock: &t_api.AcquireLockResponse{
 					Status: t_api.StatusCreated,
 					Lock: &lock.Lock{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Timeout:     1,
+						ResourceId:      "foo",
+						ProcessId:       "bar",
+						ExecutionId:     "baz",
+						ExpiryInSeconds: 1,
 					},
 				},
 			},
@@ -1282,10 +1282,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing resource id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:  "",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1,
+					ResourceId:      "",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 1,
 				},
 			},
 			req:  nil,
@@ -1296,10 +1296,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing process id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "",
-					ExecutionId: "baz",
-					Timeout:     1,
+					ResourceId:      "foo",
+					ProcessId:       "",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 1,
 				},
 			},
 			req:  nil,
@@ -1310,10 +1310,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing execution id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "",
-					Timeout:     1,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "",
+					ExpiryInSeconds: 1,
 				},
 			},
 			req:  nil,
@@ -1324,10 +1324,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing timeout",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     0,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 0,
 				},
 			},
 			req:  nil,
@@ -1384,14 +1384,14 @@ func TestHeartbeatLocks(t *testing.T) {
 		{
 			name: "HeartbeatLocks",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId: "foo",
-				Timeout:   1,
+				ProcessId:       "foo",
+				ExpiryInSeconds: 1,
 			},
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-					ProcessId: "foo",
-					Timeout:   1,
+					ProcessId:       "foo",
+					ExpiryInSeconds: 1,
 				},
 			},
 			res: &t_api.Response{
@@ -1405,8 +1405,8 @@ func TestHeartbeatLocks(t *testing.T) {
 		{
 			name: "HeartbeatLocks missing process id",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId: "",
-				Timeout:   1,
+				ProcessId:       "",
+				ExpiryInSeconds: 1,
 			},
 			req:  nil,
 			res:  nil,
@@ -1415,8 +1415,8 @@ func TestHeartbeatLocks(t *testing.T) {
 		{
 			name: "HeartbeatLocks missing timeout",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId: "foo",
-				Timeout:   0,
+				ProcessId:       "foo",
+				ExpiryInSeconds: 0,
 			},
 			req:  nil,
 			res:  nil,

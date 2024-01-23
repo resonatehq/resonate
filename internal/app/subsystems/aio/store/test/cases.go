@@ -142,19 +142,21 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "barUpdated",
-					ExecutionId: "baz",
-					Timeout:     1736571700000,
+					ResourceId:      "foo",
+					ProcessId:       "barUpdated",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571700000,
 				},
 			},
 		},
@@ -179,19 +181,21 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz1",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz1",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz2",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz2",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 		},
@@ -216,28 +220,31 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo-1",
-					ProcessId:   "a",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo-1",
+					ProcessId:       "a",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo-2",
-					ProcessId:   "a",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo-2",
+					ProcessId:       "a",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo-3",
-					ProcessId:   "b",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo-3",
+					ProcessId:       "b",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
@@ -281,10 +288,11 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
@@ -313,10 +321,11 @@ var TestCases = []*testCase{
 				ReadLock: &t_aio.QueryLocksResult{
 					RowsReturned: 1,
 					Records: []*lock.LockRecord{{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Timeout:     1736571600000,
+						ResourceId:      "foo",
+						ProcessId:       "bar",
+						ExecutionId:     "baz",
+						ExpiryInSeconds: 10,
+						Timeout:         1736571600000,
 					}},
 				},
 			},
@@ -334,10 +343,11 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
@@ -369,10 +379,11 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.AcquireLock,
 				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+					Timeout:         1736571600000,
 				},
 			},
 			{
