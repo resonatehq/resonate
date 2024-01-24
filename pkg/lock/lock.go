@@ -12,10 +12,11 @@ type Lock struct {
 
 func (l *Lock) String() string {
 	return fmt.Sprintf(
-		"Lock(resourceId=%s, processId=%s, executionId=%s, expiryInSeconds=%d)",
+		"Lock(resourceId=%s, processId=%s, executionId=%s, expiryInSeconds=%d, expiresAt=%d)",
 		l.ResourceId,
 		l.ProcessId,
 		l.ExecutionId,
 		l.ExpiryInSeconds,
+		l.ExpiresAt,
 	)
 }
