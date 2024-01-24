@@ -769,15 +769,15 @@ func TestHttpServer(t *testing.T) {
 				"resourceId": "foo",
 				"processId": "bar",
 				"executionId": "baz",
-				"timeout": 1736571600000
+				"expiryInSeconds": 10
 			}`),
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
 				AcquireLock: &t_api.AcquireLockRequest{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
+					ResourceId:      "foo",
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
 				},
 			},
 			res: &t_api.Response{
@@ -785,24 +785,24 @@ func TestHttpServer(t *testing.T) {
 				AcquireLock: &t_api.AcquireLockResponse{
 					Status: t_api.StatusCreated,
 					Lock: &lock.Lock{
-						ResourceId:  "foo",
-						ProcessId:   "bar",
-						ExecutionId: "baz",
-						Timeout:     1736571600000,
+						ResourceId:      "foo",
+						ProcessId:       "bar",
+						ExecutionId:     "baz",
+						ExpiryInSeconds: 10,
 					},
 				},
 			},
 			status: 201,
 		},
 		{
-			name:   "AcquireLock missing resourceId",
+			name:   "AcquireLock missing executionIdc",
 			path:   "locks/acquire",
 			method: "POST",
 			body: []byte(`{
 				"resourceId": "foo",
 				"processId": "bar",
 				"executionId": "",
-				"timeout": 1736571600000
+				"expiryInSeconds": 10
 			}`),
 			req:    nil,
 			res:    nil,
@@ -813,14 +813,12 @@ func TestHttpServer(t *testing.T) {
 			path:   "locks/heartbeat",
 			method: "POST",
 			body: []byte(`{
-				"processId": "bar",
-				"timeout": 1736571600000
+				"processId": "bar"
 			}`),
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 					ProcessId: "bar",
-					Timeout:   1736571600000,
 				},
 			},
 			res: &t_api.Response{

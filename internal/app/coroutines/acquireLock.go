@@ -27,7 +27,7 @@ func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 								ResourceId:  req.AcquireLock.ResourceId,
 								ProcessId:   req.AcquireLock.ProcessId,
 								ExecutionId: req.AcquireLock.ExecutionId,
-								Timeout:     req.AcquireLock.Timeout,
+								Timeout:     c.Time() + (req.AcquireLock.ExpiryInSeconds * 1000), // from s to ms
 							},
 						},
 					},
@@ -62,10 +62,10 @@ func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 			AcquireLock: &t_api.AcquireLockResponse{
 				Status: t_api.StatusCreated,
 				Lock: &lock.Lock{
-					ResourceId:  req.AcquireLock.ResourceId,
-					ProcessId:   req.AcquireLock.ProcessId,
-					ExecutionId: req.AcquireLock.ExecutionId,
-					Timeout:     req.AcquireLock.Timeout,
+					ResourceId:      req.AcquireLock.ResourceId,
+					ProcessId:       req.AcquireLock.ProcessId,
+					ExecutionId:     req.AcquireLock.ExecutionId,
+					ExpiryInSeconds: req.AcquireLock.ExpiryInSeconds,
 				},
 			},
 		}, nil)

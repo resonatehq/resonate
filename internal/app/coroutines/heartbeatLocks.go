@@ -23,7 +23,6 @@ func HeartbeatLocks(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 							Kind: t_aio.HeartbeatLocks,
 							HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
 								ProcessId: req.HeartbeatLocks.ProcessId,
-								Timeout:   req.HeartbeatLocks.Timeout,
 							},
 						},
 					},

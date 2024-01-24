@@ -14,7 +14,8 @@ message Lock {
     string resource_id = 1;
     string process_id = 2; 
     string execution_id = 3;
-    int64 timeout = 4;  
+    int64 expiry_in_seconds = 4;  
+    int64 expires_at = 5;
 }
 
 message AcquireLockRequest {
@@ -28,8 +29,7 @@ message AcquireLockResponse {
   
 message HeartbeatLocksRequest {
     string process_id = 1;
-    int64 timeout = 2;
-    string request_id = 3;
+    string request_id = 2;
 }
   
 message HeartbeatLocksResponse { 

@@ -28,10 +28,11 @@ import (
 const (
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS locks (
-		resource_id   TEXT UNIQUE,
-		process_id    TEXT,
-		execution_id  TEXT, 
-		timeout       INTEGER
+		resource_id       TEXT UNIQUE,
+		process_id        TEXT,
+		execution_id      TEXT, 
+		expiry_in_seconds INTEGER,
+		timeout           INTEGER
 	); 
 
 	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
@@ -108,7 +109,7 @@ const (
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
-		resource_id, process_id, execution_id, timeout
+		resource_id, process_id, execution_id, expiry_in_seconds, timeout
 	FROM
 		locks
 	WHERE
@@ -116,12 +117,13 @@ const (
 
 	LOCK_ACQUIRE_STATEMENT = `
 	INSERT INTO locks
-		(resource_id, process_id, execution_id, timeout)
+		(resource_id, process_id, execution_id, expiry_in_seconds, timeout)
 	VALUES
-		(?, ?, ?, ?)
+		(?, ?, ?, ?, ?)
 	ON CONFLICT(resource_id)
 	DO UPDATE SET 
 		process_id = excluded.process_id,
+		expiry_in_seconds = excluded.expiry_in_seconds,
 		timeout = excluded.timeout
 	WHERE
 		execution_id = excluded.execution_id`
@@ -130,7 +132,7 @@ const (
 	UPDATE
 		locks
 	SET
-		timeout = ?
+		timeout = timeout + (expiry_in_seconds * 1000) 
 	WHERE
 		process_id = ?`
 
@@ -692,6 +694,7 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 		&record.ResourceId,
 		&record.ProcessId,
 		&record.ExecutionId,
+		&record.ExpiryInSeconds,
 		&record.Timeout,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -717,7 +720,7 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 
 func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.Timeout)
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.ExpiryInSeconds, cmd.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -737,7 +740,7 @@ func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.A
 
 func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
 	// update
-	res, err := stmt.Exec(cmd.Timeout, cmd.ProcessId)
+	res, err := stmt.Exec(cmd.ProcessId)
 	if err != nil {
 		return nil, err
 	}

@@ -615,7 +615,7 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
 				owned := m.locks.Get(l.lock.ResourceId)
-				owned.lock.Timeout = req.HeartbeatLocks.Timeout
+				owned.lock.ExpiresAt = owned.lock.ExpiresAt + (owned.lock.ExpiryInSeconds * 1000)
 			}
 		}
 
@@ -641,11 +641,10 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 				return nil
 			}
 
-			// todo: come back to once expand dst knowledge.
 			// if lock belongs to the same executionId it must have timedout.
-			// if lm.lock.Timeout > t {
-			// 	return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
-			// }
+			if lm.lock.ExpiresAt > t {
+				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+			}
 			lm.lock = nil
 		}
 

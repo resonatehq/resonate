@@ -30,15 +30,15 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 	if req.Lock.ExecutionId == "" {
 		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.execution_id must be provided")
 	}
-	if req.Lock.Timeout == 0 {
+	if req.Lock.ExpiryInSeconds == 0 {
 		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.timeout must be provided")
 	}
 
 	body := &service.AcquireLockBody{
-		ResourceId:  req.Lock.ResourceId,
-		ProcessId:   req.Lock.ProcessId,
-		ExecutionId: req.Lock.ExecutionId,
-		Timeout:     req.Lock.Timeout,
+		ResourceId:      req.Lock.ResourceId,
+		ProcessId:       req.Lock.ProcessId,
+		ExecutionId:     req.Lock.ExecutionId,
+		ExpiryInSeconds: req.Lock.ExpiryInSeconds,
 	}
 
 	resp, err := s.service.AcquireLock(header, body)
@@ -61,13 +61,9 @@ func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocks
 	if req.ProcessId == "" {
 		return nil, grpcStatus.Error(codes.InvalidArgument, "process_id must be provided")
 	}
-	if req.Timeout == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "timeout must be provided")
-	}
 
 	body := &service.HeartbeatBody{
 		ProcessId: req.ProcessId,
-		Timeout:   req.Timeout,
 	}
 
 	res, err := s.service.Heartbeat(header, body)
@@ -115,9 +111,9 @@ func protoLock(lock *lock.Lock) *grpcApi.Lock {
 	}
 
 	return &grpcApi.Lock{
-		ResourceId:  lock.ResourceId,
-		ProcessId:   lock.ProcessId,
-		ExecutionId: lock.ExecutionId,
-		Timeout:     lock.Timeout,
+		ResourceId:      lock.ResourceId,
+		ProcessId:       lock.ProcessId,
+		ExecutionId:     lock.ExecutionId,
+		ExpiryInSeconds: lock.ExpiryInSeconds,
 	}
 }
