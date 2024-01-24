@@ -69,8 +69,7 @@ describe("LocalPromiseStore", () => {
     expect(searchResults.id).toBe(scheduleId);
 
     const isDeleted = await store.schedules.delete(scheduleId);
-
-    expect(isDeleted).toBe(true);
+    expect(isDeleted).toBeUndefined();
 
     // search for the schedule again
     let schedules: Schedule[] = [];

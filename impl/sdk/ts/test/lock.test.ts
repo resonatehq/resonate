@@ -1,7 +1,6 @@
 import { jest, describe, test, expect } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
 import { LocalStore } from "../lib/core/stores/local";
-import { MemoryLockStore } from "../lib/core/storages/memory";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
@@ -19,7 +18,7 @@ function write(context: Context, id: string, final: boolean = false) {
 }
 
 describe("Lock", () => {
-  const store = new LocalStore(undefined, undefined, undefined, new MemoryLockStore());
+  const store = new LocalStore();
   const r1 = new Resonate({ store });
   const r2 = new Resonate({ store });
 

@@ -8,26 +8,26 @@ import {
   isDurablePromise,
   isCompletedPromise,
 } from "../promise";
-import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
+import { IStore, IPromiseStore, IScheduleStore } from "../store";
 import { IEncoder } from "../encoder";
 import { Base64Encoder } from "../encoders/base64";
 import { ErrorCodes, ResonateError } from "../error";
 import { ILogger } from "../logger";
 import { Schedule, isSchedule } from "../schedule";
 import { Logger } from "../loggers/logger";
-import { MemoryLockStore } from "../storages/memory";
+import { LocalLockStore } from "./local";
 
 export class RemoteStore implements IStore {
   public promises: RemotePromiseStore;
   public schedules: RemoteScheduleStore;
-  public locks: ILockStore;
+  public locks: LocalLockStore;
 
   constructor(url: string, logger: ILogger, encoder: IEncoder<string, string> = new Base64Encoder()) {
     this.promises = new RemotePromiseStore(url, logger, encoder);
     this.schedules = new RemoteScheduleStore(url, logger, encoder);
 
     // temp
-    this.locks = new MemoryLockStore();
+    this.locks = new LocalLockStore();
   }
 }
 
@@ -325,7 +325,7 @@ export class RemoteScheduleStore implements IScheduleStore {
     return schedule;
   }
 
-  async delete(id: string): Promise<boolean> {
+  async delete(id: string): Promise<void> {
     await call(
       `${this.url}/schedules/${id}`,
       isDeleted,
@@ -338,7 +338,6 @@ export class RemoteScheduleStore implements IScheduleStore {
       },
       this.logger,
     );
-    return true;
   }
 
   async *search(

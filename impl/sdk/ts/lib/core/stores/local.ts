@@ -14,29 +14,30 @@ import {
 import { Schedule } from "../schedule";
 import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
 import { ErrorCodes, ResonateError } from "../error";
-import { IPromiseStorage, IScheduleStorage } from "../storage";
+import { IStorage } from "../storage";
 import { WithTimeout } from "../storages/withTimeout";
-import { MemoryLockStore, MemoryPromiseStorage, MemoryScheduleStorage } from "../storages/memory";
+import { MemoryStorage } from "../storages/memory";
 import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
+import { Lock } from "../lock";
 
 export class LocalStore implements IStore {
   public promises: LocalPromiseStore;
   public schedules: LocalScheduleStore;
-  public locks: ILockStore;
+  public locks: LocalLockStore;
 
   private toSchedule: Schedule[] = [];
   private next: number | undefined = undefined;
 
   constructor(
     private logger: ILogger = new Logger(),
-    promiseStorage: IPromiseStorage = new WithTimeout(new MemoryPromiseStorage()),
-    scheduleStorage: IScheduleStorage = new MemoryScheduleStorage(),
-    lockStore: ILockStore = new MemoryLockStore(),
+    promiseStorage: IStorage<DurablePromise> = new WithTimeout(new MemoryStorage<DurablePromise>()),
+    scheduleStorage: IStorage<Schedule> = new MemoryStorage<Schedule>(),
+    lockStorage: IStorage<Lock> = new MemoryStorage<Lock>(),
   ) {
     this.promises = new LocalPromiseStore(promiseStorage);
     this.schedules = new LocalScheduleStore(scheduleStorage, this);
-    this.locks = lockStore;
+    this.locks = new LocalLockStore(lockStorage);
 
     this.init();
   }
@@ -114,7 +115,8 @@ export class LocalStore implements IStore {
 }
 
 export class LocalPromiseStore implements IPromiseStore {
-  constructor(private storage: IPromiseStorage = new WithTimeout(new MemoryPromiseStorage())) {}
+  constructor(private storage: IStorage<DurablePromise> = new MemoryStorage<DurablePromise>()) {}
+  // constructor(private storage: IPromiseStorage = new WithTimeout(new MemoryPromiseStorage())) {}
 
   async create(
     id: string,
@@ -126,17 +128,7 @@ export class LocalPromiseStore implements IPromiseStore {
     tags: Record<string, string> | undefined,
   ): Promise<PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
-      if (promise) {
-        if (strict && !isPendingPromise(promise)) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        if (promise.idempotencyKeyForCreate === undefined || ikey != promise.idempotencyKeyForCreate) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        return promise;
-      } else {
+      if (!promise) {
         return {
           state: "PENDING",
           id: id,
@@ -156,6 +148,16 @@ export class LocalPromiseStore implements IPromiseStore {
           tags: tags,
         };
       }
+
+      if (strict && !isPendingPromise(promise)) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      if (promise.idempotencyKeyForCreate === undefined || ikey != promise.idempotencyKeyForCreate) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      return promise;
     });
   }
 
@@ -167,37 +169,37 @@ export class LocalPromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
-      if (promise) {
-        if (strict && !isPendingPromise(promise) && !isResolvedPromise(promise)) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        if (isPendingPromise(promise)) {
-          return {
-            state: "RESOLVED",
-            id: promise.id,
-            timeout: promise.timeout,
-            param: promise.param,
-            value: {
-              headers: headers,
-              data: data,
-            },
-            createdOn: promise.createdOn,
-            completedOn: Date.now(),
-            idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
-            idempotencyKeyForComplete: ikey,
-            tags: promise.tags,
-          };
-        }
-
-        if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        return promise;
-      } else {
+      if (!promise) {
         throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
+
+      if (isPendingPromise(promise)) {
+        return {
+          state: "RESOLVED",
+          id: promise.id,
+          timeout: promise.timeout,
+          param: promise.param,
+          value: {
+            headers: headers,
+            data: data,
+          },
+          createdOn: promise.createdOn,
+          completedOn: Date.now(),
+          idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
+          idempotencyKeyForComplete: ikey,
+          tags: promise.tags,
+        };
+      }
+
+      if (strict && !isResolvedPromise(promise)) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      return promise;
     });
   }
 
@@ -209,37 +211,37 @@ export class LocalPromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
-      if (promise) {
-        if (strict && !isPendingPromise(promise) && !isRejectedPromise(promise)) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        if (isPendingPromise(promise)) {
-          return {
-            state: "REJECTED",
-            id: promise.id,
-            timeout: promise.timeout,
-            param: promise.param,
-            value: {
-              headers: headers,
-              data: data,
-            },
-            createdOn: promise.createdOn,
-            completedOn: Date.now(),
-            idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
-            idempotencyKeyForComplete: ikey,
-            tags: promise.tags,
-          };
-        }
-
-        if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        return promise;
-      } else {
+      if (!promise) {
         throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
+
+      if (isPendingPromise(promise)) {
+        return {
+          state: "REJECTED",
+          id: promise.id,
+          timeout: promise.timeout,
+          param: promise.param,
+          value: {
+            headers: headers,
+            data: data,
+          },
+          createdOn: promise.createdOn,
+          completedOn: Date.now(),
+          idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
+          idempotencyKeyForComplete: ikey,
+          tags: promise.tags,
+        };
+      }
+
+      if (strict && !isRejectedPromise(promise)) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      return promise;
     });
   }
 
@@ -251,63 +253,73 @@ export class LocalPromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
-      if (promise) {
-        if (strict && !isPendingPromise(promise) && !isCanceledPromise(promise)) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        if (isPendingPromise(promise)) {
-          return {
-            state: "REJECTED_CANCELED",
-            id: promise.id,
-            timeout: promise.timeout,
-            param: promise.param,
-            value: {
-              headers: headers,
-              data: data,
-            },
-            createdOn: promise.createdOn,
-            completedOn: Date.now(),
-            idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
-            idempotencyKeyForComplete: ikey,
-            tags: promise.tags,
-          };
-        }
-
-        if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
-          throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
-        }
-
-        return promise;
-      } else {
+      if (!promise) {
         throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
       }
+
+      if (isPendingPromise(promise)) {
+        return {
+          state: "REJECTED_CANCELED",
+          id: promise.id,
+          timeout: promise.timeout,
+          param: promise.param,
+          value: {
+            headers: headers,
+            data: data,
+          },
+          createdOn: promise.createdOn,
+          completedOn: Date.now(),
+          idempotencyKeyForCreate: promise.idempotencyKeyForCreate,
+          idempotencyKeyForComplete: ikey,
+          tags: promise.tags,
+        };
+      }
+
+      if (strict && !isCanceledPromise(promise)) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      if (promise.idempotencyKeyForComplete === undefined || ikey != promise.idempotencyKeyForComplete) {
+        throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request");
+      }
+
+      return promise;
     });
   }
 
   async get(id: string): Promise<DurablePromise> {
     const promise = await this.storage.rmw(id, (p) => p);
 
-    if (promise) {
-      return promise;
+    if (!promise) {
+      throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
     }
 
-    throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
+    return promise;
   }
 
-  search(
+  async *search(
     id: string,
     state?: string,
     tags?: Record<string, string>,
     limit?: number,
   ): AsyncGenerator<DurablePromise[], void> {
-    return this.storage.search(id, state, tags, limit);
+    //  filter the promises returned from all storage
+    const regex = new RegExp(id.replaceAll("*", ".*"));
+    const states = searchStates(state);
+    const tagEntries = Object.entries(tags ?? {});
+
+    for await (const promises of this.storage.all()) {
+      yield promises
+        .filter((p) => states.includes(p.state))
+        .filter((p) => regex.test(p.id))
+        .filter((p) => tagEntries.every(([k, v]) => p.tags?.[k] == v));
+    }
   }
 }
 
 export class LocalScheduleStore implements IScheduleStore {
   constructor(
-    private storage: IScheduleStorage = new MemoryScheduleStorage(),
+    private storage: IStorage<Schedule> = new MemoryStorage<Schedule>(),
     private store: LocalStore | undefined = undefined,
   ) {}
 
@@ -395,28 +407,28 @@ export class LocalScheduleStore implements IScheduleStore {
     return schedule;
   }
 
-  async delete(id: string): Promise<boolean> {
-    const ok = await this.storage.delete(id);
-
-    if (ok && this.store) {
-      this.store.deleteSchedule(id);
-    }
-
-    return ok;
+  delete(id: string): Promise<void> {
+    return this.storage.rmd(id, () => true);
   }
 
   async get(id: string): Promise<Schedule> {
     const schedule = await this.storage.rmw(id, (s) => s);
 
-    if (schedule) {
-      return schedule;
+    if (!schedule) {
+      throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
     }
 
-    throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
+    return schedule;
   }
 
-  search(id: string, tags?: Record<string, string>, limit?: number): AsyncGenerator<Schedule[], void> {
-    return this.storage.search(id, tags, limit);
+  async *search(id: string, tags?: Record<string, string>, limit?: number): AsyncGenerator<Schedule[], void> {
+    // filter the schedules returned from storage
+    const regex = new RegExp(id.replaceAll("*", ".*"));
+    const tagEntries = Object.entries(tags ?? {});
+
+    for await (const schedules of this.storage.all()) {
+      yield schedules.filter((s) => regex.test(s.id)).filter((s) => tagEntries.every(([k, v]) => s.tags?.[k] == v));
+    }
   }
 
   private nextRunTime(cron: string, lastRunTime: number): number {
@@ -424,5 +436,43 @@ export class LocalScheduleStore implements IScheduleStore {
       .parseExpression(cron, { currentDate: new Date(lastRunTime) })
       .next()
       .getTime();
+  }
+}
+
+export class LocalLockStore implements ILockStore {
+  constructor(private storage: IStorage<Lock> = new MemoryStorage<Lock>()) {}
+
+  async tryAcquire(id: string, pid: string, eid: string): Promise<boolean> {
+    const lock = await this.storage.rmw(id, (lock) => {
+      if (!lock || lock.eid === eid) {
+        return {
+          id,
+          pid,
+          eid,
+        };
+      }
+
+      return lock;
+    });
+
+    return lock.eid === eid;
+  }
+
+  release(id: string, eid: string) {
+    return this.storage.rmd(id, (lock) => lock.eid === eid);
+  }
+}
+
+// Utils
+
+function searchStates(state: string | undefined): string[] {
+  if (state?.toLowerCase() == "pending") {
+    return ["PENDING"];
+  } else if (state?.toLowerCase() == "resolved") {
+    return ["RESOLVED"];
+  } else if (state?.toLowerCase() == "rejected") {
+    return ["REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"];
+  } else {
+    return ["PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"];
   }
 }

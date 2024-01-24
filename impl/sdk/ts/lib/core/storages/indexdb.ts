@@ -1,9 +1,9 @@
-import { IPromiseStorage } from "../storage";
+import { IStorage } from "../storage";
 import { DurablePromise, isDurablePromise } from "../promise";
 import { ResonateError, ErrorCodes } from "../error";
 import { Schedule } from "../schedule";
 
-export class IndexedDbStorage implements IPromiseStorage {
+export class IndexedDbStorage implements IStorage<DurablePromise> {
   private dbName = "resonateDB";
   private readonly storeName = "promises";
   private db: Promise<IDBDatabase>;
@@ -51,24 +51,16 @@ export class IndexedDbStorage implements IPromiseStorage {
     return resultPromise;
   }
 
-  async *search(
-    id: string,
-    state: string | undefined,
-    tags: Record<string, string> | undefined,
-    limit: number | undefined,
-  ): AsyncGenerator<DurablePromise[], void> {
-    // for now WithTimeout will implement
-    // search logic
+  async rmd(id: string, f: (promise: DurablePromise) => boolean): Promise<void> {
+    // unimplemented
+  }
+
+  async *all(): AsyncGenerator<DurablePromise[], void> {
     const db = await this.getDb();
     const transaction = db.transaction(this.storeName, "readwrite");
     const objectStore = transaction.objectStore(this.storeName);
 
     yield this.getAllPromises(objectStore);
-  }
-
-  async deleteSchedule(id: string): Promise<boolean> {
-    // TODO: To be implemented
-    return true;
   }
 
   private async getDb(): Promise<IDBDatabase> {

@@ -166,7 +166,7 @@ export interface IScheduleStore {
    * @param id Unique identifier for the promise to be deleted.
    * @returns A promise schedule that is pending, canceled, resolved, or rejected.
    */
-  delete(id: string): Promise<boolean>;
+  delete(id: string): Promise<void>;
 
   /**
    * Search for schedules.
@@ -182,6 +182,6 @@ export interface IScheduleStore {
  * Lock Store API
  */
 export interface ILockStore {
-  tryAcquire(id: string, pid: string, eid: string): boolean;
-  release(id: string, eid: string): void;
+  tryAcquire(id: string, pid: string, eid: string): Promise<boolean>;
+  release(id: string, eid: string): Promise<void>;
 }

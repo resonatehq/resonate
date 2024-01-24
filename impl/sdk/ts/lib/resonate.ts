@@ -208,12 +208,12 @@ export class Resonate {
     id = this.id(this.namespace, name, opts.id ?? id);
     const idempotencyKey = opts.idempotencyKey ?? id;
 
-    const locks = this.store(opts.store).locks;
+    const store = this.store(opts.store);
 
     if (!this.cache.has(id)) {
       const promise = new Promise(async (resolve, reject) => {
         // lock
-        while (!locks.tryAcquire(id, this.pid, opts.eid)) {
+        while (!(await store.locks.tryAcquire(id, this.pid, opts.eid))) {
           // sleep
           await new Promise((r) => setTimeout(r, 1000));
         }
@@ -225,7 +225,7 @@ export class Resonate {
         } catch (e) {
           reject(e);
         } finally {
-          locks.release(id, opts.eid);
+          await store.locks.release(id, opts.eid);
         }
       });
 
