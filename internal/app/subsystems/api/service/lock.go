@@ -55,11 +55,9 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 
 func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, error) {
 	util.Assert(body.ProcessId != "", "process_id must be provided")
-	util.Assert(body.ExpiryInSeconds != 0, "expiry_in_seconds must be provided")
 
 	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
-		ProcessId:       body.ProcessId,
-		ExpiryInSeconds: body.ExpiryInSeconds,
+		ProcessId: body.ProcessId,
 	}
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)

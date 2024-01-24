@@ -61,13 +61,9 @@ func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocks
 	if req.ProcessId == "" {
 		return nil, grpcStatus.Error(codes.InvalidArgument, "process_id must be provided")
 	}
-	if req.ExpiryInSeconds == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "timeout must be provided")
-	}
 
 	body := &service.HeartbeatBody{
-		ProcessId:       req.ProcessId,
-		ExpiryInSeconds: req.ExpiryInSeconds,
+		ProcessId: req.ProcessId,
 	}
 
 	res, err := s.service.Heartbeat(header, body)

@@ -7,6 +7,7 @@ type Lock struct {
 	ProcessId       string `json:"processId"`
 	ExecutionId     string `json:"executionId"`
 	ExpiryInSeconds int64  `json:"expiryInSeconds"`
+	ExpiresAt       int64  `json:"expiresAt"`
 }
 
 func (l *Lock) String() string {

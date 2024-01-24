@@ -71,6 +71,10 @@ components:
         expiry_in_seconds:
           type: integer
           format: int64
+        expires_at:
+          type: integer
+          format: int64
+          readOnly: true
       required:
         - resource_id
         - process_id
@@ -82,12 +86,8 @@ components:
       properties:
         process_id:
           type: string
-        expiry_in_seconds:
-          type: integer
-          format: int64
       required:
         - process_id
-        - expiry_in_seconds
 
     HeartbeatResponse:
       type: object

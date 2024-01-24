@@ -398,13 +398,11 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 
 func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request {
 	processId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInSeconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
 	return &t_api.Request{
 		Kind: t_api.HeartbeatLocks,
 		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-			ProcessId:       processId,
-			ExpiryInSeconds: expiryInSeconds,
+			ProcessId: processId,
 		},
 	}
 }

@@ -148,8 +148,7 @@ type AcquireLockRequest struct {
 }
 
 type HeartbeatLocksRequest struct {
-	ProcessId       string `json:"processId"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds"`
+	ProcessId string `json:"processId"`
 }
 
 type ReleaseLockRequest struct {
@@ -266,9 +265,8 @@ func (r *Request) String() string {
 		)
 	case HeartbeatLocks:
 		return fmt.Sprintf(
-			"HeartbeatLocks(processId=%s, expiryInSeconds=%d)",
+			"HeartbeatLocks(processId=%s)",
 			r.HeartbeatLocks.ProcessId,
-			r.HeartbeatLocks.ExpiryInSeconds,
 		)
 
 	case ReleaseLock:

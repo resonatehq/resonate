@@ -14,6 +14,6 @@ func (r *LockRecord) Lock() (*Lock, error) {
 		ProcessId:       r.ProcessId,
 		ExecutionId:     r.ExecutionId,
 		ExpiryInSeconds: r.ExpiryInSeconds,
-		// drop the timeout. it is an implementation detail.
+		ExpiresAt:       r.Timeout,
 	}, nil
 }

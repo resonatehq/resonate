@@ -120,7 +120,7 @@ const (
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
-		resource_id, process_id, execution_id, expiry_in_seconds, ctimeout
+		resource_id, process_id, execution_id, expiry_in_seconds, timeout
 	FROM
 		locks
 	WHERE
@@ -142,9 +142,9 @@ const (
   	UPDATE 
 		locks 
   	SET 
-		timeout = $1
+		timeout = timeout + (expiry_in_seconds * 1000) 
   	WHERE 
-		process_id = $2`
+		process_id = $1`
 
 	LOCK_RELEASE_STATEMENT = `
 	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
@@ -778,7 +778,7 @@ func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 
 func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
 	// update
-	res, err := stmt.Exec(cmd.Timeout, cmd.ProcessId)
+	res, err := stmt.Exec(cmd.ProcessId)
 	if err != nil {
 		return nil, err
 	}

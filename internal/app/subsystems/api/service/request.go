@@ -71,8 +71,7 @@ type AcquireLockBody struct {
 }
 
 type HeartbeatBody struct {
-	ProcessId       string `json:"processId" binding:"required"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds" binding:"required"`
+	ProcessId string `json:"processId" binding:"required"`
 }
 
 type ReleaseLockBody struct {

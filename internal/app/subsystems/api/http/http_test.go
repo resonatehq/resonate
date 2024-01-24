@@ -813,14 +813,12 @@ func TestHttpServer(t *testing.T) {
 			path:   "locks/heartbeat",
 			method: "POST",
 			body: []byte(`{
-				"processId": "bar",
-				"expiryInSeconds": 10
+				"processId": "bar"
 			}`),
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-					ProcessId:       "bar",
-					ExpiryInSeconds: 10,
+					ProcessId: "bar",
 				},
 			},
 			res: &t_api.Response{

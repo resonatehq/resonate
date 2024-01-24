@@ -1384,14 +1384,12 @@ func TestHeartbeatLocks(t *testing.T) {
 		{
 			name: "HeartbeatLocks",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId:       "foo",
-				ExpiryInSeconds: 1,
+				ProcessId: "foo",
 			},
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatLocks,
 				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-					ProcessId:       "foo",
-					ExpiryInSeconds: 1,
+					ProcessId: "foo",
 				},
 			},
 			res: &t_api.Response{
@@ -1405,18 +1403,7 @@ func TestHeartbeatLocks(t *testing.T) {
 		{
 			name: "HeartbeatLocks missing process id",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId:       "",
-				ExpiryInSeconds: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "HeartbeatLocks missing timeout",
-			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId:       "foo",
-				ExpiryInSeconds: 0,
+				ProcessId: "",
 			},
 			req:  nil,
 			res:  nil,

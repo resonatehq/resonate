@@ -251,7 +251,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.HeartbeatLocks,
 				HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
 					ProcessId: "a",
-					Timeout:   1736572500000,
 				},
 			},
 		},
