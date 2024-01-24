@@ -26,7 +26,7 @@ paths:
   /locks/heartbeat:
     post:
       summary: heartbeat
-      description: update heartbeat for all locks that match the process_id
+      description: update heartbeat for all locks that match the processId
       operationId: heartbeat
       requestBody:
         content:
@@ -62,32 +62,32 @@ components:
     Lock:
       type: object
       properties:
-        resource_id:
+        resourceId:
           type: string
-        process_id:
+        processId:
           type: string
-        execution_id:
+        executionId:
           type: string
-        expiry_in_seconds:
+        expiryInSeconds:
           type: integer
           format: int64
-        expires_at:
+        expiresAt:
           type: integer
           format: int64
           readOnly: true
       required:
-        - resource_id
-        - process_id
-        - execution_id
-        - expiry_in_seconds
+        - resourceId
+        - processId
+        - executionId
+        - expiryInSeconds
 
     HeartbeatRequest:
       type: object
       properties:
-        process_id:
+        processId:
           type: string
       required:
-        - process_id
+        - processId
 
     HeartbeatResponse:
       type: object
@@ -99,10 +99,10 @@ components:
     ReleaseLockRequest:
       type: object
       properties:
-        resource_id:
+        resourceId:
           type: string
-        execution_id:
+        executionId:
           type: string
       required:
-        - resource_id
-        - execution_id
+        - resourceId
+        - executionId
