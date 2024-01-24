@@ -1,21 +1,66 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
 import { IRetry } from "../lib/core/retry";
-import { ExponentialRetry } from "../lib/core/retries/exponential";
-import { LinearRetry } from "../lib/core/retries/linear";
+import { Retry } from "../lib/core/retries/retry";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
 
-describe("Retry policies", () => {
+describe("Retry delays", () => {
+  for (let i = 1; i <= 10; i++) {
+    test(`Exponential (${i})`, () => {
+      const ctx = { attempt: 0, timeout: Number.MAX_SAFE_INTEGER };
+      const initialDelay = 100 * i;
+      const backoffFactor = i + 1;
+      const retry = Retry.exponential(initialDelay, backoffFactor, 10, Infinity);
+
+      for (const d of retry.iterator(ctx)) {
+        expect(d).toBe(ctx.attempt === 0 ? 0 : initialDelay * Math.pow(backoffFactor, ctx.attempt - 1));
+        ctx.attempt++;
+      }
+
+      expect(ctx.attempt).toBe(10);
+      expect(retry.next(ctx)).toStrictEqual({ done: true });
+    });
+
+    test(`Linear (${i})`, () => {
+      const ctx = { attempt: 0, timeout: Number.MAX_SAFE_INTEGER };
+      const delay = 100 * i;
+      const retry = Retry.linear(delay, 10);
+
+      for (const d of retry.iterator(ctx)) {
+        expect(d).toBe(ctx.attempt === 0 ? 0 : delay);
+        ctx.attempt++;
+      }
+
+      expect(ctx.attempt).toBe(10);
+      expect(retry.next(ctx)).toStrictEqual({ done: true });
+    });
+
+    test(`Never (${i})`, () => {
+      const ctx = { attempt: 0, timeout: Number.MAX_SAFE_INTEGER };
+      const retry = Retry.never();
+
+      for (const d of retry.iterator(ctx)) {
+        expect(d).toBe(0);
+        ctx.attempt++;
+      }
+
+      expect(ctx.attempt).toBe(1);
+      expect(retry.next(ctx)).toStrictEqual({ done: true });
+    });
+  }
+});
+
+describe("Context retries", () => {
   const resonate = new Resonate();
   resonate.register("async", foo, {
     timeout: Number.MAX_SAFE_INTEGER,
-    retry: ExponentialRetry.atMostOnce(),
+    retry: Retry.never(),
   });
   resonate.register("generator", bar, {
     timeout: Number.MAX_SAFE_INTEGER,
-    retry: ExponentialRetry.atMostOnce(),
+    retry: Retry.never(),
   });
 
   const spy = jest.fn(nope);
@@ -26,19 +71,17 @@ describe("Retry policies", () => {
 
   for (const f of ["async", "generator"]) {
     for (let i = 1; i <= 10; i++) {
-      test(`Exponential at most once (${f}, ${i})`, async () => {
-        await expect(resonate.run(f, `e-amo-${f}-${i}`, spy, ExponentialRetry.atMostOnce())).rejects.toThrow("nope");
-        expect(spy).toHaveBeenCalledTimes(1);
-      });
-      test(`Exponential at least once (${f}, ${i})`, async () => {
-        await expect(resonate.run(f, `e-alo-${f}-${i}`, spy, ExponentialRetry.atLeastOnce(i, 0))).rejects.toThrow(
-          "nope",
-        );
+      test(`Exponential (${f}, ${i})`, async () => {
+        await expect(resonate.run(f, `e-alo-${f}-${i}`, spy, Retry.exponential(0, 0, i, 0))).rejects.toThrow("nope");
         expect(spy).toHaveBeenCalledTimes(i);
       });
       test(`Linear (${f}, ${i})`, async () => {
-        await expect(resonate.run(f, `l-${f}-${i}`, spy, new LinearRetry(0, i))).rejects.toThrow("nope");
+        await expect(resonate.run(f, `l-${f}-${i}`, spy, Retry.linear(0, i))).rejects.toThrow("nope");
         expect(spy).toHaveBeenCalledTimes(i);
+      });
+      test(`Never (${f}, ${i})`, async () => {
+        await expect(resonate.run(f, `e-amo-${f}-${i}`, spy, Retry.never())).rejects.toThrow("nope");
+        expect(spy).toHaveBeenCalledTimes(1);
       });
     }
   }

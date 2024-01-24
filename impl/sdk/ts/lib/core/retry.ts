@@ -1,16 +1,14 @@
-import { Context } from "../resonate";
-
 export interface IRetry {
-  next(ctx: Context): { done: boolean; delay?: number };
-  iterator(ctx: Context): IterableIterator<number>;
+  next<T extends { attempt: number; timeout: number }>(ctx: T): { done: boolean; delay?: number };
+  iterator<T extends { attempt: number; timeout: number }>(ctx: T): IterableIterator<number>;
 }
 
 export class IterableRetry implements IRetry {
-  next(ctx: Context): { done: boolean; delay?: number } {
+  next<T extends { attempt: number; timeout: number }>(ctx: T): { done: boolean; delay?: number } {
     throw new Error("Method not implemented");
   }
 
-  iterator(ctx: Context): IterableIterator<number> {
+  iterator<T extends { attempt: number; timeout: number }>(ctx: T): IterableIterator<number> {
     const self = this; // eslint-disable-line @typescript-eslint/no-this-alias
 
     return {

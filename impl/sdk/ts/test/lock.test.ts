@@ -7,7 +7,7 @@ jest.setTimeout(10000);
 
 const sharedResource: string[] = [];
 
-function write(context: Context, id: string, final: boolean = false) {
+function write(context: Context, id: string, final: boolean) {
   return new Promise((resolve) => {
     sharedResource.push(id);
 
@@ -22,12 +22,12 @@ describe("Lock", () => {
   const r1 = new Resonate({ store });
   const r2 = new Resonate({ store });
 
-  r1.register("write", write);
-  r2.register("write", write);
+  r1.register("write", write, { eid: "a" });
+  r2.register("write", write, { eid: "b" });
 
   test("Lock guards shared resource", async () => {
-    r1.run("write", "id", "a", false, { eid: "a" });
-    const p2 = r2.run("write", "id", "b", true, { eid: "b" });
+    r1.run("write", "id", "a", false);
+    const p2 = r2.run("write", "id", "b", true);
 
     while (sharedResource.length === 0) {
       await new Promise((resolve) => setTimeout(resolve, 10));

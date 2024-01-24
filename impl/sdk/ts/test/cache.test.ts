@@ -1,6 +1,6 @@
 import { jest, describe, test, expect, beforeEach } from "@jest/globals";
 import { Resonate, Context } from "../lib/resonate";
-import { ExponentialRetry } from "../lib/core/retries/exponential";
+import { Retry } from "../lib/core/retries/retry";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
@@ -15,7 +15,7 @@ describe("Cache", () => {
     throw new Error(e);
   });
   const reject = resonate.register("reject", rejectSpy, {
-    retry: ExponentialRetry.atMostOnce(),
+    retry: Retry.never(),
   });
 
   beforeEach(() => {

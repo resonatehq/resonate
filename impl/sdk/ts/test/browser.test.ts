@@ -8,7 +8,7 @@ jest.setTimeout(10000);
 
 describe("Resonate Server Tests", () => {
   beforeAll(async () => {
-    browser = await launch();
+    browser = await launch({ headless: "new" });
     // Open a new page
     [page] = await browser.pages();
     await page.goto("https://google.com");

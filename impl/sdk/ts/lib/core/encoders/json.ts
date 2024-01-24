@@ -9,6 +9,16 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
     }
 
     return JSON.stringify(data, (_, value) => {
+      if (value instanceof AggregateError) {
+        return {
+          __type: "aggregate_error",
+          errors: value.errors,
+          message: value.message,
+          stack: value.stack,
+          name: value.name,
+        };
+      }
+
       if (value instanceof Error) {
         return {
           __type: "error",
@@ -30,6 +40,10 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
     }
 
     return JSON.parse(data, (_, value) => {
+      if (value?.__type === "aggregate_error") {
+        return Object.assign(new AggregateError(value.errors, value.message), value);
+      }
+
       if (value?.__type === "error") {
         return Object.assign(new Error(value.message), value);
       }
