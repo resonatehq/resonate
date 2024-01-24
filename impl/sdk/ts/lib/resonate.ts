@@ -205,7 +205,9 @@ export class Resonate {
     const { func, opts: defaults } = this.functions[name];
     const { args, opts } = split(func, argsAndOpts, defaults);
 
-    id = this.id(this.namespace, name, opts.id ?? id);
+    // opts.id takes precedence so that we can reuse the unaltered
+    // id on the recovery path
+    id = opts.id ?? this.id(this.namespace, name, id);
     const idempotencyKey = opts.idempotencyKey ?? id;
 
     const store = this.store(opts.store);
@@ -246,15 +248,15 @@ export class Resonate {
 
     for await (const promises of search) {
       for (const promise of promises) {
-        const { func, args } = encoder.decode(promise.value.data) as { func: string; args: any[] };
-
         try {
+          const { func, args } = encoder.decode(promise.param.data) as { func: string; args: any[] };
+
           this.run(func, promise.id, ...args, {
             id: promise.id,
             idempotencyKey: promise.idempotencyKeyForCreate,
           });
         } catch (e: unknown) {
-          this.logger.warn(`Function ${func} with id ${promise.id} failed on the recovery path`, e);
+          this.logger.warn(`Durable promise ${promise.id} failed on the recovery path`, e);
         }
       }
     }
