@@ -172,19 +172,21 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 	return cqe.Completion.CreatePromise, nil
 }
 
-// Cancel Promise
-
-func (s *Service) CancelPromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
+// Complete Promise
+func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
+	var kind = ToKind(state)
+
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "cancel-promise"),
+		Metadata: s.metadata(header.RequestId, "complete-promise"),
 		Submission: &t_api.Request{
-			Kind: t_api.CancelPromise,
-			CancelPromise: &t_api.CancelPromiseRequest{
+			Kind: kind,
+			CompletePromise: &t_api.CompletePromiseRequest{
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
+				State:          state,
 				Value:          body.Value,
 			},
 		},
@@ -198,84 +200,26 @@ func (s *Service) CancelPromise(id string, header *CompletePromiseHeader, body *
 		return nil, api.HandleResonateError(resErr)
 	}
 
-	util.Assert(cqe.Completion.CancelPromise != nil, "response must not be nil")
+	util.Assert(cqe.Completion.CompletePromise != nil, "response must not be nil")
 
-	if api.IsRequestError(cqe.Completion.CancelPromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.CancelPromise.Status)
+	if api.IsRequestError(cqe.Completion.CompletePromise.Status) {
+		return nil, api.HandleRequestError(cqe.Completion.CompletePromise.Status)
 	}
 
 	// success
-	return cqe.Completion.CancelPromise, nil
+	return cqe.Completion.CompletePromise, nil
 }
 
-// Resolve Promise
+func ToKind(state promise.State) t_api.Kind {
 
-func (s *Service) ResolvePromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
-
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "resolve-promise"),
-		Submission: &t_api.Request{
-			Kind: t_api.ResolvePromise,
-			ResolvePromise: &t_api.ResolvePromiseRequest{
-				Id:             id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Value:          body.Value,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandleResonateError(resErr)
+	switch state {
+	case promise.Canceled:
+		return t_api.CancelPromise
+	case promise.Rejected:
+		return t_api.RejectPromise
+	case promise.Resolved:
+		return t_api.ResolvePromise
+	default:
+		panic("State not valid.")
 	}
-
-	util.Assert(cqe.Completion.ResolvePromise != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.ResolvePromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ResolvePromise.Status)
-	}
-
-	// success
-	return cqe.Completion.ResolvePromise, nil
-}
-
-// Reject Promise
-
-func (s *Service) RejectPromise(id string, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
-
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "reject-promise"),
-		Submission: &t_api.Request{
-			Kind: t_api.RejectPromise,
-			RejectPromise: &t_api.RejectPromiseRequest{
-				Id:             id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Value:          body.Value,
-			},
-		},
-		Callback: s.sendOrPanic(cq),
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandleResonateError(resErr)
-	}
-
-	util.Assert(cqe.Completion.RejectPromise != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.RejectPromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.RejectPromise.Status)
-	}
-
-	// success
-	return cqe.Completion.RejectPromise, nil
 }

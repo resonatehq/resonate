@@ -14,12 +14,10 @@ type Request struct {
 	Kind Kind
 
 	// PROMISES
-	ReadPromise    *ReadPromiseRequest
-	SearchPromises *SearchPromisesRequest
-	CreatePromise  *CreatePromiseRequest
-	CancelPromise  *CancelPromiseRequest
-	ResolvePromise *ResolvePromiseRequest
-	RejectPromise  *RejectPromiseRequest
+	ReadPromise     *ReadPromiseRequest
+	SearchPromises  *SearchPromisesRequest
+	CreatePromise   *CreatePromiseRequest
+	CompletePromise *CompletePromiseRequest
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
@@ -62,6 +60,14 @@ type CreatePromiseRequest struct {
 	Param          promise.Value     `json:"param,omitempty"`
 	Timeout        int64             `json:"timeout"`
 	Tags           map[string]string `json:"tags,omitempty"`
+}
+
+type CompletePromiseRequest struct {
+	Id             string           `json:"id"`
+	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	Strict         bool             `json:"strict"`
+	State          promise.State    `json:"state"`
+	Value          promise.Value    `json:"value,omitempty"`
 }
 
 type CancelPromiseRequest struct {
@@ -188,24 +194,27 @@ func (r *Request) String() string {
 		)
 	case CancelPromise:
 		return fmt.Sprintf(
-			"CancelPromise(id=%s, idempotencyKey=%s, strict=%t)",
-			r.CancelPromise.Id,
-			r.CancelPromise.IdempotencyKey,
-			r.CancelPromise.Strict,
-		)
-	case ResolvePromise:
-		return fmt.Sprintf(
-			"ResolvePromise(id=%s, idempotencyKey=%s, strict=%t)",
-			r.ResolvePromise.Id,
-			r.ResolvePromise.IdempotencyKey,
-			r.ResolvePromise.Strict,
+			"CancelPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
+			r.CompletePromise.Id,
+			r.CompletePromise.State,
+			r.CompletePromise.IdempotencyKey,
+			r.CompletePromise.Strict,
 		)
 	case RejectPromise:
 		return fmt.Sprintf(
-			"RejectPromise(id=%s, idempotencyKey=%s, strict=%t)",
-			r.RejectPromise.Id,
-			r.RejectPromise.IdempotencyKey,
-			r.RejectPromise.Strict,
+			"RejectPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
+			r.CompletePromise.Id,
+			r.CompletePromise.State,
+			r.CompletePromise.IdempotencyKey,
+			r.CompletePromise.Strict,
+		)
+	case ResolvePromise:
+		return fmt.Sprintf(
+			"RejectPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
+			r.CompletePromise.Id,
+			r.CompletePromise.State,
+			r.CompletePromise.IdempotencyKey,
+			r.CompletePromise.Strict,
 		)
 	// SCHEDULES
 	case ReadSchedule:

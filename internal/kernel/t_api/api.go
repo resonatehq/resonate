@@ -1,5 +1,7 @@
 package t_api
 
+import "github.com/resonatehq/resonate/pkg/promise"
+
 type Kind int
 
 const (
@@ -71,5 +73,18 @@ func (k Kind) String() string {
 		return "release-lock"
 	default:
 		panic("invalid api")
+	}
+}
+
+func From(state promise.State) Kind {
+	switch state {
+	case promise.Canceled:
+		return CancelPromise
+	case promise.Rejected:
+		return RejectPromise
+	case promise.Resolved:
+		return ResolvePromise
+	default:
+		panic("invalid state")
 	}
 }

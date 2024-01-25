@@ -42,8 +42,9 @@ const (
 	Pending State = 1 << iota
 	Resolved
 	Rejected
-	Timedout
 	Canceled
+	Timedout
+	Invalid
 )
 
 func (s State) String() string {
@@ -106,4 +107,17 @@ func (v Value) String() string {
 		v.Headers,
 		string(v.Data),
 	)
+}
+
+func From(value string) State {
+	switch strings.ToUpper(value) {
+	case Resolved.String():
+		return Resolved
+	case Rejected.String():
+		return Rejected
+	case Canceled.String():
+		return Canceled
+	default:
+		return Invalid
+	}
 }
