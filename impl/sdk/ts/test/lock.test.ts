@@ -35,7 +35,7 @@ describe("Lock", () => {
     expect(sharedResource.length).toBe(1);
 
     // release lock so p2 can run
-    store.locks.release("write/id", sharedResource[0]);
+    await store.locks.release("write/id", sharedResource[0]);
 
     const r = await p2;
 
