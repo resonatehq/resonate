@@ -164,7 +164,7 @@ func CompletePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*
 				}
 			} else {
 				status := t_api.ForbiddenStatus(p.State)
-				strict := req.CompletePromise.Strict && p.State != promise.Rejected
+				strict := req.CompletePromise.Strict && p.State != req.CompletePromise.State
 
 				if !strict && p.IdempotencyKeyForComplete.Match(req.CompletePromise.IdempotencyKey) {
 					status = t_api.StatusOK

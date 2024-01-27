@@ -121,13 +121,11 @@ func (s *server) completePromise(c *gin.Context) {
 		err  error
 	)
 
-	var promiseState = promise.From(body.State)
-
-	if promise.State.In(promiseState, promise.Invalid) {
+	if !body.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(errors.New("invalid state")))
 	}
 
-	resp, err = s.service.CompletePromise(id, promiseState, &header, body)
+	resp, err = s.service.CompletePromise(id, body.State, &header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

@@ -226,7 +226,7 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *t_api.Request
 		Kind: t_api.ResolvePromise,
 		CompletePromise: &t_api.CompletePromiseRequest{
 			Id:    id,
-			State: promise.Rejected,
+			State: promise.Resolved,
 			Value: promise.Value{
 				Headers: headers,
 				Data:    data,
