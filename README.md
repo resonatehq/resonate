@@ -2,7 +2,8 @@
 >
 > Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
 >
-> [Join our slack](https://resonatehqcommunity.slack.com)
+> [Join our slack](https://resonatehq.io/slack)
+
 
 <br /><br />
 
