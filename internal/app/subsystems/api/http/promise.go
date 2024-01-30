@@ -3,7 +3,6 @@ package http
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
@@ -122,17 +121,12 @@ func (s *server) completePromise(c *gin.Context) {
 		err  error
 	)
 
-	switch strings.ToUpper(body.State) {
-	case promise.Resolved.String():
-		resp, err = s.service.ResolvePromise(id, &header, body)
-	case promise.Rejected.String():
-		resp, err = s.service.RejectPromise(id, &header, body)
-	case promise.Canceled.String():
-		resp, err = s.service.CancelPromise(id, &header, body)
-	default:
+	if !body.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(errors.New("invalid state")))
+		return
 	}
 
+	resp, err = s.service.CompletePromise(id, body.State, &header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

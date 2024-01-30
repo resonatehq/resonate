@@ -224,7 +224,7 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 			Data:    data,
 		},
 	}
-	resp, err := s.service.CancelPromise(req.Id, header, body)
+	resp, err := s.service.CompletePromise(req.Id, promise.Canceled, header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
@@ -266,7 +266,7 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		},
 	}
 
-	resp, err := s.service.ResolvePromise(req.Id, header, body)
+	resp, err := s.service.CompletePromise(req.Id, promise.Resolved, header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")
@@ -308,7 +308,7 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		},
 	}
 
-	resp, err := s.service.RejectPromise(req.Id, header, body)
+	resp, err := s.service.CompletePromise(req.Id, promise.Rejected, header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		util.Assert(errors.As(err, &apiErr), "err must be api error")

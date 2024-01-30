@@ -7,9 +7,7 @@ const (
 	ReadPromise Kind = iota
 	SearchPromises
 	CreatePromise
-	CancelPromise
-	ResolvePromise
-	RejectPromise
+	CompletePromise
 
 	// SCHEDULES
 	ReadSchedule
@@ -40,12 +38,8 @@ func (k Kind) String() string {
 		return "search-promises"
 	case CreatePromise:
 		return "create-promise"
-	case CancelPromise:
-		return "cancel-promise"
-	case ResolvePromise:
-		return "resolve-promise"
-	case RejectPromise:
-		return "reject-promise"
+	case CompletePromise:
+		return "complete-promise"
 	// SCHEDULES
 	case ReadSchedule:
 		return "read-schedule"
