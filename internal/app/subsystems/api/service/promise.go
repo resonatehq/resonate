@@ -176,12 +176,10 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	var kind = ToKind(state)
-
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 		Metadata: s.metadata(header.RequestId, "complete-promise"),
 		Submission: &t_api.Request{
-			Kind: kind,
+			Kind: t_api.CompletePromise,
 			CompletePromise: &t_api.CompletePromiseRequest{
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -208,18 +206,4 @@ func (s *Service) CompletePromise(id string, state promise.State, header *Comple
 
 	// success
 	return cqe.Completion.CompletePromise, nil
-}
-
-func ToKind(state promise.State) t_api.Kind {
-
-	switch state {
-	case promise.Canceled:
-		return t_api.CancelPromise
-	case promise.Rejected:
-		return t_api.RejectPromise
-	case promise.Resolved:
-		return t_api.ResolvePromise
-	default:
-		panic("State not valid.")
-	}
 }

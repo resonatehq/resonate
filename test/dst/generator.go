@@ -201,7 +201,7 @@ func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *t_api.Request 
 	strict := r.Intn(2) == 0
 
 	return &t_api.Request{
-		Kind: t_api.CancelPromise,
+		Kind: t_api.CompletePromise,
 		CompletePromise: &t_api.CompletePromiseRequest{
 			Id:    id,
 			State: promise.Canceled,
@@ -223,7 +223,7 @@ func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *t_api.Request
 	strict := r.Intn(2) == 0
 
 	return &t_api.Request{
-		Kind: t_api.ResolvePromise,
+		Kind: t_api.CompletePromise,
 		CompletePromise: &t_api.CompletePromiseRequest{
 			Id:    id,
 			State: promise.Resolved,
@@ -245,7 +245,7 @@ func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *t_api.Request 
 	strict := r.Intn(2) == 0
 
 	return &t_api.Request{
-		Kind: t_api.RejectPromise,
+		Kind: t_api.CompletePromise,
 		CompletePromise: &t_api.CompletePromiseRequest{
 			Id:    id,
 			State: promise.Rejected,

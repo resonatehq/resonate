@@ -1,7 +1,5 @@
 package t_api
 
-import "github.com/resonatehq/resonate/pkg/promise"
-
 type Kind int
 
 const (
@@ -9,9 +7,7 @@ const (
 	ReadPromise Kind = iota
 	SearchPromises
 	CreatePromise
-	CancelPromise
-	ResolvePromise
-	RejectPromise
+	CompletePromise
 
 	// SCHEDULES
 	ReadSchedule
@@ -42,12 +38,8 @@ func (k Kind) String() string {
 		return "search-promises"
 	case CreatePromise:
 		return "create-promise"
-	case CancelPromise:
-		return "cancel-promise"
-	case ResolvePromise:
-		return "resolve-promise"
-	case RejectPromise:
-		return "reject-promise"
+	case CompletePromise:
+		return "complete-promise"
 	// SCHEDULES
 	case ReadSchedule:
 		return "read-schedule"
@@ -73,18 +65,5 @@ func (k Kind) String() string {
 		return "release-lock"
 	default:
 		panic("invalid api")
-	}
-}
-
-func From(state promise.State) Kind {
-	switch state {
-	case promise.Canceled:
-		return CancelPromise
-	case promise.Rejected:
-		return RejectPromise
-	case promise.Resolved:
-		return ResolvePromise
-	default:
-		panic("invalid state")
 	}
 }

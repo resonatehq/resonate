@@ -413,7 +413,7 @@ func TestHttpServer(t *testing.T) {
 				}
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo/bar",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -426,7 +426,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -445,7 +445,7 @@ func TestHttpServer(t *testing.T) {
 				"state": "REJECTED_CANCELED"
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -458,7 +458,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -485,7 +485,7 @@ func TestHttpServer(t *testing.T) {
 				}
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo/bar",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -498,7 +498,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -517,7 +517,7 @@ func TestHttpServer(t *testing.T) {
 				"state": "RESOLVED" 
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -530,7 +530,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -557,7 +557,7 @@ func TestHttpServer(t *testing.T) {
 				}
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo/bar",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -570,7 +570,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -589,7 +589,7 @@ func TestHttpServer(t *testing.T) {
 				"state": "REJECTED"
 			}`),
 			req: &t_api.Request{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -602,7 +602,7 @@ func TestHttpServer(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{

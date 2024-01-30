@@ -246,7 +246,7 @@ func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Res
 	}
 }
 
-func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CompletePromise.Id)
 
 	switch res.CompletePromise.Status {
@@ -273,104 +273,6 @@ func (m *Model) ValidateCancelPromise(t int64, req *t_api.Request, res *t_api.Re
 		}
 		if pm.completed() {
 			return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, promise.Canceled)
-		}
-
-		// delete all subscriptions
-		for _, sm := range pm.subscriptions {
-			sm.subscription = nil
-		}
-
-		// update model state
-		pm.promise = res.CompletePromise.Promise
-		return nil
-	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
-		return nil
-	case t_api.StatusPromiseNotFound:
-		if pm.promise != nil {
-			return fmt.Errorf("promise exists %s", pm.promise)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CompletePromise.Status)
-	}
-}
-
-func (m *Model) ValidateResolvePromise(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.CompletePromise.Id)
-
-	switch res.CompletePromise.Status {
-	case t_api.StatusOK:
-		if pm.completed() {
-			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
-			} else if req.CompletePromise.Strict && pm.promise.State != promise.Resolved {
-				return fmt.Errorf("unexpected state %s when strict true", pm.promise.State)
-			}
-		}
-
-		// delete all subscriptions
-		for _, sm := range pm.subscriptions {
-			sm.subscription = nil
-		}
-
-		// update model state
-		pm.promise = res.CompletePromise.Promise
-		return nil
-	case t_api.StatusCreated:
-		if res.CompletePromise.Promise.State != promise.Resolved {
-			return fmt.Errorf("unexpected state %s after resolve promise", res.CompletePromise.Promise.State)
-		}
-		if pm.completed() {
-			return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, promise.Resolved)
-		}
-
-		// delete all subscriptions
-		for _, sm := range pm.subscriptions {
-			sm.subscription = nil
-		}
-
-		// update model state
-		pm.promise = res.CompletePromise.Promise
-		return nil
-	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
-		return nil
-	case t_api.StatusPromiseNotFound:
-		if pm.promise != nil {
-			return fmt.Errorf("promise exists %s", pm.promise)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unexpected resonse status '%d'", res.CompletePromise.Status)
-	}
-}
-
-func (m *Model) ValidateRejectPromise(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.CompletePromise.Id)
-
-	switch res.CompletePromise.Status {
-	case t_api.StatusOK: // dst use the 200 for idempotency,, uggghhh
-		if pm.completed() {
-			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) {
-				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
-			} else if req.CompletePromise.Strict && pm.promise.State != promise.Rejected {
-				return fmt.Errorf("unexpected state %s when strict true", pm.promise.State)
-			}
-		}
-
-		// delete all subscriptions
-		for _, sm := range pm.subscriptions {
-			sm.subscription = nil
-		}
-
-		// update model state
-		pm.promise = res.CompletePromise.Promise
-		return nil
-	case t_api.StatusCreated:
-		if res.CompletePromise.Promise.State != promise.Rejected {
-			return fmt.Errorf("unexpected state %s after reject promise", res.CompletePromise.Promise.State)
-		}
-		if pm.completed() {
-			return fmt.Errorf("invalid state transition (%s -> %s)", pm.promise.State, promise.Rejected)
 		}
 
 		// delete all subscriptions

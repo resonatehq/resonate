@@ -544,7 +544,7 @@ func TestCancelPromise(t *testing.T) {
 				},
 			},
 			req: &t_api.Request{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -557,7 +557,7 @@ func TestCancelPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -574,7 +574,7 @@ func TestCancelPromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -587,7 +587,7 @@ func TestCancelPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -604,7 +604,7 @@ func TestCancelPromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -617,7 +617,7 @@ func TestCancelPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.CancelPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyResolved,
 					Promise: &promise.Promise{
@@ -687,7 +687,7 @@ func TestResolvePromise(t *testing.T) {
 				},
 			},
 			req: &t_api.Request{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -700,7 +700,7 @@ func TestResolvePromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -717,7 +717,7 @@ func TestResolvePromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -730,7 +730,7 @@ func TestResolvePromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -747,7 +747,7 @@ func TestResolvePromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -760,7 +760,7 @@ func TestResolvePromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ResolvePromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyRejected,
 					Promise: &promise.Promise{
@@ -830,7 +830,7 @@ func TestRejectPromise(t *testing.T) {
 				},
 			},
 			req: &t_api.Request{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
@@ -843,7 +843,7 @@ func TestRejectPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -860,7 +860,7 @@ func TestRejectPromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -873,7 +873,7 @@ func TestRejectPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
@@ -890,7 +890,7 @@ func TestRejectPromise(t *testing.T) {
 				Id: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
 					IdempotencyKey: nil,
@@ -903,7 +903,7 @@ func TestRejectPromise(t *testing.T) {
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.RejectPromise,
+				Kind: t_api.CompletePromise,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusPromiseAlreadyResolved,
 					Promise: &promise.Promise{

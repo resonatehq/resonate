@@ -143,21 +143,9 @@ func (r *Response) String() string {
 			r.CompletePromise.Status,
 			r.CompletePromise.Promise,
 		)
-	case CancelPromise:
+	case CompletePromise:
 		return fmt.Sprintf(
-			"CancelPromise(status=%d, promise=%s)",
-			r.CompletePromise.Status,
-			r.CompletePromise.Promise,
-		)
-	case RejectPromise:
-		return fmt.Sprintf(
-			"RejectPromise(status=%d, promise=%s)",
-			r.CompletePromise.Status,
-			r.CompletePromise.Promise,
-		)
-	case ResolvePromise:
-		return fmt.Sprintf(
-			"ResolvePromise(status=%d, promise=%s)",
+			"CompletePromise(status=%d, promise=%s)",
 			r.CompletePromise.Status,
 			r.CompletePromise.Promise,
 		)

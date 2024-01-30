@@ -192,25 +192,9 @@ func (r *Request) String() string {
 			r.CreatePromise.Timeout,
 			r.CreatePromise.Strict,
 		)
-	case CancelPromise:
+	case CompletePromise:
 		return fmt.Sprintf(
-			"CancelPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
-			r.CompletePromise.Id,
-			r.CompletePromise.State,
-			r.CompletePromise.IdempotencyKey,
-			r.CompletePromise.Strict,
-		)
-	case RejectPromise:
-		return fmt.Sprintf(
-			"RejectPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
-			r.CompletePromise.Id,
-			r.CompletePromise.State,
-			r.CompletePromise.IdempotencyKey,
-			r.CompletePromise.Strict,
-		)
-	case ResolvePromise:
-		return fmt.Sprintf(
-			"RejectPromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
+			"CompletePromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
 			r.CompletePromise.Id,
 			r.CompletePromise.State,
 			r.CompletePromise.IdempotencyKey,
