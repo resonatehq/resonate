@@ -1,5 +1,5 @@
 import { Opts } from "./core/opts";
-import { IStore } from "./core/store";
+import { IStore, IScheduleStore } from "./core/store";
 import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
 import { Retry } from "./core/retries/retry";
 import { IBucket } from "./core/bucket";
@@ -139,6 +139,15 @@ export class Resonate {
    */
   bucket(name: string): IBucket {
     return this.buckets[name];
+  }
+
+  /**
+   * The default schedule store.
+   *
+   * @returns instance of IScheduleStore
+   */
+  get schedules(): IScheduleStore {
+    return this.stores["default"].schedules;
   }
 
   /**
