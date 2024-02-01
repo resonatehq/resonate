@@ -282,23 +282,30 @@ export class RemoteScheduleStore implements IScheduleStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const schedule = call(
+    const promiseValue: any = {
+      data: promiseData ? encode(promiseData, this.encoder) : undefined,
+      headers: promiseHeaders || {},
+    };
+
+    const requestBody = {
+      id,
+      description,
+      cron,
+      tags,
+      promiseId,
+      promiseTimeout,
+      promiseParam: promiseValue,
+      promiseData: promiseData ? encode(promiseData, this.encoder) : undefined,
+      promiseTags,
+    };
+
+    const schedule = call<Schedule>(
       `${this.url}/schedules`,
       isSchedule,
       {
         method: "POST",
         headers: reqHeaders,
-        body: JSON.stringify({
-          id,
-          description,
-          cron,
-          tags,
-          promiseId,
-          promiseTimeout,
-          promiseHeaders,
-          promiseData: promiseData ? encode(promiseData, this.encoder) : undefined,
-          promiseTags,
-        }),
+        body: JSON.stringify(requestBody),
       },
       this.logger,
     );
@@ -511,6 +518,7 @@ export class RemoteLockStore implements ILockStore {
       resourceId: resourceId,
       processId: processId,
       executionId: executionId,
+      expiryInSeconds: 60000,
     };
 
     const acquired = call<boolean>(
