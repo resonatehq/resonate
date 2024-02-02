@@ -14,6 +14,7 @@ import (
 func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
 
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
+		expiresAt := c.Time() + (req.AcquireLock.ExpiryInSeconds * 1000) // from s to ms
 
 		// Try to acquire lock (upsert). Update lock if already acquired by the same executionId.
 		completion, err := c.Yield(&t_aio.Submission{
@@ -24,10 +25,11 @@ func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 						{
 							Kind: t_aio.AcquireLock,
 							AcquireLock: &t_aio.AcquireLockCommand{
-								ResourceId:  req.AcquireLock.ResourceId,
-								ProcessId:   req.AcquireLock.ProcessId,
-								ExecutionId: req.AcquireLock.ExecutionId,
-								Timeout:     c.Time() + (req.AcquireLock.ExpiryInSeconds * 1000), // from s to ms
+								ResourceId:      req.AcquireLock.ResourceId,
+								ProcessId:       req.AcquireLock.ProcessId,
+								ExecutionId:     req.AcquireLock.ExecutionId,
+								ExpiryInSeconds: req.AcquireLock.ExpiryInSeconds,
+								Timeout:         expiresAt,
 							},
 						},
 					},
@@ -66,6 +68,7 @@ func AcquireLock(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn
 					ProcessId:       req.AcquireLock.ProcessId,
 					ExecutionId:     req.AcquireLock.ExecutionId,
 					ExpiryInSeconds: req.AcquireLock.ExpiryInSeconds,
+					ExpiresAt:       expiresAt,
 				},
 			},
 		}, nil)
