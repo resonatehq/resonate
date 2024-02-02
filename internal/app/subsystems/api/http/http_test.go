@@ -614,6 +614,46 @@ func TestHttpServer(t *testing.T) {
 			status: 201,
 		},
 		{
+			name:   "RejectTimeoutPromise",
+			path:   "promises/foo/bar",
+			method: "PATCH",
+			headers: map[string]string{
+				"Idempotency-Key": "bar",
+				"Strict":          "true",
+			},
+			body: []byte(`{
+				"state": "REJECTED_TIMEDOUT", 
+				"value": {
+					"headers": {"a":"a","b":"b","c":"c"},
+					"data": "cmVqZWN0"
+				}
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.CompletePromise,
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:             "foo/bar",
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
+					Strict:         true,
+					State:          promise.Timedout,
+					Value: promise.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("reject"),
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompletePromise,
+				CompletePromise: &t_api.CompletePromiseResponse{
+					Status: t_api.StatusPromiseAlreadyTimedOut,
+					Promise: &promise.Promise{
+						Id:    "foo/bar",
+						State: promise.Timedout,
+					},
+				},
+			},
+			status: 403,
+		},
+		{
 			name:   "ReadSchedule",
 			path:   "schedules/foo",
 			method: "GET",
