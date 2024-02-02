@@ -49,8 +49,8 @@ Available now:
 - schedules
 - tracing
 - logging
-- volatile promise store
-- durable promise store
+- local promise store
+- remote promise store
 
 Coming soon:
 - rate limiting
@@ -63,6 +63,26 @@ Let us know [features](https://github.com/resonatehq/resonate-sdk-ts/issues) you
 npm install -g ts-node
 npm install @resonatehq/sdk
 npm install express @types/express
+```
+
+## What's New
+
+Schedules! You can now invoke a function on a recurring schedule. Please note, this feature is experimental and bugs are expected. If encountered please [let us know](https://github.com/resonatehq/resonate-sdk-ts/issues/new).
+
+```ts
+import { Resonate, Context } from "@resonatehq/sdk";
+
+const resonate = new Resonate();
+
+resonate.schedule("everyMinute", "* * * * *", (ctx: Context) => {
+  console.log("every minute", Date.now());
+});
+
+resonate.schedule("everyHour", "0 * * * *", (ctx: Context) => {
+  console.log("every hour", Date.now());
+});
+
+resonate.start();
 ```
 
 ## Getting Started

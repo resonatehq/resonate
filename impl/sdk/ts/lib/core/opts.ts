@@ -18,16 +18,6 @@ export type Opts = {
   timeout: number;
 
   /**
-   * Overrides the default store.
-   */
-  store: string;
-
-  /**
-   * Overrides the default bucket.
-   */
-  bucket: string;
-
-  /**
    * Overrides the default retry policy.
    */
   retry: IRetry;

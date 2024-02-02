@@ -22,10 +22,10 @@ export class RemoteStore implements IStore {
   public schedules: RemoteScheduleStore;
   public locks: RemoteLockStore;
 
-  constructor(url: string, logger: ILogger, encoder: IEncoder<string, string> = new Base64Encoder()) {
+  constructor(url: string, pid: string, logger: ILogger, encoder: IEncoder<string, string> = new Base64Encoder()) {
     this.promises = new RemotePromiseStore(url, logger, encoder);
     this.schedules = new RemoteScheduleStore(url, logger, encoder);
-    this.locks = new RemoteLockStore(url, logger);
+    this.locks = new RemoteLockStore(url, pid, logger);
   }
 }
 
@@ -193,11 +193,11 @@ export class RemotePromiseStore implements IPromiseStore {
       `${this.url}/promises/${id}`,
       isDurablePromise,
       {
+        method: "GET",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
-        method: "GET",
       },
       this.logger,
     );
@@ -239,11 +239,11 @@ export class RemotePromiseStore implements IPromiseStore {
         url.toString(),
         isSearchPromiseResult,
         {
+          method: "GET",
           headers: {
             Accept: "application/json",
             "Content-Type": "application/json",
           },
-          method: "GET",
         },
         this.logger,
       );
@@ -282,30 +282,25 @@ export class RemoteScheduleStore implements IScheduleStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promiseValue: any = {
-      data: promiseData ? encode(promiseData, this.encoder) : undefined,
-      headers: promiseHeaders || {},
-    };
-
-    const requestBody = {
-      id,
-      description,
-      cron,
-      tags,
-      promiseId,
-      promiseTimeout,
-      promiseParam: promiseValue,
-      promiseData: promiseData ? encode(promiseData, this.encoder) : undefined,
-      promiseTags,
-    };
-
     const schedule = call<Schedule>(
       `${this.url}/schedules`,
       isSchedule,
       {
         method: "POST",
         headers: reqHeaders,
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          id,
+          description,
+          cron,
+          tags,
+          promiseId,
+          promiseTimeout,
+          promiseParam: {
+            headers: promiseHeaders,
+            data: promiseData ? encode(promiseData, this.encoder) : undefined,
+          },
+          promiseTags,
+        }),
       },
       this.logger,
     );
@@ -318,11 +313,11 @@ export class RemoteScheduleStore implements IScheduleStore {
       `${this.url}/schedules/${id}`,
       isSchedule,
       {
+        method: "GET",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
         },
-        method: "GET",
       },
       this.logger,
     );
@@ -333,7 +328,7 @@ export class RemoteScheduleStore implements IScheduleStore {
   async delete(id: string): Promise<void> {
     await call(
       `${this.url}/schedules/${id}`,
-      isDeleted,
+      (b: unknown): b is any => true,
       {
         method: "DELETE",
         headers: {
@@ -374,11 +369,11 @@ export class RemoteScheduleStore implements IScheduleStore {
         url.toString(),
         isSearchSchedulesResult,
         {
+          method: "GET",
           headers: {
             Accept: "application/json",
             "Content-Type": "application/json",
           },
-          method: "GET",
         },
         this.logger,
       );
@@ -389,7 +384,97 @@ export class RemoteScheduleStore implements IScheduleStore {
   }
 }
 
-// utils
+export class RemoteLockStore implements ILockStore {
+  private lockExpiry: number = 60000;
+  private heartbeatInterval: number = this.lockExpiry / 4;
+
+  private interval: number | null = null;
+
+  constructor(
+    private url: string,
+    private pid: string,
+    private logger: ILogger = new Logger(),
+  ) {}
+
+  async tryAcquire(resourceId: string, executionId: string): Promise<boolean> {
+    const acquired = call<boolean>(
+      `${this.url}/locks/acquire`,
+      (b: unknown): b is any => true,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          resourceId: resourceId,
+          processId: this.pid,
+          executionId: executionId,
+          expiryInSeconds: this.lockExpiry / 1000,
+        }),
+      },
+      this.logger,
+    );
+
+    if ((await acquired) && this.interval === null) {
+      // lazily start the heartbeat
+      this.startHeartbeat();
+    }
+
+    return await acquired;
+  }
+
+  async release(resourceId: string, executionId: string): Promise<void> {
+    return call<void>(
+      `${this.url}/locks/release`,
+      (b: unknown): b is void => b === undefined,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          resourceId,
+          executionId,
+        }),
+      },
+      this.logger,
+    );
+  }
+
+  private startHeartbeat(): void {
+    this.heartbeatInterval = +setInterval(async () => {
+      if ((await this.heartbeat()) === 0) {
+        this.stopHeartbeat();
+      }
+    }, this.heartbeatInterval);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.interval !== null) {
+      clearInterval(this.interval);
+      this.interval = null;
+    }
+  }
+
+  private async heartbeat(): Promise<number> {
+    const res = await call<{ locksAffected: number }>(
+      `${this.url}/locks/heartbeat`,
+      (b: unknown): b is { locksAffected: number } =>
+        typeof b === "object" && b !== null && "locksAffected" in b && typeof b.locksAffected === "number",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          processId: this.pid,
+        }),
+      },
+      this.logger,
+    );
+
+    return res.locksAffected;
+  }
+}
+
+// Utils
 
 async function call<T>(
   url: string,
@@ -402,20 +487,19 @@ async function call<T>(
 
   for (let i = 0; i < retries; i++) {
     try {
-      const r = await fetch(url, options);
-      const body: unknown = await r.json();
+      logger.debug("store:req", {
+        method: options.method,
+        url: url,
+        headers: options.headers,
+        body: options.body,
+      });
 
-      logger.debug("store", {
-        req: {
-          method: options.method,
-          url: url,
-          headers: options.headers,
-          body: options.body,
-        },
-        res: {
-          status: r.status,
-          body: body,
-        },
+      const r = await fetch(url, options);
+      const body: unknown = r.status !== 204 ? await r.json() : undefined;
+
+      logger.debug("store:res", {
+        status: r.status,
+        body: body,
       });
 
       if (!r.ok) {
@@ -476,123 +560,30 @@ function decode<P extends DurablePromise>(promise: P, encoder: IEncoder<string, 
 
 // Type guards
 
-function isDeleted(_: any): _ is any {
-  return true;
-}
-
-function isSearchPromiseResult(obj: any): obj is { cursor: string; promises: DurablePromise[] } {
+function isSearchPromiseResult(obj: unknown): obj is { cursor: string; promises: DurablePromise[] } {
   return (
-    obj !== undefined &&
+    typeof obj === "object" &&
+    obj !== null &&
+    "cursor" in obj &&
     obj.cursor !== undefined &&
     (obj.cursor === null || typeof obj.cursor === "string") &&
+    "promises" in obj &&
     obj.promises !== undefined &&
     Array.isArray(obj.promises) &&
     obj.promises.every(isDurablePromise)
   );
 }
 
-function isSearchSchedulesResult(obj: any): obj is { cursor: string; schedules: Schedule[] } {
+function isSearchSchedulesResult(obj: unknown): obj is { cursor: string; schedules: Schedule[] } {
   return (
-    obj !== undefined &&
+    typeof obj === "object" &&
+    obj !== null &&
+    "cursor" in obj &&
     obj.cursor !== undefined &&
     (obj.cursor === null || typeof obj.cursor === "string") &&
+    "schedules" in obj &&
     obj.schedules !== undefined &&
     Array.isArray(obj.schedules) &&
     obj.schedules.every(isSchedule)
   );
-}
-
-export class RemoteLockStore implements ILockStore {
-  private url: string;
-  private heartbeatInterval: number | null = null;
-
-  constructor(
-    url: string,
-    private logger: ILogger = new Logger(),
-  ) {
-    this.url = url;
-  }
-
-  async tryAcquire(resourceId: string, processId: string, executionId: string): Promise<boolean> {
-    const lockRequest = {
-      resourceId: resourceId,
-      processId: processId,
-      executionId: executionId,
-      expiryInSeconds: 60000,
-    };
-
-    const acquired = call<boolean>(
-      `${this.url}/locks/acquire`,
-      (b: unknown): b is boolean => typeof b === "boolean",
-      {
-        method: "post",
-        body: JSON.stringify(lockRequest),
-      },
-      this.logger,
-    );
-
-    if (await acquired) {
-      if (this.heartbeatInterval === null) {
-        this.startHeartbeat(processId);
-      }
-      return true;
-    }
-    return false;
-  }
-
-  async release(resourceId: string, executionId: string): Promise<void> {
-    const releaseLockRequest = {
-      resource_id: resourceId,
-      execution_id: executionId,
-    };
-
-    call<void>(
-      `${this.url}/locks/release`,
-      (response: unknown): response is void => response === undefined,
-      {
-        method: "post",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(releaseLockRequest),
-      },
-      this.logger,
-    );
-  }
-
-  private startHeartbeat(processId: string): void {
-    this.heartbeatInterval = +setInterval(async () => {
-      const locksAffected = await this.heartbeat(processId);
-      if (locksAffected === 0) {
-        this.stopHeartbeat();
-      }
-    }, 5000); // desired heartbeat interval (in ms)
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-    }
-  }
-
-  private async heartbeat(processId: string): Promise<number> {
-    const heartbeatRequest = {
-      process_id: processId,
-      timeout: 0,
-    };
-
-    return call<number>(
-      `${this.url}/locks/heartbeat`,
-      (locksAffected: unknown): locksAffected is number => typeof locksAffected === "number",
-      {
-        method: "post",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(heartbeatRequest),
-      },
-      this.logger,
-    );
-  }
 }

@@ -182,6 +182,20 @@ export interface IScheduleStore {
  * Lock Store API
  */
 export interface ILockStore {
-  tryAcquire(id: string, pid: string, eid: string): Promise<boolean>;
+  /**
+   * Try to acquire a lock.
+   *
+   * @param id Id of lock.
+   * @param eid Execution id of lock.
+   * @returns A boolean indicating whether or not the lock was acquired.
+   */
+  tryAcquire(id: string, eid: string): Promise<boolean>;
+
+  /**
+   * Release a lock.
+   *
+   * @param id Id of lock.
+   * @param eid Execution id of lock.
+   */
   release(id: string, eid: string): Promise<void>;
 }

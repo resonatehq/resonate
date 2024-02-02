@@ -1,5 +1,5 @@
 import { Opts } from "./core/opts";
-import { IStore, IScheduleStore } from "./core/store";
+import { IStore } from "./core/store";
 import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
 import { Retry } from "./core/retries/retry";
 import { IBucket } from "./core/bucket";
@@ -12,6 +12,8 @@ import { JSONEncoder } from "./core/encoders/json";
 import { ResonateError } from "./core/error";
 import { ICache } from "./core/cache";
 import { Cache } from "./core/caches/cache";
+import { Schedule } from "./core/schedule";
+import { IEncoder } from "./core/encoder";
 
 // Types
 
@@ -43,6 +45,7 @@ type ResonateOpts = {
   store: IStore;
   bucket: IBucket;
   logger: ILogger;
+  encoder: IEncoder<unknown, string | undefined>;
 };
 
 export class Resonate {
@@ -50,11 +53,13 @@ export class Resonate {
 
   private cache: ICache<Promise<any>> = new Cache();
 
-  private stores: Record<string, IStore> = {};
+  private store: IStore;
 
-  private buckets: Record<string, IBucket> = {};
+  private bucket: IBucket;
 
   readonly logger: ILogger;
+
+  readonly encoder: IEncoder<unknown, string | undefined>;
 
   readonly pid: string;
 
@@ -80,74 +85,24 @@ export class Resonate {
     store,
     logger = new Logger(),
     bucket = new Bucket(),
+    encoder = new JSONEncoder(),
   }: Partial<ResonateOpts> = {}) {
     this.pid = pid;
     this.namespace = namespace;
     this.seperator = seperator;
 
+    this.bucket = bucket;
     this.logger = logger;
+    this.encoder = encoder;
 
     // store
-    let defaultStore: IStore;
     if (store) {
-      defaultStore = store;
+      this.store = store;
     } else if (url) {
-      defaultStore = new RemoteStore(url, logger);
+      this.store = new RemoteStore(url, this.pid, logger);
     } else {
-      defaultStore = new LocalStore(logger);
+      this.store = new LocalStore(logger);
     }
-
-    this.addStore("default", defaultStore);
-    this.addBucket("default", bucket);
-  }
-
-  /**
-   * Add a store.
-   *
-   * @param name
-   * @param store
-   */
-  addStore(name: string, store: IStore) {
-    this.stores[name] = store;
-  }
-
-  /**
-   * Get a store by name.
-   *
-   * @param name
-   * @returns instance of IPromiseStore
-   */
-  store(name: string): IStore {
-    return this.stores[name];
-  }
-
-  /**
-   * Add a bucket.
-   *
-   * @param name
-   * @param bucket
-   */
-  addBucket(name: string, bucket: IBucket) {
-    this.buckets[name] = bucket;
-  }
-
-  /**
-   * Get a bucket by name.
-   *
-   * @param name
-   * @returns instance of IBucket
-   */
-  bucket(name: string): IBucket {
-    return this.buckets[name];
-  }
-
-  /**
-   * The default schedule store.
-   *
-   * @returns instance of IScheduleStore
-   */
-  get schedules(): IScheduleStore {
-    return this.stores["default"].schedules;
   }
 
   /**
@@ -155,6 +110,7 @@ export class Resonate {
    *
    * @param name
    * @param func
+   * @param opts
    * @returns Resonate function
    */
   register<A extends any[], R>(
@@ -173,8 +129,6 @@ export class Resonate {
       // default opts
       opts: {
         timeout: 10000,
-        store: "default",
-        bucket: "default",
         retry: Retry.exponential(),
         encoder: new JSONEncoder(),
         eid: randomId(),
@@ -196,6 +150,51 @@ export class Resonate {
     for (const key in module) {
       this.register(key, module[key]);
     }
+  }
+
+  /**
+   * Invoke a function on a recurring schedule.
+   *
+   * @param name
+   * @param cron
+   * @param func
+   * @param args
+   * @param opts
+   * @returns Resonate function
+   */
+  schedule<A extends any[], R>(
+    name: string,
+    cron: string,
+    func: DurableFunction<A, R>,
+    ...argsAndOpts: A
+  ): Promise<Schedule>;
+  schedule<A extends any[], R>(
+    name: string,
+    cron: string,
+    func: DurableFunction<A, R>,
+    ...argsAndOpts: [...A, Partial<Opts>]
+  ): Promise<Schedule>;
+  schedule<A extends any[], R>(
+    name: string,
+    cron: string,
+    func: DurableFunction<A, R>,
+    ...argsAndOpts: [...A, Partial<Opts>?]
+  ): Promise<Schedule> {
+    const { args, opts } = split(func, argsAndOpts);
+    this.register(name, func, opts);
+
+    return this.store.schedules.create(
+      name,
+      name,
+      undefined,
+      cron,
+      undefined,
+      "{{.id}}/{{.timestamp}}",
+      opts.timeout ?? 10000,
+      undefined,
+      this.encoder.encode({ func: name, args: args }),
+      undefined,
+    );
   }
 
   /**
@@ -225,24 +224,22 @@ export class Resonate {
     id = opts.id ?? this.id(this.namespace, name, id);
     const idempotencyKey = opts.idempotencyKey ?? id;
 
-    const store = this.store(opts.store);
-
     if (!this.cache.has(id)) {
       const promise = new Promise(async (resolve, reject) => {
         // lock
-        while (!(await store.locks.tryAcquire(id, this.pid, opts.eid))) {
+        while (!(await this.store.locks.tryAcquire(id, opts.eid))) {
           // sleep
           await new Promise((r) => setTimeout(r, 1000));
         }
 
-        const context = new ResonateContext(this, name, id, idempotencyKey, opts);
+        const context = new ResonateContext(this, this.store, this.bucket, name, id, idempotencyKey, opts);
 
         try {
           resolve(await context.execute(func, args));
         } catch (e) {
           reject(e);
         } finally {
-          await store.locks.release(id, opts.eid);
+          await this.store.locks.release(id, opts.eid);
         }
       });
 
@@ -255,16 +252,14 @@ export class Resonate {
   async start(store: string = "default") {
     setTimeout(() => this.start(store), 1000);
 
-    const encoder = new JSONEncoder();
-
-    const search = this.store(store).promises.search(this.id(this.namespace, "*"), "pending", {
+    const search = this.store.promises.search(this.id(this.namespace, "*"), "pending", {
       "resonate:invocation": "true",
     });
 
     for await (const promises of search) {
       for (const promise of promises) {
         try {
-          const { func, args } = encoder.decode(promise.param.data) as { func: string; args: any[] };
+          const { func, args } = this.encoder.decode(promise.param.data) as { func: string; args: any[] };
 
           this.run(func, promise.id, ...args, {
             id: promise.id,
@@ -409,21 +404,16 @@ class ResonateContext implements Context {
 
   private traces: ITrace[] = [];
 
-  private store: IStore;
-
-  private bucket: IBucket;
-
   constructor(
     private readonly resonate: Resonate,
+    private readonly store: IStore,
+    private readonly bucket: IBucket,
     public readonly name: string,
     public readonly id: string,
     public readonly idempotencyKey: string,
     public readonly defaults: Opts,
     public readonly opts: Opts = defaults,
-  ) {
-    this.store = resonate.store(opts.store);
-    this.bucket = resonate.bucket(opts.bucket);
-  }
+  ) {}
 
   get timeout(): number {
     return Math.min(this.created + this.opts.timeout, this.parent?.timeout ?? Infinity);
@@ -456,10 +446,19 @@ class ResonateContext implements Context {
     const idempotencyKey = opts.idempotencyKey ?? id;
     const name = typeof func === "string" ? func : func.name;
 
-    const context = new ResonateContext(this.resonate, name, id, idempotencyKey, this.defaults, {
-      ...this.defaults,
-      ...opts,
-    });
+    const context = new ResonateContext(
+      this.resonate,
+      this.store,
+      this.bucket,
+      name,
+      id,
+      idempotencyKey,
+      this.defaults,
+      {
+        ...this.defaults,
+        ...opts,
+      },
+    );
     this.addChild(context);
 
     return context.execute(func, args);

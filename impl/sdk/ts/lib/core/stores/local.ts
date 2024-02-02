@@ -19,7 +19,6 @@ import { WithTimeout } from "../storages/withTimeout";
 import { MemoryStorage } from "../storages/memory";
 import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
-import { Lock } from "../lock";
 
 export class LocalStore implements IStore {
   public promises: LocalPromiseStore;
@@ -33,7 +32,7 @@ export class LocalStore implements IStore {
     private logger: ILogger = new Logger(),
     promiseStorage: IStorage<DurablePromise> = new WithTimeout(new MemoryStorage<DurablePromise>()),
     scheduleStorage: IStorage<Schedule> = new MemoryStorage<Schedule>(),
-    lockStorage: IStorage<Lock> = new MemoryStorage<Lock>(),
+    lockStorage: IStorage<{ id: string; eid: string }> = new MemoryStorage<{ id: string; eid: string }>(),
   ) {
     this.promises = new LocalPromiseStore(promiseStorage);
     this.schedules = new LocalScheduleStore(scheduleStorage, this);
@@ -93,8 +92,8 @@ export class LocalStore implements IStore {
           false,
           schedule.promiseParam?.headers,
           schedule.promiseParam?.data,
-          schedule.promiseTimeout,
-          schedule.promiseTags,
+          Date.now() + schedule.promiseTimeout,
+          { ...schedule.promiseTags, "resonate:schedule": schedule.id, "resonate:invocation": "true" },
         );
       } catch (error) {
         this.logger.warn("error creating scheduled promise", error);
@@ -110,7 +109,9 @@ export class LocalStore implements IStore {
   }
 
   private generatePromiseId(schedule: Schedule): string {
-    return schedule.promiseId.replace("{{id}}", schedule.id).replace("{{timestamp}}", schedule.nextRunTime.toString());
+    return schedule.promiseId
+      .replace("{{.id}}", schedule.id)
+      .replace("{{.timestamp}}", schedule.nextRunTime.toString());
   }
 }
 
@@ -440,14 +441,15 @@ export class LocalScheduleStore implements IScheduleStore {
 }
 
 export class LocalLockStore implements ILockStore {
-  constructor(private storage: IStorage<Lock> = new MemoryStorage<Lock>()) {}
+  constructor(
+    private storage: IStorage<{ id: string; eid: string }> = new MemoryStorage<{ id: string; eid: string }>(),
+  ) {}
 
-  async tryAcquire(id: string, pid: string, eid: string): Promise<boolean> {
+  async tryAcquire(id: string, eid: string): Promise<boolean> {
     const lock = await this.storage.rmw(id, (lock) => {
       if (!lock || lock.eid === eid) {
         return {
           id,
-          pid,
           eid,
         };
       }
