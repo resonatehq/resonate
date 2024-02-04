@@ -200,7 +200,7 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
-	state := promise.State(math.Exp2(float64(r.Intn(4) + 1)))
+	state := promise.State(math.Exp2(float64(r.Intn(3) + 1)))
 
 	return &t_api.Request{
 		Kind: t_api.CompletePromise,
