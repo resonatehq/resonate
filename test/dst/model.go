@@ -252,7 +252,7 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
 		if pm.completed() {
-			if !(!req.CompletePromise.Strict && req.CompletePromise.State.In(promise.Timedout)) &&
+			if !(!req.CompletePromise.Strict && pm.promise.State == promise.Timedout) &&
 				!pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
 			} else if req.CompletePromise.Strict && pm.promise.State != req.CompletePromise.State {

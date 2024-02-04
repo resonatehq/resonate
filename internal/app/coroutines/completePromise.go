@@ -165,7 +165,7 @@ func CompletePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*
 			} else {
 				status := t_api.ForbiddenStatus(p.State)
 				strict := req.CompletePromise.Strict && p.State != req.CompletePromise.State
-				timeout := !req.CompletePromise.Strict && req.CompletePromise.State.In(promise.Timedout)
+				timeout := !req.CompletePromise.Strict && p.State == promise.Timedout
 
 				if (!strict && p.IdempotencyKeyForComplete.Match(req.CompletePromise.IdempotencyKey)) || timeout {
 					status = t_api.StatusOK
