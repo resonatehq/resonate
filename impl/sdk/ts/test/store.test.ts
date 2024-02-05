@@ -1,7 +1,10 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
+import { DurablePromise } from "../lib/core/promise";
 import { RemotePromiseStore } from "../lib/core/stores/remote";
 import { LocalPromiseStore } from "../lib/core/stores/local";
+import { WithTimeout } from "../lib/core/storages/withTimeout";
+import { MemoryStorage } from "../lib/core/storages/memory";
 
 // Set a larger timeout for hooks (e.g., 10 seconds)
 jest.setTimeout(10000);
@@ -10,7 +13,8 @@ describe("Resonate Server Tests", () => {
   const useDurable = process.env.USE_DURABLE === "true";
   const url = process.env.RESONATE_URL || "http://localhost:8001";
 
-  const store = useDurable ? new RemotePromiseStore(url) : new LocalPromiseStore();
+  const storage = new WithTimeout(new MemoryStorage<DurablePromise>());
+  const store = useDurable ? new RemotePromiseStore(url) : new LocalPromiseStore(storage);
 
   describe("State Transition Tests", () => {
     test("Test Case 0: transitions from Init to Pending via Create", async () => {
@@ -2455,6 +2459,301 @@ describe("Resonate Server Tests", () => {
       await store.cancel("id289", "iku", false, undefined, undefined);
 
       await expect(store.cancel("id289", "iku*", false, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 290: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id290", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id290", undefined, true, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 291: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id291", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id291", undefined, false, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 292: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id292", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id292", "ikc", true, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 293: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id293", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id293", "ikc", false, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 294: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id294", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.resolve("id294", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 295: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id295", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.resolve("id295", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id295");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 296: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id296", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.resolve("id296", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 297: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id297", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.resolve("id297", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id297");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 298: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id298", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.reject("id298", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 299: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id299", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.reject("id299", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id299");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 300: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id300", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.reject("id300", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 301: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id301", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.reject("id301", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id301");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 302: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id302", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.cancel("id302", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 303: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id303", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.cancel("id303", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id303");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 304: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id304", undefined, false, undefined, undefined, 0, undefined);
+
+      await expect(store.cancel("id304", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 305: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id305", undefined, false, undefined, undefined, 0, undefined);
+
+      const promise = await store.cancel("id305", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id305");
+      expect(promise.idempotencyKeyForCreate).toBe(undefined);
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 306: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id306", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id306", undefined, true, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 307: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id307", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id307", undefined, false, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 308: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id308", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id308", "ikc", true, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 309: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id309", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.create(
+        "id309",
+        "ikc",
+        false,
+        undefined,
+        undefined,
+        Number.MAX_SAFE_INTEGER,
+        undefined,
+      );
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id309");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 310: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id310", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id310", "ikc*", true, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 311: transitions from Timedout to Timedout via Create", async () => {
+      await store.create("id311", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(
+        store.create("id311", "ikc*", false, undefined, undefined, Number.MAX_SAFE_INTEGER, undefined),
+      ).rejects.toThrow();
+    });
+
+    test("Test Case 312: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id312", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.resolve("id312", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 313: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id313", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.resolve("id313", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id313");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 314: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id314", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.resolve("id314", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 315: transitions from Timedout to Timedout via Resolve", async () => {
+      await store.create("id315", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.resolve("id315", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id315");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 316: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id316", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.reject("id316", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 317: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id317", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.reject("id317", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id317");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 318: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id318", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.reject("id318", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 319: transitions from Timedout to Timedout via Reject", async () => {
+      await store.create("id319", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.reject("id319", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id319");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 320: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id320", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.cancel("id320", undefined, true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 321: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id321", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.cancel("id321", undefined, false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id321");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
+    });
+
+    test("Test Case 322: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id322", "ikc", false, undefined, undefined, 0, undefined);
+
+      await expect(store.cancel("id322", "iku", true, undefined, undefined)).rejects.toThrow();
+    });
+
+    test("Test Case 323: transitions from Timedout to Timedout via Cancel", async () => {
+      await store.create("id323", "ikc", false, undefined, undefined, 0, undefined);
+
+      const promise = await store.cancel("id323", "iku", false, undefined, undefined);
+
+      expect(promise.state).toBe("REJECTED_TIMEDOUT");
+      expect(promise.id).toBe("id323");
+      expect(promise.idempotencyKeyForCreate).toBe("ikc");
+      expect(promise.idempotencyKeyForComplete).toBe(undefined);
     });
   });
 });
