@@ -58,7 +58,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			generator.AddRequest(generator.GenerateCreatePromise)
 			model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
 		case t_api.CompletePromise:
-			generator.AddRequest(generator.GenerateCancelPromise)
+			generator.AddRequest(generator.GenerateCompletePromise)
 			model.AddResponse(t_api.CompletePromise, model.ValidateCompletePromise)
 
 		// SCHEDULES
