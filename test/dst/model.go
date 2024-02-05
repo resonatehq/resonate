@@ -252,8 +252,8 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
 		if pm.completed() {
-			if !(!req.CompletePromise.Strict && pm.promise.State == promise.Timedout) &&
-				!pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) {
+			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) &&
+				(req.CompletePromise.Strict || pm.promise.State != promise.Timedout) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
 			} else if req.CompletePromise.Strict && pm.promise.State != req.CompletePromise.State {
 				return fmt.Errorf("unexpected state %s when strict true", pm.promise.State)
@@ -269,13 +269,13 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 		pm.promise = res.CompletePromise.Promise
 		return nil
 	case t_api.StatusCreated:
-		if req.CompletePromise.State.In(promise.Resolved) && res.CompletePromise.Promise.State != promise.Resolved {
+		if req.CompletePromise.State == promise.Resolved && res.CompletePromise.Promise.State != promise.Resolved {
 			return fmt.Errorf("unexpected state %s after resolve promise", res.CompletePromise.Promise.State)
 		}
-		if req.CompletePromise.State.In(promise.Rejected) && res.CompletePromise.Promise.State != promise.Rejected {
+		if req.CompletePromise.State == promise.Rejected && res.CompletePromise.Promise.State != promise.Rejected {
 			return fmt.Errorf("unexpected state %s after reject promise", res.CompletePromise.Promise.State)
 		}
-		if req.CompletePromise.State.In(promise.Canceled) && res.CompletePromise.Promise.State != promise.Canceled {
+		if req.CompletePromise.State == promise.Canceled && res.CompletePromise.Promise.State != promise.Canceled {
 			return fmt.Errorf("unexpected state %s after cancel promise", res.CompletePromise.Promise.State)
 		}
 		if pm.completed() {
