@@ -32,3 +32,22 @@ export type Opts = {
    */
   eid: string;
 };
+
+export class ContextOpts {
+  constructor(private opts: Partial<Opts> = {}) {}
+
+  all(): Partial<Opts> {
+    return this.opts;
+  }
+
+  merge(opts: Partial<Opts>): ContextOpts {
+    return new ContextOpts({
+      ...this.opts,
+      ...opts,
+    });
+  }
+}
+
+export function isContextOpts(o: unknown): o is ContextOpts {
+  return o instanceof ContextOpts;
+}

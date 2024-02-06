@@ -17,7 +17,7 @@ interface AsyncFunc {
 }
 
 interface GeneratorFunc {
-  (c: Context, ...args: any[]): Generator<any, any, any>;
+  (c: Context, ...args: any[]): Generator<Promise<any>, any, any>;
 }
 
 class TraceTestSuite {
@@ -226,7 +226,7 @@ describe("Resonate SDK Trace Tests", () => {
       c: Context,
       a: number,
       b: number,
-    ): Generator<Promise<Promise<number>>, number, number> {
+    ): Generator<Promise<number>, number, number> {
       const x = yield c.run(a1, a, b);
       const y = yield c.run(a1, a, b);
 

@@ -22,7 +22,7 @@ describe("All combinator", () => {
       (ctx: Context) => {
         return ctx.all([ctx.run(identity, 1), ctx.run(identity, 2), ctx.run(identity, 3)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     const r = await f("test");
@@ -35,7 +35,7 @@ describe("All combinator", () => {
       (ctx: Context) => {
         return ctx.all([]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     const r = await f("test");
@@ -48,7 +48,7 @@ describe("All combinator", () => {
       (ctx: Context) => {
         return ctx.all([ctx.run(identity, 1), ctx.run(nope), ctx.run(identity, 3)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     await expect(f("test")).rejects.toThrow("nope");
@@ -64,7 +64,7 @@ describe("Any combinator", () => {
       (ctx: Context) => {
         return ctx.any([ctx.run(nope), ctx.run(identity, 2), ctx.run(nope)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     const r = await f("test");
@@ -77,7 +77,7 @@ describe("Any combinator", () => {
       (ctx: Context) => {
         return ctx.any([]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     await expect(f("test")).rejects.toBeInstanceOf(AggregateError);
@@ -89,7 +89,7 @@ describe("Any combinator", () => {
       (ctx: Context) => {
         return ctx.any([ctx.run(nope), ctx.run(nope), ctx.run(nope)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     await expect(f("test")).rejects.toBeInstanceOf(AggregateError);
@@ -105,7 +105,7 @@ describe("Race combinator", () => {
       (ctx: Context) => {
         return ctx.race([ctx.run(identity, 1), ctx.run(nope), ctx.run(nope)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     const r = await f("test");
@@ -118,7 +118,7 @@ describe("Race combinator", () => {
       (ctx: Context) => {
         return ctx.race([ctx.run(nope), ctx.run(identity, 2), ctx.run(identity, 3)]);
       },
-      { retry: Retry.never() },
+      resonate.options({ retry: Retry.never() }),
     );
 
     await expect(f("test")).rejects.toThrow("nope");

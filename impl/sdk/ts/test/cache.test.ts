@@ -14,9 +14,13 @@ describe("Cache", () => {
   const rejectSpy = jest.fn((ctx: Context, e: string) => {
     throw new Error(e);
   });
-  const reject = resonate.register("reject", rejectSpy, {
-    retry: Retry.never(),
-  });
+  const reject = resonate.register(
+    "reject",
+    rejectSpy,
+    resonate.options({
+      retry: Retry.never(),
+    }),
+  );
 
   beforeEach(() => {
     resolveSpy.mockClear();

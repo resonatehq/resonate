@@ -54,14 +54,22 @@ describe("Retry delays", () => {
 
 describe("Context retries", () => {
   const resonate = new Resonate();
-  resonate.register("async", foo, {
-    timeout: Number.MAX_SAFE_INTEGER,
-    retry: Retry.never(),
-  });
-  resonate.register("generator", bar, {
-    timeout: Number.MAX_SAFE_INTEGER,
-    retry: Retry.never(),
-  });
+  resonate.register(
+    "async",
+    foo,
+    resonate.options({
+      timeout: Number.MAX_SAFE_INTEGER,
+      retry: Retry.never(),
+    }),
+  );
+  resonate.register(
+    "generator",
+    bar,
+    resonate.options({
+      timeout: Number.MAX_SAFE_INTEGER,
+      retry: Retry.never(),
+    }),
+  );
 
   const spy = jest.fn(nope);
 
@@ -87,14 +95,14 @@ describe("Context retries", () => {
   }
 });
 
-async function foo(context: Context, next: (c: Context) => void, retry: IRetry) {
-  return await context.run(next, { retry });
+async function foo(ctx: Context, next: (c: Context) => void, retry: IRetry) {
+  return await ctx.run(next, ctx.options({ retry }));
 }
 
-function* bar(context: Context, next: (c: Context) => void, retry: IRetry): Generator {
-  return yield context.run(next, { retry });
+function* bar(ctx: Context, next: (c: Context) => void, retry: IRetry): Generator {
+  return yield ctx.run(next, ctx.options({ retry }));
 }
 
-function nope(context: Context) {
+function nope() {
   throw new Error("nope");
 }
