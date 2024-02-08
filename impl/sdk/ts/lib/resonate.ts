@@ -1,4 +1,4 @@
-import { Opts, ContextOpts, isContextOpts } from "./core/opts";
+import { ResonateOptions, ContextOptions, Options, isContextOpts } from "./core/opts";
 import { IStore } from "./core/store";
 import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
 import { Retry } from "./core/retries/retry";
@@ -14,104 +14,55 @@ import { ICache } from "./core/cache";
 import { Cache } from "./core/caches/cache";
 import { Schedule } from "./core/schedule";
 import { IEncoder } from "./core/encoder";
-
-// Types
-
-// Resonate supports any function that takes a context as the first
-// argument. The generic parameter is used to restrict the return
-// type when a generator used.
-type Func<T = any> = (ctx: Context, ...args: any[]) => T;
-
-// Similar to the built in Parameters type, but ignores the required
-// context parameter.
-type Params<F extends Func> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
-
-// Similar to the built in ReturnType type, but optionally returns
-// the awaited inferred return value of F if F is a generator,
-// otherwise returns the awaited inferred return value.
-type Return<F extends Func> = F extends (ctx: Context, ...args: any) => infer R
-  ? R extends Generator<unknown, infer G>
-    ? Awaited<G>
-    : Awaited<R>
-  : never;
-
-function isFunction(f: unknown): f is Func {
-  return (
-    typeof f === "function" &&
-    (f.constructor.name === "Function" || f.constructor.name === "AsyncFunction" || f.constructor.name === "")
-  );
-}
-
-function isGenerator(f: unknown): f is Func<Generator> {
-  return typeof f === "function" && f.constructor.name === "GeneratorFunction";
-}
+import { IRetry } from "./core/retry";
+import { Func, Params, Return, isFunction, isGenerator } from "./core/types";
 
 // Resonate
 
-type ResonateOpts = {
-  url: string;
-  pid: string;
-  namespace: string;
-  seperator: string;
-  store: IStore;
-  bucket: IBucket;
-  logger: ILogger;
-  encoder: IEncoder<unknown, string | undefined>;
-  recoveryDelay: number;
-};
-
 export class Resonate {
-  private functions: Record<string, { func: Func; opts: Opts }> = {};
-
   private cache: ICache<Promise<any>> = new Cache();
-
-  private recoveryDelay: number;
-
+  private functions: Record<string, { func: Func; opts: ContextOptions }> = {};
   private recoveryInterval: number | undefined = undefined;
 
-  private store: IStore;
-
-  private bucket: IBucket;
-
-  readonly logger: ILogger;
-
+  readonly bucket: IBucket;
   readonly encoder: IEncoder<unknown, string | undefined>;
-
-  readonly pid: string;
-
+  readonly logger: ILogger;
   readonly namespace: string;
-
-  readonly seperator: string;
+  readonly recoveryDelay: number;
+  readonly retry: IRetry;
+  readonly pid: string;
+  readonly separator: string;
+  readonly store: IStore;
+  readonly timeout: number;
 
   /**
-   * Instantiate a new Resonate instance.
+   * Creates a Resonate instance. This is the starting point for using Resonate.
    *
-   * @param opts.url optional url of a DurablePromiseStore, if not provided a VolatilePromiseStore will be used
-   * @param opts.logger optional logger, defaults to a the default Logger
-   * @param opts.timeout optional timeout for function invocations, defaults to 10000ms
-   * @param opts.retry optional retry policy constructor, defaults to Retry.atLeastOnce()
-   * @param opts.bucket optional default bucket, defaults to "default"
-   * @param opts.encoder optional default encoder, defaults to "default"
+   * @constructor
+   * @param opts - A partial resonate options object.
    */
   constructor({
-    url,
-    pid = randomId(),
-    namespace = "",
-    seperator = "/",
-    store,
-    logger = new Logger(),
     bucket = new Bucket(),
     encoder = new JSONEncoder(),
+    logger = new Logger(),
+    namespace = "",
+    pid = rid(),
     recoveryDelay = 1000,
-  }: Partial<ResonateOpts> = {}) {
-    this.pid = pid;
-    this.namespace = namespace;
-    this.seperator = seperator;
-
+    retry = Retry.exponential(),
+    separator: seperator = "/",
+    store = undefined,
+    timeout = 1000,
+    url = undefined,
+  }: Partial<ResonateOptions> = {}) {
     this.bucket = bucket;
-    this.logger = logger;
     this.encoder = encoder;
+    this.logger = logger;
+    this.namespace = namespace;
+    this.pid = pid;
     this.recoveryDelay = recoveryDelay;
+    this.retry = retry;
+    this.separator = seperator;
+    this.timeout = timeout;
 
     // store
     if (store) {
@@ -126,15 +77,15 @@ export class Resonate {
   /**
    * Register a function with Resonate. Registered functions can be invoked with {@link run}, or by the returned function.
    *
-   * @param name a name to identify the function
-   * @param func the function to register with resonate
-   * @param opts optional resonate options
+   * @param name A unique name to identify the function.
+   * @param func The function to register with resonate.
+   * @param opts Resonate options, can be constructed by calling {@link options}.
    * @returns Resonate function
    */
   register<F extends Func>(
     name: string,
     func: F,
-    opts: ContextOpts = new ContextOpts(),
+    opts: Options = new Options(),
   ): (id: string, ...args: Params<F>) => Promise<Return<F>> {
     if (name in this.functions) {
       throw new Error(`Function ${name} already registered`);
@@ -144,12 +95,13 @@ export class Resonate {
       // the function
       func: func,
 
-      // inject sensible defaults
+      // default opts
       opts: {
-        timeout: 10000,
+        bucket: this.bucket,
+        eid: rid(),
+        encoder: this.encoder,
         retry: Retry.exponential(),
-        encoder: new JSONEncoder(),
-        eid: randomId(),
+        timeout: this.timeout,
         ...opts.all(),
       },
     };
@@ -160,12 +112,12 @@ export class Resonate {
   }
 
   /**
-   * Register a module with Resonate. Registered module functions can be invoked with run.
+   * Register a module with Resonate. Registered module functions can be invoked with {@link run}.
    *
    * @param module the javascript module
    * @param opts optional resonate options
    */
-  registerModule(module: Record<string, Func>, opts: ContextOpts = new ContextOpts()) {
+  registerModule(module: Record<string, Func>, opts: Options = new Options()) {
     for (const key in module) {
       this.register(key, module[key], opts);
     }
@@ -174,10 +126,12 @@ export class Resonate {
   /**
    * Invoke a Resonate function.
    *
-   * @param name the name of the registered function
-   * @param id a unique identifier for the invocation
-   * @param args arguments to pass to the function
-   * @returns a promise that resolves to the return value of the function
+   * @template T The return type of function.
+   * @template P The type of parameters to be passed to the function.
+   * @param name The name of the function registered with Resonate.
+   * @param id A unique identifier for this invocation.
+   * @param args The arguments to pass to the function.
+   * @returns A promise that resolves to the return value of the function.
    */
   run<T = any, P extends any[] = any[]>(name: string, id: string, ...args: P): Promise<T> {
     // use a constructed id for both the id and idempotency key
@@ -186,7 +140,7 @@ export class Resonate {
     return this._run(name, id, id, args);
   }
 
-  _run<T = any, P extends any[] = any[]>(
+  private _run<T = any, P extends any[] = any[]>(
     name: string,
     id: string,
     idempotencyKey: string | undefined,
@@ -227,24 +181,32 @@ export class Resonate {
   /**
    * Invoke a function on a recurring schedule.
    *
-   * @param name
-   * @param cron
-   * @param func
-   * @param args
-   * @param opts
-   * @returns Resonate function
+   * @param name The name of the schedule.
+   * @param cron The cron expression for the schedule.
+   * @param funcName The name of the function registered with Resonate to invoke on a schedule.
+   * @param args The arguments to pass to the function.
+   * @returns The Resonate schedule.
    */
-  schedule(name: string, cron: string, func: string, ...args: any[]): Promise<Schedule>;
-  schedule<F extends Func>(name: string, cron: string, func: F, ...args: Params<F>): Promise<Schedule>;
+  schedule(name: string, cron: string, funcName: string, ...args: any[]): Promise<Schedule>;
+
+  /**
+   * Invoke a function on a recurring schedule.
+   *
+   * @param name The name of the schedule, will also be used as the name for the function registered with Resonate.
+   * @param cron The cron expression for the schedule.
+   * @param func The function to register with Resonate.
+   * @param argsAndOpts The arguments to pass to the function, followed by {@link options}.
+   * @returns The Resonate schedule.
+   */
   schedule<F extends Func>(
     name: string,
     cron: string,
     func: F,
-    ...argsAndOpts: [...Params<F>, ContextOpts]
+    ...argsAndOpts: [...Params<F>, Options?]
   ): Promise<Schedule>;
   schedule(name: string, cron: string, func: string | Func, ...argsAndOpts: any[]): Promise<Schedule> {
     let args: any[];
-    let opts: Partial<Opts>;
+    let opts: Partial<ContextOptions>;
 
     if (typeof func == "string") {
       if (!(func in this.functions)) {
@@ -279,11 +241,11 @@ export class Resonate {
   }
 
   /**
-   * Start resonate recovery path.
+   * Start the Resonate recovery control loop.
    *
-   * Starts a control loop that polls the promise store for promises
-   * that have the "resonate:invocation" tag. When a promise is
-   * returned from the search, execute the corresponding function.
+   * Polls the promise store for pending promises that have the
+   * "resonate:invocation" tag. When a promise is matches, execute
+   * the corresponding function.
    */
   async recover() {
     if (this.recoveryInterval === undefined) {
@@ -311,17 +273,18 @@ export class Resonate {
   }
 
   /**
-   * Construct context opts.
+   * Helper function that maps a partial {@link ContextOptions} to
+   * Options.
    *
-   * @param opts Resonate {@link Opts}
-   * @returns an instance of resonate opts
+   * @param opts A partial Resonate {@link ContextOptions}
+   * @returns An instance of Options.
    */
-  options(opts: Partial<Opts>): ContextOpts {
-    return new ContextOpts(opts);
+  options(opts: Partial<ContextOptions>): Options {
+    return new Options(opts);
   }
 
   private id(...parts: string[]): string {
-    return parts.filter((p) => p !== "").join(this.seperator);
+    return parts.filter((p) => p !== "").join(this.separator);
   }
 }
 
@@ -339,7 +302,7 @@ export interface Context {
   readonly idempotencyKey: string | undefined;
 
   /**
-   * The absolute time the context will expire.
+   * The absolute time in ms that the context will expire.
    */
   readonly timeout: number;
 
@@ -349,7 +312,7 @@ export interface Context {
   readonly created: number;
 
   /**
-   * The count of all durable function calls made by from the context.
+   * The count of all function calls made by this context.
    */
   readonly counter: number;
 
@@ -381,22 +344,32 @@ export interface Context {
   /**
    * Invoke a function durably.
    *
-   * @param func the function to invoke
-   * @param args arguments to pass to the function, optionally followed by Resonate {@link Opts}
-   * @returns a promise that resolves to the return value of the function
+   * @param func The function to invoke.
+   * @param args The function arguments, optionally followed by context {@link options}.
+   * @returns A promise that resolves to the return value of the function.
    */
-  run<F extends Func>(func: F, ...args: Params<F>): Promise<Return<F>>;
-  run<F extends Func>(func: F, ...args: [...Params<F>, ContextOpts]): Promise<Return<F>>;
-  run<T = any, P = any>(func: string, args: P): Promise<T>;
-  run<T = any, P = any>(func: string, args: P, opts: ContextOpts): Promise<T>;
+  run<F extends Func>(func: F, ...args: [...Params<F>, Options?]): Promise<Return<F>>;
 
   /**
-   * Construct context opts.
+   * Invoke a remote function.
    *
-   * @param opts Resonate {@link Opts}
-   * @returns an instance of resonate opts
+   * @template T The return type of the remote function.
+   * @template P The type of parameters to be passed to the remote function.
+   * @param id The id of the remote function.
+   * @param args The arguments to pass to the remote function.
+   * @param opts The optional context {@link options}.
+   * @returns A promise that resolves to the resolved value of the remote function.
    */
-  options(opts: Partial<Opts>): ContextOpts;
+  run<T = any, P = any>(id: string, args: P, opts?: Options): Promise<T>;
+
+  /**
+   * Helper function that maps a partial {@link ContextOptions} to
+   * Options.
+   *
+   * @param opts A partial Resonate {@link ContextOptions}
+   * @returns An instance of Options.
+   */
+  options(opts: Partial<ContextOptions>): Options;
 
   /**
    * Wraps an array of durable promises into a new durable promise that fulfills when all input
@@ -404,14 +377,13 @@ export interface Context {
    *
    * See [Promise.all()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/all) for more information.
    *
-   * @param values array of durable promises
-   * @param opts resonate options {@link Opts}
-   * @returns a promise that resolves with an array of all resolved values, or rejects with the reason of the first rejected durable promise
+   * @param values Array of durable promises.
+   * @param opts Optional resonate {@link options}.
+   * @returns A promise that resolves with an array of all resolved values, or rejects with the reason of the first rejected durable promise.
    */
-  all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }>;
   all<T extends readonly unknown[] | []>(
     values: T,
-    opts?: ContextOpts,
+    opts?: Options,
   ): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }>;
 
   /**
@@ -420,12 +392,11 @@ export interface Context {
    *
    * See [Promise.any()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/any) for more information.
    *
-   * @param values array of durable promises
-   * @param opts resonate options {@link Opts}
-   * @returns a promise that resolves with the first resolved value, or rejects with an aggregate error if all durable promises reject
+   * @param values Array of durable promises.
+   * @param opts Optional resonate {@link options}.
+   * @returns A promise that resolves with the first resolved value, or rejects with an aggregate error if all durable promises reject.
    */
-  any<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-  any<T extends readonly unknown[] | []>(values: T, opts?: ContextOpts): Promise<Awaited<T[number]>>;
+  any<T extends readonly unknown[] | []>(values: T, opts?: Options): Promise<Awaited<T[number]>>;
 
   /**
    * Wraps an array of durable promises into a new durable promise that fulfills when the first
@@ -433,12 +404,11 @@ export interface Context {
    *
    * See [Promise.race()](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/race) for more information.
    *
-   * @param values array of durable promises
-   * @param opts resonate options {@link Opts}
-   * @returns a promise that fulfills with the first durable promise that resolves or rejects
+   * @param values Array of durable promises.
+   * @param opts Optional resonate {@link options}.
+   * @returns A promise that fulfills with the first durable promise that resolves or rejects.
    */
-  race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-  race<T extends readonly unknown[] | []>(values: T, opts?: ContextOpts): Promise<Awaited<T[number]>>;
+  race<T extends readonly unknown[] | []>(values: T, opts?: Options): Promise<Awaited<T[number]>>;
 }
 
 class ResonateContext implements Context {
@@ -467,8 +437,8 @@ class ResonateContext implements Context {
     public readonly name: string,
     public readonly id: string,
     public readonly idempotencyKey: string | undefined,
-    public readonly defaults: Opts,
-    public readonly opts: Opts = defaults,
+    public readonly defaults: ContextOptions,
+    public readonly opts: ContextOptions = defaults,
   ) {}
 
   get timeout(): number {
@@ -491,18 +461,16 @@ class ResonateContext implements Context {
     return this.parent === undefined;
   }
 
-  options(opts: Partial<Opts>): ContextOpts {
-    return new ContextOpts(opts);
+  options(opts: Partial<ContextOptions>): Options {
+    return new Options(opts);
   }
 
-  run<F extends Func>(func: F, ...args: Params<F>): Promise<Return<F>>;
-  run<F extends Func>(func: F, ...args: [...Params<F>, ContextOpts]): Promise<Return<F>>;
-  run<T = any, P = any>(func: string, args: P): Promise<T>;
-  run<T = any, P = any>(func: string, args: P, opts: ContextOpts): Promise<T>;
-  run(func: Func | string, ...argsAndOpts: [...any, ContextOpts?]): Promise<any> {
+  run<F extends Func>(func: F, ...args: [...Params<F>, Options?]): Promise<Return<F>>;
+  run<T = any, P = any>(func: string, args: P, opts?: Options): Promise<T>;
+  run(func: Func | string, ...argsAndOpts: [...any, Options?]): Promise<any> {
     const { args, opts } = split(argsAndOpts);
 
-    const id = opts.id ?? [this.id, this.counter++].join(this.resonate.seperator);
+    const id = opts.id ?? [this.id, this.counter++].join(this.resonate.separator);
     const idempotencyKey = opts.idempotencyKey ?? id;
     const name = typeof func === "string" ? func : func.name;
 
@@ -569,14 +537,9 @@ class ResonateContext implements Context {
     });
   }
 
-  async all<T extends readonly unknown[] | []>(values: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }>;
   async all<T extends readonly unknown[] | []>(
     values: T,
-    opts: ContextOpts,
-  ): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }>;
-  async all<T extends readonly unknown[] | []>(
-    values: T,
-    opts: ContextOpts = new ContextOpts(),
+    opts: Options = new Options(),
   ): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
     // Promise.all handles rejected promises, however, on the recovery path
     // the resolved/rejected value may be retrieved from the promise store,
@@ -597,12 +560,7 @@ class ResonateContext implements Context {
     );
   }
 
-  async any<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-  async any<T extends readonly unknown[] | []>(values: T, opts: ContextOpts): Promise<Awaited<T[number]>>;
-  async any<T extends readonly unknown[] | []>(
-    values: T,
-    opts: ContextOpts = new ContextOpts(),
-  ): Promise<Awaited<T[number]>> {
+  async any<T extends readonly unknown[] | []>(values: T, opts: Options = new Options()): Promise<Awaited<T[number]>> {
     // Promise.any handles rejected promises, however, on the recovery path
     // the resolved/rejected value may be retrieved from the promise store,
     // circumventing Promise.any. To avoid unhandled rejections, we attach
@@ -622,12 +580,7 @@ class ResonateContext implements Context {
     );
   }
 
-  async race<T extends readonly unknown[] | []>(values: T): Promise<Awaited<T[number]>>;
-  async race<T extends readonly unknown[] | []>(values: T, opts: ContextOpts): Promise<Awaited<T[number]>>;
-  async race<T extends readonly unknown[] | []>(
-    values: T,
-    opts: ContextOpts = new ContextOpts(),
-  ): Promise<Awaited<T[number]>> {
+  async race<T extends readonly unknown[] | []>(values: T, opts: Options = new Options()): Promise<Awaited<T[number]>> {
     // Promise.race handles rejected promises, however, on the recovery path
     // the resolved/rejected value may be retrieved from the promise store,
     // circumventing Promise.race. To avoid unhandled rejections, we attach
@@ -818,8 +771,8 @@ class GInvocation<F extends Func<Generator>> {
 
 // Utils
 
-function split<T extends any[]>(args: [...T, ContextOpts?]): { args: T; opts: Partial<Opts> } {
-  let opts: Partial<Opts> = {};
+function split<T extends any[]>(args: [...T, Options?]): { args: T; opts: Partial<ContextOptions> } {
+  let opts: Partial<ContextOptions> = {};
 
   if (isContextOpts(args[args.length - 1])) {
     opts = args[args.length - 1].all();
@@ -829,6 +782,6 @@ function split<T extends any[]>(args: [...T, ContextOpts?]): { args: T; opts: Pa
   return { args: args as unknown as T, opts: opts };
 }
 
-function randomId(): string {
+function rid(): string {
   return Math.floor(Math.random() * Number.MAX_SAFE_INTEGER).toString(16);
 }

@@ -22,8 +22,8 @@ describe("Lock", () => {
   const r1 = new Resonate({ store });
   const r2 = new Resonate({ store });
 
-  r1.register("write", write, r1.options({ eid: "a" }));
-  r2.register("write", write, r2.options({ eid: "b" }));
+  r1.register("write", write, r1.options({ eid: "a", timeout: 5000 }));
+  r2.register("write", write, r2.options({ eid: "b", timeout: 5000 }));
 
   test("Lock guards shared resource", async () => {
     r1.run("write", "id", "a", false);

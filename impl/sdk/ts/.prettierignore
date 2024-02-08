@@ -1,5 +1,6 @@
 build
 dist
+docs
 coverage
 examples
 README.md

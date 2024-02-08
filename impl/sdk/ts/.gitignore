@@ -2,6 +2,7 @@
 node_modules/
 out/
 dist/
+docs/
 coverage/
 .next/
 mydb.sqlite

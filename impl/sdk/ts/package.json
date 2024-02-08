@@ -17,6 +17,7 @@
         "build": "tsc --build tsconfig.build.json",
         "lint": "prettier . --check && eslint .",
         "prettier": "prettier . --write",
+        "docs": "npx typedoc lib/index.ts --githubPages ",
         "debug": "node --inspect-brk ./node_modules/.bin/jest -i"
     },
     "files": [
@@ -33,6 +34,8 @@
         "eslint-plugin-promise": "^6.1.1",
         "prettier": "3.1.0",
         "ts-jest": "^29.1.1",
+        "typedoc": "^0.25.7",
+        "typedoc-material-theme": "^1.0.2",
         "typescript": "^5.2.2"
     },
     "dependencies": {
