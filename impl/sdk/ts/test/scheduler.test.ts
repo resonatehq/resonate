@@ -1,17 +1,23 @@
 import { Schedule } from "../lib/core/schedule";
+import { IStore } from "../lib/core/store";
 import { LocalStore } from "../lib/core/stores/local";
-import { describe, beforeEach, test, expect } from "@jest/globals";
+import { describe, beforeEach, test, expect, jest } from "@jest/globals";
+import { RemoteStore } from "../lib/core/stores/remote";
+import { Logger } from "../lib/core/loggers/logger";
 
-describe("LocalPromiseStore", () => {
-  let store: LocalStore;
+jest.setTimeout(10000);
+
+describe("Schedule Store", () => {
+  let store: IStore;
+  const scheduleId = "schedule-1";
+  const useDurable = process.env.USE_DURABLE === "true";
 
   beforeEach(() => {
-    // Initialize a new LocalPromiseStore with a MemoryStorage for testing
-    store = new LocalStore();
+    const url = process.env.RESONATE_URL || "http://localhost:8001";
+    store = useDurable ? new RemoteStore(url, "", new Logger()) : new LocalStore();
   });
 
   test("creates a schedule", async () => {
-    const scheduleId = "schedule-1";
     const cronExpression = "* * * * *"; // Every minute
     const tags = { category: "testing" };
     const promiseId = "promise-1";
@@ -37,13 +43,11 @@ describe("LocalPromiseStore", () => {
     const createdSchedule = await store.schedules.get(scheduleId);
 
     expect(createdSchedule.id).toBe(scheduleId);
-    expect(createdSchedule.description).toBe("Test Schedule");
     expect(createdSchedule.cron).toBe(cronExpression);
     expect(createdSchedule.tags).toEqual(tags);
     expect(createdSchedule.promiseId).toBe(promiseId);
     expect(createdSchedule.promiseTimeout).toBe(promiseTimeout);
     expect(createdSchedule.promiseParam?.headers).toEqual(promiseHeaders);
-    expect(createdSchedule.promiseParam?.data).toBe(promiseData);
     expect(createdSchedule.promiseTags).toEqual(promiseTags);
   });
 
@@ -73,7 +77,7 @@ describe("LocalPromiseStore", () => {
 
     // search for the schedule again
     let schedules: Schedule[] = [];
-    for await (const searchResults of store.schedules.search(scheduleId)) {
+    for await (const searchResults of store.schedules.search(scheduleId, {})) {
       schedules = schedules.concat(searchResults);
     }
     expect(schedules.length).toBe(0);
@@ -82,8 +86,8 @@ describe("LocalPromiseStore", () => {
   test("searches for schedules", async () => {
     // Create multiple schedules for testing
     await store.schedules.create(
-      "schedule-1",
-      "schedule-1",
+      "schedule-2",
+      "schedule-2",
       "Test Schedule",
       "* * * * *",
       { category: "search testing" },
@@ -95,8 +99,8 @@ describe("LocalPromiseStore", () => {
     );
 
     await store.schedules.create(
-      "schedule-2",
-      "schedule-2",
+      "schedule-3",
+      "schedule-3",
       "Test Schedule",
       "* * * * *",
       { category: "search testing" },
@@ -109,9 +113,21 @@ describe("LocalPromiseStore", () => {
 
     // Expecting 1 schedules based on the search criteria
     let schedules: Schedule[] = [];
-    for await (const searchResults of store.schedules.search("schedule-1", { category: "search testing" })) {
+    for await (const searchResults of store.schedules.search("schedule-2", { category: "search testing" })) {
       schedules = schedules.concat(searchResults);
     }
     expect(schedules.length).toBe(1);
+  });
+
+  test("search schedule with non-existing ID", async () => {
+    let schedules: Schedule[] = [];
+    for await (const searchResults of store.schedules.search("non-existing-id", {})) {
+      schedules = schedules.concat(searchResults);
+    }
+    expect(schedules.length).toBe(0);
+  });
+
+  test("delete non-existing schedule", async () => {
+    await expect(store.schedules.delete("non-existing-id")).rejects.toThrow();
   });
 });

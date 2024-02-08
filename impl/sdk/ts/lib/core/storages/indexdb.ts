@@ -51,8 +51,9 @@ export class IndexedDbStorage implements IStorage<DurablePromise> {
     return resultPromise;
   }
 
-  async rmd(id: string, f: (promise: DurablePromise) => boolean): Promise<void> {
-    // unimplemented
+  async rmd(id: string, f: (promise: DurablePromise) => boolean): Promise<boolean> {
+    // TODO: Implement this
+    return true;
   }
 
   async *all(): AsyncGenerator<DurablePromise[], void> {

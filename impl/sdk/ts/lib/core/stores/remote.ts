@@ -395,8 +395,8 @@ export class RemoteLockStore implements ILockStore {
     private logger: ILogger = new Logger(),
   ) {}
 
-  async tryAcquire(resourceId: string, executionId: string): Promise<boolean> {
-    await call<boolean>(
+  async tryAcquire(resourceId: string, executionId: string, lockExpiry: number = this.lockExpiry): Promise<boolean> {
+    const acquired = call<boolean>(
       `${this.url}/locks/acquire`,
       (b: unknown): b is any => true,
       {
@@ -405,7 +405,7 @@ export class RemoteLockStore implements ILockStore {
           resourceId: resourceId,
           processId: this.pid,
           executionId: executionId,
-          expiryInSeconds: this.lockExpiry / 1000,
+          expiryInSeconds: lockExpiry / 1000,
         }),
       },
       this.logger,
@@ -414,7 +414,7 @@ export class RemoteLockStore implements ILockStore {
     // lazily start the heartbeat
     this.startHeartbeat();
 
-    return true;
+    return await acquired;
   }
 
   async release(resourceId: string, executionId: string): Promise<void> {

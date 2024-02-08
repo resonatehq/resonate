@@ -8,7 +8,7 @@ export class WithTimeout implements IStorage<DurablePromise> {
     return this.storage.rmw(id, (p) => func(p ? timeout(p) : undefined));
   }
 
-  rmd(id: string, func: (item: DurablePromise) => boolean): Promise<void> {
+  rmd(id: string, func: (item: DurablePromise) => boolean): Promise<boolean> {
     return this.storage.rmd(id, (p) => func(timeout(p)));
   }
 

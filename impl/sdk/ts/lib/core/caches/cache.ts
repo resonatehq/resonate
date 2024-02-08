@@ -12,4 +12,8 @@ export class Cache<T> {
   has(key: string): boolean {
     return key in this.cache;
   }
+
+  delete(key: string): void {
+    delete this.cache[key];
+  }
 }

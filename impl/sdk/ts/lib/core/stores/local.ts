@@ -417,8 +417,11 @@ export class LocalScheduleStore implements IScheduleStore {
     return schedule;
   }
 
-  delete(id: string): Promise<void> {
-    return this.storage.rmd(id, () => true);
+  async delete(id: string): Promise<void> {
+    const result = await this.storage.rmd(id, () => true);
+    if (!result) {
+      throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found");
+    }
   }
 
   async get(id: string): Promise<Schedule> {
@@ -466,11 +469,18 @@ export class LocalLockStore implements ILockStore {
       return lock;
     });
 
+    if (lock.eid !== eid) {
+      throw new ResonateError(ErrorCodes.FORBIDDEN, `Forbidden request`);
+    }
+
     return lock.eid === eid;
   }
 
-  release(id: string, eid: string) {
-    return this.storage.rmd(id, (lock) => lock.eid === eid);
+  async release(id: string, eid: string) {
+    const result = await this.storage.rmd(id, (lock) => lock.eid === eid);
+    if (!result) {
+      throw new ResonateError(ErrorCodes.NOT_FOUND, `Not found`);
+    }
   }
 }
 

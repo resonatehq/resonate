@@ -23,3 +23,9 @@ export class ResonateError extends Error {
     return e instanceof ResonateError ? e : new ResonateError(ErrorCodes.UNKNOWN, "Unexpected error", e);
   }
 }
+
+export class ResonateTestCrash extends ResonateError {
+  constructor(prob: number) {
+    super(ErrorCodes.UNKNOWN, "Simulated failure with prob: " + prob, undefined, false);
+  }
+}

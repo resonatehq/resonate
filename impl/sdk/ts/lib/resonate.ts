@@ -9,7 +9,7 @@ import { RemoteStore } from "./core/stores/remote";
 import { ILogger, ITrace } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { JSONEncoder } from "./core/encoders/json";
-import { ResonateError } from "./core/error";
+import { ResonateError, ResonateTestCrash } from "./core/error";
 import { ICache } from "./core/cache";
 import { Cache } from "./core/caches/cache";
 import { Schedule } from "./core/schedule";
@@ -20,7 +20,7 @@ import { Func, Params, Return, isFunction, isGenerator } from "./core/types";
 // Resonate
 
 export class Resonate {
-  private cache: ICache<Promise<any>> = new Cache();
+  private cache: ICache<{ context: Context; promise: Promise<any> }> = new Cache();
   private functions: Record<string, { func: Func; opts: ContextOptions }> = {};
   private recoveryInterval: number | undefined = undefined;
 
@@ -102,6 +102,7 @@ export class Resonate {
         encoder: this.encoder,
         retry: Retry.exponential(),
         timeout: this.timeout,
+        test: { p: 0, generator: Math.random },
         ...opts.all(),
       },
     };
@@ -134,6 +135,24 @@ export class Resonate {
    * @returns A promise that resolves to the return value of the function.
    */
   run<T = any, P extends any[] = any[]>(name: string, id: string, ...args: P): Promise<T> {
+    return this.runWithContext(name, id, ...args).promise;
+  }
+
+  /**
+   * Invoke a Resonate function.
+   *
+   * @template T The return type of function.
+   * @template P The type of parameters to be passed to the function.
+   * @param name The name of the function registered with Resonate.
+   * @param id A unique identifier for this invocation.
+   * @param args The arguments to pass to the function.
+   * @returns An object containing the context and a promise that resolves to the return value of the function and the context.
+   */
+  runWithContext<T = any, P extends any[] = any[]>(
+    name: string,
+    id: string,
+    ...args: P
+  ): { context: Context; promise: Promise<T> } {
     // use a constructed id for both the id and idempotency key
     // TODO: can user override the top level id / idempotency key?
     id = this.id(this.namespace, name, id);
@@ -145,7 +164,7 @@ export class Resonate {
     id: string,
     idempotencyKey: string | undefined,
     args: P,
-  ): Promise<T> {
+  ): { context: Context; promise: Promise<T> } {
     if (!(name in this.functions)) {
       throw new Error(`Function ${name} not registered`);
     }
@@ -154,6 +173,8 @@ export class Resonate {
     const { func, opts } = this.functions[name];
 
     if (!this.cache.has(id)) {
+      const context = new ResonateContext(this, this.store, this.bucket, name, id, idempotencyKey, opts);
+
       const promise = new Promise(async (resolve, reject) => {
         // lock
         while (!(await this.store.locks.tryAcquire(id, opts.eid))) {
@@ -161,18 +182,31 @@ export class Resonate {
           await new Promise((r) => setTimeout(r, 1000));
         }
 
-        const context = new ResonateContext(this, this.store, this.bucket, name, id, idempotencyKey, opts);
-
+        let err: unknown;
+        let isrejected = false;
+        let result: any;
         try {
-          resolve(await context.execute(func, args));
+          result = await context.execute(func, args);
         } catch (e) {
-          reject(e);
-        } finally {
-          await this.store.locks.release(id, opts.eid);
+          err = e;
+          isrejected = true;
+        }
+        // unlock
+        await this.store.locks.release(id, opts.eid);
+
+        // TODO : This is just for testing purposes.
+        if (err instanceof ResonateTestCrash) {
+          this.cache.delete(id);
+        }
+
+        if (isrejected) {
+          reject(err);
+        } else {
+          resolve(result);
         }
       });
 
-      this.cache.set(id, promise);
+      this.cache.set(id, { context, promise });
     }
 
     return this.cache.get(id);
@@ -509,9 +543,16 @@ class ResonateContext implements Context {
 
       // trace
       const trace = this.startTrace(this.id);
+      const seedrandom = this.opts.test.generator();
+      const failureProb = seedrandom < this.opts.test.p;
+      const chooseFailureBranch = Math.floor(this.opts.test.generator() * 2);
 
       // invoke
       try {
+        if (failureProb && chooseFailureBranch === 0) {
+          throw new ResonateTestCrash(this.opts.test.p);
+        }
+
         let r = await generator.next();
         while (!r.done) {
           r = await generator.next(r.value);
@@ -521,7 +562,12 @@ class ResonateContext implements Context {
 
         if (isPendingPromise(promise)) {
           throw new Error("Invalid state");
-        } else if (isResolvedPromise(promise)) {
+        }
+
+        if (failureProb && chooseFailureBranch === 1) {
+          throw new ResonateTestCrash(this.opts.test.p);
+        }
+        if (isResolvedPromise(promise)) {
           resolve(this.opts.encoder.decode(promise.value.data));
         } else {
           reject(this.opts.encoder.decode(promise.value.data));

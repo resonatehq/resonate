@@ -109,6 +109,12 @@ export interface ContextOptions {
    * Overrides the default timeout.
    */
   timeout: number;
+
+  /**
+   * Test Only
+   * Probability of failure.
+   */
+  test: { p: number; generator: () => number };
 }
 
 // Use a class to wrap ContextOptions so we can use the prototype
