@@ -543,16 +543,9 @@ class ResonateContext implements Context {
 
       // trace
       const trace = this.startTrace(this.id);
-      const seedrandom = this.opts.test.generator();
-      const failureProb = seedrandom < this.opts.test.p;
-      const chooseFailureBranch = Math.floor(this.opts.test.generator() * 2);
 
       // invoke
       try {
-        if (failureProb && chooseFailureBranch === 0) {
-          throw new ResonateTestCrash(this.opts.test.p);
-        }
-
         let r = await generator.next();
         while (!r.done) {
           r = await generator.next(r.value);
@@ -562,12 +555,7 @@ class ResonateContext implements Context {
 
         if (isPendingPromise(promise)) {
           throw new Error("Invalid state");
-        }
-
-        if (failureProb && chooseFailureBranch === 1) {
-          throw new ResonateTestCrash(this.opts.test.p);
-        }
-        if (isResolvedPromise(promise)) {
+        } else if (isResolvedPromise(promise)) {
           resolve(this.opts.encoder.decode(promise.value.data));
         } else {
           reject(this.opts.encoder.decode(promise.value.data));
@@ -666,6 +654,14 @@ class ResonateContext implements Context {
     );
 
     if (isPendingPromise(promise)) {
+      const fail = this.opts.test.generator() < this.opts.test.p;
+      const branch = Math.floor(this.opts.test.generator() * 2);
+
+      // generate failure before invoking the function
+      if (fail && branch === 0) {
+        throw new ResonateTestCrash(this.opts.test.p);
+      }
+
       try {
         // TODO
         // decode the arguments from the promise
@@ -678,11 +674,23 @@ class ResonateContext implements Context {
         // encode value
         const data = this.opts.encoder.encode(r);
 
+        // generate failure after invoking the function but before
+        // resolve the promise
+        if (fail && branch === 1) {
+          throw new ResonateTestCrash(this.opts.test.p);
+        }
+
         // resolve durable promise
         return yield this.store.promises.resolve(this.id, this.idempotencyKey, false, undefined, data);
       } catch (e: unknown) {
         // encode error
         const data = this.opts.encoder.encode(e);
+
+        // generate failure after invoking the function but before
+        // rejecting the promise
+        if (fail && branch === 1) {
+          throw new ResonateTestCrash(this.opts.test.p);
+        }
 
         // reject durable promise
         return yield this.store.promises.reject(this.id, this.idempotencyKey, false, undefined, data);
