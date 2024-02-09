@@ -1,6 +1,14 @@
 import { ResonateOptions, ContextOptions, Options, isContextOpts } from "./core/opts";
 import { IStore } from "./core/store";
-import { DurablePromise, isPendingPromise, isResolvedPromise } from "./core/promise";
+import {
+  CanceledPromise,
+  DurablePromise,
+  RejectedPromise,
+  ResolvedPromise,
+  TimedoutPromise,
+  isPendingPromise,
+  isResolvedPromise,
+} from "./core/promise";
 import { Retry } from "./core/retries/retry";
 import { IBucket } from "./core/bucket";
 import { Bucket } from "./core/buckets/bucket";
@@ -20,19 +28,20 @@ import { Func, Params, Return, isFunction, isGenerator } from "./core/types";
 // Resonate
 
 export class Resonate {
-  private cache: ICache<{ context: Context; promise: Promise<any> }> = new Cache();
-  private functions: Record<string, { func: Func; opts: ContextOptions }> = {};
+  private readonly cache: ICache<{ context: Context; promise: Promise<any> }> = new Cache();
+  private readonly functions: Record<string, { func: Func; opts: ContextOptions }> = {};
   private recoveryInterval: number | undefined = undefined;
 
-  readonly bucket: IBucket;
-  readonly encoder: IEncoder<unknown, string | undefined>;
+  private readonly bucket: IBucket;
+  private readonly encoder: IEncoder<unknown, string | undefined>;
+  private readonly store: IStore;
+
   readonly logger: ILogger;
   readonly namespace: string;
   readonly recoveryDelay: number;
   readonly retry: IRetry;
   readonly pid: string;
   readonly separator: string;
-  readonly store: IStore;
   readonly timeout: number;
 
   /**
@@ -139,7 +148,7 @@ export class Resonate {
   }
 
   /**
-   * Invoke a Resonate function.
+   * Invoke a Resonate function and return the context and a promise.
    *
    * @template T The return type of function.
    * @template P The type of parameters to be passed to the function.
@@ -304,6 +313,77 @@ export class Resonate {
         }
       }
     }
+  }
+
+  /**
+   * Create a durable promise.
+   *
+   * Generally, promises should be created implicitly by calling run.
+   * This provides a manual alternative.
+   *
+   * @param id The id of the promise.
+   * @param data Optional data to associate with the promise.
+   * @param timeout The relative timeout of the promise in ms, defaults to 10000.
+   * @param idempotencyKey The idempotency key to use for the creation of the promise, defaults to the id.
+   * @param headers Optional headers to associate with the promise.
+   * @param tags Optional tags to associate with the promise.
+   * @returns The durable promise deduplicated on the idempotency key. The promise may already be completed.
+   */
+  create(
+    id: string,
+    data?: any,
+    timeout: number = 10000,
+    idempotencyKey: string = id,
+    headers?: Record<string, string>,
+    tags?: Record<string, string>,
+  ): Promise<DurablePromise> {
+    timeout = Date.now() + timeout;
+    data = this.encoder.encode(data);
+    return this.store.promises.create(id, idempotencyKey, false, headers, data, timeout, tags);
+  }
+
+  /**
+   * Resolve a durable promise.
+   *
+   * Generally, promises should be resolved implicitly by calling run.
+   * This provides a manual alternative.
+   *
+   * @param id The id of the promise.
+   * @param data Optional data to associate with the promise.
+   * @param idempotencyKey The idempotency key to use for the creation of the promise, defaults to the id.
+   * @param headers Optional headers to associate with the promise.
+   * @returns The durable promise deduplicated on the idempotency key. The promise may already be completed.
+   */
+  resolve(
+    id: string,
+    data?: any,
+    idempotencyKey: string = id,
+    headers?: Record<string, string>,
+  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+    data = this.encoder.encode(data);
+    return this.store.promises.resolve(id, idempotencyKey, false, headers, data);
+  }
+
+  /**
+   * Rejects a durable promise.
+   *
+   * Generally, promises may be rejected implicitly by calling run.
+   * This provides a manual alternative.
+   *
+   * @param id The id of the promise.
+   * @param data Optional data to associate with the promise.
+   * @param idempotencyKey The idempotency key to use for the creation of the promise, defaults to the id.
+   * @param headers Optional headers to associate with the promise.
+   * @returns The durable promise deduplicated on the idempotency key. The promise may already be completed.
+   */
+  reject(
+    id: string,
+    data?: any,
+    idempotencyKey: string = id,
+    headers?: Record<string, string>,
+  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+    data = this.encoder.encode(data);
+    return this.store.promises.reject(id, idempotencyKey, false, headers, data);
   }
 
   /**
