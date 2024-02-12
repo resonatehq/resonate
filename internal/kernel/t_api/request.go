@@ -37,6 +37,10 @@ type Request struct {
 	HeartbeatLocks *HeartbeatLocksRequest
 	ReleaseLock    *ReleaseLockRequest
 
+	// TASKS
+	ClaimTask    *ClaimTaskRequest
+	CompleteTask *CompleteTaskRequest
+
 	// ECHO
 	Echo *EchoRequest
 }
@@ -154,6 +158,37 @@ type HeartbeatLocksRequest struct {
 type ReleaseLockRequest struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
+}
+
+// Tasks
+
+// ClaimTaskRequest allows a process that received a pending task
+// to claim ownership of the task for processing. It identifies the
+// specific task to claim using the unique taskId and counter
+// originally provided with the pending task. Claiming the task locks
+// it from being claimed by other workers for a set period of time
+// so that duplicate work is avoided. Once claimed, the process should
+// carry out the task work then release the claim upon completion or
+// failure to allow the task to be retried.
+type ClaimTaskRequest struct {
+	TaskId          string `json:"taskId"`
+	Counter         int    `json:"counter"`
+	ProcessId       string `json:"processId"`
+	ExecutionId     string `json:"executionId"`
+	ExpiryInSeconds int64  `json:"expiryInSeconds"`
+}
+
+// CompleteTaskRequest allows a process that has claimed a task to mark
+// the task as complete (resolved or rejected). It identifies the
+// specific task to complete using the unique taskId and counter originally
+// provided with the pending task. Completing the task releases the claim
+// on the task.
+type CompleteTaskRequest struct {
+	TaskId      string        `json:"taskId"`
+	Counter     int           `json:"counter"`
+	ExecutionId string        `json:"executionId"`
+	State       promise.State `json:"state"`
+	Value       promise.Value `json:"value"`
 }
 
 func (r *Request) String() string {
@@ -274,6 +309,26 @@ func (r *Request) String() string {
 			"ReleaseLock(resourceId=%s, executionId=%s)",
 			r.ReleaseLock.ResourceId,
 			r.ReleaseLock.ExecutionId,
+		)
+
+	// TASKS
+	case ClaimTask:
+		return fmt.Sprintf(
+			"ClaimTask(taskId=%s, counter=%d, processId=%s, executionId=%s, expiryInSeconds=%d)",
+			r.ClaimTask.TaskId,
+			r.ClaimTask.Counter,
+			r.ClaimTask.ProcessId,
+			r.ClaimTask.ExecutionId,
+			r.ClaimTask.ExpiryInSeconds,
+		)
+	case CompleteTask:
+		return fmt.Sprintf(
+			"CompleteTask(taskId=%s, counter=%d, executionId=%s, state=%s, value=%s)",
+			r.CompleteTask.TaskId,
+			r.CompleteTask.Counter,
+			r.CompleteTask.ExecutionId,
+			r.CompleteTask.State,
+			r.CompleteTask.Value,
 		)
 
 	// ECHO

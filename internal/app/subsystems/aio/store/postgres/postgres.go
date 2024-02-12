@@ -708,7 +708,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
 			default:
-				panic("invalid command")
+				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
 			}
 
 			if err != nil {

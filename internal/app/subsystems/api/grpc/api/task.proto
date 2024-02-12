@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package task;
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+
+service Tasks {
+    rpc ClaimTask (ClaimTaskRequest) returns (ClaimTaskResponse) {}
+    rpc CompleteTask (CompleteTaskRequest) returns (CompleteTaskResponse) {}
+}
+  
+message ClaimTaskRequest {
+    string task_id = 1; 
+    int32 counter = 2;
+    string process_id = 3; 
+    string execution_id = 4;
+    int64 expiry_in_seconds = 5;  
+}
+
+message ClaimTaskResponse {
+    Promise promise = 1;
+}
+
+message CompleteTaskRequest {
+    string task_id = 1; 
+    int32 counter = 2;
+    string execution_id = 3;
+    State state = 4;
+    Value value = 5;
+}
+
+message CompleteTaskResponse {}
+
+// Task is a high-level abstraction of a pending promise that can be claimed and completed by a worker.
+
+message Promise {
+    string id = 1;
+    State state = 2;
+    Value param = 3;
+    Value value = 4;
+    int64 timeout = 5;
+    string idempotencyKeyForCreate = 6;
+    string idempotencyKeyForComplete = 7;
+    int64 createdOn = 8;
+    int64 completedOn = 9;
+    map<string, string> tags = 10;
+}
+
+enum State {
+    PENDING = 0;
+    RESOLVED = 1;
+    REJECTED = 2;
+    REJECTED_TIMEDOUT = 3;
+    REJECTED_CANCELED = 4;
+}
+
+message Value {
+    map<string, string> headers = 1;
+    bytes data = 3;
+}

@@ -7,6 +7,9 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings/t_bind"
+	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
@@ -44,6 +47,7 @@ type AIOSubsystems struct {
 	Store      *AIOSubsystemConfig[StoreConfig]
 	Network    *AIOSubsystemConfig[network.Config]
 	NetworkDST *AIOSubsystemConfig[network.ConfigDST]
+	Queuing    *AIOSubsystemConfig[queuing.Config]
 }
 
 type AIOSubsystemConfig[T any] struct {
@@ -139,6 +143,24 @@ func NewConfig() (*Config, error) {
 	if err := viper.Unmarshal(&config); err != nil {
 		return nil, err
 	}
+
+	// hardcode for now
+	config.AIO.Subsystems.Queuing = &AIOSubsystemConfig[queuing.Config]{
+		Subsystem: &aio.SubsystemConfig{},
+		Config: &queuing.Config{
+			Bindings: make([]*t_bind.Config, 0),
+		},
+	}
+
+	config.AIO.Subsystems.Queuing.Config.Bindings = append(config.AIO.Subsystems.Queuing.Config.Bindings, &t_bind.Config{
+		Kind: t_bind.HTTP,
+		Name: "default",
+		Metadata: &queuing_metadata.Metadata{
+			Properties: map[string]interface{}{
+				"url": "http://localhost:8080/",
+			},
+		},
+	})
 
 	return config, nil
 }

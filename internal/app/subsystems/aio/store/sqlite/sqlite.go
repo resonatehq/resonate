@@ -20,6 +20,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -27,6 +28,20 @@ import (
 
 const (
 	CREATE_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS tasks (
+		id                TEXT UNIQUE,
+		counter           INTEGER,
+		promise_id        TEXT,
+		claim_timeout     INTEGER, 
+		complete_timeout  INTEGER, 
+		promise_timeout   INTEGER,
+		created_on        INTEGER,
+		completed_on      INTEGER, 		
+		is_completed      BOOLEAN
+	); 
+
+	CREATE INDEX IF NOT EXISTS idx_task_id ON tasks(id); 
+
 	CREATE TABLE IF NOT EXISTS locks (
 		resource_id       TEXT UNIQUE,
 		process_id        TEXT,
@@ -106,6 +121,42 @@ const (
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);`
+
+	TASK_INSERT_STATEMENT = `
+	INSERT INTO tasks
+		(id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed)
+	VALUES
+		(?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO NOTHING`
+
+	TASK_UPDATE_STATEMENT = `
+	UPDATE
+		tasks
+	SET
+		counter = ?, claim_timeout = ?, complete_timeout = ?, completed_on = ?, is_completed = ?
+	WHERE
+		id = ?`
+
+	TASK_SELECT_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		id = ?`
+
+	TASK_SELECT_ALL_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		is_completed = ? AND 
+		claim_timeout < ? AND 
+		complete_timeout < ? AND 
+		promise_timeout > ?
+	ORDER BY
+		created_on ASC`
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
@@ -557,6 +608,20 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	}
 	defer lockTimeoutStmt.Close()
 
+	// TASKS
+
+	taskInsertStmt, err := tx.Prepare(TASK_INSERT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer taskInsertStmt.Close()
+
+	taskUpdateStmf, err := tx.Prepare(TASK_UPDATE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer taskUpdateStmf.Close()
+
 	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
@@ -669,8 +734,22 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
 				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
+			// Task
+			case t_aio.CreateTask:
+				util.Assert(command.CreateTask != nil, "command must not be nil")
+				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
+			case t_aio.UpdateTask:
+				util.Assert(command.UpdateTask != nil, "command must not be nil")
+				results[i][j], err = w.updateTask(tx, taskUpdateStmf, command.UpdateTask)
+			case t_aio.ReadTask:
+				util.Assert(command.ReadTask != nil, "command must not be nil")
+				results[i][j], err = w.readTask(tx, command.ReadTask)
+			case t_aio.ReadTasks:
+				util.Assert(command.ReadTasks != nil, "command must not be nil")
+				results[i][j], err = w.readTasks(tx, command.ReadTasks)
+
 			default:
-				panic("invalid command")
+				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
 			}
 
 			if err != nil {
@@ -680,6 +759,122 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	}
 
 	return results, nil
+}
+
+// Tasks
+
+func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id, cmd.Counter, cmd.PromiseId, cmd.ClaimTimeout, cmd.CompleteTimeout, cmd.PromiseTimeout, cmd.CreatedOn, cmd.CompletedOn, cmd.IsCompleted)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateTask,
+		CreateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateTaskCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Counter, cmd.ClaimTimeout, cmd.CompleteTimeout, cmd.CompletedOn, cmd.IsCompleted, cmd.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.UpdateTask,
+		UpdateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t_aio.Result, error) {
+	row := tx.QueryRow(TASK_SELECT_STATEMENT, cmd.Id)
+	record := &task.TaskRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.Id,
+		&record.Counter,
+		&record.PromiseId,
+		&record.ClaimTimeout,
+		&record.CompleteTimeout,
+		&record.PromiseTimeout,
+		&record.CreatedOn,
+		&record.CompletedOn,
+		&record.IsCompleted,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*task.TaskRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadTask,
+		ReadTask: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(TASK_SELECT_ALL_STATEMENT, cmd.IsCompleted, cmd.RunTime, cmd.RunTime, cmd.RunTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*task.TaskRecord
+
+	for rows.Next() {
+		record := &task.TaskRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Counter,
+			&record.PromiseId,
+			&record.ClaimTimeout,
+			&record.CompleteTimeout,
+			&record.PromiseTimeout,
+			&record.CreatedOn,
+			&record.CompletedOn,
+			&record.IsCompleted,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadTasks,
+		ReadTasks: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
 }
 
 // Locks

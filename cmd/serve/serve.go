@@ -16,6 +16,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -51,28 +52,30 @@ func ServeCmd() *cobra.Command {
 			reg := prometheus.NewRegistry()
 			metrics := metrics.New(reg)
 
-			// instatiate api/aio
+			// instantiate api/aio
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
-			// instatiate api subsystems
+			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
 			grpc := grpc.New(api, config.API.Subsystems.Grpc)
 
-			// instatiate aio subsystems
+			// instantiate aio subsystems
 			network := network.New(config.AIO.Subsystems.Network.Config)
 			store, err := util.NewStore(config.AIO.Subsystems.Store)
 			if err != nil {
 				return err
 			}
+			queuing := queuing.NewSubsytemOrDie(config.AIO.Subsystems.Queuing.Config)
 
 			// add api subsystems
 			api.AddSubsystem(http)
 			api.AddSubsystem(grpc)
 
-			// add api subsystems
+			// add aio subsystems
 			aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Subsystem)
 			aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
+			aio.AddSubsystem(t_aio.Queuing, queuing, config.AIO.Subsystems.Queuing.Subsystem)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -209,6 +212,12 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Int("aio-network-batch-size", 100, "max submissions processed each tick by a network worker")
 	cmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
 
+	// todo: comeback to this.
+	// array of queuing bindings
+	// cmd.Flags().String("aio-queuing-kind", "http", "queuing subsystem kind")
+	// cmd.Flags().String("aio-queuing-name", "first-http", "queuing subsystem name")
+	// cmd.Flags().StringToString("aio-queuing-spec", nil, "queuing subsystem spec")
+	// _ = viper.BindPFlag("aio.subsystems.queuing.spec", cmd.Flags().Lookup("aio-queuing-spec"))
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))

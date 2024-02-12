@@ -3,6 +3,7 @@ package util
 import (
 	"cmp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -88,4 +89,43 @@ func Next(curr int64, cronExp string) (int64, error) {
 
 func ParseCron(cronExp string) (cron.Schedule, error) {
 	return cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
+}
+
+type ResonateResourceName struct {
+	PromiseId string
+	QueueId   *string
+}
+
+// resonate::<promise-id>/<queue-id>
+// todo: error handling later...
+func ParseId(id string) *ResonateResourceName {
+	split := strings.Split(id, "::")
+	if len(split) != 2 {
+		return &ResonateResourceName{
+			PromiseId: id,
+		}
+	}
+
+	resource := split[1]
+	promiseAndQueue := strings.Split(resource, "/")
+	if len(promiseAndQueue) != 2 {
+		return &ResonateResourceName{
+			PromiseId: id,
+		}
+	}
+
+	rrn := &ResonateResourceName{
+		PromiseId: promiseAndQueue[0],
+		QueueId:   &promiseAndQueue[1],
+	}
+
+	return rrn
+}
+
+func GetQueueId(id string) string {
+	queueAndTask := strings.Split(id, ":")
+	if len(queueAndTask) != 2 {
+		panic("invalid id")
+	}
+	return queueAndTask[0]
 }

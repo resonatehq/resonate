@@ -36,6 +36,10 @@ type Response struct {
 	HeartbeatLocks *HeartbeatLocksResponse
 	ReleaseLock    *ReleaseLockResponse
 
+	// TASKS
+	ClaimTask    *ClaimTaskResponse
+	CompleteTask *CompleteTaskResponse
+
 	// ECHO
 	Echo *EchoResponse
 }
@@ -119,6 +123,22 @@ type HeartbeatLocksResponse struct {
 }
 
 type ReleaseLockResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
+// Tasks
+
+// ClaimTaskResponse is a response to a ClaimTaskRequest.
+// It contains the status of the claim operation and the promise that was claimed.
+// The promise param is the input to the task. Think RPC call.
+// Promise value is the response. -- dst with claim and complete is like threst,, it;s the enuqueing that needs work..
+type ClaimTaskResponse struct {
+	Status  ResponseStatus   `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+// CompleteTaskResponse is just an acknowledgement that the task was completed.
+type CompleteTaskResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 
@@ -225,6 +245,19 @@ func (r *Response) String() string {
 		return fmt.Sprintf(
 			"ReleaseLock(status=%d)",
 			r.ReleaseLock.Status,
+		)
+
+	// TASKS
+	case ClaimTask:
+		return fmt.Sprintf(
+			"ClaimTask(status=%d, promise=%s)",
+			r.ClaimTask.Status,
+			r.ClaimTask.Promise,
+		)
+	case CompleteTask:
+		return fmt.Sprintf(
+			"CompleteTask(status=%d)",
+			r.CompleteTask.Status,
 		)
 
 	// ECHO

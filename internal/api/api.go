@@ -122,6 +122,10 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.HeartbeatLocks.Status)
 			case t_api.ReleaseLock:
 				status = int(res.ReleaseLock.Status)
+			case t_api.ClaimTask:
+				status = int(res.ClaimTask.Status)
+			case t_api.CompleteTask:
+				status = int(res.CompleteTask.Status)
 			case t_api.Echo:
 				status = 2000
 			default:

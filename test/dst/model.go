@@ -655,6 +655,46 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
+// TASKS
+
+func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response) error {
+	switch res.ClaimTask.Status {
+	case t_api.StatusTaskNotFound:
+		return nil
+	case t_api.StatusLockAlreadyAcquired:
+		return nil
+	case t_api.StatusTaskAlreadyCompleted:
+		return nil
+	case t_api.StatusTaskWrongCounter:
+		return nil
+	case t_api.StatusTaskAlreadyTimedOut:
+		return nil
+	case t_api.StatusOK:
+		return nil
+	default:
+		return fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
+	}
+}
+
+func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response) error {
+	switch res.CompleteTask.Status {
+	case t_api.StatusTaskNotFound:
+		return nil
+	// case t_api.StatusLockAlreadyAcquired:
+	// 	return nil
+	case t_api.StatusTaskAlreadyCompleted:
+		return nil
+	case t_api.StatusTaskWrongCounter:
+		return nil
+	case t_api.StatusTaskAlreadyTimedOut:
+		return nil
+	case t_api.StatusOK:
+		return nil
+	default:
+		return fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
+	}
+}
+
 // UTILS
 
 func (m *PromiseModel) idempotencyKeyForCreateMatch(promise *promise.Promise) bool {

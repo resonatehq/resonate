@@ -170,6 +170,12 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
+
+	// make it a task
+	if RandBool(r) {
+		id = fmt.Sprintf("resonate::%s/default", id)
+	}
+
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
@@ -416,6 +422,54 @@ func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
 		ReleaseLock: &t_api.ReleaseLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
+		},
+	}
+}
+
+// TASK
+
+func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
+	taskId := g.idSet[r.Intn(len(g.idSet))]
+	counter := r.Int()
+	processId := g.idSet[r.Intn(len(g.idSet))]
+	executionId := g.idSet[r.Intn(len(g.idSet))]
+	expiryInSeconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+
+	return &t_api.Request{
+		Kind: t_api.ClaimTask,
+		ClaimTask: &t_api.ClaimTaskRequest{
+			TaskId:          taskId,
+			Counter:         counter,
+			ProcessId:       processId,
+			ExecutionId:     executionId,
+			ExpiryInSeconds: expiryInSeconds,
+		},
+	}
+}
+
+func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
+	taskId := g.idSet[r.Intn(len(g.idSet))]
+	counter := r.Int()
+	executionId := g.idSet[r.Intn(len(g.idSet))]
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
+
+	state := promise.Resolved
+	if RandBool(r) {
+		state = promise.Rejected
+	}
+
+	return &t_api.Request{
+		Kind: t_api.CompleteTask,
+		CompleteTask: &t_api.CompleteTaskRequest{
+			TaskId:      taskId,
+			Counter:     counter,
+			ExecutionId: executionId,
+			State:       state,
+			Value: promise.Value{
+				Headers: headers,
+				Data:    data,
+			},
 		},
 	}
 }

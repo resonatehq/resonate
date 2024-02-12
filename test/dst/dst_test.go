@@ -10,6 +10,9 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings/t_bind"
+	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -41,10 +44,24 @@ func TestDST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	queuing := queuing.NewSubsytemOrDie(&queuing.Config{
+		Bindings: []*t_bind.Config{
+			{
+				Kind: t_bind.HTTP,
+				Name: "default",
+				Metadata: &queuing_metadata.Metadata{
+					Properties: map[string]interface{}{
+						"url": "http://localhost:8080/",
+					},
+				},
+			},
+		},
+	}) // new todo: DST VERSION...
 
 	// add api subsystems
 	aio.AddSubsystem(t_aio.Network, network)
 	aio.AddSubsystem(t_aio.Store, store)
+	aio.AddSubsystem(t_aio.Queuing, queuing)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -64,6 +81,10 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+	// todo: add enqueueTasks...
+	system.AddOnTick(2, coroutines.EnqueueTasks)
 	system.AddOnTick(2, coroutines.TimeoutLocks)
 	system.AddOnTick(2, coroutines.SchedulePromises)
 	system.AddOnTick(2, coroutines.TimeoutPromises)
@@ -71,29 +92,33 @@ func TestDST(t *testing.T) {
 
 	// specify reqs to enable
 	reqs := []t_api.Kind{
-		// PROMISE
-		t_api.ReadPromise,
-		t_api.SearchPromises,
+		// // PROMISE
+		// t_api.ReadPromise,
+		// t_api.SearchPromises,
 		t_api.CreatePromise,
-		t_api.CancelPromise,
-		t_api.ResolvePromise,
-		t_api.RejectPromise,
+		// t_api.CancelPromise,
+		// t_api.ResolvePromise,
+		// t_api.RejectPromise,
 
-		// SCHEDULE
-		t_api.ReadSchedule,
-		t_api.SearchSchedules,
-		t_api.CreateSchedule,
-		t_api.DeleteSchedule,
+		// // SCHEDULE
+		// t_api.ReadSchedule,
+		// t_api.SearchSchedules,
+		// t_api.CreateSchedule,
+		// t_api.DeleteSchedule,
 
-		// SUBSCRIPTION
-		t_api.ReadSubscriptions,
-		t_api.CreateSubscription,
-		t_api.DeleteSubscription,
+		// // SUBSCRIPTION
+		// t_api.ReadSubscriptions,
+		// t_api.CreateSubscription,
+		// t_api.DeleteSubscription,
 
-		// LOCK
-		t_api.AcquireLock,
-		t_api.HeartbeatLocks,
-		t_api.ReleaseLock,
+		// // LOCK
+		// t_api.AcquireLock,
+		// t_api.HeartbeatLocks,
+		// t_api.ReleaseLock,
+
+		// TASK
+		t_api.ClaimTask,
+		t_api.CompleteTask,
 	}
 
 	// start api/aio

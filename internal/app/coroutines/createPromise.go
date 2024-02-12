@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
@@ -10,6 +11,8 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
+
+// todo: expand to handle creation of tasks.
 
 func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
@@ -51,26 +54,46 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 		result := completion.Store.Results[0].ReadPromise
 		util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
+		// todo: from here...
 		if result.RowsReturned == 0 {
 			createdOn := c.Time()
+			rrn := util.ParseId(req.CreatePromise.Id)
+
+			createCmds := []*t_aio.Command{
+				{
+					Kind: t_aio.CreatePromise,
+					CreatePromise: &t_aio.CreatePromiseCommand{
+						Id:             rrn.PromiseId,
+						State:          promise.Pending,
+						Param:          req.CreatePromise.Param,
+						Timeout:        req.CreatePromise.Timeout,
+						IdempotencyKey: req.CreatePromise.IdempotencyKey,
+						Tags:           req.CreatePromise.Tags,
+						CreatedOn:      createdOn,
+					},
+				},
+			}
+
+			if rrn.QueueId != nil {
+				createCmds = append(createCmds, &t_aio.Command{
+					Kind: t_aio.CreateTask,
+					CreateTask: &t_aio.CreateTaskCommand{
+						// taskId=<queue-id>:<promise-id>
+						Id:             fmt.Sprintf("%s:%s", *rrn.QueueId, rrn.PromiseId),
+						Counter:        0,
+						PromiseId:      rrn.PromiseId,
+						ClaimTimeout:   createdOn + 10_000, // ?? configuration - (event-driven, task -- ...default value -- should be part of routing... resonate configuration yaml..)
+						PromiseTimeout: req.CreatePromise.Timeout,
+						CreatedOn:      createdOn,
+					},
+				})
+			}
+
 			completion, err := c.Yield(&t_aio.Submission{
 				Kind: t_aio.Store,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.CreatePromise,
-								CreatePromise: &t_aio.CreatePromiseCommand{
-									Id:             req.CreatePromise.Id,
-									State:          promise.Pending,
-									Param:          req.CreatePromise.Param,
-									Timeout:        req.CreatePromise.Timeout,
-									IdempotencyKey: req.CreatePromise.IdempotencyKey,
-									Tags:           req.CreatePromise.Tags,
-									CreatedOn:      createdOn,
-								},
-							},
-						},
+						Commands: createCmds,
 					},
 				},
 			})
@@ -105,6 +128,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			} else {
 				c.Scheduler.Add(CreatePromise(metadata, req, res))
 			}
+			// todo: to here...
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {

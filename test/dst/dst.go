@@ -102,6 +102,14 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.ReleaseLock:
 			generator.AddRequest(generator.GenerateReleaseLock)
 			model.AddResponse(t_api.ReleaseLock, model.ValidateReleaseLock)
+
+		// TASK
+		case t_api.ClaimTask:
+			generator.AddRequest(generator.GenerateClaimTask)
+			model.AddResponse(t_api.ClaimTask, model.ValidateClaimTask)
+		case t_api.CompleteTask:
+			generator.AddRequest(generator.GenerateCompleteTask)
+			model.AddResponse(t_api.CompleteTask, model.ValidateCompleteTask)
 		}
 
 	}
