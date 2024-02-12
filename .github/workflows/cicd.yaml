@@ -48,7 +48,7 @@ jobs:
           cache: false
 
       - name: Install and run golangci-lint
-        uses: golangci/golangci-lint-action@v3 # nosemgrep
+        uses: golangci/golangci-lint-action@v4 # nosemgrep
         with:
           version: v1.54
           args: --verbose --timeout=3m
