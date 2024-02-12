@@ -60,7 +60,7 @@ export class Resonate {
     retry = Retry.exponential(),
     separator: seperator = "/",
     store = undefined,
-    timeout = 1000,
+    timeout = 10000,
     url = undefined,
   }: Partial<ResonateOptions> = {}) {
     this.bucket = bucket;
@@ -477,6 +477,14 @@ export interface Context {
   run<T = any, P = any>(id: string, args: P, opts?: Options): Promise<T>;
 
   /**
+   * Convert a durable promise id into a javascript promise.
+   *
+   * @param id The id of the durable promise.
+   * @returns A promise that resolves to the resolved value of the durable.
+   */
+  promise<T = any>(id: string): Promise<T>;
+
+  /**
    * Helper function that maps a partial {@link ContextOptions} to
    * Options.
    *
@@ -577,6 +585,26 @@ class ResonateContext implements Context {
 
   options(opts: Partial<ContextOptions>): Options {
     return new Options(opts);
+  }
+
+  async promise<T = any>(id: string): Promise<T> {
+    let promise: DurablePromise | null = null;
+
+    while (!promise || isPendingPromise(promise)) {
+      try {
+        promise = await this.store.promises.get(id);
+      } catch (e: unknown) {
+        promise = null;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    if (isResolvedPromise(promise)) {
+      return this.opts.encoder.decode(promise.value.data) as T;
+    }
+
+    throw this.opts.encoder.decode(promise.value.data);
   }
 
   run<F extends Func>(func: F, ...args: [...Params<F>, Options?]): Promise<Return<F>>;
