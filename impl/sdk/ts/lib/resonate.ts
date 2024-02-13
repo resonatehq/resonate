@@ -276,7 +276,7 @@ export class Resonate {
       cron,
       undefined,
       "{{.id}}/{{.timestamp}}",
-      opts.timeout ?? 10000,
+      opts.timeout ?? this.timeout,
       undefined,
       this.encoder.encode({ func: typeof func === "string" ? func : name, args: args }),
       undefined,
@@ -332,7 +332,7 @@ export class Resonate {
   create(
     id: string,
     data?: any,
-    timeout: number = 10000,
+    timeout: number = this.timeout,
     idempotencyKey: string = id,
     headers?: Record<string, string>,
     tags?: Record<string, string>,
