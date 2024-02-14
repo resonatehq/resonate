@@ -15,7 +15,6 @@ permissions:
 jobs:
   cicd:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,7 +27,25 @@ jobs:
         run: npm install
       - name: Run linter
         run: npm run lint
-      - name: Run tests
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.21
+      - name: Clone the repository
+        run: git clone https://github.com/resonatehq/resonate.git
+      - name: Build the Go project
+        run: go build -o resonate
+        working-directory: resonate
+      - name: Start the service
+        run: ./resonate serve &
+        working-directory: resonate
+      - name: Run tests with USE_DURABLE=false
+        env:
+          USE_DURABLE: false
+        run: npm test
+      - name: Run tests with USE_DURABLE=true
+        env:
+          USE_DURABLE: true
         run: npm test
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v3
