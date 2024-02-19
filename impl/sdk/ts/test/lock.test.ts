@@ -38,7 +38,7 @@ describe("Store: Locks", () => {
     expect(acquireResult1).toBe(true);
 
     // Attempt to acquire the lock with executionId2, should fail
-    await expect(store.locks.tryAcquire(resourceId, executionId2)).rejects.toThrow();
+    await expect(store.locks.tryAcquire(resourceId, executionId2)).rejects.toThrow("Forbidden request");
 
     // Release the lock to clean up
     await store.locks.release(resourceId, executionId1);
@@ -64,7 +64,7 @@ describe("Store: Locks", () => {
     await store.locks.tryAcquire(resourceId, executionId1);
 
     // Attempt to release the lock with executionId2, should fail
-    await expect(store.locks.release(resourceId, executionId2)).rejects.toThrow();
+    await expect(store.locks.release(resourceId, executionId2)).rejects.toThrow("Not found");
 
     // Release the lock to clean up
     await store.locks.release(resourceId, executionId1);
@@ -75,6 +75,6 @@ describe("Store: Locks", () => {
     const nonExistingExecutionId = "non-existing-execution-id";
 
     // Attempt to release a lock that does not exist, should fail
-    await expect(store.locks.release(nonExistingResourceId, nonExistingExecutionId)).rejects.toThrow();
+    await expect(store.locks.release(nonExistingResourceId, nonExistingExecutionId)).rejects.toThrow("Not found");
   });
 });
