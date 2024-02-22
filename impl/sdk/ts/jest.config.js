@@ -1,5 +1,5 @@
 /** @type {import('ts-jest').JestConfigWithTsJest} */
-module.exports = {
+export default {
   collectCoverage: true,
   coverageDirectory: "coverage",
   preset: "ts-jest",
