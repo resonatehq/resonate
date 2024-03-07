@@ -57,7 +57,11 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          npm install -g npm
-          npm version prerelease --no-git-tag-version --preid $GITHUB_SHA
-          npm publish --access public
+        run: npm install -g npm &&
+          VERSION=$(npm version prerelease --no-git-tag-version --preid $GITHUB_SHA) &&
+          npm publish --access public &&
+          echo "::set-output name=version::$VERSION"
+      - name: Install Resonate and run Hello World app
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: npm install --save @resonatehq/sdk@${{ env.VERSION }} ts-node@latest && node --no-warnings=ExperimentalWarning --loader ts-node/esm helloworld.ts
+        working-directory: .github/workflows/hello_world
