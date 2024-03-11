@@ -75,7 +75,7 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		// Handle inflight cache.
 
 		tasksInflight.add(taskId(task))
-		c.OnDone(func() { schedulesInflight.remove(taskId(task)) })
+		c.OnDone(func() { tasksInflight.remove(taskId(task)) })
 
 		// Update counter for the task before enqueuing.
 
@@ -89,7 +89,7 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 							UpdateTask: &t_aio.UpdateTaskCommand{
 								Id:              task.Id,
 								Counter:         task.Counter + 1,
-								ClaimTimeout:    task.ClaimTimeout + 10_000, // 10s, the first claim timeout is arbitrary.
+								ClaimTimeout:    task.ClaimTimeout + 10_000, // 10 seconds, like the claim timeout in createPromise coroutine it is arbitrary for now.
 								CompleteTimeout: task.CompleteTimeout,
 								CompletedOn:     task.CompletedOn,
 								IsCompleted:     task.IsCompleted,
@@ -113,7 +113,6 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		queueCompletion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Queuing,
 			Queuing: &t_aio.QueuingSubmission{
-				Target:  util.GetQueueId(task.Id), // queue-id is encoded in the task-id.
 				TaskId:  task.Id,
 				Counter: task.Counter + 1,
 			},
@@ -124,10 +123,10 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		}
 
 		util.Assert(queueCompletion.Queuing != nil, "completion must not be nil")
-		// more assert here...?
+		// TODO: more assert here...?
 	})
 }
 
 func taskId(task *task.Task) string {
-	return fmt.Sprintf("%s:%v", task.Id, task.IsCompleted)
+	return fmt.Sprintf("%s", task.Id)
 }

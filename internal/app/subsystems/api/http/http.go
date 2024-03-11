@@ -56,6 +56,10 @@ func New(api api.API, config *Config) api.Subsystem {
 	r.POST("/locks/heartbeat", s.heartbeatLocks)
 	r.POST("/locks/release", s.releaseLock)
 
+	// Task API
+	r.POST("/tasks/claim", s.claimTask)
+	r.POST("/tasks/complete", s.completeTask)
+
 	return &Http{
 		config: config,
 		server: &http.Server{

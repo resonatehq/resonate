@@ -877,6 +877,76 @@ func TestHttpServer(t *testing.T) {
 			res:    nil,
 			status: 400,
 		},
+
+		// Tasks API
+		{
+			name:   "ClaimTask",
+			path:   "tasks/claim",
+			method: "POST",
+			body: []byte(`{
+				"taskId": "foo", 
+				"counter": 1, 
+				"processId": "bar", 
+				"executionId": "baz", 
+				"expiryInSeconds": 10
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskRequest{
+					TaskId:          "foo",
+					Counter:         1,
+					ProcessId:       "bar",
+					ExecutionId:     "baz",
+					ExpiryInSeconds: 10,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskResponse{
+					Status: t_api.StatusOK,
+					Promise: &promise.Promise{
+						Id:    "foo/bar",
+						State: promise.Pending,
+					},
+				},
+			},
+			status: 200,
+		},
+		{
+			name:   "CompleteTask",
+			path:   "tasks/complete",
+			method: "POST",
+			body: []byte(`{
+				"taskId": "foo", 
+				"counter": 1, 
+				"executionId": "baz", 
+				"state": "RESOLVED", 
+				"value": {
+					"headers": {"a":"a","b":"b","c":"c"},
+					"data": "cGVuZGluZw=="
+				}
+			}`),
+			req: &t_api.Request{
+				Kind: t_api.CompleteTask,
+				CompleteTask: &t_api.CompleteTaskRequest{
+					TaskId:      "foo",
+					Counter:     1,
+					ExecutionId: "baz",
+					State:       promise.Resolved,
+					Value: promise.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompleteTask,
+				CompleteTask: &t_api.CompleteTaskResponse{
+					Status: t_api.StatusOK,
+				},
+			},
+			status: 200,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			httpTest.Load(t, tc.req, tc.res)

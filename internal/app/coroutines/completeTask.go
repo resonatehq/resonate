@@ -72,7 +72,7 @@ func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackF
 		util.Assert(wc.Store != nil, "completion must not be nil")
 
 		// assert lock write. (todo: enforce 1?)
-		releaseLockResult := wc.Store.Results[0].AcquireLock
+		releaseLockResult := wc.Store.Results[0].ReleaseLock
 		util.Assert(releaseLockResult.RowsAffected == 0 || releaseLockResult.RowsAffected == 1, "result must return 0 or 1 rows")
 		// todo: 1) if owned by someone else...
 		// todo: 2) if promise already completed...
@@ -82,8 +82,8 @@ func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackF
 		util.Assert(updateTaskResult.RowsAffected == 1, "result must return 1 row")
 
 		// assert promise write.
-		promiseResult := wc.Store.Results[2].ReadPromise
-		util.Assert(promiseResult.RowsReturned == 1, "result must return 1 row")
+		promiseResult := wc.Store.Results[2].UpdatePromise
+		util.Assert(promiseResult.RowsAffected == 1, "result must return 1 row")
 
 		res(&t_api.Response{
 			Kind: t_api.CompleteTask,

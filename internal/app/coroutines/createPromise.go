@@ -1,9 +1,10 @@
 package coroutines
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -11,8 +12,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
-
-// todo: expand to handle creation of tasks.
 
 func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
@@ -54,16 +53,14 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 		result := completion.Store.Results[0].ReadPromise
 		util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
-		// todo: from here...
 		if result.RowsReturned == 0 {
 			createdOn := c.Time()
-			rrn := util.ParseId(req.CreatePromise.Id)
 
 			createCmds := []*t_aio.Command{
 				{
 					Kind: t_aio.CreatePromise,
 					CreatePromise: &t_aio.CreatePromiseCommand{
-						Id:             rrn.PromiseId,
+						Id:             req.CreatePromise.Id,
 						State:          promise.Pending,
 						Param:          req.CreatePromise.Param,
 						Timeout:        req.CreatePromise.Timeout,
@@ -74,15 +71,21 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 				},
 			}
 
-			if rrn.QueueId != nil {
+			_, err := queuing.CoroutineRouter().Match(req.CreatePromise.Id)
+			if err != nil {
+				if !errors.Is(err, queuing.ErrRouteDoesNotMatchAnyPattern) {
+					panic(err)
+				}
+			}
+
+			if err == nil {
 				createCmds = append(createCmds, &t_aio.Command{
 					Kind: t_aio.CreateTask,
 					CreateTask: &t_aio.CreateTaskCommand{
-						// taskId=<queue-id>:<promise-id>
-						Id:             fmt.Sprintf("%s:%s", *rrn.QueueId, rrn.PromiseId),
+						Id:             req.CreatePromise.Id,
 						Counter:        0,
-						PromiseId:      rrn.PromiseId,
-						ClaimTimeout:   createdOn + 10_000, // ?? configuration - (event-driven, task -- ...default value -- should be part of routing... resonate configuration yaml..)
+						PromiseId:      req.CreatePromise.Id,
+						ClaimTimeout:   createdOn, // Set it to the createdOn time to trigger immediately.
 						PromiseTimeout: req.CreatePromise.Timeout,
 						CreatedOn:      createdOn,
 					},

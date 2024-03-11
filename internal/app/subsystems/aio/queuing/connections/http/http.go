@@ -5,21 +5,29 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings/t_bind"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 )
 
-type HTTP struct {
-	client *http.Client
-	tasks  <-chan *t_bind.BindingSubmission
-	meta   Metadata
-}
+type (
+	// HTTP is a connection to an HTTP endpoint. It implements the Connection interface and
+	// is the only connection type that does not require a queue.
+	HTTP struct {
+		client *http.Client
+		tasks  <-chan *t_conn.ConnectionSubmission
+		meta   Metadata
+	}
 
-func New() t_bind.Binding {
+	Metadata struct {
+		URL string `mapstructure:"url"`
+	}
+)
+
+func New() t_conn.Connection {
 	return &HTTP{}
 }
 
-func (c *HTTP) Init(tasks <-chan *t_bind.BindingSubmission, meta *metadata.Metadata) error {
+func (c *HTTP) Init(tasks <-chan *t_conn.ConnectionSubmission, meta *metadata.Metadata) error {
 	c.client = &http.Client{}
 	c.tasks = tasks
 	md := Metadata{}
@@ -33,12 +41,12 @@ func (c *HTTP) Init(tasks <-chan *t_bind.BindingSubmission, meta *metadata.Metad
 	return nil
 }
 
-func (c *HTTP) Task() <-chan *t_bind.BindingSubmission {
+func (c *HTTP) Task() <-chan *t_conn.ConnectionSubmission {
 	return c.tasks
 }
 
-func (c *HTTP) Execute(sub *t_bind.BindingSubmission) error {
-	// create request.
+func (c *HTTP) Execute(sub *t_conn.ConnectionSubmission) error {
+	// Form request.
 	payload := fmt.Sprintf(`{"taskId":"%s", "counter":%d}`, sub.TaskId, sub.Counter)
 
 	req, err := http.NewRequest("POST", c.meta.URL, bytes.NewBuffer([]byte(payload)))
@@ -46,26 +54,19 @@ func (c *HTTP) Execute(sub *t_bind.BindingSubmission) error {
 		return fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// set headers.
+	// Set Headers.
 	req.Header.Set("Content-Type", "application/json")
 
-	// make request.
+	// Queue task.
 	resp, err := c.client.Do(req)
 	if err != nil {
 		panic(err)
 	}
 	defer resp.Body.Close()
 
-	// print response.
-	// slog.Info("response Status:", resp.Status)
-
 	return nil
 }
 
 func (c *HTTP) String() string {
-	return "http"
-}
-
-func (c *HTTP) Complete() error {
-	return nil
+	return fmt.Sprintf("http::%s", c.meta.URL)
 }

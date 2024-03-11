@@ -35,6 +35,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	grpcApi.RegisterPromisesServer(server, s)
 	grpcApi.RegisterSchedulesServer(server, s)
 	grpcApi.RegisterLocksServer(server, s)
+	grpcApi.RegisterTasksServer(server, s)
 
 	return &Grpc{
 		config: config,
@@ -70,6 +71,7 @@ type server struct {
 	grpcApi.UnimplementedPromisesServer
 	grpcApi.UnimplementedSchedulesServer
 	grpcApi.UnimplementedLocksServer
+	grpcApi.UnimplementedTasksServer
 	service *service.Service
 }
 

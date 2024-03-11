@@ -11,7 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings/t_bind"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -44,14 +44,18 @@ func TestDST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	// DST here... just testing the kernel... but no fun. ...
 	queuing := queuing.NewSubsytemOrDie(&queuing.Config{
-		Bindings: []*t_bind.Config{
+		Connections: []*t_conn.ConnectionConfig{
 			{
-				Kind: t_bind.HTTP,
-				Name: "default",
+				Kind:    t_conn.HTTP,
+				Pattern: "resonate://demo.example.com/payments/*",
+				Name:    "payments-demo",
+				Queue:   "payments-demo",
 				Metadata: &queuing_metadata.Metadata{
 					Properties: map[string]interface{}{
-						"url": "http://localhost:8080/",
+						"url": "http://localhost:5001",
 					},
 				},
 			},
@@ -83,7 +87,6 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-	// todo: add enqueueTasks...
 	system.AddOnTick(2, coroutines.EnqueueTasks)
 	system.AddOnTick(2, coroutines.TimeoutLocks)
 	system.AddOnTick(2, coroutines.SchedulePromises)

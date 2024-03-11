@@ -6,30 +6,33 @@ import (
 	"sync"
 
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/bindings/t_bind"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 )
 
 // Config is the configuration for the queuing subsystem.
 type Config struct {
-	Bindings []*t_bind.Config
+	Connections []*t_conn.ConnectionConfig
 }
 
-// QueuingSubsystem is a subsystem that dispatches tasks to user defined bindings.
+// QueuingSubsystem is a subsystem that dispatches tasks to user defined connections.
 type QueuingSubsystem struct {
-	// bindings is a map of binding names to their binding instances.
-	bindings map[string]t_bind.Binding
+	// router contains the information for routing requests to connections.
+	connectionRouter Router
 
-	// bindingsSQ is a map of binding names to their submission queues.
-	bindingsSQ map[string]chan *t_bind.BindingSubmission
+	// connections is a map of connection names to their connection instances.
+	connections map[string]t_conn.Connection
 
-	// bindingsWG is a wait group to wait for all bindings to finish before shutting down.
-	bindingsWG *sync.WaitGroup
+	// connectionsSQ is a map of connection names to their submission queues.
+	connectionsSQ map[string]chan *t_conn.ConnectionSubmission
 
-	// ctx is the parent context for all bindings.
+	// connectionsWG is a wait group to wait for all connections to finish before shutting down.
+	connectionsWG *sync.WaitGroup
+
+	// ctx is the parent context for all connections.
 	ctx context.Context
 
-	// stop is the context cancel function to send a signal to all bindings to stop.
+	// stop is the context cancel function to send a signal to all connections to stop.
 	stop context.CancelFunc
 }
 
@@ -41,23 +44,38 @@ func NewSubsytemOrDie(config *Config) *QueuingSubsystem {
 		}
 	}()
 
+	var (
+		conns      = make(map[string]t_conn.Connection, len(config.Connections))
+		connSQ     = make(map[string]chan *t_conn.ConnectionSubmission, len(config.Connections))
+		connRouter = NewRouter()
+	)
+
+	for _, cfg := range config.Connections {
+		tsq := make(chan *t_conn.ConnectionSubmission, 100) // TODO: make this configurable
+
+		connRouter.Handle(cfg.Pattern, &RouteHandler{ // for routing requests to the appropriate connection
+			Connection: cfg.Name,
+			Queue:      cfg.Queue,
+		})
+		// Workaround for no dependency injection in coroutines. (TODO: consider alternatives)
+		CoroutineRouter().Handle(cfg.Pattern, &RouteHandler{
+			Connection: cfg.Name,
+			Queue:      cfg.Queue,
+		})
+		connSQ[cfg.Name] = tsq                                     // for communication between worker and connection
+		conns[cfg.Name] = connections.NewConnectionOrDie(tsq, cfg) // for starting the connection
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
-	tm := &QueuingSubsystem{
-		bindings:   make(map[string]t_bind.Binding, len(config.Bindings)),
-		bindingsSQ: make(map[string]chan *t_bind.BindingSubmission, len(config.Bindings)),
-		bindingsWG: &sync.WaitGroup{},
-		ctx:        ctx,
-		stop:       cancel,
+
+	return &QueuingSubsystem{
+		connectionRouter: connRouter,
+		connections:      conns,
+		connectionsSQ:    connSQ,
+		connectionsWG:    &sync.WaitGroup{},
+		ctx:              ctx,
+		stop:             cancel,
 	}
-
-	for _, cfg := range config.Bindings {
-		tsq := make(chan *t_bind.BindingSubmission, 100) // todo: make this configurable
-
-		tm.bindingsSQ[cfg.Name] = tsq
-		tm.bindings[cfg.Name] = bindings.NewBindingOrDie(tsq, cfg)
-	}
-
-	return tm
 }
 
 // String returns the name of the subsystem.
@@ -68,29 +86,30 @@ func (t *QueuingSubsystem) String() string {
 // NewWorker creates a new worker for the queuing subsystem with the submission queues for each connection.
 func (t *QueuingSubsystem) NewWorker(i int) aio.Worker {
 	return &QueuingWorker{
-		BindingsSQ: t.bindingsSQ,
-		i:          i,
+		ConnectionRouter: t.connectionRouter,
+		ConnectionsSQ:    t.connectionsSQ,
+		i:                i,
 	}
 }
 
-// Start dispatches all binding to their own goroutines.
+// Start dispatches all connection to their own goroutines.
 func (t *QueuingSubsystem) Start() error {
-	t.bindingsWG.Add(len(t.bindings))
+	t.connectionsWG.Add(len(t.connections))
 
-	for _, bind := range t.bindings {
-		go func(b t_bind.Binding) {
-			defer t.bindingsWG.Done()
-			t_bind.Start(t.ctx, b)
+	for _, bind := range t.connections {
+		go func(b t_conn.Connection) {
+			defer t.connectionsWG.Done()
+			t_conn.Start(t.ctx, b)
 		}(bind)
 	}
 
 	return nil
 }
 
-// Stop cancels the subsystems context and waits for all bindings to finish.
+// Stop cancels the subsystems context and waits for all connections to finish.
 func (t *QueuingSubsystem) Stop() error {
 	t.stop()
-	t.bindingsWG.Wait()
+	t.connectionsWG.Wait()
 	return nil
 }
 

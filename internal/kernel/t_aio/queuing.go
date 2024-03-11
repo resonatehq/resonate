@@ -5,9 +5,6 @@ import "fmt"
 // QueuingSubmission is the request to send a task.
 type QueuingSubmission struct {
 
-	// Name is the key of the binding instance that will handle this submission.
-	Target string `json:"target"`
-
 	// TaskId is the id of the task that is available to be claimed by an external worker process.
 	TaskId string `json:"taskid"`
 
@@ -16,7 +13,7 @@ type QueuingSubmission struct {
 }
 
 func (s *QueuingSubmission) String() string {
-	return fmt.Sprintf("queuing: %s", s.Target)
+	return fmt.Sprintf("queuing: %s", s.TaskId)
 }
 
 type QueuingCompletionStatus int
@@ -26,6 +23,7 @@ const (
 	Failure
 )
 
+// TODO: not needed for now, but we should include more detailed error information.
 // QueuingCompletion is the response from sending a task.
 type QueuingCompletion struct {
 	Result QueuingCompletionStatus

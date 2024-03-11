@@ -105,6 +105,9 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnTick(2, coroutines.EnqueueTasks)
 			system.AddOnTick(2, coroutines.TimeoutLocks)
 			system.AddOnTick(2, coroutines.SchedulePromises)
 			system.AddOnTick(2, coroutines.TimeoutPromises)
@@ -212,12 +215,9 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Int("aio-network-batch-size", 100, "max submissions processed each tick by a network worker")
 	cmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
 
-	// todo: comeback to this.
-	// array of queuing bindings
-	// cmd.Flags().String("aio-queuing-kind", "http", "queuing subsystem kind")
-	// cmd.Flags().String("aio-queuing-name", "first-http", "queuing subsystem name")
-	// cmd.Flags().StringToString("aio-queuing-spec", nil, "queuing subsystem spec")
-	// _ = viper.BindPFlag("aio.subsystems.queuing.spec", cmd.Flags().Lookup("aio-queuing-spec"))
+	cmd.Flags().Var(&ConnectionSlice{}, "aio-queuing-connections", "queuing subsystem connections")
+	_ = viper.BindPFlag("aio.subsystems.queuing.config.connections", cmd.Flags().Lookup("aio-queuing-connections"))
+
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))
