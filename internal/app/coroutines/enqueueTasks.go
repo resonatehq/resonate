@@ -123,10 +123,9 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		}
 
 		util.Assert(queueCompletion.Queuing != nil, "completion must not be nil")
-		// TODO: more assert here...?
 	})
 }
 
 func taskId(task *task.Task) string {
-	return fmt.Sprintf("%s", task.Id)
+	return task.Id
 }

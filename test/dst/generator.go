@@ -171,8 +171,6 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
-	// make it a task -- 50% chance -- what decides...
-	// NEED DST TO BE CONFIGURED>>>
 	if RandBool(r) {
 		id = fmt.Sprintf("resonate://demo.example.com/payments/%s", id)
 	}

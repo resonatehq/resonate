@@ -95,8 +95,6 @@ func (a *aio) Stop() error {
 		close(subsystem.sq)
 	}
 
-	// todo:
-
 	return nil
 }
 
@@ -211,5 +209,3 @@ func (w *workerWrapper) collect() ([]*bus.SQE[t_aio.Submission, t_aio.Completion
 
 	return sqes, true
 }
-
-// todo: signal shutdown to workers but not waitiing.

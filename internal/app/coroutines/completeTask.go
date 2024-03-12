@@ -11,16 +11,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-// completion does not need to worry to much about the lock
-// as a promise can only be completed once. so either way. -- retries in database cause how else
-// will coroutines know. -- forget retries for now... jsut accept...
 func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
 	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
-
-		// read
-		// retries are tricky with this one. leave till the end for nod.
-		// just take whhat the first one gives you.
-		// can be RESOLVED OR REJCETED>>>> repeate... remember that ...
 		// Read task.
 		rc, err := readTask(c, req, req.CompleteTask.TaskId)
 		if err != nil {
@@ -56,11 +48,6 @@ func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackF
 			return
 		}
 
-		// todo: retry logic.
-		// if req.CompleteTask.State == promise.Rejected {
-		// 	// AND see if you can retry
-		// }
-
 		// Complete the task.
 		wc, err := completeTask(c, req, task)
 		if err != nil {
@@ -68,20 +55,18 @@ func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackF
 			return
 		}
 
-		// assert store.
+		// Assert store.
 		util.Assert(wc.Store != nil, "completion must not be nil")
 
-		// assert lock write. (todo: enforce 1?)
+		// Assert lock write.
 		releaseLockResult := wc.Store.Results[0].ReleaseLock
 		util.Assert(releaseLockResult.RowsAffected == 0 || releaseLockResult.RowsAffected == 1, "result must return 0 or 1 rows")
-		// todo: 1) if owned by someone else...
-		// todo: 2) if promise already completed...
 
-		// assert task write.
+		// Assert task write.
 		updateTaskResult := wc.Store.Results[1].UpdateTask
 		util.Assert(updateTaskResult.RowsAffected == 1, "result must return 1 row")
 
-		// assert promise write.
+		// Assert promise write.
 		promiseResult := wc.Store.Results[2].UpdatePromise
 		util.Assert(promiseResult.RowsAffected == 1, "result must return 1 row")
 
@@ -93,11 +78,6 @@ func CompleteTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackF
 		}, nil)
 	})
 }
-
-// num of retries is in memory ???? - - - - ?
-// func retry(c *Coroutine, req *t_api.Request, task *task.Task) error {
-// 	return nil
-// }
 
 func isCompleteableTask(c *Coroutine, req *t_api.Request, task *task.Task) *t_api.Response {
 	var resp *t_api.Response
@@ -174,10 +154,9 @@ func completeTask(c *Coroutine, req *t_api.Request, task *task.Task) (*t_aio.Com
 					{
 						Kind: t_aio.UpdatePromise,
 						UpdatePromise: &t_aio.UpdatePromiseCommand{
-							Id:    task.PromiseId,
-							State: req.CompleteTask.State,
-							Value: req.CompleteTask.Value,
-							// todo: forget idempotency key for now.
+							Id:          task.PromiseId,
+							State:       req.CompleteTask.State,
+							Value:       req.CompleteTask.Value,
 							CompletedOn: completedOn,
 						},
 					},

@@ -57,7 +57,7 @@ func ClaimTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) 
 
 		util.Assert(wc.Store != nil, "completion must not be nil")
 
-		// check lock write.
+		// Check lock write.
 		lockRes := wc.Store.Results[0].AcquireLock
 		util.Assert(lockRes.RowsAffected == 0 || lockRes.RowsAffected == 1, "result must return 0 or 1 rows")
 
@@ -71,11 +71,11 @@ func ClaimTask(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) 
 			return
 		}
 
-		// check task write.
+		// Check task write.
 		updateTaskResult := wc.Store.Results[1].UpdateTask
 		util.Assert(updateTaskResult.RowsAffected == 1, "result must return 1 row")
 
-		// check promise read.
+		// Check promise read.
 		promiseResult := wc.Store.Results[2].ReadPromise
 		util.Assert(promiseResult.RowsReturned == 1, "result must return 1 row")
 
@@ -170,6 +170,7 @@ func isClaimableTask(c *Coroutine, req *t_api.Request, task *task.Task) *t_api.R
 func tryClaimTask(c *Coroutine, req *t_api.Request, task *task.Task) (*t_aio.Completion, error) {
 	timeout := c.Time() + (req.ClaimTask.ExpiryInSeconds * 1000) // from s to ms
 
+	// Optimizing for the happy path. JUST GO FOR IT and avoid two writes.
 	completion, err := c.Yield(&t_aio.Submission{
 		Kind: t_aio.Store,
 		Store: &t_aio.StoreSubmission{
@@ -185,14 +186,13 @@ func tryClaimTask(c *Coroutine, req *t_api.Request, task *task.Task) (*t_aio.Com
 							Timeout:         timeout, // from s to ms
 						},
 					},
-					// optimizing for the happy path. JUST GO FOR IT and avoid two writes.
 					{
 						Kind: t_aio.UpdateTask,
 						UpdateTask: &t_aio.UpdateTaskCommand{
 							Id:              task.Id,
 							Counter:         task.Counter,
-							ClaimTimeout:    task.ClaimTimeout, // todo: reset to 0 ? -- this is arbitrary...
-							CompleteTimeout: timeout,           // this is a duplication of the lock timeout.
+							ClaimTimeout:    task.ClaimTimeout,
+							CompleteTimeout: timeout,
 							CompletedOn:     task.CompletedOn,
 							IsCompleted:     task.IsCompleted,
 						},

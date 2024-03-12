@@ -45,7 +45,7 @@ func TestDST(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// DST here... just testing the kernel... but no fun. ...
+	// TODO: DST version so just test the kernel.
 	queuing := queuing.NewSubsytemOrDie(&queuing.Config{
 		Connections: []*t_conn.ConnectionConfig{
 			{
@@ -60,7 +60,7 @@ func TestDST(t *testing.T) {
 				},
 			},
 		},
-	}) // new todo: DST VERSION...
+	})
 
 	// add api subsystems
 	aio.AddSubsystem(t_aio.Network, network)
@@ -95,29 +95,29 @@ func TestDST(t *testing.T) {
 
 	// specify reqs to enable
 	reqs := []t_api.Kind{
-		// // PROMISE
-		// t_api.ReadPromise,
-		// t_api.SearchPromises,
+		// PROMISE
+		t_api.ReadPromise,
+		t_api.SearchPromises,
 		t_api.CreatePromise,
-		// t_api.CancelPromise,
-		// t_api.ResolvePromise,
-		// t_api.RejectPromise,
+		t_api.CancelPromise,
+		t_api.ResolvePromise,
+		t_api.RejectPromise,
 
-		// // SCHEDULE
-		// t_api.ReadSchedule,
-		// t_api.SearchSchedules,
-		// t_api.CreateSchedule,
-		// t_api.DeleteSchedule,
+		// SCHEDULE
+		t_api.ReadSchedule,
+		t_api.SearchSchedules,
+		t_api.CreateSchedule,
+		t_api.DeleteSchedule,
 
-		// // SUBSCRIPTION
-		// t_api.ReadSubscriptions,
-		// t_api.CreateSubscription,
-		// t_api.DeleteSubscription,
+		// SUBSCRIPTION
+		t_api.ReadSubscriptions,
+		t_api.CreateSubscription,
+		t_api.DeleteSubscription,
 
-		// // LOCK
-		// t_api.AcquireLock,
-		// t_api.HeartbeatLocks,
-		// t_api.ReleaseLock,
+		// LOCK
+		t_api.AcquireLock,
+		t_api.HeartbeatLocks,
+		t_api.ReleaseLock,
 
 		// TASK
 		t_api.ClaimTask,

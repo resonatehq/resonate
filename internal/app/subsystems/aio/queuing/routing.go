@@ -55,7 +55,7 @@ func NewRouter() Router {
 }
 
 func (r *RouterImpl) Handle(pattern string, handler *RouteHandler) {
-	// panic: chi: routing pattern must begin with '/' in 'resonate://demo.example.com/payments/*' [recovered]
+	// chi routing pattern must begin with '/'
 	pattern = "/" + pattern
 
 	r.patterns.Post(pattern, func(w http.ResponseWriter, r *http.Request) {})
@@ -63,7 +63,7 @@ func (r *RouterImpl) Handle(pattern string, handler *RouteHandler) {
 }
 
 func (r *RouterImpl) Match(route string) (*MatchResult, error) {
-	// panic: chi: routing pattern must begin with '/' in 'resonate://demo.example.com/payments/*' [recovered]
+	// chi routing pattern must begin with '/'
 	route = "/" + route
 
 	rctx := chi.NewRouteContext()

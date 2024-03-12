@@ -155,6 +155,10 @@ func RunDSTCmd() *cobra.Command {
 				t_api.AcquireLock,
 				t_api.HeartbeatLocks,
 				t_api.ReleaseLock,
+
+				// TASK
+				t_api.ClaimTask,
+				t_api.CompleteTask,
 			}
 
 			dst := dst.New(&dst.Config{
