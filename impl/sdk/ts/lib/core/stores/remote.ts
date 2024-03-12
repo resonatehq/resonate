@@ -11,7 +11,7 @@ import {
 import { IStore, IPromiseStore, IScheduleStore } from "../store";
 import { IEncoder } from "../encoder";
 import { Base64Encoder } from "../encoders/base64";
-import { ErrorCodes, ResonateError } from "../error";
+import { ErrorCodes, ResonateStorageError } from "../error";
 import { ILockStore } from "../store";
 import { ILogger } from "../logger";
 import { Schedule, isSchedule } from "../schedule";
@@ -511,25 +511,25 @@ async function call<T>(
       if (!r.ok) {
         switch (r.status) {
           case 400:
-            throw new ResonateError(ErrorCodes.PAYLOAD, "Invalid request", body);
+            throw new ResonateStorageError(ErrorCodes.PAYLOAD, "Invalid request", body);
           case 403:
-            throw new ResonateError(ErrorCodes.FORBIDDEN, "Forbidden request", body);
+            throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request", body);
           case 404:
-            throw new ResonateError(ErrorCodes.NOT_FOUND, "Not found", body);
+            throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found", body);
           case 409:
-            throw new ResonateError(ErrorCodes.ALREADY_EXISTS, "Already exists", body);
+            throw new ResonateStorageError(ErrorCodes.ALREADY_EXISTS, "Already exists", body);
           default:
-            throw new ResonateError(ErrorCodes.SERVER, "Server error", body, true);
+            throw new ResonateStorageError(ErrorCodes.SERVER, "Server error", body, true);
         }
       }
 
       if (!guard(body)) {
-        throw new ResonateError(ErrorCodes.PAYLOAD, "Invalid response", body);
+        throw new ResonateStorageError(ErrorCodes.PAYLOAD, "Invalid response", body);
       }
 
       return body;
     } catch (e: unknown) {
-      if (e instanceof ResonateError && !e.retryable) {
+      if (e instanceof ResonateStorageError && !e.retryable) {
         throw e;
       } else {
         error = e;
@@ -537,14 +537,14 @@ async function call<T>(
     }
   }
 
-  throw ResonateError.fromError(error);
+  throw ResonateStorageError.fromError(error);
 }
 
 function encode(value: string, encoder: IEncoder<string, string>): string {
   try {
     return encoder.encode(value);
   } catch (e: unknown) {
-    throw new ResonateError(ErrorCodes.ENCODER, "Encode error", e);
+    throw new ResonateStorageError(ErrorCodes.ENCODER, "Encode error", e);
   }
 }
 
@@ -560,7 +560,7 @@ function decode<P extends DurablePromise>(promise: P, encoder: IEncoder<string, 
 
     return promise;
   } catch (e: unknown) {
-    throw new ResonateError(ErrorCodes.ENCODER, "Decode error", e);
+    throw new ResonateStorageError(ErrorCodes.ENCODER, "Decode error", e);
   }
 }
 
