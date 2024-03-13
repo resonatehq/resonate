@@ -44,16 +44,19 @@ Resonate offers a programming model that allows you to build distributed applica
 
 Distributed Async Await extends the async await programming model beyond the boundaries of a single process and makes distributed computing a first-class citizen.
 
-## Install
+## Install the Latest Release
 
-Resonate is currently in active development without a formal release cycle. We welcome early adopters to experiment with the latest build from main as we work towards our first stable release. Your [feedback](https://github.com/resonatehq/resonate/issues/new/choose) is greatly appreciated.
+#### MacOS 
 
-|  OS   | Architecture |                                                                               Link |
-| :---: | :----------: | ---------------------------------------------------------------------------------: |
-| MacOS |    x86_64    |  [Install](https://storage.googleapis.com/resonate-release/darwin-x86_64/resonate) |
-| MacOS |   aarch64    | [Install](https://storage.googleapis.com/resonate-release/darwin-aarch64/resonate) |
-| Linux |    x86_64    |   [Install](https://storage.googleapis.com/resonate-release/linux-x86_64/resonate) |
-| Linux |   aarch64    |  [Install](https://storage.googleapis.com/resonate-release/linux-aarch64/resonate) |
+```shell
+brew install --build-from-source resonate-hq/resonate/installation/brew/Formula/resonate.rb
+```
+
+#### Linux
+
+```shell
+curl -fsSL https://github.com/resonatehq/resonate/blob/main/installation/linux/install.sh | sh
+```
 
 ## Getting Started
 
