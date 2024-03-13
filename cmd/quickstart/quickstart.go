@@ -16,7 +16,7 @@ func NewCmd() *cobra.Command {
 			sdk := args[0]
 			switch strings.ToLower(sdk) {
 			case "ts", "typescript":
-				printInstructionsForTypeScript()
+				printInstructions(sdk)
 			default:
 				fmt.Printf("Error: Unknown SDK '%s'.\n", sdk)
 			}
@@ -25,8 +25,13 @@ func NewCmd() *cobra.Command {
 	return &quickstartcmd
 }
 
-func printInstructionsForTypeScript() {
-	fmt.Println("Getting started with Resonate for TypeScript")
-	fmt.Println("> 🏴‍☠️ 1. Run git clone git@github.com:resonatehq/ts-quickstart.git quickstart && cd quickstart")
-	fmt.Println("> 🏴‍☠️ 2. Follow the Getting Started instructions in Readme.md")
+func printInstructions(lang string) {
+	switch strings.ToLower(lang) {
+	case "ts", "typescript":
+		fmt.Println("Getting started with Resonate for TypeScript")
+		fmt.Println("> 🏴‍☠️ 1. Run git clone git@github.com:resonatehq/resonate-sdk-ts.git ts-quickstart && cd ts-quickstart")
+		fmt.Println("> 🏴‍☠️ 2. Follow the Getting Started instructions in Readme.md")
+	default:
+		fmt.Printf("Error: Unknown SDK '%s'.\n", lang)
+	}
 }
