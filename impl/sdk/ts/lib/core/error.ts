@@ -41,18 +41,18 @@ export class ResonateTestCrash extends ResonateError {
 
 export class ResonateCancelled extends ResonateError {
   constructor() {
-    super("Promise Cancelled");
+    super("Promise Cancelled.");
   }
 }
 
 export class ResonateTimeout extends ResonateError {
   constructor() {
-    super("Promise Timedout");
+    super("Promise Timedout.");
   }
 }
 
 export class ResonateKilled extends ResonateError {
   constructor() {
-    super("Promise Killed");
+    super("Promise Killed.");
   }
 }
