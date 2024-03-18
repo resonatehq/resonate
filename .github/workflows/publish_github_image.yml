@@ -1,5 +1,5 @@
 # ref: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions#upgrading-a-workflow-that-accesses-a-registry-using-a-personal-access-token
-name: Create and publish a Docker image
+name: Publish GitHub Docker image
 
 # Configures this workflow to run every time a change is pushed to the branch called `release-*`.
 # This aligns with the release branching change coming in v1.0.0 for hot fixes.
