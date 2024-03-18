@@ -94,9 +94,9 @@ jobs:
           chmod +x ./bin/darwin-x86_64/resonate
           chmod +x ./bin/darwin-aarch64/resonate
           tar -czvf resonate_darwin_x86_64.tar.gz ./bin/darwin-x86_64/resonate
-          sha256sum resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
+          shasum -a 256 resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
           tar -czvf resonate_darwin_aarch64.tar.gz ./bin/darwin-aarch64/resonate
-          sha256sum resonate_darwin_aarch64.tar.gz > resonate_darwin_aarch64.tar.gz.sha256
+          shasum -a 256 resonate_darwin_aarch64.tar.gz > resonate_darwin_aarch64.tar.gz.sha256
       - name: Upload Artifacts
         env:
           GH_TOKEN: ${{ github.token }}
