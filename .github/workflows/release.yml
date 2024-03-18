@@ -1,0 +1,13 @@
+name: Release Workflow
+
+on:
+  push:
+    branches: ["release-*"]
+  workflow_dispatch:
+
+jobs:
+  publish-github-image:
+    uses: ./.github/workflows/publish_github_image.yml
+
+  publish-github-release:
+    uses: ./.github/workflows/publish_github_release.yaml
