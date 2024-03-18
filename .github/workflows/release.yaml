@@ -39,7 +39,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: Release.txt
-          tag_name: Resonate ${{ needs.create_tag.outputs.tag_name }}
+          name: Resonate ${{ needs.create_tag.outputs.tag_name }}
+          tag_name: ${{ needs.create_tag.outputs.tag_name }}
+          generate_release_notes: true
+          make_latest: true
           
   release-linux-artifact:
     runs-on: ubuntu-latest
