@@ -7,12 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-github-image:
-    uses: ./.github/workflows/release_publish_github_image.yaml
+  # publish-github-image:
+  #   uses: ./.github/workflows/release_publish_github_image.yaml
 
-  publish-github-release:
-    uses: ./.github/workflows/release_publish_github_release.yaml
+  # publish-github-release:
+  #   uses: ./.github/workflows/release_publish_github_release.yaml
 
   verify-github-artifacts: 
-    needs: [publish-github-image, publish-github-release]
+    # needs: [publish-github-image, publish-github-release]
     uses: ./.github/workflows/release_verify_artifacts.yaml
