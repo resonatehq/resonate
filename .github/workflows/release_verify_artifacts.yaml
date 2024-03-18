@@ -1,1 +1,37 @@
+name: Verify GitHub Artifacts
 
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Download and test GHCR image
+        run: |
+          # Login to GHCR
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Pull the test image
+          docker pull ghcr.io/your-username/your-image:test
+
+          # Run the test image
+          docker run --rm ghcr.io/your-username/your-image:test
+
+      - name: Download and test release
+        run: |
+          # Download the release artifact
+          curl -L -O "https://github.com/your-username/your-repo/releases/download/test-release/your-artifact.tar.gz"
+
+          # Extract the artifact
+          tar -xzf your-artifact.tar.gz
+
+          # Run the extracted artifact
+          ./your-artifact
