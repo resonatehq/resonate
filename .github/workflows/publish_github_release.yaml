@@ -1,8 +1,7 @@
 name: Publish GitHub Release
 
 on:
-  push:
-    branches: ["release-*"]
+  workflow_call:
   workflow_dispatch:
 
 permissions:
