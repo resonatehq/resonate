@@ -26,13 +26,13 @@ jobs:
           # Run the test image
           docker run --rm ghcr.io/guergabo/resonate:release-1.0
 
-      - name: Download and test release
+      - name: Download and test GH release
         run: |
           # Download the release artifact
-          curl -L -O "https://github.com/your-username/your-repo/releases/download/test-release/your-artifact.tar.gz"
+          curl -L -O "https://github.com/guergabo/resonate/releases/download/v2024.03.18/resonate_linux_x86_64.tar.gz"
 
           # Extract the artifact
-          tar -xzf your-artifact.tar.gz
+          tar -xzf resonate_linux_x86_64.tar.gz
 
           # Run the extracted artifact
-          ./your-artifact
+          ./bin/linux-x86_64/resonate
