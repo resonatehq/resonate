@@ -4,8 +4,7 @@ name: Publish GitHub Docker image
 # Configures this workflow to run every time a change is pushed to the branch called `release-*`.
 # This aligns with the release branching change coming in v1.0.0 for hot fixes.
 on:
-  push:
-    branches: ["release-*"]
+  workflow_call:
   workflow_dispatch:
 
 # Defines two custom environment variables for the workflow. These are used for the Container
