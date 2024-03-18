@@ -20,10 +20,10 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
           # Pull the test image
-          docker pull ghcr.io/your-username/your-image:test
+          docker pull ghcr.io/guergabo/resonate:release-1.0
 
           # Run the test image
-          docker run --rm ghcr.io/your-username/your-image:test
+          docker run --rm ghcr.io/guergabo/resonate:release-1.0
 
       - name: Download and test release
         run: |
