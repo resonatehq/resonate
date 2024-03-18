@@ -64,14 +64,18 @@ jobs:
           CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
           chmod +x ./bin/linux-x86_64/resonate
           chmod +x ./bin/linux-aarch64/resonate
-          mv ./bin/linux-x86_64/resonate ./bin/resonate_linux_x86_64 
-          mv ./bin/linux-aarch64/resonate ./bin/resonate_linux_aarch64
+          tar -czvf resonate_linux_x86_64.tar.gz ./bin/linux-x86_64/resonate
+          sha256sum resonate_linux_x86_64.tar.gz > resonate_linux_x86_64.tar.gz.sha256
+          tar -czvf resonate_linux_aarch64.tar.gz ./bin/linux-aarch64/resonate
+          sha256sum resonate_linux_aarch64.tar.gz > resonate_linux_aarch64.tar.gz.sha256
       - name: Upload Artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ needs.create_tag.outputs.tag_name }} ./bin/resonate_linux_x86_64 --clobber
-          gh release upload ${{ needs.create_tag.outputs.tag_name }} ./bin/resonate_linux_aarch64 --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_linux_x86_64.tar.gz --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_linux_x86_64.tar.gz.sha256 --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_linux_aarch64.tar.gz --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_linux_aarch64.tar.gz.sha256 --clobber
 
   release-darwin-artifact:
     runs-on: macos-latest
@@ -89,11 +93,16 @@ jobs:
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
           chmod +x ./bin/darwin-x86_64/resonate
           chmod +x ./bin/darwin-aarch64/resonate
-          mv ./bin/darwin-x86_64/resonate ./bin/resonate_darwin_x86_64 
-          mv ./bin/darwin-aarch64/resonate ./bin/resonate_darwin_aarch64
+          tar -czvf resonate_darwin_x86_64.tar.gz ./bin/darwin-x86_64/resonate
+          sha256sum resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
+          tar -czvf resonate_darwin_aarch64.tar.gz ./bin/darwin-aarch64/resonate
+          sha256sum resonate_darwin_aarch64.tar.gz > resonate_darwin_aarch64.tar.gz.sha256
       - name: Upload Artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ needs.create_tag.outputs.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
-          gh release upload ${{ needs.create_tag.outputs.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_darwin_x86_64.tar.gz --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_darwin_x86_64.tar.gz.sha256 --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_darwin_aarch64.tar.gz --clobber
+          gh release upload ${{ needs.create_tag.outputs.tag_name }} resonate_darwin_aarch64.tar.gz.sha256 --clobber
+
