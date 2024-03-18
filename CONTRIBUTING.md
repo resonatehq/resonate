@@ -3,6 +3,8 @@
 Welcome to the Resonate project! We appreciate your interest in helping us build reliable 
 and scalable distributed systems. To get started, follow these simple steps:
 
+## MAKE A NEW RELEASE NOTE. 
+
 ## Initial setup
 
 We follow the fork and branch workflow. There will be three Git repositories involved:
