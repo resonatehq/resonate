@@ -7,7 +7,7 @@ on:
 
 jobs:
   publish-github-image:
-    uses: ./.github/workflows/publish_github_image.yaml
+    uses: ./.github/workflows/release_publish_github_image.yaml
 
   publish-github-release:
-    uses: ./.github/workflows/publish_github_release.yaml
+    uses: ./.github/workflows/release_publish_github_release.yaml
