@@ -3,7 +3,7 @@
 Welcome to the Resonate project! We appreciate your interest in helping us build reliable 
 and scalable distributed systems. To get started, follow these simple steps:
 
-## MAKE A NEW RELEASE NOTE. 
+## MAKE A COLLABORATIVE RELEASE NOTE 
 
 ## Initial setup
 
