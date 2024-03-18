@@ -11,3 +11,6 @@ jobs:
 
   publish-github-release:
     uses: ./.github/workflows/release_publish_github_release.yaml
+
+  verify-github-artifacts: 
+    uses: ./.github/workflows/release_test_artifacts.yaml
