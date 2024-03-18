@@ -58,8 +58,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ github.ref_name }} ./bin/resonate_linux_x86_64 --clobber
-          gh release upload ${{ github.ref_name }} ./bin/resonate_linux_aarch64 --clobber
+          gh release upload ${{ steps.create_tag.outputs.tag_name }} ./bin/resonate_linux_x86_64 --clobber
+          gh release upload ${{ steps.create_tag.outputs.tag_name }} ./bin/resonate_linux_aarch64 --clobber
 
   release-darwin-artifact:
     runs-on: macos-latest
@@ -83,5 +83,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ github.ref_name }} ./bin/resonate_darwin_x86_64 --clobber
-          gh release upload ${{ github.ref_name }} ./bin/resonate_darwin_aarch64 --clobber
+          gh release upload ${{ steps.create_tag.outputs.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
+          gh release upload ${{ steps.create_tag.outputs.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
