@@ -9,10 +9,16 @@ on:
 jobs:
   publish-github-image:
     uses: ./.github/workflows/release_publish_github_image.yaml
+    with:
+      tag: v1.0.0
 
   publish-github-release:
     uses: ./.github/workflows/release_publish_github_release.yaml
-
+    with:
+      tag: v1.0.0
+      
   verify-github-artifacts: 
     needs: [publish-github-image, publish-github-release]
     uses: ./.github/workflows/release_verify_artifacts.yaml
+    with:
+      tag: v1.0.0
