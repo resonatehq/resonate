@@ -2,26 +2,20 @@ name: Publish GitHub Release
 
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: 'The tag version to use for verification'
+        required: true
+        type: string
+        
   workflow_dispatch:
 
 permissions:
   contents: write
 
-jobs:
-  create_tag:
+jobs:      
+  create-release:
     runs-on: ubuntu-latest
-    steps:
-      - name: Create Tag
-        id: create_tag
-        run: |
-          tag_name="v$(date +'%Y.%m.%d')"
-          echo "::set-output name=tag_name::$tag_name"
-    outputs:
-      tag_name: ${{ steps.create_tag.outputs.tag_name }}
-      
-  build:
-    runs-on: ubuntu-latest
-    needs: [create_tag]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,23 +23,18 @@ jobs:
         run: echo ${{ github.sha }} > Release.txt
       - name: Test
         run: cat Release.txt
-      - name: Create Tag
-        id: create_tag
-        run: |
-          tag_name="v$(date +'%Y.%m.%d')"
-          echo "::set-output name=tag_name::$tag_name"
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           body_path: Release.txt
-          name: Resonate ${{ needs.create_tag.outputs.tag_name }}
-          tag_name: ${{ needs.create_tag.outputs.tag_name }}
+          name: Resonate ${{ inputs.tag }}
+          tag_name: ${{ inputs.tag }}
           generate_release_notes: true
           make_latest: true
           
   release-linux-artifact:
     runs-on: ubuntu-latest
-    needs: [create_tag, build]
+    needs: [create-release]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -59,13 +48,20 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: Build for both amd64 and arm64
         run: |
+          # Build resonate binaries
           GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
           CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
+
+          # Change permissions
           chmod +x ./bin/linux-x86_64/resonate
           chmod +x ./bin/linux-aarch64/resonate
+
+          # Compress binaries
           tar -czvf resonate_linux_x86_64.tar.gz ./bin/linux-x86_64/resonate
-          sha256sum resonate_linux_x86_64.tar.gz > resonate_linux_x86_64.tar.gz.sha256
           tar -czvf resonate_linux_aarch64.tar.gz ./bin/linux-aarch64/resonate
+
+          # Create checksums 
+          sha256sum resonate_linux_x86_64.tar.gz > resonate_linux_x86_64.tar.gz.sha256          
           sha256sum resonate_linux_aarch64.tar.gz > resonate_linux_aarch64.tar.gz.sha256
       - name: Upload Artifacts
         env:
@@ -78,7 +74,7 @@ jobs:
 
   release-darwin-artifact:
     runs-on: macos-latest
-    needs: [create_tag, build]
+    needs: [create-release]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -88,13 +84,20 @@ jobs:
           go-version: 1.21
       - name: Build for both amd64 and arm64
         run: |
+          # Build resonate binaries
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
+          
+          # Change permissions
           chmod +x ./bin/darwin-x86_64/resonate
           chmod +x ./bin/darwin-aarch64/resonate
-          tar -czvf resonate_darwin_x86_64.tar.gz ./bin/darwin-x86_64/resonate
-          shasum -a 256 resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
+
+          # Compress binaries
+          tar -czvf resonate_darwin_x86_64.tar.gz ./bin/darwin-x86_64/resonate          
           tar -czvf resonate_darwin_aarch64.tar.gz ./bin/darwin-aarch64/resonate
+
+          # Create checksums 
+          shasum -a 256 resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
           shasum -a 256 resonate_darwin_aarch64.tar.gz > resonate_darwin_aarch64.tar.gz.sha256
       - name: Upload Artifacts
         env:
