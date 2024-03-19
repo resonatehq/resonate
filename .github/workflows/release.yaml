@@ -27,17 +27,19 @@ jobs:
       new_tag: ${{ steps.bump_version.outputs.new_tag }}
       
   publish-github-image:
+    needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_image.yaml
     with:
       tag: ${{ needs.bump-version.outputs.new_tag }}
 
   publish-github-release:
+    needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_release.yaml
     with:
       tag: ${{ needs.bump-version.outputs.new_tag }}
       
   verify-github-artifacts: 
-    needs: [publish-github-image, publish-github-release]
+    needs: [bump-version, publish-github-image, publish-github-release]
     uses: ./.github/workflows/release_verify_artifacts.yaml
     with:
       tag: ${{ needs.bump-version.outputs.new_tag }}
