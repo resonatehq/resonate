@@ -7,18 +7,31 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish-github-image:
-    uses: ./.github/workflows/release_publish_github_image.yaml
-    with:
-      tag: v1.0.1
+  bump-version: 
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Bump version and push tag
+      uses: anothrNick/github-tag-action@1.64.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        WITH_V: true
+        
+  # publish-github-image:
+  #   uses: ./.github/workflows/release_publish_github_image.yaml
+  #   with:
+  #     tag: v1.0.1
 
-  publish-github-release:
-    uses: ./.github/workflows/release_publish_github_release.yaml
-    with:
-      tag: v1.0.1
+  # publish-github-release:
+  #   uses: ./.github/workflows/release_publish_github_release.yaml
+  #   with:
+  #     tag: v1.0.1
       
-  verify-github-artifacts: 
-    needs: [publish-github-image, publish-github-release]
-    uses: ./.github/workflows/release_verify_artifacts.yaml
-    with:
-      tag: v1.0.1
+  # verify-github-artifacts: 
+  #   needs: [publish-github-image, publish-github-release]
+  #   uses: ./.github/workflows/release_verify_artifacts.yaml
+  #   with:
+  #     tag: v1.0.1
