@@ -22,7 +22,6 @@ jobs:
         MAJOR_STRING_TOKEN: major(
         MINOR_STRING_TOKEN: minor(
         PATCH_STRING_TOKEN: patch(
-        DEFAULT_BUMP: none
     outputs:
       new_tag: ${{ steps.bump_version.outputs.new_tag }}
       
