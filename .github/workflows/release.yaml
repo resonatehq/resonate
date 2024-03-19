@@ -1,6 +1,6 @@
 # Release workflow is the main workflow that coordinates various GitHub workflows involved in a release of Resonate. 
 name: Release Workflow
-
+#
 on:
   push:
     branches: ["release-*"]
