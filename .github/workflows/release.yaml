@@ -15,6 +15,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
     - name: Bump version and push tag
+      id: tag_version
       uses: anothrNick/github-tag-action@1.64.0
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -29,16 +30,16 @@ jobs:
     needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_image.yaml
     with:
-      tag: ${{ needs.bump-version.outputs.new_tag }}
+      tag: ${{ steps.tag_version.outputs.new_tag }}
 
   publish-github-release:
     needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_release.yaml
     with:
-      tag: ${{ needs.bump-version.outputs.new_tag }}
+      tag: ${{ steps.tag_version.outputs.new_tag }}
       
   verify-github-artifacts: 
     needs: [bump-version, publish-github-image, publish-github-release]
     uses: ./.github/workflows/release_verify_artifacts.yaml
     with:
-      tag: ${{ needs.bump-version.outputs.new_tag }}
+      tag: ${{ steps.tag_version.outputs.new_tag }}
