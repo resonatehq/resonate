@@ -23,19 +23,21 @@ jobs:
         MINOR_STRING_TOKEN: minor(
         PATCH_STRING_TOKEN: patch(
         DEFAULT_BUMP: none
-        
-  # publish-github-image:
-  #   uses: ./.github/workflows/release_publish_github_image.yaml
-  #   with:
-  #     tag: v1.0.1
-
-  # publish-github-release:
-  #   uses: ./.github/workflows/release_publish_github_release.yaml
-  #   with:
-  #     tag: v1.0.1
+    outputs:
+      new_tag: ${{ steps.bump_version.outputs.new_tag }}
       
-  # verify-github-artifacts: 
-  #   needs: [publish-github-image, publish-github-release]
-  #   uses: ./.github/workflows/release_verify_artifacts.yaml
-  #   with:
-  #     tag: v1.0.1
+  publish-github-image:
+    uses: ./.github/workflows/release_publish_github_image.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}
+
+  publish-github-release:
+    uses: ./.github/workflows/release_publish_github_release.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}
+      
+  verify-github-artifacts: 
+    needs: [publish-github-image, publish-github-release]
+    uses: ./.github/workflows/release_verify_artifacts.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}
