@@ -1,4 +1,5 @@
 # Release workflow is the main workflow that coordinates various GitHub workflows involved in a release of Resonate. 
+# trigger
 name: Release Workflow
 
 on:
