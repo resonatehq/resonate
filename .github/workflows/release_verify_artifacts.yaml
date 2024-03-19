@@ -2,6 +2,7 @@ name: Verify GitHub Artifacts
 
 on:
   workflow_call:
+  # TODO: docker image tag... just latest? release tag v1.0.0
   workflow_dispatch:
 
 permissions:
@@ -17,14 +18,14 @@ jobs:
       run: echo seed=$RANDOM >> $GITHUB_OUTPUT
     outputs:
       seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+
       
-  verify:
+  verify-github-image:
     runs-on: ubuntu-latest
     needs: [seed]
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
-
       - name: Download and test GHCR image
         run: |
           # Login to GHCR
@@ -36,6 +37,13 @@ jobs:
           # Run the test image
           docker run --rm ghcr.io/guergabo/resonate:release-1.0 dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
 
+  
+  verify-github-release:
+    runs-on: ubuntu-latest
+    needs: [seed]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
       - name: Download and test GH release
         run: |
           # Download the release artifact
