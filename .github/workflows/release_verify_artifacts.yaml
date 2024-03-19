@@ -40,7 +40,7 @@ jobs:
           docker pull ghcr.io/guergabo/resonate:${{ inputs.tag }}
 
           # Run the test image
-          docker run --rm ghcr.io/guergabo/resonate:release-1.0 dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+          docker run --rm ghcr.io/guergabo/resonate:${{ inputs.tag }} dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
 
   
   verify-github-release:
