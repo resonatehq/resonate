@@ -53,11 +53,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=raw,value=${{ inputs.tag }}
+            type=raw,value=latest
             
       # This step uses the `docker/build-push-action` action to build the image, based on our
       # repository's `Dockerfile`. If the build succeeds, it pushes the image to GitHub Packages.
