@@ -2,6 +2,12 @@ name: Publish GitHub Docker image
 
 on:
   workflow_call:
+    inputs:
+      tag:
+        description: 'The tag version to use for the release'
+        required: true
+        type: string
+        
   workflow_dispatch:
 
 env:
