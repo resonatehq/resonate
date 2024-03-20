@@ -13,18 +13,20 @@ import (
 )
 
 type aioDST struct {
-	r          *rand.Rand
-	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
-	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	subsystems map[t_aio.Kind]Subsystem
-	metrics    *metrics.Metrics
+	r                  *rand.Rand
+	sqes               []*bus.SQE[t_aio.Submission, t_aio.Completion]
+	cqes               []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	subsystems         map[t_aio.Kind]Subsystem
+	metrics            *metrics.Metrics
+	failureProbability float64
 }
 
-func NewDST(r *rand.Rand, metrics *metrics.Metrics) *aioDST {
+func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64) *aioDST {
 	return &aioDST{
-		r:          r,
-		subsystems: map[t_aio.Kind]Subsystem{},
-		metrics:    metrics,
+		r:                  r,
+		subsystems:         map[t_aio.Kind]Subsystem{},
+		metrics:            metrics,
+		failureProbability: failureProbability,
 	}
 }
 
@@ -92,7 +94,19 @@ func (a *aioDST) Flush(t int64) {
 
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
-			a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes.Value)...)
+			// Randomly decide whether to process SQE or return an error
+			if a.r.Float64() < a.failureProbability {
+				errorTags := sqes.Key.String()
+				errorMsg := "error occurred while processing SQE"
+				slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
+				// Create a new CQE with the error
+				errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+					Error: fmt.Errorf(errorMsg),
+				}
+				a.cqes = append(a.cqes, errorCQE)
+			} else {
+				a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes.Value)...)
+			}
 		} else {
 			panic("invalid aio submission")
 		}
