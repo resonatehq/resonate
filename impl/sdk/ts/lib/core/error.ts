@@ -7,8 +7,8 @@ export enum ErrorCodes {
   ALREADY_EXISTS = 5,
   INVALID_STATE = 6,
   ENCODER = 7,
-  CANCELLED = 8,
-  TIMEOUT = 9,
+  CANCELED = 8,
+  TIMEDOUT = 9,
   KILLED = 10,
 }
 
@@ -33,26 +33,20 @@ export class ResonateStorageError extends ResonateError {
   }
 }
 
-export class ResonateTestCrash extends ResonateError {
-  constructor(prob: number) {
-    super("Simulated failure with prob: " + prob);
+export class ResonateCanceled extends ResonateError {
+  constructor() {
+    super("Promise Canceled");
   }
 }
 
-export class ResonateCancelled extends ResonateError {
+export class ResonateTimedout extends ResonateError {
   constructor() {
-    super("Promise Cancelled.");
-  }
-}
-
-export class ResonateTimeout extends ResonateError {
-  constructor() {
-    super("Promise Timedout.");
+    super("Promise Timedout");
   }
 }
 
 export class ResonateKilled extends ResonateError {
   constructor() {
-    super("Promise Killed.");
+    super("Promise Killed");
   }
 }

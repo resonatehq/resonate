@@ -1,10 +1,10 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
-import { DurablePromise } from "../lib/core/promise";
-import { RemotePromiseStore } from "../lib/core/stores/remote";
-import { LocalPromiseStore } from "../lib/core/stores/local";
-import { WithTimeout } from "../lib/core/storages/withTimeout";
+import { DurablePromise } from "../lib/core/promises/types";
 import { MemoryStorage } from "../lib/core/storages/memory";
+import { WithTimeout } from "../lib/core/storages/withTimeout";
+import { LocalPromiseStore } from "../lib/core/stores/local";
+import { RemotePromiseStore } from "../lib/core/stores/remote";
 
 jest.setTimeout(10000);
 

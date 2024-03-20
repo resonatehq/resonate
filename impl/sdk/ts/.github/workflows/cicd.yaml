@@ -27,6 +27,8 @@ jobs:
         run: npm install
       - name: Run linter
         run: npm run lint
+      - name: Run prettier
+        run: npm run prettier
       - name: Set up Go
         uses: actions/setup-go@v2
         with:

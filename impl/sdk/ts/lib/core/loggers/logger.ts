@@ -1,12 +1,13 @@
-import { ILogger, ITrace } from "../logger";
-
-type LogLevel = "debug" | "info" | "warn" | "error";
+import { ILogger, LogLevel } from "../logger";
 
 export class Logger implements ILogger {
+  public level: LogLevel;
   private _level: number;
 
-  constructor(public level: LogLevel = "info") {
-    switch (level) {
+  constructor(level?: LogLevel) {
+    this.level = level ?? (process.env.LOG_LEVEL as LogLevel) ?? "info";
+
+    switch (this.level) {
       case "debug":
         this._level = 0;
         break;
@@ -19,16 +20,6 @@ export class Logger implements ILogger {
       case "error":
         this._level = 3;
         break;
-    }
-  }
-
-  startTrace(id: string, attrs?: Record<string, string>): ITrace {
-    return new Trace(this, id, attrs);
-  }
-
-  private log(level: number, args: any[]): void {
-    if (this._level <= level) {
-      console.log(...args);
     }
   }
 
@@ -47,29 +38,16 @@ export class Logger implements ILogger {
   error(...args: any[]): void {
     this.log(3, args);
   }
-}
 
-class Trace implements ITrace {
-  private timestamp: number = Date.now();
-
-  constructor(
-    private logger: Logger,
-    private id: string,
-    private attrs?: Record<string, string>,
-    private parent?: string,
-  ) {}
-
-  start(id: string, attrs?: Record<string, string>): ITrace {
-    return new Trace(this.logger, id, attrs, this.id);
+  table(...args: any[]): void {
+    if (this._level <= 0) {
+      console.table(...args);
+    }
   }
 
-  end(): void {
-    this.logger.debug({
-      id: this.id,
-      parentId: this.parent,
-      timestamp: this.timestamp,
-      duration: Date.now() - this.timestamp,
-      attrs: this.attrs,
-    });
+  private log(level: number, args: any[]): void {
+    if (this._level <= level) {
+      console.log(...args);
+    }
   }
 }

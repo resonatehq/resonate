@@ -1,26 +1,20 @@
-import { Schedule } from "../lib/core/schedule";
-import { IStore } from "../lib/core/store";
-import { LocalStore } from "../lib/core/stores/local";
-import { describe, beforeEach, test, expect, jest } from "@jest/globals";
-import { RemoteStore } from "../lib/core/stores/remote";
-import { Logger } from "../lib/core/loggers/logger";
+import { describe, test, expect, jest } from "@jest/globals";
+import { Schedule } from "../lib/core/schedules/types";
+import { LocalScheduleStore } from "../lib/core/stores/local";
+import { RemoteScheduleStore } from "../lib/core/stores/remote";
 
 jest.setTimeout(10000);
 
 describe("Store: Schedules", () => {
-  let store: IStore;
   const useDurable = process.env.USE_DURABLE === "true";
-
-  beforeEach(() => {
-    const url = process.env.RESONATE_URL || "http://localhost:8001";
-    store = useDurable ? new RemoteStore(url, "", new Logger()) : new LocalStore();
-  });
+  const url = process.env.RESONATE_URL || "http://localhost:8001";
+  const store = useDurable ? new RemoteScheduleStore(url) : new LocalScheduleStore();
 
   test("Schedule Store: Create schedule", async () => {
     const scheduleId = "new-schedule";
     const cronExpression = "* * * * *"; // Every minute
 
-    const createdSchedule = await store.schedules.create(
+    const createdSchedule = await store.create(
       scheduleId,
       scheduleId,
       "New Schedule",
@@ -37,7 +31,7 @@ describe("Store: Schedules", () => {
     expect(createdSchedule.cron).toBe(cronExpression);
 
     // Clean up
-    await store.schedules.delete(scheduleId);
+    await store.delete(scheduleId);
   });
 
   // this test needs to be discussed
@@ -46,7 +40,7 @@ describe("Store: Schedules", () => {
     const cronExpression = "* * * * *"; // Every minute
 
     // Create the initial schedule
-    await store.schedules.create(
+    await store.create(
       scheduleId,
       scheduleId,
       "Existing Schedule",
@@ -59,7 +53,7 @@ describe("Store: Schedules", () => {
       {},
     );
 
-    const schedule = await store.schedules.create(
+    const schedule = await store.create(
       scheduleId,
       scheduleId,
       "Existing Schedule",
@@ -77,7 +71,7 @@ describe("Store: Schedules", () => {
     expect(schedule.idempotencyKey).toBe(scheduleId);
 
     // Clean up
-    await store.schedules.delete(scheduleId);
+    await store.delete(scheduleId);
   });
 
   test("Schedule Store: Create schedule that exists with different idempotency key", async () => {
@@ -85,7 +79,7 @@ describe("Store: Schedules", () => {
     const cronExpression = "* * * * *"; // Every minute
 
     // Create the initial schedule
-    await store.schedules.create(
+    await store.create(
       scheduleId,
       scheduleId,
       "Existing Schedule",
@@ -100,7 +94,7 @@ describe("Store: Schedules", () => {
 
     // Attempt to create a schedule with a different idempotency key, should throw error
     await expect(
-      store.schedules.create(
+      store.create(
         scheduleId,
         "new-idempotency-key",
         "New Schedule",
@@ -115,7 +109,7 @@ describe("Store: Schedules", () => {
     ).rejects.toThrowError("Already exists");
 
     // Clean up
-    await store.schedules.delete(scheduleId);
+    await store.delete(scheduleId);
   });
 
   test("Schedule Store: Get schedule that exists", async () => {
@@ -123,7 +117,7 @@ describe("Store: Schedules", () => {
     const cronExpression = "* * * * *"; // Every minute
 
     // Create the schedule
-    await store.schedules.create(
+    await store.create(
       scheduleId,
       scheduleId,
       "Existing Schedule",
@@ -137,25 +131,25 @@ describe("Store: Schedules", () => {
     );
 
     // Get the existing schedule
-    const existingSchedule = await store.schedules.get(scheduleId);
+    const existingSchedule = await store.get(scheduleId);
     expect(existingSchedule.id).toBe(scheduleId);
 
     // Clean up
-    await store.schedules.delete(scheduleId);
+    await store.delete(scheduleId);
   });
 
   test("Schedule Store: Get schedule that does not exist", async () => {
     const nonExistingScheduleId = "non-existing-schedule-id";
 
     // Attempt to get a schedule that does not exist, should throw NOT_FOUND error
-    await expect(store.schedules.get(nonExistingScheduleId)).rejects.toThrowError("Not found");
+    await expect(store.get(nonExistingScheduleId)).rejects.toThrowError("Not found");
   });
 
   test("Schedule Store: Delete schedule that exists", async () => {
     const scheduleId = "schedule-to-delete";
 
     // Create the schedule first
-    await store.schedules.create(
+    await store.create(
       scheduleId,
       scheduleId,
       "Existing Schedule",
@@ -169,25 +163,25 @@ describe("Store: Schedules", () => {
     );
 
     // Attempt to delete the schedule
-    const isDeleted = await store.schedules.delete(scheduleId);
+    const isDeleted = await store.delete(scheduleId);
     expect(isDeleted).toBeUndefined();
 
     // Attempt to get the deleted schedule, should throw NOT_FOUND error
-    await expect(store.schedules.get(scheduleId)).rejects.toThrowError("Not found");
+    await expect(store.get(scheduleId)).rejects.toThrowError("Not found");
   });
 
   test("Schedule Store: Delete schedule that does not exist", async () => {
     const nonExistingScheduleId = "non-existing-schedule-id";
 
     // Attempt to delete a schedule that does not exist, should throw NOT_FOUND error
-    await expect(store.schedules.delete(nonExistingScheduleId)).rejects.toThrowError("Not found");
+    await expect(store.delete(nonExistingScheduleId)).rejects.toThrowError("Not found");
   });
 
   test("Schedule Store: Search by id", async () => {
     const scheduleId = "search-by-id-schedule";
 
     // Create the schedule
-    await store.schedules.create(
+    await store.create(
       scheduleId,
       scheduleId,
       "Search by ID Schedule",
@@ -202,14 +196,14 @@ describe("Store: Schedules", () => {
 
     // Search for the schedule by id
     let schedules: Schedule[] = [];
-    for await (const searchResults of store.schedules.search(scheduleId, {})) {
+    for await (const searchResults of store.search(scheduleId, undefined, undefined)) {
       schedules = schedules.concat(searchResults);
     }
     expect(schedules.length).toBe(1);
     expect(schedules[0].id).toBe(scheduleId);
 
     // Clean up
-    await store.schedules.delete(scheduleId);
+    await store.delete(scheduleId);
   });
 
   test("Schedule Store: Search by id with wildcard(s)", async () => {
@@ -226,7 +220,7 @@ describe("Store: Schedules", () => {
     ];
 
     for (const i in scheduleIds) {
-      await store.schedules.create(
+      await store.create(
         scheduleIds[i],
         scheduleIds[i],
         "Search by ID Prefix Schedule",
@@ -242,7 +236,7 @@ describe("Store: Schedules", () => {
 
     // Search for schedules by id prefix with wildcard
     let schedules: Schedule[] = [];
-    for await (const searchResults of store.schedules.search(wildcardSearch, {})) {
+    for await (const searchResults of store.search(wildcardSearch, undefined, undefined)) {
       schedules = schedules.concat(searchResults);
     }
     expect(schedules.length).toBe(3);
@@ -251,7 +245,7 @@ describe("Store: Schedules", () => {
 
     // Clean up
     for (const i in scheduleIds) {
-      await store.schedules.delete(scheduleIds[i]);
+      await store.delete(scheduleIds[i]);
     }
   });
 
@@ -267,7 +261,7 @@ describe("Store: Schedules", () => {
       if (scheduleIds[i] === scheduleId) {
         tags = searchtag;
       }
-      await store.schedules.create(
+      await store.create(
         scheduleIds[i],
         scheduleIds[i],
         "Search by Tags Schedule",
@@ -283,14 +277,14 @@ describe("Store: Schedules", () => {
 
     // Search for the schedule by tags
     let schedules: Schedule[] = [];
-    for await (const searchResults of store.schedules.search(scheduleId, searchtag)) {
+    for await (const searchResults of store.search(scheduleId, searchtag, undefined)) {
       schedules = schedules.concat(searchResults);
     }
     expect(schedules.length).toBe(1);
 
     // Clean up
     for (const i in scheduleIds) {
-      await store.schedules.delete(scheduleIds[i]);
+      await store.delete(scheduleIds[i]);
     }
   });
 });

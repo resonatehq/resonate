@@ -1,4 +1,7 @@
 import * as cronParser from "cron-parser";
+import { ErrorCodes, ResonateStorageError } from "../error";
+import { ILogger } from "../logger";
+import { Logger } from "../loggers/logger";
 import {
   DurablePromise,
   PendingPromise,
@@ -11,15 +14,12 @@ import {
   isRejectedPromise,
   isCanceledPromise,
   isTimedoutPromise,
-} from "../promise";
-import { Schedule } from "../schedule";
-import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
-import { ErrorCodes, ResonateStorageError } from "../error";
+} from "../promises/types";
+import { Schedule } from "../schedules/types";
 import { IStorage } from "../storage";
-import { WithTimeout } from "../storages/withTimeout";
 import { MemoryStorage } from "../storages/memory";
-import { ILogger } from "../logger";
-import { Logger } from "../loggers/logger";
+import { WithTimeout } from "../storages/withTimeout";
+import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
 
 export class LocalStore implements IStore {
   public promises: LocalPromiseStore;

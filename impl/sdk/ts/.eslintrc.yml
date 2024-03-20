@@ -1,6 +1,8 @@
 extends:
   - "eslint:recommended"
   - "plugin:@typescript-eslint/recommended"
+  - "plugin:import/recommended"
+  - "plugin:import/typescript"
 
 parser: "@typescript-eslint/parser"
 
@@ -11,8 +13,9 @@ env:
   node: true
 
 rules:
-  "no-async-promise-executor":
-    - off
+  "import/order":
+    - error
+    - alphabetize: { order: "asc" }
 
   "@typescript-eslint/no-explicit-any":
     - off
@@ -22,14 +25,13 @@ rules:
     - vars: all
       args: none
 
-  require-yield: 0
-
 parserOptions:
   project: "./tsconfig.json"
 
 ignorePatterns:
-  - jest.config.js
-  - "dist/"
-  - "docs/"
-  - "examples/"
-  - "coverage/"
+  - "/*.ts" # ignore root level .ts files
+  - "/*.js" # ignore root level .js files
+  - dist/
+  - docs/
+  - examples/
+  - coverage/

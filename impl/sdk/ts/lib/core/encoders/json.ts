@@ -34,7 +34,7 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
 
   decode(data: string | undefined): unknown {
     // note about undefined:
-    // undefined causes JSON.parse to throw, so immediately return undefined as T
+    // undefined causes JSON.parse to throw, so immediately return undefined
     if (data === undefined) {
       return undefined;
     }

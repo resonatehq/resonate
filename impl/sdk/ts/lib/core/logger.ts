@@ -1,12 +1,10 @@
+export type LogLevel = "debug" | "info" | "warn" | "error";
+
 export interface ILogger {
+  level: LogLevel;
   debug(...args: any[]): void;
   info(...args: any[]): void;
   warn(...args: any[]): void;
   error(...args: any[]): void;
-  startTrace(id: string, attrs?: Record<string, string>): ITrace;
-}
-
-export interface ITrace {
-  start(id: string, attrs?: Record<string, string>): ITrace;
-  end(): void;
+  table(...args: any[]): void;
 }

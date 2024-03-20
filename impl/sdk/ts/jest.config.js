@@ -4,5 +4,5 @@ export default {
   coverageDirectory: "coverage",
   preset: "ts-jest",
   testEnvironment: "node",
-  testPathIgnorePatterns: ["dist/", "lib/core/loggers/test.ts"],
+  testPathIgnorePatterns: ["dist/"],
 };

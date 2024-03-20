@@ -5,9 +5,9 @@ import {
   RejectedPromise,
   CanceledPromise,
   TimedoutPromise,
-} from "./promise";
+} from "./promises/types";
 
-import { Schedule } from "./schedule";
+import { Schedule } from "./schedules/types";
 
 /**
  * Store Interface

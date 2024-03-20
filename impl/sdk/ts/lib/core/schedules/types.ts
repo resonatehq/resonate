@@ -16,12 +16,6 @@ export type Schedule = {
   createdOn: number;
 };
 
-export function isSchedule(obj: any): obj is Schedule {
-  return (
-    obj !== undefined &&
-    typeof obj.id === "string" &&
-    typeof obj.cron === "string" &&
-    typeof obj.promiseId === "string" &&
-    typeof obj.promiseTimeout === "number"
-  );
+export function isSchedule(s: unknown): s is Schedule {
+  return s !== null && typeof s === "object" && "id" in s;
 }
