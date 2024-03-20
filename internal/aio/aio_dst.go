@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/rand" // nosemgrep
 
+	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 
@@ -96,14 +97,19 @@ func (a *aioDST) Flush(t int64) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
 			if a.r.Float64() < a.failureProbability {
-				errorTags := sqes.Key.String()
+				errorTags := "aio"
 				errorMsg := "error occurred while processing SQE"
 				slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
 				// Create a new CQE with the error
 				// Do not do the I/O, then raise a generic Error
 				errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-					Error: fmt.Errorf(errorMsg),
+					Error:    fmt.Errorf(errorMsg),
+					Metadata: metadata.New("dst error"),
 				}
+				errorCQE.Metadata.Tags.Set("aio", "failure")
+				// new completion is the same as the original submission
+				errorCQE.Callback = sqes.Value[0].Callback
+				errorCQE.Completion = &t_aio.Completion{}
 				a.cqes = append(a.cqes, errorCQE)
 			} else {
 				// Do the I/O
@@ -111,13 +117,17 @@ func (a *aioDST) Flush(t int64) {
 				// Randomly decide whether to return an error after processing SQE
 				// Check if failure condition is met again after processing SQE
 				if a.r.Float64() < a.failureProbability {
-					errorTags := sqes.Key.String()
+					errorTags := "aio"
 					errorMsg := "error occurred after processing SQE"
-					slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
+					slog.Error("aio dst: failure", "tags", errorTags, "error", errorMsg)
 					// Create a new CQE with the error
 					errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-						Error: fmt.Errorf(errorMsg),
+						Error:    fmt.Errorf(errorMsg),
+						Metadata: metadata.New("dst error"),
 					}
+					errorCQE.Metadata.Tags.Set("aio", "failure")
+					errorCQE.Completion = processedCQEs[0].Completion
+					errorCQE.Callback = processedCQEs[0].Callback
 					a.cqes = append(a.cqes, errorCQE)
 				} else {
 					// Append processed CQEs to the list

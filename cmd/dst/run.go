@@ -84,7 +84,7 @@ func RunDSTCmd() *cobra.Command {
 
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			randomNumber := 0.6
+			randomNumber := 0.5
 			aio := aio.NewDST(r, metrics, randomNumber)
 
 			// instatiate aio subsystems
