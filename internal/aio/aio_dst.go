@@ -100,12 +100,29 @@ func (a *aioDST) Flush(t int64) {
 				errorMsg := "error occurred while processing SQE"
 				slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
 				// Create a new CQE with the error
+				// Do not do the I/O, then raise a generic Error
 				errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
 					Error: fmt.Errorf(errorMsg),
 				}
 				a.cqes = append(a.cqes, errorCQE)
 			} else {
-				a.cqes = append(a.cqes, subsystem.NewWorker(0).Process(sqes.Value)...)
+				// Do the I/O
+				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
+				// Randomly decide whether to return an error after processing SQE
+				// Check if failure condition is met again after processing SQE
+				if a.r.Float64() < a.failureProbability {
+					errorTags := sqes.Key.String()
+					errorMsg := "error occurred after processing SQE"
+					slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
+					// Create a new CQE with the error
+					errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+						Error: fmt.Errorf(errorMsg),
+					}
+					a.cqes = append(a.cqes, errorCQE)
+				} else {
+					// Append processed CQEs to the list
+					a.cqes = append(a.cqes, processedCQEs...)
+				}
 			}
 		} else {
 			panic("invalid aio submission")
