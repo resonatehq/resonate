@@ -108,7 +108,7 @@ func (a *aioDST) Flush(t int64) {
 				if a.r.Float64() < a.failureProbability {
 					for _, cqe := range processedCQEs {
 						errorCqe := createErrorCQE("aio dst error occurred after processing SQE", "aio dst failure", simpleCallback)
-						errorCqe.Completion = &t_aio.Completion{Kind: 1, Echo: &t_aio.EchoCompletion{}}
+						errorCqe.Completion = &t_aio.Completion{}
 
 						slog.Debug("aio dst: failure", "err", errorCqe, "cqe", cqe)
 						a.cqes = append(a.cqes, errorCqe)
