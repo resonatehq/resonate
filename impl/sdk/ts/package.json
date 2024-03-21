@@ -1,6 +1,6 @@
 {
     "name": "@resonatehq/sdk",
-    "version": "0.2.0",
+    "version": "0.3.1",
     "description": "Resonate TypeScript SDK",
     "main": "dist/index.js",
     "type": "module",
