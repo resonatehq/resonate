@@ -1,0 +1,91 @@
+name: Resonate SDK TypeScript Release Workflow
+
+on:
+  push:
+    branches:
+      - "release-*"
+  pull_request:
+    branches:
+      - "release-*"
+  workflow_dispatch:
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          echo "::set-output name=version::$(node -e 'console.log(require("./package.json").version)')"
+
+  # Create a tag if it does not exist
+  create-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: rickstaa/action-create-tag@v1
+        id: "tag_create"
+        with:
+          tag: ${{ steps.get_version.outputs.version }}
+          tag_exists_error: false
+          message: "${{ steps.get_version.outputs.version }} release"
+
+      # Print result using the env variable.
+      - run: |
+        echo "Tag already present: ${{ env.TAG_EXISTS }}"
+
+      # Print result using the action output.
+      - run: |
+        echo "Tag already present: ${{ steps.tag_create.outputs.tag_exists }}"
+
+  publish-github-release:
+    needs: [bump-version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Test
+        run: cat RELEASE.md # Test that the file exists
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: RELEASE.md
+          name: Resonate ${{ steps.get_version.outputs.version }}
+          tag_name: ${{ steps.get_version.outputs.version }}
+          generate_release_notes: true
+          make_latest: true
+
+  publish-npm-package:
+    needs: [bump-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v2
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+      - name: Build and push npm package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm install -g npm &&
+          npm publish --provenance --access public --tag v${{ steps.get_version.outputs.version }}
+
+  verify-npm-package:
+    needs: [publish-npm-package]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Resonate SDK and run tests
+        run: |
+          npm install --save @resonatehq/sdk@${{ steps.get_version.outputs.version }} ts-node@latest
+          node --no-warnings=ExperimentalWarning --loader ts-node/esm helloworld_release.ts
+        working-directory: .github/workflows/hello_world
