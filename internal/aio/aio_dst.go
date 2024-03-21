@@ -111,7 +111,7 @@ func (a *aioDST) Flush(t int64) {
 						errorCqe.Completion = &t_aio.Completion{}
 
 						slog.Debug("aio dst: failure", "err", errorCqe, "cqe", cqe)
-						a.cqes = append(a.cqes, errorCqe)
+						a.cqes = append(a.cqes, cqe, errorCqe)
 					}
 				} else {
 					a.cqes = append(a.cqes, processedCQEs...)
