@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - "release-*"
-  pull_request:
-    branches:
-      - "release-*"
   workflow_dispatch:
 
 jobs:
@@ -22,6 +19,7 @@ jobs:
 
   # Create a tag if it does not exist
   create-tag:
+    needs: [bump-version]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,7 +33,7 @@ jobs:
           message: "${{ steps.get_version.outputs.version }} release"
 
   publish-github-release:
-    needs: [bump-version]
+    needs: [bump-version, create-tag]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -52,7 +50,7 @@ jobs:
           make_latest: true
 
   publish-npm-package:
-    needs: [bump-version]
+    needs: [bump-version, create-tag]
     runs-on: ubuntu-latest
     permissions:
       contents: read
