@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/resonatehq/resonate/pkg/timeout"
 )
 
@@ -56,6 +57,12 @@ const (
 	HeartbeatLocks
 	ReleaseLock
 	TimeoutLocks
+
+	// TASKS
+	CreateTask
+	UpdateTask
+	ReadTask
+	ReadTasks
 )
 
 func (k StoreKind) String() string {
@@ -131,6 +138,17 @@ func (k StoreKind) String() string {
 		return "ReleaseLock"
 	case TimeoutLocks:
 		return "TimeoutLocks"
+
+	// TASKS
+	case CreateTask:
+		return "CreateTask"
+	case UpdateTask:
+		return "UpdateTask"
+	case ReadTask:
+		return "ReadTask"
+	case ReadTasks:
+		return "ReadTasks"
+
 	default:
 		panic("invalid store kind")
 	}
@@ -200,6 +218,12 @@ type Command struct {
 	HeartbeatLocks *HeartbeatLocksCommand
 	ReleaseLock    *ReleaseLockCommand
 	TimeoutLocks   *TimeoutLocksCommand
+
+	// TASKS
+	CreateTask *CreateTaskCommand
+	UpdateTask *UpdateTaskCommand
+	ReadTask   *ReadTaskCommand
+	ReadTasks  *ReadTasksCommand
 }
 
 func (c *Command) String() string {
@@ -250,6 +274,12 @@ type Result struct {
 	HeartbeatLocks *AlterLocksResult
 	ReleaseLock    *AlterLocksResult
 	TimeoutLocks   *AlterLocksResult
+
+	// TASKS
+	CreateTask *AlterTasksResult
+	UpdateTask *AlterTasksResult
+	ReadTask   *QueryTasksResult
+	ReadTasks  *QueryTasksResult
 }
 
 func (r *Result) String() string {
@@ -503,5 +533,48 @@ type QueryLocksResult struct {
 }
 
 type AlterLocksResult struct {
+	RowsAffected int64
+}
+
+// Task commands
+
+type CreateTaskCommand struct {
+	Id              string
+	Counter         int
+	PromiseId       string
+	ClaimTimeout    int64
+	CompleteTimeout int64
+	PromiseTimeout  int64
+	CreatedOn       int64
+	CompletedOn     int64
+	IsCompleted     bool
+}
+
+type UpdateTaskCommand struct {
+	Id              string
+	Counter         int
+	ClaimTimeout    int64
+	CompleteTimeout int64
+	CompletedOn     int64
+	IsCompleted     bool
+}
+
+type ReadTaskCommand struct {
+	Id string
+}
+
+type ReadTasksCommand struct {
+	IsCompleted bool
+	RunTime     int64
+}
+
+// Task results
+
+type QueryTasksResult struct {
+	RowsReturned int64
+	Records      []*task.TaskRecord
+}
+
+type AlterTasksResult struct {
 	RowsAffected int64
 }

@@ -148,7 +148,7 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 				IdempotencyKey: header.IdempotencyKey,
 				Strict:         header.Strict,
 				Param:          body.Param,
-				Timeout:        body.Timeout, // required by binding
+				Timeout:        body.Timeout, // required by connection
 				Tags:           body.Tags,
 			},
 		},

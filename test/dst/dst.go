@@ -56,7 +56,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
 		case t_api.CreatePromise:
 			generator.AddRequest(generator.GenerateCreatePromise)
-			model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
+			model.AddResponse(t_api.CreatePromise, model.ValidateCreatePromise)
 		case t_api.CompletePromise:
 			generator.AddRequest(generator.GenerateCompletePromise)
 			model.AddResponse(t_api.CompletePromise, model.ValidateCompletePromise)
@@ -96,6 +96,14 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 		case t_api.ReleaseLock:
 			generator.AddRequest(generator.GenerateReleaseLock)
 			model.AddResponse(t_api.ReleaseLock, model.ValidateReleaseLock)
+
+		// TASK
+		case t_api.ClaimTask:
+			generator.AddRequest(generator.GenerateClaimTask)
+			model.AddResponse(t_api.ClaimTask, model.ValidateClaimTask)
+		case t_api.CompleteTask:
+			generator.AddRequest(generator.GenerateCompleteTask)
+			model.AddResponse(t_api.CompleteTask, model.ValidateCompleteTask)
 		}
 
 	}

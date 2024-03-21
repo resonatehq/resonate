@@ -1,8 +1,10 @@
 package coroutines
 
 import (
+	"errors"
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/scheduler"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -53,24 +55,48 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 		if result.RowsReturned == 0 {
 			createdOn := c.Time()
+
+			createCmds := []*t_aio.Command{
+				{
+					Kind: t_aio.CreatePromise,
+					CreatePromise: &t_aio.CreatePromiseCommand{
+						Id:             req.CreatePromise.Id,
+						State:          promise.Pending,
+						Param:          req.CreatePromise.Param,
+						Timeout:        req.CreatePromise.Timeout,
+						IdempotencyKey: req.CreatePromise.IdempotencyKey,
+						Tags:           req.CreatePromise.Tags,
+						CreatedOn:      createdOn,
+					},
+				},
+			}
+
+			_, err := queuing.CoroutineRouter().Match(req.CreatePromise.Id)
+			if err != nil {
+				if !errors.Is(err, queuing.ErrRouteDoesNotMatchAnyPattern) {
+					panic(err)
+				}
+			}
+
+			if err == nil {
+				createCmds = append(createCmds, &t_aio.Command{
+					Kind: t_aio.CreateTask,
+					CreateTask: &t_aio.CreateTaskCommand{
+						Id:             req.CreatePromise.Id,
+						Counter:        0,
+						PromiseId:      req.CreatePromise.Id,
+						ClaimTimeout:   createdOn, // Set it to the createdOn time to trigger immediately.
+						PromiseTimeout: req.CreatePromise.Timeout,
+						CreatedOn:      createdOn,
+					},
+				})
+			}
+
 			completion, err := c.Yield(&t_aio.Submission{
 				Kind: t_aio.Store,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.CreatePromise,
-								CreatePromise: &t_aio.CreatePromiseCommand{
-									Id:             req.CreatePromise.Id,
-									State:          promise.Pending,
-									Param:          req.CreatePromise.Param,
-									Timeout:        req.CreatePromise.Timeout,
-									IdempotencyKey: req.CreatePromise.IdempotencyKey,
-									Tags:           req.CreatePromise.Tags,
-									CreatedOn:      createdOn,
-								},
-							},
-						},
+						Commands: createCmds,
 					},
 				},
 			})
@@ -105,6 +131,7 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			} else {
 				c.Scheduler.Add(CreatePromise(metadata, req, res))
 			}
+			// todo: to here...
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {

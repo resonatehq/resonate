@@ -8,11 +8,13 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 // Model
@@ -21,6 +23,7 @@ type Model struct {
 	promises  Promises
 	schedules Schedules
 	locks     Locks
+	tasks     Tasks
 	cursors   []*t_api.Request
 	responses map[t_api.Kind]ResponseValidator
 }
@@ -46,10 +49,16 @@ type LockModel struct {
 	lock *lock.Lock
 }
 
+type TaskModel struct {
+	id   string
+	task *task.Task
+}
+
 type Promises map[string]*PromiseModel
 type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
 type Locks map[string]*LockModel
+type Tasks map[string]*TaskModel
 type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
@@ -93,11 +102,22 @@ func (l Locks) Get(id string) *LockModel {
 	return l[id]
 }
 
+func (t Tasks) Get(id string) *TaskModel {
+	if _, ok := t[id]; !ok {
+		t[id] = &TaskModel{
+			id: id,
+		}
+	}
+
+	return t[id]
+}
+
 func NewModel() *Model {
 	return &Model{
 		promises:  map[string]*PromiseModel{},
 		schedules: map[string]*ScheduleModel{},
 		locks:     map[string]*LockModel{},
+		tasks:     map[string]*TaskModel{},
 		responses: map[t_api.Kind]ResponseValidator{},
 	}
 }
@@ -210,7 +230,7 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
@@ -223,7 +243,28 @@ func (m *Model) ValidatCreatePromise(t int64, req *t_api.Request, res *t_api.Res
 			}
 		}
 
-		// update model state
+		// Update task state.
+		router := queuing.CoroutineRouter()
+		_, err := router.Match(req.CreatePromise.Id)
+		if err != nil {
+			if !errors.Is(err, queuing.ErrRouteDoesNotMatchAnyPattern) {
+				return err
+			}
+		}
+		if err == nil {
+			tm := m.tasks.Get(req.CreatePromise.Id)
+			tm.task = &task.Task{
+				Id:             req.CreatePromise.Id,
+				Counter:        1, // updated, first tested.
+				PromiseId:      req.CreatePromise.Id,
+				ClaimTimeout:   *res.CreatePromise.Promise.CreatedOn,
+				PromiseTimeout: req.CreatePromise.Timeout,
+				CreatedOn:      *res.CreatePromise.Promise.CreatedOn,
+			}
+
+		}
+
+		// Update model state
 		pm.promise = res.CreatePromise.Promise
 		return nil
 	case t_api.StatusCreated:
@@ -561,6 +602,74 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 		return nil
 	default:
 		return fmt.Errorf("unexpected response status '%d'", res.ReleaseLock.Status)
+	}
+}
+
+// TASKS
+
+func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response) error {
+	tm := m.tasks.Get(req.ClaimTask.TaskId)
+
+	switch res.ClaimTask.Status {
+	case t_api.StatusTaskNotFound:
+		if tm.task != nil {
+			return fmt.Errorf("task exists %s", tm.task)
+		}
+		return nil
+	// Can't test this because the task is not created in the model cause of the timeout stuff.
+	case t_api.StatusLockAlreadyAcquired:
+		return nil
+	case t_api.StatusTaskAlreadyCompleted:
+		if !tm.task.IsCompleted {
+			return fmt.Errorf("task %s is not completed", tm.task)
+		}
+		return nil
+	case t_api.StatusTaskWrongCounter:
+		if tm.task.Counter == req.CompleteTask.Counter {
+			return fmt.Errorf("task counter %d matches request counter %d", tm.task.Counter, req.CompleteTask.Counter)
+		}
+		return nil
+	case t_api.StatusTaskAlreadyTimedOut:
+		if tm.task.PromiseTimeout > t {
+			return fmt.Errorf("task %s has not yet timed out", tm.task)
+		}
+		return nil
+	case t_api.StatusOK:
+		return nil
+	default:
+		return fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
+	}
+}
+
+func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response) error {
+	tm := m.tasks.Get(req.CompleteTask.TaskId)
+
+	switch res.CompleteTask.Status {
+	case t_api.StatusTaskNotFound:
+		if tm.task != nil {
+			return fmt.Errorf("task exists %s", tm.task)
+		}
+		return nil
+	case t_api.StatusTaskAlreadyCompleted:
+		if !tm.task.IsCompleted {
+			return fmt.Errorf("task %s is not completed", tm.task)
+		}
+		return nil
+	case t_api.StatusTaskWrongCounter:
+		if tm.task.Counter == req.CompleteTask.Counter {
+			return fmt.Errorf("task counter %d matches request counter %d", tm.task.Counter, req.CompleteTask.Counter)
+		}
+		return nil
+	case t_api.StatusTaskAlreadyTimedOut:
+		if tm.task.PromiseTimeout > t {
+			return fmt.Errorf("task %s has not yet timed out", tm.task)
+		}
+		return nil
+	case t_api.StatusOK:
+		tm.task.IsCompleted = true
+		return nil
+	default:
+		return fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
 	}
 }
 

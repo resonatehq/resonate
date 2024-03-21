@@ -121,6 +121,9 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnTick(2, coroutines.EnqueueTasks)
 			system.AddOnTick(2, coroutines.TimeoutLocks)
 			system.AddOnTick(2, coroutines.SchedulePromises)
 			system.AddOnTick(2, coroutines.TimeoutPromises)
@@ -148,6 +151,10 @@ func RunDSTCmd() *cobra.Command {
 				t_api.AcquireLock,
 				t_api.HeartbeatLocks,
 				t_api.ReleaseLock,
+
+				// TASK
+				t_api.ClaimTask,
+				t_api.CompleteTask,
 			}
 
 			dst := dst.New(&dst.Config{

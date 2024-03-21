@@ -11,3 +11,6 @@ func RangeIntn(r *rand.Rand, min int, max int) int {
 func RangeInt63n(r *rand.Rand, min int64, max int64) int64 {
 	return r.Int63n(max-min) + min
 }
+func RandBool(r *rand.Rand) bool {
+	return r.Intn(2) == 0
+}

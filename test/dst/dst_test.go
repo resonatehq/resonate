@@ -10,6 +10,9 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
+	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -42,9 +45,30 @@ func TestDST(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// TODO: DST version so just test the kernel.
+	queuing, err := queuing.NewSubsytemOrDie(&queuing.Config{
+		Connections: []*t_conn.ConnectionConfig{
+			{
+				Kind:    t_conn.HTTP,
+				Pattern: "resonate://demo.example.com/payments/*",
+				Name:    "payments-demo",
+				Queue:   "payments-demo",
+				Metadata: &queuing_metadata.Metadata{
+					Properties: map[string]interface{}{
+						"url": "http://localhost:5001",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// add api subsystems
 	aio.AddSubsystem(t_aio.Network, network)
 	aio.AddSubsystem(t_aio.Store, store)
+	aio.AddSubsystem(t_aio.Queuing, queuing)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -62,6 +86,9 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+	system.AddOnTick(2, coroutines.EnqueueTasks)
 	system.AddOnTick(2, coroutines.TimeoutLocks)
 	system.AddOnTick(2, coroutines.SchedulePromises)
 	system.AddOnTick(2, coroutines.TimeoutPromises)
@@ -90,6 +117,10 @@ func TestDST(t *testing.T) {
 		t_api.AcquireLock,
 		t_api.HeartbeatLocks,
 		t_api.ReleaseLock,
+
+		// TASK
+		t_api.ClaimTask,
+		t_api.CompleteTask,
 	}
 
 	// start api/aio

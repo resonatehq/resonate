@@ -18,12 +18,20 @@ const (
 	StatusPromiseAlreadyCanceled ResponseStatus = 4032
 	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
 	StatusLockAlreadyAcquired    ResponseStatus = 4034
-	StatusPromiseNotFound        ResponseStatus = 4040
-	StatusSubscriptionNotFound   ResponseStatus = 4041
-	StatusScheduleNotFound       ResponseStatus = 4042
-	StatusLockNotFound           ResponseStatus = 4043
-	StatusPromiseAlreadyExists   ResponseStatus = 4090
-	StatusScheduleAlreadyExists  ResponseStatus = 4091
+
+	StatusTaskAlreadyTimedOut  ResponseStatus = 4035
+	StatusTaskAlreadyCompleted ResponseStatus = 4036
+	StatusTaskWrongCounter     ResponseStatus = 4037
+
+	StatusPromiseNotFound      ResponseStatus = 4040
+	StatusSubscriptionNotFound ResponseStatus = 4041
+	StatusScheduleNotFound     ResponseStatus = 4042
+	StatusLockNotFound         ResponseStatus = 4043
+
+	StatusTaskNotFound ResponseStatus = 4044
+
+	StatusPromiseAlreadyExists  ResponseStatus = 4090
+	StatusScheduleAlreadyExists ResponseStatus = 4091
 )
 
 // ResponseStatus is the status code for the response.

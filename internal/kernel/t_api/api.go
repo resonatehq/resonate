@@ -25,6 +25,10 @@ const (
 	HeartbeatLocks
 	ReleaseLock
 
+	// TASKS
+	ClaimTask
+	CompleteTask
+
 	// Echo
 	Echo
 )
@@ -63,6 +67,11 @@ func (k Kind) String() string {
 		return "heartbeat-locks"
 	case ReleaseLock:
 		return "release-lock"
+	// TASKS
+	case ClaimTask:
+		return "claim-task"
+	case CompleteTask:
+		return "complete-task"
 	default:
 		panic("invalid api")
 	}

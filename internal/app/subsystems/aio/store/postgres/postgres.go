@@ -20,6 +20,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/resonatehq/resonate/pkg/timeout"
 
 	_ "github.com/lib/pq"
@@ -27,19 +28,6 @@ import (
 
 const (
 	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE IF NOT EXISTS locks (
-		resource_id       TEXT,
-		process_id        TEXT,
-		execution_id      TEXT,  
-		expiry_in_seconds BIGINT,
-		timeout           BIGINT, 
-		PRIMARY KEY(resource_id)
-	);
-	  
-	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);  
-	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
-
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT,
 		sort_id                      SERIAL,
@@ -82,6 +70,34 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_schedules_sort_id ON schedules(sort_id);
 	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
 
+	CREATE TABLE IF NOT EXISTS tasks (
+		id                TEXT,
+		counter           INTEGER,
+		promise_id        TEXT,
+		claim_timeout     BIGINT, 
+		complete_timeout  BIGINT, 
+		promise_timeout   BIGINT,
+		created_on        BIGINT,
+		completed_on      BIGINT, 		
+		is_completed      BOOLEAN, 
+		PRIMARY KEY(id)
+	); 
+
+	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
+
+	CREATE TABLE IF NOT EXISTS locks (
+		resource_id       TEXT,
+		process_id        TEXT,
+		execution_id      TEXT,  
+		expiry_in_seconds BIGINT,
+		timeout           BIGINT, 
+		PRIMARY KEY(resource_id)
+	);
+	  
+	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id);
+	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);  
+	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
+
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
 		time BIGINT,
@@ -116,42 +132,8 @@ const (
 	DROP TABLE schedules;
 	DROP TABLE timeouts;
 	DROP TABLE promises;
-	DROP TABLE locks;`
-
-	LOCK_READ_STATEMENT = `
-	SELECT 
-		resource_id, process_id, execution_id, expiry_in_seconds, timeout
-	FROM
-		locks
-	WHERE
-		resource_id = $1`
-
-	LOCK_ACQUIRE_STATEMENT = `
-  	INSERT INTO locks 
-		(resource_id, process_id, execution_id, expiry_in_seconds, timeout) 
-  	VALUES 
-		($1, $2, $3, $4, $5)
-  	ON CONFLICT(resource_id)
-	DO UPDATE SET 
-	  process_id = EXCLUDED.process_id,
-	  expiry_in_seconds = EXCLUDED.expiry_in_seconds,
-	  timeout = EXCLUDED.timeout
-  	WHERE locks.execution_id = EXCLUDED.execution_id`
-
-	LOCK_HEARTBEAT_STATEMENT = `
-  	UPDATE 
-		locks 
-  	SET 
-		timeout = timeout + (expiry_in_seconds * 1000) 
-  	WHERE 
-		process_id = $1`
-
-	LOCK_RELEASE_STATEMENT = `
-	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
-
-	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks
-	WHERE timeout <= $1`
+	DROP TABLE locks;
+	DROP TABLE tasks;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -249,6 +231,77 @@ const (
 
 	SCHEDULE_DELETE_STATEMENT = `
 	DELETE FROM schedules WHERE id = $1`
+
+	TASK_INSERT_STATEMENT = `
+	INSERT INTO tasks
+		(id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed)
+	VALUES
+		($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	ON CONFLICT(id) DO NOTHING`
+
+	TASK_UPDATE_STATEMENT = `
+	UPDATE
+		tasks
+	SET
+		counter = $1, claim_timeout = $2, complete_timeout = $3, completed_on = $4, is_completed = $5
+	WHERE
+		id = $6`
+
+	TASK_SELECT_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		id = $1`
+
+	TASK_SELECT_ALL_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		is_completed = $1 AND 
+		claim_timeout < $2 AND 
+		complete_timeout < $2 AND 
+		promise_timeout > $2
+	ORDER BY
+		created_on ASC`
+
+	LOCK_READ_STATEMENT = `
+	SELECT 
+		resource_id, process_id, execution_id, expiry_in_seconds, timeout
+	FROM
+		locks
+	WHERE
+		resource_id = $1`
+
+	LOCK_ACQUIRE_STATEMENT = `
+  	INSERT INTO locks 
+		(resource_id, process_id, execution_id, expiry_in_seconds, timeout) 
+  	VALUES 
+		($1, $2, $3, $4, $5)
+  	ON CONFLICT(resource_id)
+	DO UPDATE SET 
+	  process_id = EXCLUDED.process_id,
+	  expiry_in_seconds = EXCLUDED.expiry_in_seconds,
+	  timeout = EXCLUDED.timeout
+  	WHERE locks.execution_id = EXCLUDED.execution_id`
+
+	LOCK_HEARTBEAT_STATEMENT = `
+  	UPDATE 
+		locks 
+  	SET 
+		timeout = timeout + (expiry_in_seconds * 1000) 
+  	WHERE 
+		process_id = $1`
+
+	LOCK_RELEASE_STATEMENT = `
+	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
+
+	LOCK_TIMEOUT_STATEMENT = `
+	DELETE FROM locks
+	WHERE timeout <= $1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
@@ -595,6 +648,20 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 	defer lockTimeoutStmt.Close()
 
+	// TASKS
+
+	taskInsertStmt, err := tx.Prepare(TASK_INSERT_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer taskInsertStmt.Close()
+
+	taskUpdateStmf, err := tx.Prepare(TASK_UPDATE_STATEMENT)
+	if err != nil {
+		return nil, err
+	}
+	defer taskUpdateStmf.Close()
+
 	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
@@ -707,8 +774,22 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
 				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
+			// Task
+			case t_aio.CreateTask:
+				util.Assert(command.CreateTask != nil, "command must not be nil")
+				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
+			case t_aio.UpdateTask:
+				util.Assert(command.UpdateTask != nil, "command must not be nil")
+				results[i][j], err = w.updateTask(tx, taskUpdateStmf, command.UpdateTask)
+			case t_aio.ReadTask:
+				util.Assert(command.ReadTask != nil, "command must not be nil")
+				results[i][j], err = w.readTask(tx, command.ReadTask)
+			case t_aio.ReadTasks:
+				util.Assert(command.ReadTasks != nil, "command must not be nil")
+				results[i][j], err = w.readTasks(tx, command.ReadTasks)
+
 			default:
-				panic("invalid command")
+				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
 			}
 
 			if err != nil {
@@ -718,6 +799,122 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	}
 
 	return results, nil
+}
+
+// Tasks
+
+func (w *PostgresStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Id, cmd.Counter, cmd.PromiseId, cmd.ClaimTimeout, cmd.CompleteTimeout, cmd.PromiseTimeout, cmd.CreatedOn, cmd.CompletedOn, cmd.IsCompleted)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateTask,
+		CreateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateTaskCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Counter, cmd.ClaimTimeout, cmd.CompleteTimeout, cmd.CompletedOn, cmd.IsCompleted, cmd.Id)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.UpdateTask,
+		UpdateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t_aio.Result, error) {
+	row := tx.QueryRow(TASK_SELECT_STATEMENT, cmd.Id)
+	record := &task.TaskRecord{}
+	rowsReturned := int64(1)
+
+	if err := row.Scan(
+		&record.Id,
+		&record.Counter,
+		&record.PromiseId,
+		&record.ClaimTimeout,
+		&record.CompleteTimeout,
+		&record.PromiseTimeout,
+		&record.CreatedOn,
+		&record.CompletedOn,
+		&record.IsCompleted,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			rowsReturned = 0
+		} else {
+			return nil, err
+		}
+	}
+
+	var records []*task.TaskRecord
+	if rowsReturned == 1 {
+		records = append(records, record)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadTask,
+		ReadTask: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(TASK_SELECT_ALL_STATEMENT, cmd.IsCompleted, cmd.RunTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*task.TaskRecord
+
+	for rows.Next() {
+		record := &task.TaskRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.Counter,
+			&record.PromiseId,
+			&record.ClaimTimeout,
+			&record.CompleteTimeout,
+			&record.PromiseTimeout,
+			&record.CreatedOn,
+			&record.CompletedOn,
+			&record.IsCompleted,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadTasks,
+		ReadTasks: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
 }
 
 // LOCKS

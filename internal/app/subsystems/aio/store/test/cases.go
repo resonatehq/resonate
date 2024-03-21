@@ -13,6 +13,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/resonatehq/resonate/pkg/timeout"
 	"github.com/stretchr/testify/assert"
@@ -97,6 +98,103 @@ func (c *testCase) Panic() bool {
 }
 
 var TestCases = []*testCase{
+
+	// TASKS
+	{
+		name: "Basic task lifecyle",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.CreateTaskCommand{
+					Id:              "taskId",
+					Counter:         0,
+					PromiseId:       "promiseId",
+					ClaimTimeout:    10_000,
+					CompleteTimeout: 10_000,
+					PromiseTimeout:  30_000,
+					CreatedOn:       5_000,
+					CompletedOn:     0,
+					IsCompleted:     false,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					IsCompleted: false,
+					RunTime:     20_000,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:              "taskId",
+					Counter:         0,
+					ClaimTimeout:    10_000,
+					CompleteTimeout: 10_000,
+					CompletedOn:     25_000,
+					IsCompleted:     true,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "taskId",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:              "taskId",
+							Counter:         0,
+							PromiseId:       "promiseId",
+							ClaimTimeout:    10_000,
+							CompleteTimeout: 10_000,
+							PromiseTimeout:  30_000,
+							CreatedOn:       5_000,
+							CompletedOn:     0,
+							IsCompleted:     false,
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:              "taskId",
+							Counter:         0,
+							PromiseId:       "promiseId",
+							ClaimTimeout:    10_000,
+							CompleteTimeout: 10_000,
+							PromiseTimeout:  30_000,
+							CreatedOn:       5_000,
+							CompletedOn:     25_000,
+							IsCompleted:     true,
+						},
+					},
+				},
+			},
+		},
+	},
 
 	// LOCKS
 	{
