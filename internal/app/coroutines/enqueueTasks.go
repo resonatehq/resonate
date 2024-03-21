@@ -22,7 +22,7 @@ func EnqueueTasks(t int64, config *system.Config) *Coroutine {
 
 		// Read tasks from the store that are pending, but
 		// filter out the ones that are already inflight
-		// (e.g., tasks that are already claimed by a process))
+		// (e.g., tasks that are already claimed by a process)
 		// and that have not been globally timed out yet.
 
 		completion, err := c.Yield(&t_aio.Submission{
