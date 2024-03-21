@@ -70,8 +70,6 @@ func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	a.cqes = a.cqes[min(n, len(a.cqes)):]
 
 	for _, cqe := range cqes {
-		slog.Debug("aio:dequeue", "cqe", cqe)
-
 		var status string
 		if cqe.Error != nil {
 			status = "failure"
@@ -96,41 +94,26 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
-			if a.r.Float64() < a.failureProbability {
-				errorTags := "aio"
-				errorMsg := "error occurred while processing SQE"
-				slog.Error("aio:failure", "tags", errorTags, "error", errorMsg)
-				// Create a new CQE with the error
-				// Do not do the I/O, then raise a generic Error
-				errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-					Error:    fmt.Errorf(errorMsg),
-					Metadata: metadata.New("dst error"),
-				}
-				errorCQE.Metadata.Tags.Set("aio", "failure")
-				// new completion is the same as the original submission
-				errorCQE.Callback = sqes.Value[0].Callback
-				errorCQE.Completion = &t_aio.Completion{}
-				a.cqes = append(a.cqes, errorCQE)
+			if a.r.Float64() > 5*a.failureProbability {
+				// Create a new CQE
+				errorCqe := createErrorCQE("aio dst error occurred while processing SQE", "aio dst failure", simpleCallback)
+				errorCqe.Completion = &t_aio.Completion{}
+
+				slog.Debug("aio dst: failure", "err", errorCqe)
+				a.cqes = append(a.cqes, errorCqe)
 			} else {
 				// Do the I/O
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
-				// Check if failure condition is met again after processing SQE
-				if a.r.Float64() < a.failureProbability {
-					errorTags := "aio"
-					errorMsg := "error occurred after processing SQE"
-					slog.Error("aio dst: failure", "tags", errorTags, "error", errorMsg)
-					// Create a new CQE with the error
-					errorCQE := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-						Error:    fmt.Errorf(errorMsg),
-						Metadata: metadata.New("dst error"),
+				if a.r.Float64() < 4 {
+					for _, cqe := range processedCQEs {
+						errorCqe := createErrorCQE("aio dst error occurred after processing SQE", "aio dst failure", simpleCallback)
+						errorCqe.Completion = &t_aio.Completion{Kind: 1, Echo: &t_aio.EchoCompletion{}}
+
+						slog.Debug("aio dst: failure", "err", errorCqe, "cqe", cqe)
+						a.cqes = append(a.cqes, errorCqe)
 					}
-					errorCQE.Metadata.Tags.Set("aio", "failure")
-					errorCQE.Completion = processedCQEs[0].Completion
-					errorCQE.Callback = processedCQEs[0].Callback
-					a.cqes = append(a.cqes, errorCQE)
 				} else {
-					// Append processed CQEs to the list
 					a.cqes = append(a.cqes, processedCQEs...)
 				}
 			}
@@ -140,6 +123,19 @@ func (a *aioDST) Flush(t int64) {
 	}
 
 	a.sqes = nil
+}
+
+func simpleCallback(completion *t_aio.Completion, err error) {
+}
+
+func createErrorCQE(errorMsg string, tags string, callback func(*t_aio.Completion, error)) *bus.CQE[t_aio.Submission, t_aio.Completion] {
+	errorCqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+		Error:    fmt.Errorf(errorMsg),
+		Metadata: metadata.New("dst error"),
+	}
+	errorCqe.Metadata.Tags.Set("aio", tags)
+	errorCqe.Callback = callback
+	return errorCqe
 }
 
 func (a *aioDST) String() string {
