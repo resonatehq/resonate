@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"html/template"
 	"net/http"
-	"text/template"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/resonatehq/resonate/internal/util"

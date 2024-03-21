@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 // Config is the configuration for the queuing subsystem.
@@ -94,7 +95,7 @@ func (t *QueuingSubsystem) NewWorker(i int) aio.Worker {
 func (t *QueuingSubsystem) Start() error {
 	t.connectionsWG.Add(len(t.connections))
 
-	for _, bind := range t.connections {
+	for _, bind := range util.OrderedRange(t.connections) {
 		go func(b t_conn.Connection) {
 			defer t.connectionsWG.Done()
 			t_conn.Start(t.ctx, b)
