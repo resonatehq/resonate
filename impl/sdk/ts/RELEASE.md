@@ -1,4 +1,4 @@
-# Release Notes - Version 0.3.1
+# Release Notes - Version 0.3.2
 
 ## Overview
 
