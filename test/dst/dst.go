@@ -56,7 +56,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			model.AddResponse(t_api.SearchPromises, model.ValidateSearchPromises)
 		case t_api.CreatePromise:
 			generator.AddRequest(generator.GenerateCreatePromise)
-			model.AddResponse(t_api.CreatePromise, model.ValidatCreatePromise)
+			model.AddResponse(t_api.CreatePromise, model.ValidateCreatePromise)
 		case t_api.CompletePromise:
 			generator.AddRequest(generator.GenerateCompletePromise)
 			model.AddResponse(t_api.CompletePromise, model.ValidateCompletePromise)
