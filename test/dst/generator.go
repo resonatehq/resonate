@@ -2,6 +2,7 @@ package dst
 
 import (
 	"fmt"
+	"math"
 	"math/rand" // nosemgrep
 	"strconv"
 
@@ -198,59 +199,19 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	}
 }
 
-func (g *Generator) GenerateCancelPromise(r *rand.Rand, t int64) *t_api.Request {
+func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
+	state := promise.State(math.Exp2(float64(r.Intn(3) + 1)))
 
 	return &t_api.Request{
-		Kind: t_api.CancelPromise,
-		CancelPromise: &t_api.CancelPromiseRequest{
-			Id: id,
-			Value: promise.Value{
-				Headers: headers,
-				Data:    data,
-			},
-			IdempotencyKey: idempotencyKey,
-			Strict:         strict,
-		},
-	}
-}
-
-func (g *Generator) GenerateResolvePromise(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	strict := r.Intn(2) == 0
-
-	return &t_api.Request{
-		Kind: t_api.ResolvePromise,
-		ResolvePromise: &t_api.ResolvePromiseRequest{
-			Id: id,
-			Value: promise.Value{
-				Headers: headers,
-				Data:    data,
-			},
-			IdempotencyKey: idempotencyKey,
-			Strict:         strict,
-		},
-	}
-}
-
-func (g *Generator) GenerateRejectPromise(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	strict := r.Intn(2) == 0
-
-	return &t_api.Request{
-		Kind: t_api.RejectPromise,
-		RejectPromise: &t_api.RejectPromiseRequest{
-			Id: id,
+		Kind: t_api.CompletePromise,
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:    id,
+			State: state,
 			Value: promise.Value{
 				Headers: headers,
 				Data:    data,

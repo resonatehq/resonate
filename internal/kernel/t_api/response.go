@@ -12,13 +12,11 @@ import (
 type Response struct {
 	Kind Kind
 
-	// PROMISES
-	CreatePromise  *CreatePromiseResponse
-	ReadPromise    *ReadPromiseResponse
-	SearchPromises *SearchPromisesResponse
-	CancelPromise  *CompletePromiseResponse
-	ResolvePromise *CompletePromiseResponse
-	RejectPromise  *CompletePromiseResponse
+	// Promises
+	CreatePromise   *CreatePromiseResponse
+	ReadPromise     *ReadPromiseResponse
+	SearchPromises  *SearchPromisesResponse
+	CompletePromise *CompletePromiseResponse
 
 	// SCHEDULES
 	CreateSchedule  *CreateScheduleResponse
@@ -162,26 +160,14 @@ func (r *Response) String() string {
 	case CreatePromise:
 		return fmt.Sprintf(
 			"CreatePromise(status=%d, promise=%s)",
-			r.CreatePromise.Status,
-			r.CreatePromise.Promise,
+			r.CompletePromise.Status,
+			r.CompletePromise.Promise,
 		)
-	case CancelPromise:
+	case CompletePromise:
 		return fmt.Sprintf(
-			"CancelPromise(status=%d, promise=%s)",
-			r.CancelPromise.Status,
-			r.CancelPromise.Promise,
-		)
-	case ResolvePromise:
-		return fmt.Sprintf(
-			"ResolvePromise(status=%d, promise=%s)",
-			r.ResolvePromise.Status,
-			r.ResolvePromise.Promise,
-		)
-	case RejectPromise:
-		return fmt.Sprintf(
-			"RejectPromise(status=%d, promise=%s)",
-			r.RejectPromise.Status,
-			r.RejectPromise.Promise,
+			"CompletePromise(status=%d, promise=%s)",
+			r.CompletePromise.Status,
+			r.CompletePromise.Promise,
 		)
 
 	// SCHEDULES

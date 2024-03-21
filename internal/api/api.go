@@ -96,12 +96,8 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 				status = int(res.SearchPromises.Status)
 			case t_api.CreatePromise:
 				status = int(res.CreatePromise.Status)
-			case t_api.CancelPromise:
-				status = int(res.CancelPromise.Status)
-			case t_api.ResolvePromise:
-				status = int(res.ResolvePromise.Status)
-			case t_api.RejectPromise:
-				status = int(res.RejectPromise.Status)
+			case t_api.CompletePromise:
+				status = int(res.CompletePromise.Status)
 			case t_api.ReadSchedule:
 				status = int(res.ReadSchedule.Status)
 			case t_api.SearchSchedules:

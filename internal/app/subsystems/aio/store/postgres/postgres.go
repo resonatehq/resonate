@@ -177,7 +177,7 @@ const (
 	UPDATE
 		promises
 	SET
-		state = 8, completed_on = timeout
+		state = 16, completed_on = timeout
 	WHERE
 		state = 1 AND timeout <= $1`
 

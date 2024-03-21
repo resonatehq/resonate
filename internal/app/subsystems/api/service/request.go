@@ -32,7 +32,7 @@ type CompletePromiseHeader struct {
 }
 
 type CompletePromiseBody struct {
-	State string        `json:"state" binding:"required,oneofcaseinsensitive=resolved rejected rejected_canceled"`
+	State promise.State `json:"state" binding:"required"`
 	Value promise.Value `json:"value"`
 }
 

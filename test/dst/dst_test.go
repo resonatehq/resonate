@@ -72,9 +72,7 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
-	system.AddOnRequest(t_api.CancelPromise, coroutines.CancelPromise)
-	system.AddOnRequest(t_api.ResolvePromise, coroutines.ResolvePromise)
-	system.AddOnRequest(t_api.RejectPromise, coroutines.RejectPromise)
+	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
@@ -99,9 +97,7 @@ func TestDST(t *testing.T) {
 		t_api.ReadPromise,
 		t_api.SearchPromises,
 		t_api.CreatePromise,
-		t_api.CancelPromise,
-		t_api.ResolvePromise,
-		t_api.RejectPromise,
+		t_api.CompletePromise,
 
 		// SCHEDULE
 		t_api.ReadSchedule,

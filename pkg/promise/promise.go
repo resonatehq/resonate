@@ -42,8 +42,8 @@ const (
 	Pending State = 1 << iota
 	Resolved
 	Rejected
-	Timedout
 	Canceled
+	Timedout
 )
 
 func (s State) String() string {
@@ -54,10 +54,10 @@ func (s State) String() string {
 		return "RESOLVED"
 	case Rejected:
 		return "REJECTED"
-	case Timedout:
-		return "REJECTED_TIMEDOUT"
 	case Canceled:
 		return "REJECTED_CANCELED"
+	case Timedout:
+		return "REJECTED_TIMEDOUT"
 	default:
 		panic("invalid state")
 	}
@@ -80,10 +80,10 @@ func (s *State) UnmarshalJSON(data []byte) error {
 		*s = Resolved
 	case "REJECTED":
 		*s = Rejected
-	case "REJECTED_TIMEDOUT":
-		*s = Timedout
 	case "REJECTED_CANCELED":
 		*s = Canceled
+	case "REJECTED_TIMEDOUT":
+		*s = Timedout
 	default:
 		return fmt.Errorf("invalid state '%s'", state)
 	}

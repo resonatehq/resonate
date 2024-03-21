@@ -1871,7 +1871,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.UpdatePromise,
 				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "qux",
-					State: 8,
+					State: promise.Timedout,
 					Value: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -1897,7 +1897,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.UpdatePromise,
 				UpdatePromise: &t_aio.UpdatePromiseCommand{
 					Id:    "quy",
-					State: 16,
+					State: promise.Canceled,
 					Value: promise.Value{
 						Headers: map[string]string{},
 						Data:    []byte{},
@@ -2076,7 +2076,7 @@ var TestCases = []*testCase{
 					Records: []*promise.PromiseRecord{
 						{
 							Id:           "quy",
-							State:        16,
+							State:        8,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							ValueHeaders: []byte("{}"),
@@ -2089,7 +2089,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:           "qux",
-							State:        8,
+							State:        16,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							ValueHeaders: []byte("{}"),
@@ -2124,7 +2124,7 @@ var TestCases = []*testCase{
 					Records: []*promise.PromiseRecord{
 						{
 							Id:           "quy",
-							State:        16,
+							State:        8,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							ValueHeaders: []byte("{}"),
@@ -2137,7 +2137,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:           "qux",
-							State:        8,
+							State:        16,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							ValueHeaders: []byte("{}"),
@@ -3547,7 +3547,7 @@ var TestCases = []*testCase{
 					Records: []*promise.PromiseRecord{
 						{
 							Id:           "baz",
-							State:        8,
+							State:        16,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							Timeout:      2,
@@ -3558,7 +3558,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:           "bar",
-							State:        8,
+							State:        16,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							Timeout:      2,
@@ -3569,7 +3569,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:           "foo",
-							State:        8,
+							State:        16,
 							ParamHeaders: []byte("{}"),
 							ParamData:    []byte{},
 							Timeout:      2,
