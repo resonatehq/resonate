@@ -79,7 +79,8 @@ const (
 		promise_timeout   BIGINT,
 		created_on        BIGINT,
 		completed_on      BIGINT, 		
-		is_completed      BOOLEAN
+		is_completed      BOOLEAN, 
+		PRIMARY KEY(id)
 	); 
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
