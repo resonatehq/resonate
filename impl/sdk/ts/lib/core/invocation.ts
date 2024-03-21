@@ -35,7 +35,9 @@ export class Invocation<T> {
   constructor(
     public readonly id: string,
     public readonly idempotencyKey: string | undefined,
+    public readonly param: any,
     public readonly opts: Options,
+    public readonly version: number,
     parent?: Invocation<any>,
   ) {
     const { future, resolve, reject } = Future.deferred<T>(this);
@@ -50,6 +52,8 @@ export class Invocation<T> {
   get timeout(): number {
     return Math.min(this.createdAt + this.opts.timeout, this.parent?.timeout ?? Infinity);
   }
+
+  // TODO: move to execution
 
   get killed(): boolean {
     return this.root._killed;
@@ -81,7 +85,7 @@ export class Invocation<T> {
     const parentOpts = this.parent?.opts ?? this.root.opts;
 
     return isPartialOptions(opts)
-      ? { args: args.slice(0, -1), opts: { ...parentOpts, ...opts } }
+      ? { args: args.slice(0, -1), opts: { ...parentOpts, ...opts, tags: { ...parentOpts.tags, ...opts.tags } } }
       : { args, opts: parentOpts };
   }
 }

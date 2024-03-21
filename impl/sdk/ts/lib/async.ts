@@ -47,9 +47,31 @@ export class Resonate extends ResonateBase {
   register<F extends AFunc>(
     name: string,
     func: F,
-    opts: Partial<Options> = {},
-  ): (id: string, ...args: Params<F>) => ResonatePromise<Return<F>> {
-    return super.register(name, func, opts);
+    opts?: Partial<Options>,
+  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
+
+  /**
+   * Register a function with Resonate. Registered functions can be invoked by calling {@link run}, or by the returned function.
+   *
+   * @template F The type of the function.
+   * @param name A unique name to identify the function.
+   * @param version Version of the function.
+   * @param func The function to register with Resonate.
+   * @param opts Resonate options, can be constructed by calling {@link options}.
+   * @returns Resonate function
+   */
+  register<F extends AFunc>(
+    name: string,
+    version: number,
+    func: F,
+    opts?: Partial<Options>,
+  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
+  register<F extends AFunc>(
+    name: string,
+    funcOrVersion: F | number,
+    funcOrOpts: F | Partial<Options>,
+  ): (id: string, ...args: any) => ResonatePromise<Return<F>> {
+    return super.register(name, funcOrVersion, funcOrOpts);
   }
 
   /**
@@ -84,6 +106,13 @@ export class Info {
   constructor(private invocation: Invocation<any>) {}
 
   /**
+   * The running count of function execution attempts.
+   */
+  get attempt() {
+    return this.invocation.attempt;
+  }
+
+  /**
    * Uniquely identifies the function invocation.
    */
   get id() {
@@ -105,10 +134,10 @@ export class Info {
   }
 
   /**
-   * The running count of function execution attempts.
+   * The resonate function version.
    */
-  get attempt() {
-    return this.invocation.attempt;
+  get version() {
+    return this.invocation.version;
   }
 }
 
@@ -116,6 +145,13 @@ export class Context {
   constructor(private invocation: Invocation<any>) {}
 
   /**
+   * The running count of child function invocations.
+   */
+  get counter() {
+    return this.invocation.counter;
+  }
+
+  /**
    * Uniquely identifies the function invocation.
    */
   get id() {
@@ -137,10 +173,10 @@ export class Context {
   }
 
   /**
-   * The running count of child function invocations.
+   * The resonate function version.
    */
-  get counter() {
-    return this.invocation.counter;
+  get version() {
+    return this.invocation.version;
   }
 
   /**
@@ -176,7 +212,7 @@ export class Context {
     const { args, opts } = this.invocation.split(argsWithOpts);
 
     // create a new invocation
-    const invocation = new Invocation(id, idempotencyKey, opts, this.invocation);
+    const invocation = new Invocation(id, idempotencyKey, undefined, opts, this.invocation.version, this.invocation);
 
     let execution: Execution<any>;
     if (typeof func === "string") {
@@ -206,13 +242,13 @@ export class Context {
    * @param args The function arguments, optionally followed by {@link options}.
    * @returns A promise that resolves to the return value of the function.
    */
-  io<F extends IFunc>(func: F, ...args: [...Params<F>, PartialOptions?]): Promise<Return<F>>;
+  io<F extends IFunc>(func: F, ...args: [...Params<F>, PartialOptions?]): ResonatePromise<Return<F>>;
   io(func: (...args: any[]) => any, ...argsWithOpts: any[]): ResonatePromise<any> {
     const id = `${this.invocation.id}.${this.invocation.counter}`;
     const idempotencyKey = utils.hash(id);
     const { args, opts } = this.invocation.split(argsWithOpts);
 
-    const invocation = new Invocation(id, idempotencyKey, opts, this.invocation);
+    const invocation = new Invocation(id, idempotencyKey, undefined, opts, this.invocation.version, this.invocation);
     const info = new Info(invocation);
 
     // create an ordinary execution
@@ -262,8 +298,18 @@ class Scheduler {
     // the idempotency key is a hash of the id
     const idempotencyKey = utils.hash(id);
 
+    // params, used for recovery
+    const param = {
+      func: name,
+      version,
+      args,
+    };
+
+    // add an invocation tag
+    opts.tags["resonate:invocation"] = "true";
+
     // create a new invocation
-    const invocation = new Invocation<Return<F>>(id, idempotencyKey, opts);
+    const invocation = new Invocation<Return<F>>(id, idempotencyKey, param, opts, version);
 
     // create a new execution
     const ctx = new Context(invocation);

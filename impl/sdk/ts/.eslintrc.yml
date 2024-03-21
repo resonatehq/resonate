@@ -25,6 +25,8 @@ rules:
     - vars: all
       args: none
 
+  require-yield: off
+
 parserOptions:
   project: "./tsconfig.json"
 

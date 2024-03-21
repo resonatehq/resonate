@@ -36,7 +36,48 @@ export class OrdinaryExecution<T> extends Execution<T> {
     super(invocation);
   }
 
-  private async invoke(): Promise<T> {
+  protected async fork() {
+    try {
+      // create a durable promise
+      const promise = await DurablePromise.create<T>(
+        this.invocation.opts.store.promises,
+        this.invocation.opts.encoder,
+        this.invocation.id,
+        this.invocation.timeout,
+        {
+          idempotencyKey: this.invocation.idempotencyKey,
+          param: this.invocation.param,
+          tags: this.invocation.opts.tags,
+        },
+      );
+
+      if (promise.pending) {
+        // if pending, invoke the function and resolve/reject the durable promise
+        await this.run().then(
+          (v) => promise.resolve(v, { idempotencyKey: this.invocation.idempotencyKey }),
+          (e) => promise.reject(e, { idempotencyKey: this.invocation.idempotencyKey }),
+        );
+      }
+
+      // resolve/reject the invocation
+      if (promise.resolved) {
+        this.invocation.resolve(promise.value());
+      } else if (promise.rejected || promise.canceled || promise.timedout) {
+        this.invocation.reject(promise.error());
+      }
+    } catch (e) {
+      // if an error occurs, kill the invocation
+      this.invocation.kill(e);
+    }
+
+    return this.invocation.future;
+  }
+
+  protected async join(future: Future<T>) {
+    return await future.promise;
+  }
+
+  private async run(): Promise<T> {
     let error;
 
     // invoke the function according to the retry policy
@@ -55,43 +96,6 @@ export class OrdinaryExecution<T> extends Execution<T> {
     // if all attempts fail throw the last error
     throw error;
   }
-
-  protected async fork() {
-    try {
-      // create a durable promise
-      const promise = await DurablePromise.create<T>(
-        this.invocation.opts.store.promises,
-        this.invocation.opts.encoder,
-        this.invocation.id,
-        this.invocation.timeout,
-        { idempotencyKey: this.invocation.idempotencyKey },
-      );
-
-      if (promise.pending) {
-        // if pending, invoke the function and resolve/reject the durable promise
-        await this.invoke().then(
-          (v) => promise.resolve(v, { idempotencyKey: this.invocation.idempotencyKey }),
-          (e) => promise.reject(e, { idempotencyKey: this.invocation.idempotencyKey }),
-        );
-      }
-
-      // resolve/reject the invocation
-      if (promise.resolved) {
-        this.invocation.resolve(promise.value);
-      } else if (promise.rejected || promise.canceled || promise.timedout) {
-        this.invocation.reject(promise.error);
-      }
-    } catch (e) {
-      // if an error occurs, kill the invocation
-      this.invocation.kill(e);
-    }
-
-    return this.invocation.future;
-  }
-
-  protected async join(future: Future<T>) {
-    return await future.promise;
-  }
 }
 
 export class DeferredExecution<T> extends Execution<T> {
@@ -107,11 +111,18 @@ export class DeferredExecution<T> extends Execution<T> {
         this.invocation.opts.encoder,
         this.invocation.id,
         this.invocation.timeout,
-        { idempotencyKey: this.invocation.idempotencyKey, poll: true },
+        {
+          idempotencyKey: this.invocation.idempotencyKey,
+          param: this.invocation.param,
+          tags: this.invocation.opts.tags,
+          poll: true,
+        },
       );
 
       // poll the completion of the durable promise
-      promise.completed.then((p) => (p.resolved ? this.invocation.resolve(p.value) : this.invocation.reject(p.error)));
+      promise.completed.then((p) =>
+        p.resolved ? this.invocation.resolve(p.value()) : this.invocation.reject(p.error()),
+      );
     } catch (e) {
       // if an error occurs, kill the invocation
       this.invocation.kill(e);
@@ -141,14 +152,18 @@ export class GeneratorExecution<T> extends Execution<T> {
         this.invocation.opts.encoder,
         this.invocation.id,
         this.invocation.timeout,
-        { idempotencyKey: this.invocation.idempotencyKey },
+        {
+          idempotencyKey: this.invocation.idempotencyKey,
+          param: this.invocation.param,
+          tags: this.invocation.opts.tags,
+        },
       );
 
       // resolve/reject the invocation if already completed
       if (promise.resolved) {
-        this.invocation.resolve(promise.value);
+        this.invocation.resolve(promise.value());
       } else if (promise.rejected || promise.canceled || promise.timedout) {
-        this.invocation.reject(promise.error);
+        this.invocation.reject(promise.error());
       }
       return promise;
     } catch (e) {
@@ -164,9 +179,9 @@ export class GeneratorExecution<T> extends Execution<T> {
 
       // resolve/reject the invocation
       if (promise.resolved) {
-        this.invocation.resolve(promise.value);
+        this.invocation.resolve(promise.value());
       } else if (promise.rejected || promise.canceled || promise.timedout) {
-        this.invocation.reject(promise.error);
+        this.invocation.reject(promise.error());
       }
     } catch (e) {
       // if an error occurs, kill the invocation
@@ -183,9 +198,9 @@ export class GeneratorExecution<T> extends Execution<T> {
 
       // resolve/reject the invocation
       if (promise.resolved) {
-        this.invocation.resolve(promise.value);
+        this.invocation.resolve(promise.value());
       } else if (promise.rejected || promise.canceled || promise.timedout) {
-        this.invocation.reject(promise.error);
+        this.invocation.reject(promise.error());
       }
     } catch (e) {
       // if an error occurs, kill the invocation

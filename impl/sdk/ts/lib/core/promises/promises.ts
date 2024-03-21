@@ -69,16 +69,16 @@ export class DurablePromise<T> {
     return this.promise.state === "REJECTED_TIMEDOUT";
   }
 
-  get value() {
+  param() {
+    return this.encoder.decode(this.promise.param.data);
+  }
+
+  value() {
     return this.encoder.decode(this.promise.value.data) as T;
   }
 
-  get error() {
+  error() {
     return this.encoder.decode(this.promise.value.data);
-  }
-
-  static async get<T>(store: IPromiseStore, encoder: IEncoder<unknown, string | undefined>, id: string) {
-    return new DurablePromise<T>(store, encoder, await store.get(id));
   }
 
   static async create<T>(
@@ -144,6 +144,23 @@ export class DurablePromise<T> {
       encoder,
       await store.cancel(id, opts.idempotencyKey, opts.strict ?? false, opts.headers, encoder.encode(error)),
     );
+  }
+
+  static async get<T>(store: IPromiseStore, encoder: IEncoder<unknown, string | undefined>, id: string) {
+    return new DurablePromise<T>(store, encoder, await store.get(id));
+  }
+
+  static async *search(
+    store: IPromiseStore,
+    encoder: IEncoder<unknown, string | undefined>,
+    id: string,
+    state?: string,
+    tags?: Record<string, string>,
+    limit?: number,
+  ): AsyncGenerator<DurablePromise<any>[], void> {
+    for await (const promises of store.search(id, state, tags, limit)) {
+      yield promises.map((p) => new DurablePromise(store, encoder, p));
+    }
   }
 
   async resolve(value: T, opts: Partial<CompleteOptions> = {}) {

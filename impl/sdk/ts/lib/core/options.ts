@@ -32,6 +32,11 @@ export interface ResonateOptions {
   retry: IRetry;
 
   /**
+   * Tags to add to all durable promises.
+   */
+  tags: Record<string, string>;
+
+  /**
    * A store instance, if provided this will take precedence over a
    * remote store.
    */
@@ -70,6 +75,11 @@ export interface Options {
    * Overrides the default store.
    */
   store: IStore;
+
+  /**
+   * Additional tags to add to the durable promise.
+   */
+  tags: Record<string, string>;
 
   /**
    * Overrides the default timeout.
