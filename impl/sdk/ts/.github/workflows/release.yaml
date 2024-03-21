@@ -21,7 +21,6 @@ jobs:
       - name: Verify version
         run: |
           echo "Version from package.json: ${{ steps.get_version.outputs.version }}"
-        
 
   # Create a tag if it does not exist
   create-tag:
