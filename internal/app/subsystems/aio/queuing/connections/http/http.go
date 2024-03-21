@@ -60,7 +60,7 @@ func (c *HTTP) Execute(sub *t_conn.ConnectionSubmission) error {
 	// Queue task.
 	resp, err := c.client.Do(req)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer resp.Body.Close()
 

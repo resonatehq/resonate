@@ -28,32 +28,6 @@ import (
 
 const (
 	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE IF NOT EXISTS tasks (
-		id                TEXT UNIQUE,
-		counter           INTEGER,
-		promise_id        TEXT,
-		claim_timeout     INTEGER, 
-		complete_timeout  INTEGER, 
-		promise_timeout   INTEGER,
-		created_on        INTEGER,
-		completed_on      INTEGER, 		
-		is_completed      BOOLEAN
-	); 
-
-	CREATE INDEX IF NOT EXISTS idx_task_id ON tasks(id); 
-
-	CREATE TABLE IF NOT EXISTS locks (
-		resource_id       TEXT UNIQUE,
-		process_id        TEXT,
-		execution_id      TEXT, 
-		expiry_in_seconds INTEGER,
-		timeout           INTEGER
-	); 
-
-	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id); 
-	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
-
 	CREATE TABLE IF NOT EXISTS promises (
 		id                           TEXT UNIQUE,
 		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -94,6 +68,32 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_schedules_id ON schedules(id);
 	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
 
+	CREATE TABLE IF NOT EXISTS tasks (
+		id                TEXT UNIQUE,
+		counter           INTEGER,
+		promise_id        TEXT,
+		claim_timeout     INTEGER, 
+		complete_timeout  INTEGER, 
+		promise_timeout   INTEGER,
+		created_on        INTEGER,
+		completed_on      INTEGER, 		
+		is_completed      BOOLEAN
+	); 
+
+	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
+
+	CREATE TABLE IF NOT EXISTS locks (
+		resource_id       TEXT UNIQUE,
+		process_id        TEXT,
+		execution_id      TEXT, 
+		expiry_in_seconds INTEGER,
+		timeout           INTEGER
+	); 
+
+	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
+	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id); 
+	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
+
 	CREATE TABLE IF NOT EXISTS timeouts (
 		id   TEXT,
 		time INTEGER,
@@ -121,77 +121,6 @@ const (
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);`
-
-	TASK_INSERT_STATEMENT = `
-	INSERT INTO tasks
-		(id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed)
-	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?, ?)
-	ON CONFLICT(id) DO NOTHING`
-
-	TASK_UPDATE_STATEMENT = `
-	UPDATE
-		tasks
-	SET
-		counter = ?, claim_timeout = ?, complete_timeout = ?, completed_on = ?, is_completed = ?
-	WHERE
-		id = ?`
-
-	TASK_SELECT_STATEMENT = `
-	SELECT 
-		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
-	FROM
-		tasks
-	WHERE
-		id = ?`
-
-	TASK_SELECT_ALL_STATEMENT = `
-	SELECT 
-		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
-	FROM
-		tasks
-	WHERE
-		is_completed = ? AND 
-		claim_timeout < ? AND 
-		complete_timeout < ? AND 
-		promise_timeout > ?
-	ORDER BY
-		created_on ASC`
-
-	LOCK_READ_STATEMENT = `
-	SELECT 
-		resource_id, process_id, execution_id, expiry_in_seconds, timeout
-	FROM
-		locks
-	WHERE
-		resource_id = ?`
-
-	LOCK_ACQUIRE_STATEMENT = `
-	INSERT INTO locks
-		(resource_id, process_id, execution_id, expiry_in_seconds, timeout)
-	VALUES
-		(?, ?, ?, ?, ?)
-	ON CONFLICT(resource_id)
-	DO UPDATE SET 
-		process_id = excluded.process_id,
-		expiry_in_seconds = excluded.expiry_in_seconds,
-		timeout = excluded.timeout
-	WHERE
-		execution_id = excluded.execution_id`
-
-	LOCK_HEARTBEAT_STATEMENT = `
-	UPDATE
-		locks
-	SET
-		timeout = timeout + (expiry_in_seconds * 1000) 
-	WHERE
-		process_id = ?`
-
-	LOCK_RELEASE_STATEMENT = `
-	DELETE FROM locks WHERE resource_id = ? AND execution_id = ?`
-
-	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks WHERE timeout <= ?`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -289,6 +218,77 @@ const (
 
 	SCHEDULE_DELETE_STATEMENT = `
 	DELETE FROM schedules WHERE id = ?`
+
+	TASK_INSERT_STATEMENT = `
+	INSERT INTO tasks
+		(id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed)
+	VALUES
+		(?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO NOTHING`
+
+	TASK_UPDATE_STATEMENT = `
+	UPDATE
+		tasks
+	SET
+		counter = ?, claim_timeout = ?, complete_timeout = ?, completed_on = ?, is_completed = ?
+	WHERE
+		id = ?`
+
+	TASK_SELECT_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		id = ?`
+
+	TASK_SELECT_ALL_STATEMENT = `
+	SELECT 
+		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
+	FROM
+		tasks
+	WHERE
+		is_completed = ? AND 
+		claim_timeout < ? AND 
+		complete_timeout < ? AND 
+		promise_timeout > ?
+	ORDER BY
+		created_on ASC`
+
+	LOCK_READ_STATEMENT = `
+	SELECT 
+		resource_id, process_id, execution_id, expiry_in_seconds, timeout
+	FROM
+		locks
+	WHERE
+		resource_id = ?`
+
+	LOCK_ACQUIRE_STATEMENT = `
+	INSERT INTO locks
+		(resource_id, process_id, execution_id, expiry_in_seconds, timeout)
+	VALUES
+		(?, ?, ?, ?, ?)
+	ON CONFLICT(resource_id)
+	DO UPDATE SET 
+		process_id = excluded.process_id,
+		expiry_in_seconds = excluded.expiry_in_seconds,
+		timeout = excluded.timeout
+	WHERE
+		execution_id = excluded.execution_id`
+
+	LOCK_HEARTBEAT_STATEMENT = `
+	UPDATE
+		locks
+	SET
+		timeout = timeout + (expiry_in_seconds * 1000) 
+	WHERE
+		process_id = ?`
+
+	LOCK_RELEASE_STATEMENT = `
+	DELETE FROM locks WHERE resource_id = ? AND execution_id = ?`
+
+	LOCK_TIMEOUT_STATEMENT = `
+	DELETE FROM locks WHERE timeout <= ?`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
