@@ -34,14 +34,6 @@ jobs:
           tag_exists_error: false
           message: "${{ steps.get_version.outputs.version }} release"
 
-      # Print result using the env variable.
-      - run: |
-        echo "Tag already present: ${{ env.TAG_EXISTS }}"
-
-      # Print result using the action output.
-      - run: |
-        echo "Tag already present: ${{ steps.tag_create.outputs.tag_exists }}"
-
   publish-github-release:
     needs: [bump-version]
     runs-on: ubuntu-latest
