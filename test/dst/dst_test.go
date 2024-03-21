@@ -46,7 +46,7 @@ func TestDST(t *testing.T) {
 	}
 
 	// TODO: DST version so just test the kernel.
-	queuing := queuing.NewSubsytemOrDie(&queuing.Config{
+	queuing, err := queuing.NewSubsytemOrDie(&queuing.Config{
 		Connections: []*t_conn.ConnectionConfig{
 			{
 				Kind:    t_conn.HTTP,
@@ -61,6 +61,9 @@ func TestDST(t *testing.T) {
 			},
 		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// add api subsystems
 	aio.AddSubsystem(t_aio.Network, network)

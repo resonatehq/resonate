@@ -7,7 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 )
 
-func NewConnectionOrDie(tasks <-chan *t_conn.ConnectionSubmission, cfg *t_conn.ConnectionConfig) t_conn.Connection {
+func NewConnection(tasks <-chan *t_conn.ConnectionSubmission, cfg *t_conn.ConnectionConfig) (t_conn.Connection, error) {
 	var (
 		conn t_conn.Connection
 		err  error
@@ -18,12 +18,12 @@ func NewConnectionOrDie(tasks <-chan *t_conn.ConnectionSubmission, cfg *t_conn.C
 		conn = http_conn.New()
 		err = conn.Init(tasks, cfg.Metadata)
 	default:
-		panic(fmt.Sprintf("invalid queuing kind: %s", cfg.Kind))
+		return nil, fmt.Errorf("invalid queuing kind: %s", cfg.Kind)
 	}
 
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
-	return conn
+	return conn, nil
 }

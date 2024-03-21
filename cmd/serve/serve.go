@@ -66,7 +66,10 @@ func ServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			queuing := queuing.NewSubsytemOrDie(config.AIO.Subsystems.Queuing.Config)
+			queuing, err := queuing.NewSubsytemOrDie(config.AIO.Subsystems.Queuing.Config)
+			if err != nil {
+				return err
+			}
 
 			// add api subsystems
 			api.AddSubsystem(http)
@@ -193,6 +196,7 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
 
 	// aio
+	// Store
 	cmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
 	cmd.Flags().String("aio-store", "sqlite", "promise store type")
 	cmd.Flags().Int("aio-store-size", 100, "size of store submission queue buffered channel")
@@ -208,14 +212,18 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().String("aio-store-postgres-database", "resonate", "postgres database name")
 	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 250*time.Millisecond, "postgres transaction timeout")
 	cmd.Flags().Bool("aio-store-postgres-reset", false, "postgres database clean on shutdown")
+	// Network
 	cmd.Flags().Int("aio-network-size", 100, "size of network submission queue buffered channel")
 	cmd.Flags().Int("aio-network-workers", 3, "number of concurrent http requests")
 	cmd.Flags().Int("aio-network-batch-size", 100, "max submissions processed each tick by a network worker")
 	cmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
-
+	// Queuing
+	cmd.Flags().Int("aio-queuing-size", 100, "size of queuing submission queue buffered channel")
+	cmd.Flags().Int("aio-queuing-workers", 1, "number of queuing workers") // must be 1.
+	cmd.Flags().Int("aio-queuing-batch-size", 100, "max submissions processed each tick by a queuing worker")
 	cmd.Flags().Var(&ConnectionSlice{}, "aio-queuing-connections", "queuing subsystem connections")
-	_ = viper.BindPFlag("aio.subsystems.queuing.config.connections", cmd.Flags().Lookup("aio-queuing-connections"))
 
+	// Store
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))
@@ -232,10 +240,16 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.database", cmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.txTimeout", cmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.reset", cmd.Flags().Lookup("aio-store-postgres-reset"))
+	// Network
 	_ = viper.BindPFlag("aio.subsystems.network.subsystem.size", cmd.Flags().Lookup("aio-network-size"))
 	_ = viper.BindPFlag("aio.subsystems.network.subsystem.workers", cmd.Flags().Lookup("aio-network-workers"))
 	_ = viper.BindPFlag("aio.subsystems.network.subsystem.batchSize", cmd.Flags().Lookup("aio-network-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", cmd.Flags().Lookup("aio-network-timeout"))
+	// Queuing
+	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.size", cmd.Flags().Lookup("aio-queuing-size"))
+	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.workers", cmd.Flags().Lookup("aio-queuing-workers"))
+	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.batchSize", cmd.Flags().Lookup("aio-queuing-batch-size"))
+	_ = viper.BindPFlag("aio.subsystems.queuing.config.connections", cmd.Flags().Lookup("aio-queuing-connections"))
 
 	// system
 	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")

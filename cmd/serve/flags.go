@@ -12,12 +12,15 @@ type (
 )
 
 func (c *ConnectionSlice) String() string {
+	if c == nil || len(*c) == 0 {
+		return ""
+	}
 	jsonStr, _ := json.Marshal(c)
 	return string(jsonStr)
 }
 
 func (c *ConnectionSlice) Set(v string) error {
-	var connections []*t_conn.ConnectionConfig
+	connections := make([]*t_conn.ConnectionConfig, 0)
 	if err := json.Unmarshal([]byte(v), &connections); err != nil {
 		return err
 	}

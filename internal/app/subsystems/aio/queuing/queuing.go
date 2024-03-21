@@ -2,7 +2,6 @@ package queuing
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -37,17 +36,13 @@ type QueuingSubsystem struct {
 }
 
 // NewSubsytemOrDie creates a new queuing subsystem with the given config.
-func NewSubsytemOrDie(config *Config) *QueuingSubsystem {
-	defer func() {
-		if r := recover(); r != nil {
-			panic(fmt.Sprintf("failed to create queuing subsytem: %v", r))
-		}
-	}()
-
+func NewSubsytemOrDie(config *Config) (*QueuingSubsystem, error) {
+	// TODO: if nil, no need to do anything.
 	var (
 		conns      = make(map[string]t_conn.Connection, len(config.Connections))
 		connSQ     = make(map[string]chan *t_conn.ConnectionSubmission, len(config.Connections))
 		connRouter = NewRouter()
+		err        error
 	)
 
 	for _, cfg := range config.Connections {
@@ -63,7 +58,10 @@ func NewSubsytemOrDie(config *Config) *QueuingSubsystem {
 			Queue:      cfg.Queue,
 		})
 		connSQ[cfg.Name] = tsq                                     // for communication between worker and connection
-		conns[cfg.Name] = connections.NewConnectionOrDie(tsq, cfg) // for starting the connection
+		conns[cfg.Name], err = connections.NewConnection(tsq, cfg) // for starting the connection
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,7 +73,7 @@ func NewSubsytemOrDie(config *Config) *QueuingSubsystem {
 		connectionsWG:    &sync.WaitGroup{},
 		ctx:              ctx,
 		stop:             cancel,
-	}
+	}, nil
 }
 
 // String returns the name of the subsystem.
