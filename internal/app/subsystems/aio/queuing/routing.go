@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/resonatehq/resonate/internal/util"
@@ -55,16 +56,14 @@ func NewRouter() Router {
 }
 
 func (r *RouterImpl) Handle(pattern string, handler *RouteHandler) {
-	// chi routing pattern must begin with '/' and accept any domain.
-	pattern = "/" + "{http}://{domain}" + pattern
-
+	// chi routing pattern must begin with '/'. This is the behavior we want.
 	r.patterns.Post(pattern, func(w http.ResponseWriter, r *http.Request) {})
 	r.handlers[pattern] = handler
 }
 
 func (r *RouterImpl) Match(route string) (*MatchResult, error) {
 	// chi routing pattern must begin with '/'.
-	route = "/" + route
+	route = normalizeRoute(route)
 
 	rctx := chi.NewRouteContext()
 
@@ -109,4 +108,11 @@ func (r *RouterImpl) renderQueue(queueTemplate string, params chi.RouteParams) (
 	}
 
 	return buf.String(), nil
+}
+
+func normalizeRoute(route string) string {
+	if strings.HasPrefix(route, "/") {
+		return route
+	}
+	return "/" + route
 }

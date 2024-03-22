@@ -1,6 +1,7 @@
 package queuing
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -16,49 +17,29 @@ func TestRouting(t *testing.T) {
 		expectedErr    error
 	}{
 		{
-			name:    "simple .com",
+			name:    "payment simple",
 			pattern: "/payments/*",
-			route:   "http://demo.example.com/payments/123",
+			route:   "payments/123", // promise id
 			expectedResult: &MatchResult{
-				Route:        "/http://demo.example.com/payments/123",
-				RoutePattern: "/{http}://{domain}/payments/*",
+				Route:        "/payments/123",
+				RoutePattern: "/payments/*",
 				Connection:   "conn1",
 			},
 		},
 		{
-			name:    "simple .io",
+			name:    "payment simple with slash",
 			pattern: "/payments/*",
-			route:   "http://demo.example.io/payments/123",
+			route:   "/payments/123", // promise id
 			expectedResult: &MatchResult{
-				Route:        "/http://demo.example.io/payments/123",
-				RoutePattern: "/{http}://{domain}/payments/*",
+				Route:        "/payments/123",
+				RoutePattern: "/payments/*",
 				Connection:   "conn1",
 			},
 		},
 		{
-			name:    "simple localhost",
-			pattern: "/payments/*",
-			route:   "http://localhost/payments/123",
-			expectedResult: &MatchResult{
-				Route:        "/http://localhost/payments/123",
-				RoutePattern: "/{http}://{domain}/payments/*",
-				Connection:   "conn1",
-			},
-		},
-		{
-			name:    "simple localhost https",
-			pattern: "/payments/*",
-			route:   "https://localhost/payments/123",
-			expectedResult: &MatchResult{
-				Route:        "/https://localhost/payments/123",
-				RoutePattern: "/{http}://{domain}/payments/*",
-				Connection:   "conn1",
-			},
-		},
-		{
-			name:        "simple .com",
+			name:        "absolute url does not work",
 			pattern:     "/payments/*",
-			route:       "http://demo.example.com/analytics/123",
+			route:       "http://demo.example.com/payments/123",
 			expectedErr: ErrRouteDoesNotMatchAnyPattern,
 		},
 	}
@@ -72,10 +53,12 @@ func TestRouting(t *testing.T) {
 			})
 
 			result, err := router.Match(tc.route)
-			if tc.expectedErr != nil {
+			if err != nil {
 				assert.Equal(t, tc.expectedErr, err)
 				return
 			}
+
+			fmt.Printf("result: %+v\n", result)
 
 			assert.Equal(t, tc.expectedResult.Route, result.Route)
 			assert.Equal(t, tc.expectedResult.RoutePattern, result.RoutePattern)
