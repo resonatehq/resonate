@@ -39,7 +39,7 @@ func TestRouting(t *testing.T) {
 		{
 			name:        "absolute url does not work",
 			pattern:     "/payments/*",
-			route:       "http://demo.example.com/payments/123",
+			route:       "http://demo.example.com/payments/123", // promise id
 			expectedErr: ErrRouteDoesNotMatchAnyPattern,
 		},
 	}
