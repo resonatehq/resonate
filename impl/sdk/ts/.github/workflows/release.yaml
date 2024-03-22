@@ -73,8 +73,10 @@ jobs:
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
+      - name: Install npm package dependencies
+        run: npm install
       - name: Build npm package
-        run: npm install -g npm && npm run build
+        run: npm run build
       - name: Publish npm package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
