@@ -1,5 +1,5 @@
 import * as cronParser from "cron-parser";
-import { ErrorCodes, ResonateStorageError } from "../error";
+import { ErrorCodes, ResonateError } from "../errors";
 import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
 import {
@@ -151,11 +151,11 @@ export class LocalPromiseStore implements IPromiseStore {
       }
 
       if (strict && !isPendingPromise(promise)) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       if (promise.idempotencyKeyForCreate === undefined || ikey !== promise.idempotencyKeyForCreate) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       return promise;
@@ -171,7 +171,7 @@ export class LocalPromiseStore implements IPromiseStore {
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
-        throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+        throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
       }
 
       if (isPendingPromise(promise)) {
@@ -193,14 +193,14 @@ export class LocalPromiseStore implements IPromiseStore {
       }
 
       if (strict && !isResolvedPromise(promise)) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       if (
         !isTimedoutPromise(promise) &&
         (promise.idempotencyKeyForComplete === undefined || ikey !== promise.idempotencyKeyForComplete)
       ) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       return promise;
@@ -216,7 +216,7 @@ export class LocalPromiseStore implements IPromiseStore {
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
-        throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+        throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
       }
 
       if (isPendingPromise(promise)) {
@@ -238,14 +238,14 @@ export class LocalPromiseStore implements IPromiseStore {
       }
 
       if (strict && !isRejectedPromise(promise)) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       if (
         !isTimedoutPromise(promise) &&
         (promise.idempotencyKeyForComplete === undefined || ikey !== promise.idempotencyKeyForComplete)
       ) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       return promise;
@@ -261,7 +261,7 @@ export class LocalPromiseStore implements IPromiseStore {
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
-        throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+        throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
       }
 
       if (isPendingPromise(promise)) {
@@ -283,14 +283,14 @@ export class LocalPromiseStore implements IPromiseStore {
       }
 
       if (strict && !isCanceledPromise(promise)) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       if (
         !isTimedoutPromise(promise) &&
         (promise.idempotencyKeyForComplete === undefined || ikey !== promise.idempotencyKeyForComplete)
       ) {
-        throw new ResonateStorageError(ErrorCodes.FORBIDDEN, "Forbidden request");
+        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
       }
 
       return promise;
@@ -301,7 +301,7 @@ export class LocalPromiseStore implements IPromiseStore {
     const promise = await this.storage.rmw(id, (p) => p);
 
     if (!promise) {
-      throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+      throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
     }
 
     return promise;
@@ -348,7 +348,7 @@ export class LocalScheduleStore implements IScheduleStore {
     const schedule = await this.storage.rmw(id, (schedule) => {
       if (schedule) {
         if (schedule.idempotencyKey === undefined || ikey != schedule.idempotencyKey) {
-          throw new ResonateStorageError(ErrorCodes.ALREADY_EXISTS, "Already exists");
+          throw new ResonateError("Already exists", ErrorCodes.STORE_ALREADY_EXISTS);
         }
         return schedule;
       }
@@ -359,7 +359,7 @@ export class LocalScheduleStore implements IScheduleStore {
       try {
         nextRunTime = this.nextRunTime(cron, createdOn);
       } catch (error) {
-        throw ResonateStorageError.fromError(error);
+        throw ResonateError.fromError(error);
       }
 
       return {
@@ -391,7 +391,7 @@ export class LocalScheduleStore implements IScheduleStore {
   async update(id: string, lastRunTime: number): Promise<Schedule | undefined> {
     const schedule = await this.storage.rmw(id, (schedule) => {
       if (!schedule) {
-        throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+        throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
       }
 
       // update iff not already updated
@@ -400,7 +400,7 @@ export class LocalScheduleStore implements IScheduleStore {
         try {
           nextRunTime = this.nextRunTime(schedule.cron, lastRunTime);
         } catch (error) {
-          throw ResonateStorageError.fromError(error);
+          throw ResonateError.fromError(error);
         }
 
         schedule.lastRunTime = lastRunTime;
@@ -420,7 +420,7 @@ export class LocalScheduleStore implements IScheduleStore {
   async delete(id: string): Promise<void> {
     const result = await this.storage.rmd(id, () => true);
     if (!result) {
-      throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+      throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
     }
   }
 
@@ -428,7 +428,7 @@ export class LocalScheduleStore implements IScheduleStore {
     const schedule = await this.storage.rmw(id, (s) => s);
 
     if (!schedule) {
-      throw new ResonateStorageError(ErrorCodes.NOT_FOUND, "Not found");
+      throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
     }
 
     return schedule;
@@ -470,7 +470,7 @@ export class LocalLockStore implements ILockStore {
     });
 
     if (lock.eid !== eid) {
-      throw new ResonateStorageError(ErrorCodes.FORBIDDEN, `Forbidden request`);
+      throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
     }
 
     return lock.eid === eid;
@@ -479,7 +479,7 @@ export class LocalLockStore implements ILockStore {
   async release(id: string, eid: string) {
     const result = await this.storage.rmd(id, (lock) => lock.eid === eid);
     if (!result) {
-      throw new ResonateStorageError(ErrorCodes.NOT_FOUND, `Not found`);
+      throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
     }
   }
 }

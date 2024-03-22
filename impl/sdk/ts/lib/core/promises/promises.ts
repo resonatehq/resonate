@@ -1,17 +1,20 @@
 import { IEncoder } from "../encoder";
+import { ErrorCodes, ResonateError } from "../errors";
 import { IPromiseStore } from "../store";
 import { PendingPromise, ResolvedPromise, RejectedPromise, CanceledPromise, TimedoutPromise } from "./types";
+
+export type CreateOptions = {
+  idempotencyKey: string;
+  headers: Record<string, string>;
+  tags: Record<string, string>;
+  strict: boolean;
+  poll: boolean; // TODO
+};
 
 export type CompleteOptions = {
   idempotencyKey: string;
   headers: Record<string, string>;
   strict: boolean;
-};
-
-export type CreateOptions = CompleteOptions & {
-  param: any;
-  tags: Record<string, string>;
-  poll: boolean;
 };
 
 export class DurablePromise<T> {
@@ -74,11 +77,30 @@ export class DurablePromise<T> {
   }
 
   value() {
+    if (!this.resolved) {
+      throw new Error("Promise is not resolved");
+    }
+
     return this.encoder.decode(this.promise.value.data) as T;
   }
 
   error() {
-    return this.encoder.decode(this.promise.value.data);
+    if (this.rejected) {
+      return this.encoder.decode(this.promise.value.data);
+    } else if (this.canceled) {
+      return new ResonateError(
+        "Resonate function canceled",
+        ErrorCodes.CANCELED,
+        this.encoder.decode(this.promise.value.data),
+      );
+    } else if (this.timedout) {
+      return new ResonateError(
+        `Resonate function timedout at ${new Date(this.promise.timeout).toISOString()}`,
+        ErrorCodes.TIMEDOUT,
+      );
+    } else {
+      throw new Error("Promise is not rejected, canceled, or timedout");
+    }
   }
 
   static async create<T>(
@@ -86,6 +108,7 @@ export class DurablePromise<T> {
     encoder: IEncoder<unknown, string | undefined>,
     id: string,
     timeout: number,
+    param: unknown = undefined,
     opts: Partial<CreateOptions> = {},
   ) {
     return new DurablePromise<T>(
@@ -96,7 +119,7 @@ export class DurablePromise<T> {
         opts.idempotencyKey,
         opts.strict ?? false,
         opts.headers,
-        encoder.encode(opts.param),
+        encoder.encode(param),
         timeout,
         opts.tags,
       ),

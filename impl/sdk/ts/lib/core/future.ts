@@ -40,15 +40,14 @@ export class ResonatePromise<T> extends Promise<T> {
 // Future
 /////////////////////////////////////////////////////////////////////
 
+export type Value<T> = { kind: "pending" } | { kind: "resolved"; value: T } | { kind: "rejected"; error: unknown };
+
 export class Future<T> {
   // a discriminate property
   readonly kind = "future";
 
-  // a unique identifier
-  id: string;
-
-  // used to deduplicate futures
-  idempotencyKey: string | undefined;
+  // initial value
+  private _value: Value<T> = { kind: "pending" };
 
   /**
    * Represents the eventual return value of a Resonate function.
@@ -60,12 +59,11 @@ export class Future<T> {
   constructor(
     private invocation: Invocation<T>,
     public promise: Promise<T>,
-  ) {
-    this.id = invocation.id;
-    this.idempotencyKey = invocation.idempotencyKey;
-  }
+    private _resolve: (v: T) => void,
+    private _reject: (v?: unknown) => void,
+  ) {}
 
-  static deferred<T>(executor: Invocation<T>) {
+  static deferred<T>(invocation: Invocation<T>) {
     let resolve!: (v: T) => void;
     let reject!: (v?: unknown) => void;
 
@@ -75,8 +73,23 @@ export class Future<T> {
       reject = _reject;
     });
 
-    // return a new future and resolvers for the future
-    return { future: new Future(executor, promise), resolve, reject };
+    // construct a new future
+    const future = new Future(invocation, promise, resolve, reject);
+
+    // return future and resolvers
+    return {
+      future: future,
+      resolve: future.resolve.bind(future),
+      reject: future.reject.bind(future),
+    };
+  }
+
+  get id() {
+    return this.invocation.id;
+  }
+
+  get idempotencyKey() {
+    return this.invocation.idempotencyKey;
   }
 
   get root() {
@@ -89,5 +102,19 @@ export class Future<T> {
 
   get children() {
     return this.invocation.children.map((i) => i.future);
+  }
+
+  get value() {
+    return this._value;
+  }
+
+  private resolve(value: T) {
+    this._resolve(value);
+    this._value = { kind: "resolved", value };
+  }
+
+  private reject(error: unknown) {
+    this._reject(error);
+    this._value = { kind: "rejected", error };
   }
 }

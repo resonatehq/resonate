@@ -8,20 +8,20 @@ import { Options, PartialOptions, isPartialOptions } from "./options";
 export class Invocation<T> {
   future: Future<T>;
   resolve: (v: T) => void;
-  reject: (v?: unknown) => void;
+  reject: (e: unknown) => void;
+
+  killed: boolean = false;
 
   createdAt: number = Date.now();
-  _killed: boolean = false;
-
-  readonly root: Invocation<any>;
-  readonly parent: Invocation<any> | null;
-  readonly children: Invocation<any>[] = [];
-
   counter: number = 0;
   attempt: number = 0;
 
   awaited: Future<any>[] = [];
   blocked: Future<any> | null = null;
+
+  readonly root: Invocation<any>;
+  readonly parent: Invocation<any> | null;
+  readonly children: Invocation<any>[] = [];
 
   /**
    * Represents a Resonate function invocation.
@@ -33,11 +33,13 @@ export class Invocation<T> {
    * @param parent - The parent invocation.
    */
   constructor(
+    public readonly name: string,
+    public readonly version: number,
     public readonly id: string,
     public readonly idempotencyKey: string | undefined,
-    public readonly param: any,
+    public readonly headers: Record<string, string> | undefined,
+    public readonly param: unknown,
     public readonly opts: Options,
-    public readonly version: number,
     parent?: Invocation<any>,
   ) {
     const { future, resolve, reject } = Future.deferred<T>(this);
@@ -53,15 +55,8 @@ export class Invocation<T> {
     return Math.min(this.createdAt + this.opts.timeout, this.parent?.timeout ?? Infinity);
   }
 
-  // TODO: move to execution
-
-  get killed(): boolean {
-    return this.root._killed;
-  }
-
-  kill(error: unknown) {
-    this.root._killed = true;
-    this.root.reject(error);
+  addChild(child: Invocation<any>) {
+    this.children.push(child);
   }
 
   await(future: Future<any>) {
@@ -74,10 +69,6 @@ export class Invocation<T> {
 
   unblock() {
     this.blocked = null;
-  }
-
-  addChild(child: Invocation<any>) {
-    this.children.push(child);
   }
 
   split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {

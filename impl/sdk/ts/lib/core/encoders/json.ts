@@ -1,4 +1,5 @@
 import { IEncoder } from "../encoder";
+import { ResonateError } from "../errors";
 
 export class JSONEncoder implements IEncoder<unknown, string | undefined> {
   encode(data: unknown): string | undefined {
@@ -12,10 +13,22 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
       if (value instanceof AggregateError) {
         return {
           __type: "aggregate_error",
-          errors: value.errors,
           message: value.message,
           stack: value.stack,
           name: value.name,
+          errors: value.errors,
+        };
+      }
+
+      if (value instanceof ResonateError) {
+        return {
+          __type: "resonate_error",
+          message: value.message,
+          stack: value.stack,
+          name: value.name,
+          code: value.code,
+          cause: value.cause,
+          retriable: value.retriable,
         };
       }
 
@@ -42,6 +55,10 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
     return JSON.parse(data, (_, value) => {
       if (value?.__type === "aggregate_error") {
         return Object.assign(new AggregateError(value.errors, value.message), value);
+      }
+
+      if (value?.__type === "resonate_error") {
+        return Object.assign(new ResonateError(value.message, value.code, value.cause, value.retriable), value);
       }
 
       if (value?.__type === "error") {

@@ -315,20 +315,20 @@ class Scheduler {
   // tick is mutually exclusive
   private running: boolean = false;
 
-  // all top level executions and their corresponding promises
-  private executions: Record<string, { execution: Execution<any>; promise: ResonatePromise<any> }> = {};
+  // all top level executions
+  private cache: Record<string, Execution<any>> = {};
 
-  // all invocations
-  private invocations: Invocation<any>[] = [];
-
-  // executions with a next value
+  // executions ready to be run
   private runnable: Continuation<any>[] = [];
 
-  // executions that are waiting for a next value
+  // executions that are awaiting another execution
   private awaiting: Execution<any>[] = [];
 
+  // all executions
+  private executions: Execution<any>[] = [];
+
   // executions that have been killed
-  private killed: Invocation<any>[] = [];
+  private killed: Execution<any>[] = [];
 
   constructor(private logger: ILogger) {}
 
@@ -342,8 +342,8 @@ class Scheduler {
   ): ResonatePromise<Return<F>> {
     // if the execution is already running, and not killed,
     // return the promise
-    if (this.executions[id] && !this.executions[id].execution.invocation.killed) {
-      return this.executions[id].promise;
+    if (this.cache[id] && !this.cache[id].killed) {
+      return this.cache[id].execute();
     }
 
     // the idempotency key is a hash of the id
@@ -356,11 +356,8 @@ class Scheduler {
       args,
     };
 
-    // add an invocation tag
-    opts.tags["resonate:invocation"] = "true";
-
     // create a new invocation
-    const invocation = new Invocation(id, idempotencyKey, param, opts, version);
+    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, opts);
 
     // create a new execution
     const generator = func(new Context(invocation), ...args);
@@ -378,8 +375,8 @@ class Scheduler {
 
     // store the invocation, execution, and promise
     // will be used if run is called again with the same id
-    this.invocations.push(invocation);
-    this.executions[id] = { execution, promise };
+    this.cache[id] = execution;
+    this.executions.push(execution);
 
     return promise;
   }
@@ -397,13 +394,10 @@ class Scheduler {
       // step through the generator if in debug mode
       if (this.logger.level === "debug" && (await this.keypress()) === "\u001b") {
         // kill when escape key is pressed
-        continuation?.execution.invocation.kill("manually killed");
+        continuation?.execution.kill("manual kill");
       }
 
-      // print all invocations if in debug mode
-      this.print();
-
-      if (continuation && !continuation.execution.invocation.killed) {
+      if (continuation && !continuation.execution.killed) {
         try {
           // apply the next value to the generator
           const result = this.next(continuation);
@@ -430,10 +424,13 @@ class Scheduler {
         }
 
         // housekeeping
-        if (continuation.execution.invocation.killed) {
+        if (continuation.execution.killed) {
           this.kill(continuation.execution);
         }
       }
+
+      // print all invocations if in debug mode
+      this.print();
     }
 
     // TODO: suspend
@@ -471,36 +468,36 @@ class Scheduler {
   }
 
   private async applyCall(continuation: Continuation<any>, { value, yieldFuture }: Call) {
+    // the parent is the current invocation
+    const parent = continuation.execution.invocation;
+
     // the id is either:
     // 1. a provided string in the case of a deferred execution
     // 2. a generated string in the case of an ordinary execution
-    const id =
-      value.kind === "deferred"
-        ? value.func
-        : `${continuation.execution.invocation.id}.${continuation.execution.invocation.counter}`;
+    const id = value.kind === "deferred" ? value.func : `${parent.id}.${parent.counter}`;
 
     // the idempotency key is a hash of the id
     const idempotencyKey = utils.hash(id);
 
+    // human readable name of the function
+    const name = value.kind === "deferred" ? value.func : value.func.name;
+
+    // version is inherited from the parent
+    const version = parent.version;
+
     // create a new invocation
-    const invocation = new Invocation(
-      id,
-      idempotencyKey,
-      undefined,
-      value.opts,
-      continuation.execution.invocation.version,
-      continuation.execution.invocation,
-    );
-    this.invocations.push(invocation);
+    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, undefined, value.opts, parent);
 
     // add child and increment counter
-    continuation.execution.invocation.addChild(invocation);
-    continuation.execution.invocation.counter++;
+    parent.addChild(invocation);
+    parent.counter++;
+
+    let execution: GeneratorExecution<any> | OrdinaryExecution<any> | DeferredExecution<any>;
 
     if (value.kind === "resonate") {
       // create a generator execution
       const ctx = new Context(invocation);
-      const execution = new GeneratorExecution(invocation, value.func(ctx, ...value.args));
+      execution = new GeneratorExecution(invocation, value.func(ctx, ...value.args));
       const promise = await execution.create();
 
       if (promise && promise.pending) {
@@ -510,15 +507,18 @@ class Scheduler {
     } else if (value.kind === "ordinary") {
       // create an ordinary execution
       const info = new Info(invocation);
-      const execution = new OrdinaryExecution(invocation, () => value.func(info, ...value.args));
-      execution.execute();
+      execution = new OrdinaryExecution(invocation, () => value.func(info, ...value.args));
+      execution.execute().catch(() => {});
     } else if (value.kind === "deferred") {
       // create a deferred execution
-      const execution = new DeferredExecution(invocation);
-      execution.execute();
+      execution = new DeferredExecution(invocation);
+      execution.execute().catch(() => {});
     } else {
       this.yeet(`permitted call values are (resonate, ordinary, deferred), received ${value}`);
     }
+
+    // add to all executions
+    this.executions.push(execution);
 
     if (yieldFuture) {
       // if the call is expected to yield a future, add the future to runnable
@@ -568,12 +568,12 @@ class Scheduler {
 
   private kill(execution: Execution<any>) {
     // add to killed
-    const killed = this.invocations.filter((i) => i.root === execution.invocation.root);
+    const killed = this.executions.filter((e) => e.invocation.root === execution.invocation.root);
     this.killed = this.killed.concat(killed);
 
     // remove from awaiting and runnable
-    this.awaiting = this.awaiting.filter((e) => e.invocation.root !== execution.invocation.root);
     this.runnable = this.runnable.filter((c) => c.execution.invocation.root !== execution.invocation.root);
+    this.awaiting = this.awaiting.filter((e) => e.invocation.root !== execution.invocation.root);
   }
 
   private async keypress(): Promise<string> {
@@ -600,15 +600,18 @@ class Scheduler {
   }
 
   private print() {
-    this.logger.debug("Invocations");
+    this.logger.debug("Executions");
     this.logger.table(
-      this.invocations.map((i) => ({
-        id: i.id,
-        idempotencyKey: i.idempotencyKey,
-        parent: i.parent ? i.parent.id : undefined,
-        killed: i.killed,
-        awaited: i.awaited.map((f) => f.id).join(","),
-        blocked: i.blocked?.id,
+      this.executions.map((e) => ({
+        name: e.invocation.name,
+        version: e.invocation.version,
+        id: e.invocation.id,
+        idempotencyKey: e.invocation.idempotencyKey,
+        parent: e.invocation.parent ? e.invocation.parent.id : undefined,
+        killed: e.killed,
+        pending: e.invocation.future.value.kind === "pending",
+        awaited: e.invocation.awaited.map((f) => f.id).join(","),
+        blocked: e.invocation.blocked?.id,
       })),
     );
   }
