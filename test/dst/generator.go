@@ -173,7 +173,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	id := g.idSet[r.Intn(len(g.idSet))]
 
 	if RandBool(r) {
-		id = fmt.Sprintf("resonate://demo.example.com/payments/%s", id)
+		id = fmt.Sprintf("payments/%s", id)
 	}
 
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
