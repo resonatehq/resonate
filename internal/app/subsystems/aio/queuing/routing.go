@@ -55,15 +55,15 @@ func NewRouter() Router {
 }
 
 func (r *RouterImpl) Handle(pattern string, handler *RouteHandler) {
-	// chi routing pattern must begin with '/'
-	pattern = "/" + pattern
+	// chi routing pattern must begin with '/' and accept any domain.
+	pattern = "/" + "{http}://{domain}" + pattern
 
 	r.patterns.Post(pattern, func(w http.ResponseWriter, r *http.Request) {})
 	r.handlers[pattern] = handler
 }
 
 func (r *RouterImpl) Match(route string) (*MatchResult, error) {
-	// chi routing pattern must begin with '/'
+	// chi routing pattern must begin with '/'.
 	route = "/" + route
 
 	rctx := chi.NewRouteContext()
