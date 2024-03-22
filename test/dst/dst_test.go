@@ -50,7 +50,7 @@ func TestDST(t *testing.T) {
 		Connections: []*t_conn.ConnectionConfig{
 			{
 				Kind:    t_conn.HTTP,
-				Pattern: "resonate://demo.example.com/payments/*",
+				Pattern: "/payments/*",
 				Name:    "payments-demo",
 				Queue:   "payments-demo",
 				Metadata: &queuing_metadata.Metadata{
