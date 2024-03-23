@@ -26,16 +26,17 @@ import (
 
 func RunDSTCmd() *cobra.Command {
 	var (
-		seed            int64
-		ticks           int64
-		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 1000}
-		ids             = util.RangeIntFlag{Min: 1, Max: 1000}
-		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 1000}
-		headers         = util.RangeIntFlag{Min: 1, Max: 1000}
-		data            = util.RangeIntFlag{Min: 1, Max: 1000}
-		tags            = util.RangeIntFlag{Min: 1, Max: 1000}
-		urls            = util.RangeIntFlag{Min: 1, Max: 1000}
-		retries         = util.RangeIntFlag{Min: 1, Max: 1000}
+		seed               int64
+		ticks              int64
+		reqsPerTick        = util.RangeIntFlag{Min: 1, Max: 1000}
+		ids                = util.RangeIntFlag{Min: 1, Max: 1000}
+		idempotencyKeys    = util.RangeIntFlag{Min: 1, Max: 1000}
+		headers            = util.RangeIntFlag{Min: 1, Max: 1000}
+		data               = util.RangeIntFlag{Min: 1, Max: 1000}
+		tags               = util.RangeIntFlag{Min: 1, Max: 1000}
+		urls               = util.RangeIntFlag{Min: 1, Max: 1000}
+		retries            = util.RangeIntFlag{Min: 1, Max: 1000}
+		failureProbability float64
 	)
 
 	cmd := &cobra.Command{
@@ -84,8 +85,7 @@ func RunDSTCmd() *cobra.Command {
 
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			randomNumber := 0.5
-			aio := aio.NewDST(r, metrics, randomNumber)
+			aio := aio.NewDST(r, metrics, failureProbability)
 
 			// instatiate aio subsystems
 			network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
@@ -200,6 +200,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&tags, "tags", "number promise tags")
 	cmd.Flags().Var(&urls, "urls", "number subscription urls")
 	cmd.Flags().Var(&retries, "retries", "number subscription retries")
+	cmd.Flags().Float64Var(&failureProbability, "failure-probability", 0.5, "probability of aio failure")
 
 	// api
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000000}, "api-size", "size of the submission queue buffered channel")
