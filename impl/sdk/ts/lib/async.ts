@@ -199,7 +199,17 @@ export class Context {
    * @param opts Optional {@link options}.
    * @returns A promise that resolves to the resolved value of the remote function.
    */
-  run<T>(func: string, args?: any, opts?: PartialOptions): ResonatePromise<T>;
+  run<T>(func: string, args: any, opts?: PartialOptions): ResonatePromise<T>;
+
+  /**
+   * Invoke a remote function.
+   *
+   * @template T The return type of the remote function.
+   * @param func The id of the remote function.
+   * @param opts Optional {@link options}.
+   * @returns A promise that resolves to the resolved value of the remote function.
+   */
+  run<T>(func: string, opts?: PartialOptions): ResonatePromise<T>;
   run(func: string | ((...args: any[]) => any), ...argsWithOpts: any[]): ResonatePromise<any> {
     // the parent is the current invocation
     const parent = this.invocation;

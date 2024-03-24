@@ -218,6 +218,7 @@ export abstract class ResonateBase {
    */
   options({
     encoder = this.encoder,
+    poll = 5000, // every 5s
     retry = this.retry,
     store = this.store,
     tags = {},
@@ -229,6 +230,7 @@ export abstract class ResonateBase {
     return {
       __resonate: true,
       encoder,
+      poll,
       retry,
       store,
       tags,

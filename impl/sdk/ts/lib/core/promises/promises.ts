@@ -6,9 +6,10 @@ import { PendingPromise, ResolvedPromise, RejectedPromise, CanceledPromise, Time
 export type CreateOptions = {
   idempotencyKey: string;
   headers: Record<string, string>;
+  param: unknown;
   tags: Record<string, string>;
   strict: boolean;
-  poll: boolean; // TODO
+  poll: number | undefined; // TODO
 };
 
 export type CompleteOptions = {
@@ -28,15 +29,15 @@ export class DurablePromise<T> {
     private store: IPromiseStore,
     private encoder: IEncoder<unknown, string | undefined>,
     private promise: PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise,
-    poll: boolean = false,
+    poll?: number,
   ) {
     this.created = Promise.resolve(this);
     this.completed = new Promise((resolve) => {
       this.complete = resolve;
     });
 
-    if (poll) {
-      this.interval = setInterval(() => this.poll(), 5000);
+    if (poll !== undefined) {
+      this.interval = setInterval(() => this.poll(), poll);
     }
   }
 
@@ -108,7 +109,6 @@ export class DurablePromise<T> {
     encoder: IEncoder<unknown, string | undefined>,
     id: string,
     timeout: number,
-    param: unknown = undefined,
     opts: Partial<CreateOptions> = {},
   ) {
     return new DurablePromise<T>(
@@ -119,11 +119,11 @@ export class DurablePromise<T> {
         opts.idempotencyKey,
         opts.strict ?? false,
         opts.headers,
-        encoder.encode(param),
-        timeout,
+        encoder.encode(opts.param),
+        Date.now() + timeout,
         opts.tags,
       ),
-      opts.poll ?? false,
+      opts.poll,
     );
   }
 

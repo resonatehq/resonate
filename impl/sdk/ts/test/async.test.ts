@@ -1,6 +1,7 @@
 import { describe, test, expect, jest } from "@jest/globals";
 import { Resonate, Context } from "../lib/async";
 import { Retry } from "../lib/core/retries/retry";
+import * as utils from "../lib/core/utils";
 
 jest.setTimeout(10000);
 
@@ -29,6 +30,14 @@ describe("Async functions", () => {
     throw new Error("foo");
   }
 
+  async function deferredSuccess(ctx: Context) {
+    return await ctx.run("success", ctx.options({ poll: 0 }));
+  }
+
+  async function deferredFailure(ctx: Context) {
+    return await ctx.run("failure", ctx.options({ poll: 0 }));
+  }
+
   test("success", async () => {
     const resonate = new Resonate({
       timeout: 1000,
@@ -37,6 +46,14 @@ describe("Async functions", () => {
 
     resonate.register("run", run);
     resonate.register("io", io);
+    resonate.register("success", ordinarySuccess);
+    resonate.register("successAsync", ordinarySuccessAsync);
+
+    // pre-resolve deferred
+    const deferred = await resonate.promises.create("success", 1000, {
+      idempotencyKey: utils.hash("success"),
+    });
+    deferred.resolve("foo");
 
     const results: string[] = [
       ordinarySuccess(),
@@ -45,6 +62,9 @@ describe("Async functions", () => {
       await resonate.run("run", "run.b", ordinarySuccessAsync),
       await resonate.run("io", "run.c", ordinarySuccess),
       await resonate.run("io", "run.d", ordinarySuccessAsync),
+      await resonate.run("run", "run.e", deferredSuccess),
+      await resonate.run("success", "run.f"),
+      await resonate.run("successAsync", "run.g"),
     ];
 
     expect(results.every((r) => r === "foo")).toBe(true);
@@ -58,6 +78,14 @@ describe("Async functions", () => {
 
     resonate.register("run", run);
     resonate.register("io", io);
+    resonate.register("failure", ordinaryFailure);
+    resonate.register("failureAsync", ordinaryFailureAsync);
+
+    // pre-reject deferred
+    const deferred = await resonate.promises.create("failure", 1000, {
+      idempotencyKey: utils.hash("failure"),
+    });
+    deferred.reject(new Error("foo"));
 
     const functions = [
       () => ordinaryFailureAsync(),
@@ -65,6 +93,9 @@ describe("Async functions", () => {
       () => resonate.run("run", "run.b", ordinaryFailureAsync),
       () => resonate.run("io", "run.c", ordinaryFailure),
       () => resonate.run("io", "run.d", ordinaryFailureAsync),
+      () => resonate.run("run", "run.e", deferredFailure),
+      () => resonate.run("failure", "run.f"),
+      () => resonate.run("failureAsync", "run.g"),
     ];
 
     for (const f of functions) {
