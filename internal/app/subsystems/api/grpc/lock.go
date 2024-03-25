@@ -31,7 +31,7 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.execution_id must be provided")
 	}
 	if req.Lock.ExpiryInMilliseconds == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.timeout must be provided")
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.expiry_in_milliseconds must be provided")
 	}
 
 	body := &service.AcquireLockBody{
