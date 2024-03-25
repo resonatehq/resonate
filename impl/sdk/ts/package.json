@@ -1,11 +1,12 @@
 {
-    "name": "@resonatehq/sdk",
-    "version": "0.3.2",
-    "description": "Resonate TypeScript SDK",
-    "main": "dist/index.js",
-    "type": "module",
-    "types": "dist/index.d.ts",
+    "name": "@guergabo-test/sdk",
+    "version": "0.3.5",
+    "description": "TypeScript SDK for Resonate",
+    "author": "Resonate Developers",
     "license": "Apache-2.0",
+    "type": "commonjs",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "repository": {
         "type": "git",
         "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
@@ -13,8 +14,11 @@
     "publishConfig": {
         "provenance": true
     },
+    "files": [
+        "dist"
+    ],
     "scripts": {
-        "test": "node --loader ts-node/esm --experimental-vm-modules node_modules/jest/bin/jest.js --config jest.config.js",
+        "test": "jest --config jest.config.js", 
         "build": "tsc --build tsconfig.build.json",
         "lint": "eslint .",
         "lint:fix": "eslint . --fix",
@@ -23,9 +27,9 @@
         "docs": "npx typedoc lib/index.ts --githubPages",
         "debug": "node --inspect-brk ./node_modules/.bin/jest -i"
     },
-    "files": [
-        "dist"
-    ],
+    "dependencies": {
+        "cron-parser": "^4.9.0"
+    },
     "devDependencies": {
         "@jest/globals": "^29.7.0",
         "@types/node": "^20.11.19",
@@ -43,8 +47,8 @@
         "typedoc": "^0.25.7",
         "typedoc-material-theme": "^1.0.2",
         "typescript": "^5.2.2"
-    },
-    "dependencies": {
-        "cron-parser": "^4.9.0"
+    }, 
+    "engines": {
+        "node": ">= 18"
     }
 }

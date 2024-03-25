@@ -41,7 +41,7 @@ export class Logger implements ILogger {
 
   table(...args: any[]): void {
     if (this._level <= 0) {
-      console.table(...args);
+      console.table(args);
     }
   }
 
