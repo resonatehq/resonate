@@ -120,7 +120,13 @@ const (
 		time         INTEGER,
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
-	);`
+	);
+	
+	CREATE TABLE IF NOT EXISTS migrations (
+		id    INTEGER PRIMARY KEY
+	);
+	
+	INSERT INTO migrations (id) VALUES (1);`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
