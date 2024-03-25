@@ -1256,19 +1256,19 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:      "foo",
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 1,
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 1,
 				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
 				AcquireLock: &t_api.AcquireLockRequest{
-					ResourceId:      "foo",
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 1,
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 1,
 				},
 			},
 			res: &t_api.Response{
@@ -1276,10 +1276,10 @@ func TestAcquireLock(t *testing.T) {
 				AcquireLock: &t_api.AcquireLockResponse{
 					Status: t_api.StatusCreated,
 					Lock: &lock.Lock{
-						ResourceId:      "foo",
-						ProcessId:       "bar",
-						ExecutionId:     "baz",
-						ExpiryInSeconds: 1,
+						ResourceId:           "foo",
+						ProcessId:            "bar",
+						ExecutionId:          "baz",
+						ExpiryInMilliseconds: 1,
 					},
 				},
 			},
@@ -1289,10 +1289,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing resource id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:      "",
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 1,
+					ResourceId:           "",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 1,
 				},
 			},
 			req:  nil,
@@ -1303,10 +1303,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing process id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:      "foo",
-					ProcessId:       "",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 1,
+					ResourceId:           "foo",
+					ProcessId:            "",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 1,
 				},
 			},
 			req:  nil,
@@ -1317,10 +1317,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing execution id",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:      "foo",
-					ProcessId:       "bar",
-					ExecutionId:     "",
-					ExpiryInSeconds: 1,
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "",
+					ExpiryInMilliseconds: 1,
 				},
 			},
 			req:  nil,
@@ -1331,10 +1331,10 @@ func TestAcquireLock(t *testing.T) {
 			name: "AcquireLock missing timeout",
 			grpcReq: &grpcApi.AcquireLockRequest{
 				Lock: &grpcApi.Lock{
-					ResourceId:      "foo",
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 0,
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 0,
 				},
 			},
 			req:  nil,
@@ -1555,20 +1555,20 @@ func TestClaimTask(t *testing.T) {
 		{
 			name: "ClaimTask",
 			grpcReq: &grpcApi.ClaimTaskRequest{
-				TaskId:          "foo",
-				Counter:         1,
-				ProcessId:       "bar",
-				ExecutionId:     "baz",
-				ExpiryInSeconds: 10,
+				TaskId:               "foo",
+				Counter:              1,
+				ProcessId:            "bar",
+				ExecutionId:          "baz",
+				ExpiryInMilliseconds: 10,
 			},
 			req: &t_api.Request{
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskRequest{
-					TaskId:          "foo",
-					Counter:         1,
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 10,
+					TaskId:               "foo",
+					Counter:              1,
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10,
 				},
 			},
 			res: &t_api.Response{
