@@ -124,7 +124,14 @@ const (
 		time         BIGINT,
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
-	);`
+	);
+	
+	CREATE TABLE IF NOT EXISTS migrations (
+		id    INTEGER,
+		PRIMARY KEY(id) 
+	);
+	
+	INSERT INTO migrations (id) VALUES (1);`
 
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE notifications;
@@ -133,7 +140,8 @@ const (
 	DROP TABLE timeouts;
 	DROP TABLE promises;
 	DROP TABLE locks;
-	DROP TABLE tasks;`
+	DROP TABLE tasks;
+	DROP TABLE migrations;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
