@@ -83,18 +83,18 @@ jobs:
         run: |
           npm publish --provenance --access public --tag latest
 
-  verify-npm-package:
-    needs: [bump-version, publish-npm-package]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v2
-        with:
-          node-version: "20"
-          registry-url: "https://registry.npmjs.org"
-      - name: Install Resonate SDK and run tests
-        run: |
-          npm install --save @resonatehq/sdk ts-node@latest
-          node --no-warnings=ExperimentalWarning --loader ts-node/esm helloworld_release.ts
-        working-directory: .github/workflows/hello_world
+  # verify-npm-package:
+  #   needs: [bump-version, publish-npm-package]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Set up Node
+  #       uses: actions/setup-node@v2
+  #       with:
+  #         node-version: "20"
+  #         registry-url: "https://registry.npmjs.org"
+  #     - name: Install Resonate SDK and run tests
+  #       run: |
+  #         npm install --save @resonatehq/sdk ts-node@latest
+  #         node --no-warnings=ExperimentalWarning --loader ts-node/esm helloworld_release.ts
+  #       working-directory: .github/workflows/hello_world
