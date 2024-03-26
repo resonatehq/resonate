@@ -231,8 +231,11 @@ export class Context {
     // opts are optional and can be provided as the last arg
     const { args, opts } = this.invocation.split(argsWithOpts);
 
+    // param is only required for deferred executions
+    const param = typeof func === "string" ? args[0] : undefined;
+
     // create a new invocation
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, undefined, opts, parent);
+    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, opts, parent);
 
     let execution: Execution<any>;
     if (typeof func === "string") {

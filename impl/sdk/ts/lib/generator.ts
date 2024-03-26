@@ -288,7 +288,7 @@ export class Context {
     const { args, opts } = this.invocation.split(argsWithOpts);
 
     if (typeof func === "string") {
-      return { kind: "call", value: { kind: "deferred", func, args: args[0], opts }, yieldFuture };
+      return { kind: "call", value: { kind: "deferred", func, args, opts }, yieldFuture };
     } else if (func.constructor.name === "GeneratorFunction") {
       return { kind: "call", value: { kind: "resonate", func, args, opts }, yieldFuture };
     } else {
@@ -485,8 +485,11 @@ class Scheduler {
     // version is inherited from the parent
     const version = parent.version;
 
+    // param is only required for deferred executions
+    const param = value.kind === "deferred" ? value.args[0] : undefined;
+
     // create a new invocation
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, undefined, value.opts, parent);
+    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, value.opts, parent);
 
     // add child and increment counter
     parent.addChild(invocation);
