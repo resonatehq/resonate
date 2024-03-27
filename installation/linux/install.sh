@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Set the version you want to install
-RES_VERSION="v0.2.0"
+RES_VERSION=$(curl -s "https://api.github.com/repos/resonatehq/resonate/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
 # Set the installation directory
 INSTALL_DIR="/usr/local/bin"
