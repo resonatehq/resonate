@@ -62,6 +62,6 @@ jobs:
 
       - name: Verify package
         run: |
-          npm install @resonatehq/sdk@latest
+          npm install @resonatehq/sdk@${{ github.ref_name }}
           ts-node app.ts
         working-directory: examples/async
