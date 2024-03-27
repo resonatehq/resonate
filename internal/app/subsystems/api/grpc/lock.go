@@ -30,15 +30,15 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 	if req.Lock.ExecutionId == "" {
 		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.execution_id must be provided")
 	}
-	if req.Lock.ExpiryInSeconds == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.timeout must be provided")
+	if req.Lock.ExpiryInMilliseconds == 0 {
+		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.expiry_in_milliseconds must be provided")
 	}
 
 	body := &service.AcquireLockBody{
-		ResourceId:      req.Lock.ResourceId,
-		ProcessId:       req.Lock.ProcessId,
-		ExecutionId:     req.Lock.ExecutionId,
-		ExpiryInSeconds: req.Lock.ExpiryInSeconds,
+		ResourceId:           req.Lock.ResourceId,
+		ProcessId:            req.Lock.ProcessId,
+		ExecutionId:          req.Lock.ExecutionId,
+		ExpiryInMilliseconds: req.Lock.ExpiryInMilliseconds,
 	}
 
 	resp, err := s.service.AcquireLock(header, body)
@@ -111,9 +111,9 @@ func protoLock(lock *lock.Lock) *grpcApi.Lock {
 	}
 
 	return &grpcApi.Lock{
-		ResourceId:      lock.ResourceId,
-		ProcessId:       lock.ProcessId,
-		ExecutionId:     lock.ExecutionId,
-		ExpiryInSeconds: lock.ExpiryInSeconds,
+		ResourceId:           lock.ResourceId,
+		ProcessId:            lock.ProcessId,
+		ExecutionId:          lock.ExecutionId,
+		ExpiryInMilliseconds: lock.ExpiryInMilliseconds,
 	}
 }

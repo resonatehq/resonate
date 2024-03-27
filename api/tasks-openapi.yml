@@ -125,7 +125,7 @@ components:
           type: string
         executionId:
           type: string
-        expiryInSeconds:
+        expiryInMilliseconds:
           type: integer
           format: int64
       required:
@@ -133,7 +133,7 @@ components:
         - counter
         - processId
         - executionId
-        - expiryInSeconds
+        - expiryInMilliseconds
 
     CompleteTaskReq:
       type: object

@@ -505,11 +505,11 @@ type ReadLockCommand struct {
 }
 
 type AcquireLockCommand struct {
-	ResourceId      string
-	ProcessId       string
-	ExecutionId     string
-	ExpiryInSeconds int64
-	Timeout         int64
+	ResourceId           string
+	ProcessId            string
+	ExecutionId          string
+	ExpiryInMilliseconds int64
+	Timeout              int64
 }
 
 type HeartbeatLocksCommand struct {

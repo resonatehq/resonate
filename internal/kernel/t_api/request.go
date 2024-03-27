@@ -151,10 +151,10 @@ type EchoRequest struct {
 // Locks
 
 type AcquireLockRequest struct {
-	ResourceId      string `json:"resourceId"`
-	ProcessId       string `json:"processId"`
-	ExecutionId     string `json:"executionId"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds"`
+	ResourceId           string `json:"resourceId"`
+	ProcessId            string `json:"processId"`
+	ExecutionId          string `json:"executionId"`
+	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
 }
 
 type HeartbeatLocksRequest struct {
@@ -177,11 +177,11 @@ type ReleaseLockRequest struct {
 // carry out the task work then release the claim upon completion or
 // failure to allow the task to be retried.
 type ClaimTaskRequest struct {
-	TaskId          string `json:"taskId"`
-	Counter         int    `json:"counter"`
-	ProcessId       string `json:"processId"`
-	ExecutionId     string `json:"executionId"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds"`
+	TaskId               string `json:"taskId"`
+	Counter              int    `json:"counter"`
+	ProcessId            string `json:"processId"`
+	ExecutionId          string `json:"executionId"`
+	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
 }
 
 // CompleteTaskRequest allows a process that has claimed a task to mark
@@ -285,11 +285,11 @@ func (r *Request) String() string {
 	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
-			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, expiryInSeconds=%d)",
+			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, expiryInMilliseconds=%d)",
 			r.AcquireLock.ResourceId,
 			r.AcquireLock.ProcessId,
 			r.AcquireLock.ExecutionId,
-			r.AcquireLock.ExpiryInSeconds,
+			r.AcquireLock.ExpiryInMilliseconds,
 		)
 	case HeartbeatLocks:
 		return fmt.Sprintf(
@@ -307,12 +307,12 @@ func (r *Request) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(taskId=%s, counter=%d, processId=%s, executionId=%s, expiryInSeconds=%d)",
+			"ClaimTask(taskId=%s, counter=%d, processId=%s, executionId=%s, expiryInMilliseconds=%d)",
 			r.ClaimTask.TaskId,
 			r.ClaimTask.Counter,
 			r.ClaimTask.ProcessId,
 			r.ClaimTask.ExecutionId,
-			r.ClaimTask.ExpiryInSeconds,
+			r.ClaimTask.ExpiryInMilliseconds,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(

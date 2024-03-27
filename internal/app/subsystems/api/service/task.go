@@ -19,14 +19,14 @@ func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTa
 	util.Assert(body.Counter >= 0, "counter must be greater than or equal to 0")
 	util.Assert(body.ProcessId != "", "process_id must be provided")
 	util.Assert(body.ExecutionId != "", "execution_id must be provided")
-	util.Assert(body.ExpiryInSeconds > 0, "expiry_in_seconds must be greater than 0")
+	util.Assert(body.ExpiryInMilliseconds > 0, "expiry_in_milliseconds must be greater than 0")
 
 	claimTask := &t_api.ClaimTaskRequest{
-		TaskId:          body.TaskId,
-		Counter:         body.Counter,
-		ProcessId:       body.ProcessId,
-		ExecutionId:     body.ExecutionId,
-		ExpiryInSeconds: body.ExpiryInSeconds,
+		TaskId:               body.TaskId,
+		Counter:              body.Counter,
+		ProcessId:            body.ProcessId,
+		ExecutionId:          body.ExecutionId,
+		ExpiryInMilliseconds: body.ExpiryInMilliseconds,
 	}
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)

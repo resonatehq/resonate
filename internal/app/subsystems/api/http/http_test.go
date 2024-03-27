@@ -775,15 +775,15 @@ func TestHttpServer(t *testing.T) {
 				"resourceId": "foo",
 				"processId": "bar",
 				"executionId": "baz",
-				"expiryInSeconds": 10
+				"expiryInMilliseconds": 10000
 			}`),
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
 				AcquireLock: &t_api.AcquireLockRequest{
-					ResourceId:      "foo",
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 10,
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
 				},
 			},
 			res: &t_api.Response{
@@ -791,10 +791,10 @@ func TestHttpServer(t *testing.T) {
 				AcquireLock: &t_api.AcquireLockResponse{
 					Status: t_api.StatusCreated,
 					Lock: &lock.Lock{
-						ResourceId:      "foo",
-						ProcessId:       "bar",
-						ExecutionId:     "baz",
-						ExpiryInSeconds: 10,
+						ResourceId:           "foo",
+						ProcessId:            "bar",
+						ExecutionId:          "baz",
+						ExpiryInMilliseconds: 10_000,
 					},
 				},
 			},
@@ -808,7 +808,7 @@ func TestHttpServer(t *testing.T) {
 				"resourceId": "foo",
 				"processId": "bar",
 				"executionId": "",
-				"expiryInSeconds": 10
+				"expiryInMilliseconds": 10000
 			}`),
 			req:    nil,
 			res:    nil,
@@ -894,16 +894,16 @@ func TestHttpServer(t *testing.T) {
 				"counter": 1, 
 				"processId": "bar", 
 				"executionId": "baz", 
-				"expiryInSeconds": 10
+				"expiryInMilliseconds": 10000
 			}`),
 			req: &t_api.Request{
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskRequest{
-					TaskId:          "foo",
-					Counter:         1,
-					ProcessId:       "bar",
-					ExecutionId:     "baz",
-					ExpiryInSeconds: 10,
+					TaskId:               "foo",
+					Counter:              1,
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
 				},
 			},
 			res: &t_api.Response{

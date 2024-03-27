@@ -15,7 +15,7 @@ message ClaimTaskRequest {
     int32 counter = 3;
     string process_id = 4; 
     string execution_id = 5;
-    int64 expiry_in_seconds = 6;  
+    int64 expiry_in_milliseconds = 6;  
 }
 
 message ClaimTaskResponse {

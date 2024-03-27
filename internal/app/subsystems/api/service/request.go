@@ -64,10 +64,10 @@ type CreateScheduleBody struct {
 // LOCKS
 
 type AcquireLockBody struct {
-	ResourceId      string `json:"resourceId" binding:"required"`
-	ProcessId       string `json:"processId" binding:"required"`
-	ExecutionId     string `json:"executionId" binding:"required"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds" binding:"required"`
+	ResourceId           string `json:"resourceId" binding:"required"`
+	ProcessId            string `json:"processId" binding:"required"`
+	ExecutionId          string `json:"executionId" binding:"required"`
+	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds" binding:"required"`
 }
 
 type HeartbeatBody struct {
@@ -82,11 +82,11 @@ type ReleaseLockBody struct {
 // TASKS
 
 type ClaimTaskBody struct {
-	TaskId          string `json:"taskId" binding:"required"`
-	Counter         int    `json:"counter" binding:"required"`
-	ProcessId       string `json:"processId" binding:"required"`
-	ExecutionId     string `json:"executionId" binding:"required"`
-	ExpiryInSeconds int64  `json:"expiryInSeconds" binding:"required"`
+	TaskId               string `json:"taskId" binding:"required"`
+	Counter              int    `json:"counter" binding:"required"`
+	ProcessId            string `json:"processId" binding:"required"`
+	ExecutionId          string `json:"executionId" binding:"required"`
+	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds" binding:"required"`
 }
 
 type CompleteTaskBody struct {
