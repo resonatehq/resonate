@@ -1,62 +1,47 @@
-name: Release
+
+# Release workflow is the main workflow that coordinates various GitHub workflows involved in a release of Resonate. 
+name: Release Workflow
 
 on:
-  release:
-    types:
-      - created
-
-permissions:
-  contents: write
+  push:
+    branches: ["release-*"]
+  workflow_dispatch:
 
 jobs:
-  release-linux-artifact:
+  bump-version: 
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Go 1.21
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Install cross-compiler for linux/arm64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build for both amd64 and arm64
-        run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
-          CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
-          chmod +x ./bin/linux-x86_64/resonate
-          chmod +x ./bin/linux-aarch64/resonate
-          mv ./bin/linux-x86_64/resonate ./bin/resonate_linux_x86_64 
-          mv ./bin/linux-aarch64/resonate ./bin/resonate_linux_aarch64
-      - name: Upload Artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_x86_64 --clobber
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_aarch64 --clobber
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Bump version and push tag
+      id: tag_version
+      uses: anothrNick/github-tag-action@1.64.0
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        WITH_V: true
+        MAJOR_STRING_TOKEN: major(
+        MINOR_STRING_TOKEN: minor(
+        PATCH_STRING_TOKEN: patch(
+        TAG_CONTEXT: branch
+    outputs:
+      new_tag: ${{ steps.tag_version.outputs.new_tag }}
+      
+  publish-github-image:
+    needs: [bump-version]
+    uses: ./.github/workflows/release_publish_github_image.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}
 
-  release-darwin-artifact:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Build for both amd64 and arm64
-        run: |
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-          chmod +x ./bin/darwin-x86_64/resonate
-          chmod +x ./bin/darwin-aarch64/resonate
-          mv ./bin/darwin-x86_64/resonate ./bin/resonate_darwin_x86_64 
-          mv ./bin/darwin-aarch64/resonate ./bin/resonate_darwin_aarch64
-      - name: Upload Artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
+  publish-github-release:
+    needs: [bump-version]
+    uses: ./.github/workflows/release_publish_github_release.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}
+      
+  verify-github-artifacts: 
+    needs: [bump-version, publish-github-image, publish-github-release]
+    uses: ./.github/workflows/release_verify_artifacts.yaml
+    with:
+      tag: ${{ needs.bump-version.outputs.new_tag }}

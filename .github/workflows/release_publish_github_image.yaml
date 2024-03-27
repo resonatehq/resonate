@@ -1,15 +1,15 @@
-# ref: https://docs.github.com/en/packages/managing-github-packages-using-github-actions-workflows/publishing-and-installing-a-package-with-github-actions#upgrading-a-workflow-that-accesses-a-registry-using-a-personal-access-token
-name: Create and publish a Docker image
+name: Publish GitHub Docker image
 
-# Configures this workflow to run every time a change is pushed to the branch called `release-*`.
-# This aligns with the release branching change coming in v1.0.0 for hot fixes.
 on:
-  push:
-    branches: ["release-*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: 'The tag version to use for the release'
+        required: true
+        type: string
+        
   workflow_dispatch:
 
-# Defines two custom environment variables for the workflow. These are used for the Container
-# registry domain, and a name for the Docker image that this workflow builds.
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -26,7 +26,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Add support for more platforms with QEMU (optional)
+      # Add support for more platforms with QEMU
       # https://github.com/docker/setup-qemu-action
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -52,13 +52,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
-      # This step uses the `docker/build-push-action` action to build the image, based on your
+          tags: |
+            type=raw,value=${{ inputs.tag }}
+            type=raw,value=latest
+            
+      # This step uses the `docker/build-push-action` action to build the image, based on our
       # repository's `Dockerfile`. If the build succeeds, it pushes the image to GitHub Packages.
       # It uses the `context` parameter to define the build's context as the set of files located
-      # in the specified path. For more information,
-      # see "[Usage](https://github.com/docker/build-push-action#usage)" in the README of the
-      # `docker/build-push-action` repository. It uses the `tags` and `labels` parameters to tag
+      # in the specified path. It uses the `tags` and `labels` parameters to tag
       # and label the image with the output from the "meta" step.
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -68,3 +69,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true

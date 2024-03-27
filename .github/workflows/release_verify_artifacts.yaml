@@ -1,0 +1,61 @@
+name: Verify GitHub Artifacts
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: 'The tag version to use for verification'
+        required: true
+        type: string
+        
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+    - id: seed
+      name: Set random seed
+      run: echo seed=$RANDOM >> $GITHUB_OUTPUT
+    outputs:
+      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+
+      
+  verify-github-image:
+    runs-on: ubuntu-latest
+    needs: [seed]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Download and test GHCR image
+        run: |
+          # Login to GHCR
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+          # Pull the test image
+          docker pull ghcr.io/guergabo/resonate:${{ inputs.tag }}
+
+          # Run the test image
+          docker run --rm ghcr.io/guergabo/resonate:${{ inputs.tag }} dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+
+  
+  verify-github-release:
+    runs-on: ubuntu-latest
+    needs: [seed]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Download and test GH release
+        run: |
+          # Download the release artifact
+          curl -L -O "https://github.com/guergabo/resonate/releases/download/${{ inputs.tag }}/resonate_linux_x86_64.tar.gz"
+
+          # Extract the artifact
+          tar -xzf resonate_linux_x86_64.tar.gz
+
+          # Run the extracted artifact
+          ./bin/linux-x86_64/resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
