@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"math/rand" // nosemgrep
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 
@@ -95,27 +94,27 @@ func (a *aioDST) Flush(t int64) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
 			if a.r.Float64() < a.failureProbability {
-				// Create a new CQE
-				errorCqe := createErrorCQE("aio dst error occurred while processing SQE", "aio dst failure", simpleCallback)
-				errorCqe.Completion = &t_aio.Completion{}
-
-				slog.Debug("aio dst: failure", "err", errorCqe)
-				a.cqes = append(a.cqes, errorCqe)
-			} else {
 				// Do the I/O
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
-				if a.r.Float64() < a.failureProbability {
-					for _, cqe := range processedCQEs {
-						errorCqe := createErrorCQE("aio dst error occurred after processing SQE", "aio dst failure", simpleCallback)
-						errorCqe.Completion = &t_aio.Completion{}
-
-						slog.Debug("aio dst: failure", "err", errorCqe, "cqe", cqe)
-						a.cqes = append(a.cqes, cqe, errorCqe)
+				for i := range processedCQEs {
+					if a.r.Float64() < a.failureProbability && processedCQEs[i].Error == nil {
+						processedCQEs[i].Error = fmt.Errorf("aio dst: failure, after processing")
 					}
-				} else {
-					a.cqes = append(a.cqes, processedCQEs...)
 				}
+				a.cqes = append(a.cqes, processedCQEs...)
+			} else {
+				// error without processing
+				res := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes.Value))
+				for i := range sqes.Value {
+					res[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+						Metadata:   sqes.Value[i].Metadata,
+						Completion: nil,
+						Callback:   sqes.Value[i].Callback,
+						Error:      fmt.Errorf("aio dst: failure, no processing"),
+					}
+				}
+				a.cqes = append(a.cqes, res...)
 			}
 		} else {
 			panic("invalid aio submission")
@@ -123,19 +122,6 @@ func (a *aioDST) Flush(t int64) {
 	}
 
 	a.sqes = nil
-}
-
-func simpleCallback(completion *t_aio.Completion, err error) {
-}
-
-func createErrorCQE(errorMsg string, tags string, callback func(*t_aio.Completion, error)) *bus.CQE[t_aio.Submission, t_aio.Completion] {
-	errorCqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-		Error:    fmt.Errorf(errorMsg),
-		Metadata: metadata.New("dst error"),
-	}
-	errorCqe.Metadata.Tags.Set("aio", tags)
-	errorCqe.Callback = callback
-	return errorCqe
 }
 
 func (a *aioDST) String() string {
