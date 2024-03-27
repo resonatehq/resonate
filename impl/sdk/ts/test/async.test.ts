@@ -5,7 +5,7 @@ import * as utils from "../lib/core/utils";
 
 jest.setTimeout(10000);
 
-describe("Async functions", () => {
+describe("Functions: async", () => {
   async function run(ctx: Context, func: any) {
     return await ctx.run(func);
   }

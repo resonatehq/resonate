@@ -4,7 +4,7 @@ import * as generator from "../lib/generator";
 
 jest.setTimeout(10000);
 
-describe("Versioning", () => {
+describe("Functions: versions", () => {
   const a = new async.Resonate();
   a.register("test", (ctx: async.Context) => ({ v: "v1", c: ctx.version }));
   a.register("test", 2, (ctx: async.Context) => ({ v: "v2", c: ctx.version }));

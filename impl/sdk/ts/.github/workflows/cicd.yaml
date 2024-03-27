@@ -13,45 +13,82 @@ permissions:
   id-token: write
 
 jobs:
-  cicd:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - name: Install dependencies
-        run: npm install
-      - name: Run linter
-        run: npm run lint
-      - name: Run prettier
-        run: npm run prettier
+
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
           go-version: 1.21
-      - name: Clone the repository
-        run: git clone https://github.com/resonatehq/resonate.git
-      - name: Build the Go project
+
+      - name: Checkout resonate-sdk-ts repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run prettier
+        run: npm run prettier
+
+      - name: Checkout resonate repository
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate
+          path: resonate
+
+      - name: Build resonate
         run: go build -o resonate
         working-directory: resonate
-      - name: Start the service
+
+      - name: Start resonate server
         run: ./resonate serve &
         working-directory: resonate
-      - name: Run tests with USE_DURABLE=false
+
+      - name: Run tests
         env:
-          USE_DURABLE: false
+          RESONATE_STORE_URL: http://localhost:8001
         run: npm test
-      - name: Run tests with USE_DURABLE=true
-        env:
-          USE_DURABLE: true
-        run: npm test
+
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v3
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Checkout resonate-sdk-ts repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
       - name: Build
         run: npm run build
+
+      - name: Publish
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # Use 0.0.0 so as to not conflict with a newer version
+          # Use the commit sha as a unique identifier
+          npm version 0.0.0-SNAPSHOT-$GITHUB_SHA --git-tag-version false
+
+          # Publish to the main tag
+          npm publish --provenance --access public --tag main

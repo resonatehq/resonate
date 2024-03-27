@@ -5,7 +5,7 @@ import { Resonate, Context } from "../lib/generator";
 
 jest.setTimeout(10000);
 
-describe("Generator functions", () => {
+describe("Functions: generator", () => {
   function* run(ctx: Context, func: any): Generator<any> {
     return yield ctx.run(func);
   }

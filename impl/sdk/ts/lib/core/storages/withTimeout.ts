@@ -1,8 +1,9 @@
 import { DurablePromise, TimedoutPromise, isPendingPromise } from "../promises/types";
 import { IStorage } from "../storage";
+import { MemoryStorage } from "./memory";
 
 export class WithTimeout implements IStorage<DurablePromise> {
-  constructor(private storage: IStorage<DurablePromise>) {}
+  constructor(private storage: IStorage<DurablePromise> = new MemoryStorage<DurablePromise>()) {}
 
   rmw<T extends DurablePromise | undefined>(id: string, func: (item: DurablePromise | undefined) => T): Promise<T> {
     return this.storage.rmw(id, (p) => func(p ? timeout(p) : undefined));

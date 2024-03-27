@@ -1,100 +1,67 @@
-name: Resonate SDK TypeScript Release Workflow
+name: Release
 
 on:
-  push:
-    branches:
-      - "release-*"
-  workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  id-token: write
 
 jobs:
-  bump-version:
+  publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      version: ${{ steps.get_version.outputs.version }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Get version from package.json
-        id: get_version
-        run: |
-          echo "::set-output name=version::$(node -e 'console.log(require("./package.json").version)')"
-      - name: Verify version
-        run: |
-          echo "Version from package.json: ${{ steps.get_version.outputs.version }}"
-
-  # Create a tag if it does not exist
-  create-tag:
-    needs: [bump-version]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: rickstaa/action-create-tag@v1
-        id: "tag_create"
-        with:
-          tag: v${{ needs.bump-version.outputs.version }}
-          tag_exists_error: false
-          message: "${{ needs.bump-version.outputs.version }} release"
-
-  publish-github-release:
-    needs: [bump-version, create-tag]
-    runs-on: ubuntu-latest
-    permissions: # The permissions needed to create a release
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Test
-        run: cat RELEASE.md # Test that the file exists
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: RELEASE.md
-          name: Resonate v${{ needs.bump-version.outputs.version }}
-          tag_name: v${{ needs.bump-version.outputs.version }}
-          generate_release_notes: true
-          make_latest: true
-
-  publish-npm-package:
-    needs: [bump-version, create-tag]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
       - name: Set up Node
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
-      - name: Install npm package dependencies
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches package.json version
+        run: |
+          RELEASE_VERSION=${{ github.ref_name }}
+          PACKAGE_VERSION=$(npm pkg get version | sed 's/"//g')
+
+          if [ "$RELEASE_VERSION" != "v$PACKAGE_VERSION" ]; then
+            echo "Error: GitHub release tag ($RELEASE_VERSION) does not match package.json version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+      - name: Install dependencies
         run: npm install
-      - name: Build npm package
+
+      - name: Build
         run: npm run build
-      - name: Publish npm package
+
+      - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm publish --provenance --access public --tag latest
 
-  # verify-npm-package:
-  #   needs: [bump-version, publish-npm-package]
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Node
-  #       uses: actions/setup-node@v2
-  #       with:
-  #         node-version: "20"
-  #         registry-url: "https://registry.npmjs.org"
-  #     - name: Install Resonate SDK and run tests
-  #       run: |
-  #         npm install --save @resonatehq/sdk ts-node@latest
-  #         node --no-warnings=ExperimentalWarning --loader ts-node/esm helloworld_release.ts
-  #       working-directory: .github/workflows/hello_world
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install ts-node
+        run: npm install -g ts-node
+
+      - name: Verify package
+        run: |
+          npm install @resonatehq/sdk@latest
+          ts-node app.ts
+        working-directory: examples/async

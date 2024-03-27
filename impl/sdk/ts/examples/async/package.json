@@ -1,0 +1,18 @@
+{
+  "name": "resonate-example-async",
+  "version": "1.0.0",
+  "description": "Resonate async example",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Resonate Developers",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@resonatehq/sdk": "file:../.."
+  }
+}
