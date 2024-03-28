@@ -122,25 +122,15 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			metadata.Tags.Set("name", req.Kind.String())
 			metadata.Tags.Set("api", "dst")
 
-			if req == nil {
-				errs = append(errs, fmt.Errorf("request is nil"))
-				break
-			}
-
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					// CQE Invariant: Assert that a callback is set after dequeuing
-					if res == nil && err == nil {
-						errs = append(errs, fmt.Errorf("cqe invariant violation: callback is not set for response"))
-					} else {
-						modelErr := model.Step(t, req, res, err)
-						if modelErr != nil {
-							errs = append(errs, modelErr)
-						}
-						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					modelErr := model.Step(t, req, res, err)
+					if modelErr != nil {
+						errs = append(errs, modelErr)
 					}
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, t), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 

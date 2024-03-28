@@ -98,9 +98,7 @@ func (a *aioDST) Flush(t int64) {
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
 				for i := range processedCQEs {
-					if a.r.Float64() < a.failureProbability && processedCQEs[i].Error == nil {
-						processedCQEs[i].Error = fmt.Errorf("aio dst: failure, after processing")
-					}
+					processedCQEs[i].Error = fmt.Errorf("aio dst: failure, after processing")
 				}
 				a.cqes = append(a.cqes, processedCQEs...)
 			} else {

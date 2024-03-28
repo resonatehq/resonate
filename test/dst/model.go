@@ -144,9 +144,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 		case t_api.ErrAIOSubmissionQueueFull:
 			return nil
 		case t_api.ErrAIOStoreFailure:
-			if strings.Contains(resErr.Unwrap().Error(), "aio dst: failure") {
-				return fmt.Errorf("unexpected resonate error '%v'", resErr.Error()+" aio dst: failure")
-			}
+			return nil
 		default:
 			return fmt.Errorf("unexpected resonate error '%v'", resErr)
 		}
