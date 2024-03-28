@@ -73,10 +73,14 @@ export class Invocation<T> {
 
   split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
     const opts = args[args.length - 1];
-    const parentOpts = this.parent?.opts ?? this.root.opts;
+
+    // defaults are specified on the root invocation
+    // this means that overrides only apply to the current invocation
+    // and do no propagate to children
+    const defaults = this.root.opts;
 
     return isPartialOptions(opts)
-      ? { args: args.slice(0, -1), opts: { ...parentOpts, ...opts, tags: { ...parentOpts.tags, ...opts.tags } } }
-      : { args, opts: parentOpts };
+      ? { args: args.slice(0, -1), opts: { ...defaults, ...opts, tags: { ...defaults.tags, ...opts.tags } } }
+      : { args, opts: defaults };
   }
 }

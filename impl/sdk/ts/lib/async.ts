@@ -2,7 +2,6 @@ import { Execution, OrdinaryExecution, DeferredExecution } from "./core/executio
 import { ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
-import { Retry } from "./core/retries/retry";
 import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
 
@@ -10,9 +9,7 @@ import { ResonateBase } from "./resonate";
 // Types
 /////////////////////////////////////////////////////////////////////
 
-export type AFunc = (ctx: Context, ...args: any[]) => any;
-
-export type IFunc = (info: Info, ...args: any[]) => any;
+export type Func = (ctx: Context, ...args: any[]) => any;
 
 export type Params<F> = F extends (ctx: any, ...args: infer P) => any ? P : never;
 
@@ -45,7 +42,7 @@ export class Resonate extends ResonateBase {
    * @param opts Resonate options, can be constructed by calling {@link options}.
    * @returns Resonate function
    */
-  register<F extends AFunc>(
+  register<F extends Func>(
     name: string,
     func: F,
     opts?: Partial<Options>,
@@ -61,13 +58,13 @@ export class Resonate extends ResonateBase {
    * @param opts Resonate options, can be constructed by calling {@link options}.
    * @returns Resonate function
    */
-  register<F extends AFunc>(
+  register<F extends Func>(
     name: string,
     version: number,
     func: F,
     opts?: Partial<Options>,
   ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
-  register<F extends AFunc>(
+  register<F extends Func>(
     name: string,
     funcOrVersion: F | number,
     funcOrOpts: F | Partial<Options>,
@@ -83,11 +80,11 @@ export class Resonate extends ResonateBase {
    * @param opts Resonate options, can be constructed by calling {@link options}.
    * @returns Resonate function
    */
-  registerModule<F extends AFunc>(module: Record<string, F>, opts: Partial<Options> = {}) {
+  registerModule<F extends Func>(module: Record<string, F>, opts: Partial<Options> = {}) {
     super.registerModule(module, opts);
   }
 
-  protected execute<F extends AFunc>(
+  protected execute<F extends Func>(
     name: string,
     version: number,
     id: string,
@@ -103,7 +100,7 @@ export class Resonate extends ResonateBase {
 // Context
 /////////////////////////////////////////////////////////////////////
 
-export class Info {
+export class Context {
   constructor(private invocation: Invocation<any>) {}
 
   /**
@@ -112,38 +109,6 @@ export class Info {
   get attempt() {
     return this.invocation.attempt;
   }
-
-  /**
-   * Uniquely identifies the function invocation.
-   */
-  get id() {
-    return this.invocation.id;
-  }
-
-  /**
-   * Deduplicates function invocations with the same id.
-   */
-  get idempotencyKey() {
-    return this.invocation.idempotencyKey;
-  }
-
-  /**
-   * The timestamp in ms, once this time elapses the function invocation will timeout.
-   */
-  get timeout() {
-    return this.invocation.timeout;
-  }
-
-  /**
-   * The resonate function version.
-   */
-  get version() {
-    return this.invocation.version;
-  }
-}
-
-export class Context {
-  constructor(private invocation: Invocation<any>) {}
 
   /**
    * The running count of child function invocations.
@@ -188,7 +153,7 @@ export class Context {
    * @param args The function arguments, optionally followed by {@link options}.
    * @returns A promise that resolves to the return value of the function.
    */
-  run<F extends AFunc>(func: F, ...args: [...Params<F>, PartialOptions?]): ResonatePromise<Return<F>>;
+  run<F extends Func>(func: F, ...args: [...Params<F>, PartialOptions?]): ResonatePromise<Return<F>>;
 
   /**
    * Invoke a remote function.
@@ -243,45 +208,11 @@ export class Context {
       // this execution will be fulfilled out-of-process
       execution = new DeferredExecution(invocation);
     } else {
-      // create an ordinary execution// human readable name of the function
+      // create an ordinary execution
       // this execution wraps a user-provided function
       const ctx = new Context(invocation);
-      execution = new OrdinaryExecution(invocation, () => func(ctx, ...args), Retry.never());
+      execution = new OrdinaryExecution(invocation, () => func(ctx, ...args));
     }
-
-    // bump the counter
-    parent.counter++;
-
-    // return a resonate promise
-    return execution.execute();
-  }
-
-  /**
-   * Invoke an io function.
-   *
-   * @template F The type of the function.
-   * @param func The function to invoke.
-   * @param args The function arguments, optionally followed by {@link options}.
-   * @returns A promise that resolves to the return value of the function.
-   */
-  io<F extends IFunc>(func: F, ...args: [...Params<F>, PartialOptions?]): ResonatePromise<Return<F>>;
-  io(func: (...args: any[]) => any, ...argsWithOpts: any[]): ResonatePromise<any> {
-    const parent = this.invocation;
-
-    const id = `${parent.id}.${parent.counter}`;
-    const idempotencyKey = utils.hash(id);
-    const { args, opts } = this.invocation.split(argsWithOpts);
-
-    const name = func.name;
-    const version = parent.version;
-
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, undefined, opts, parent);
-
-    // create an ordinary execution
-    // this execution wraps a user-provided io function
-    // unlike run, an io function can not create child invocations
-    const info = new Info(invocation);
-    const execution = new OrdinaryExecution(invocation, () => func(info, ...args));
 
     // bump the counter
     parent.counter++;
@@ -308,7 +239,7 @@ export class Context {
 class Scheduler {
   private cache: Record<string, Execution<any>> = {};
 
-  add<F extends AFunc>(
+  add<F extends Func>(
     name: string,
     version: number,
     id: string,

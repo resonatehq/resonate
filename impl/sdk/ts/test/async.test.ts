@@ -10,10 +10,6 @@ describe("Functions: async", () => {
     return await ctx.run(func);
   }
 
-  async function io(ctx: Context, func: any) {
-    return await ctx.io(func);
-  }
-
   function ordinarySuccess() {
     return "foo";
   }
@@ -45,7 +41,6 @@ describe("Functions: async", () => {
     });
 
     resonate.register("run", run);
-    resonate.register("io", io);
     resonate.register("success", ordinarySuccess);
     resonate.register("successAsync", ordinarySuccessAsync);
 
@@ -60,11 +55,9 @@ describe("Functions: async", () => {
       await ordinarySuccessAsync(),
       await resonate.run("run", "run.a", ordinarySuccess),
       await resonate.run("run", "run.b", ordinarySuccessAsync),
-      await resonate.run("io", "run.c", ordinarySuccess),
-      await resonate.run("io", "run.d", ordinarySuccessAsync),
-      await resonate.run("run", "run.e", deferredSuccess),
-      await resonate.run("success", "run.f"),
-      await resonate.run("successAsync", "run.g"),
+      await resonate.run("run", "run.c", deferredSuccess),
+      await resonate.run("success", "run.d"),
+      await resonate.run("successAsync", "run.e"),
     ];
 
     expect(results.every((r) => r === "foo")).toBe(true);
@@ -77,7 +70,6 @@ describe("Functions: async", () => {
     });
 
     resonate.register("run", run);
-    resonate.register("io", io);
     resonate.register("failure", ordinaryFailure);
     resonate.register("failureAsync", ordinaryFailureAsync);
 
@@ -91,11 +83,9 @@ describe("Functions: async", () => {
       () => ordinaryFailureAsync(),
       () => resonate.run("run", "run.a", ordinaryFailure),
       () => resonate.run("run", "run.b", ordinaryFailureAsync),
-      () => resonate.run("io", "run.c", ordinaryFailure),
-      () => resonate.run("io", "run.d", ordinaryFailureAsync),
-      () => resonate.run("run", "run.e", deferredFailure),
-      () => resonate.run("failure", "run.f"),
-      () => resonate.run("failureAsync", "run.g"),
+      () => resonate.run("run", "run.c", deferredFailure),
+      () => resonate.run("failure", "run.d"),
+      () => resonate.run("failureAsync", "run.e"),
     ];
 
     for (const f of functions) {
