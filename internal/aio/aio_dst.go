@@ -1,6 +1,7 @@
 package aio
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
@@ -98,7 +99,7 @@ func (a *aioDST) Flush(t int64) {
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
 				for i := range processedCQEs {
-					processedCQEs[i].Error = fmt.Errorf("aio dst: failure, after processing")
+					processedCQEs[i].Error = errors.New("aio dst: failure, after processing")
 				}
 				a.cqes = append(a.cqes, processedCQEs...)
 			} else {
@@ -109,7 +110,7 @@ func (a *aioDST) Flush(t int64) {
 						Metadata:   sqes.Value[i].Metadata,
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
-						Error:      fmt.Errorf("aio dst: failure, no processing"),
+						Error:      errors.New("aio dst: failure, before processing"),
 					}
 				}
 				a.cqes = append(a.cqes, res...)
