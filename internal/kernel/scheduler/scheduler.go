@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type S interface {
@@ -54,6 +55,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 
 	// dequeue cqes
 	for _, cqe := range s.aio.Dequeue(batchSize) {
+		util.Assert(cqe.Callback != nil, "cqe is nil")
 		cqe.Callback(cqe.Completion, cqe.Error)
 	}
 
@@ -70,7 +72,7 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 			metadata := coroutine.metadata
 			metadata.Tags.Set("aio", submission.Kind.String())
 
-			s.aio.Enqueue(&bus.SQE[t_aio.Submission, t_aio.Completion]{
+			sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
 				Metadata:   metadata,
 				Submission: submission,
 				Callback: func(completion *t_aio.Completion, err error) {
@@ -88,7 +90,11 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 						}
 					}
 				},
-			})
+			}
+
+			util.Assert(sqe.Callback != nil, "sqe is nil")
+			s.aio.Enqueue(sqe)
+
 		} else {
 			slog.Debug("scheduler:rmv", "coroutine", coroutine)
 			s.metrics.CoroutinesInFlight.WithLabelValues(coroutine.metadata.Tags.Get("name")).Dec()

@@ -143,6 +143,8 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 			return nil
 		case t_api.ErrAIOSubmissionQueueFull:
 			return nil
+		case t_api.ErrAIOStoreFailure:
+			return nil
 		default:
 			return fmt.Errorf("unexpected resonate error '%v'", resErr)
 		}
