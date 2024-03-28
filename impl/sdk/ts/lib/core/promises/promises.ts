@@ -4,7 +4,7 @@ import { IPromiseStore } from "../store";
 import { PendingPromise, ResolvedPromise, RejectedPromise, CanceledPromise, TimedoutPromise } from "./types";
 
 export type CreateOptions = {
-  idempotencyKey: string;
+  idempotencyKey: string | undefined;
   headers: Record<string, string>;
   param: unknown;
   tags: Record<string, string>;
@@ -13,7 +13,7 @@ export type CreateOptions = {
 };
 
 export type CompleteOptions = {
-  idempotencyKey: string;
+  idempotencyKey: string | undefined;
   headers: Record<string, string>;
   strict: boolean;
 };

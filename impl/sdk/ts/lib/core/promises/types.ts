@@ -98,17 +98,13 @@ export type TimedoutPromise = {
 // Type guards
 
 export function isDurablePromise(p: unknown): p is DurablePromise {
-  if (
+  return (
     p !== null &&
     typeof p === "object" &&
     "state" in p &&
     typeof p.state === "string" &&
     ["PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes(p.state)
-  ) {
-    return true;
-  }
-
-  return false;
+  );
 }
 
 export function isPendingPromise(p: unknown): p is PendingPromise {

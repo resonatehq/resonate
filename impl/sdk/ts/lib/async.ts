@@ -2,6 +2,7 @@ import { Execution, OrdinaryExecution, DeferredExecution } from "./core/executio
 import { ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
+import * as schedules from "./core/schedules/schedules";
 import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
 
@@ -84,15 +85,42 @@ export class Resonate extends ResonateBase {
     super.registerModule(module, opts);
   }
 
+  /**
+   * Schedule a resonate function.
+   *
+   * @param name The schedule name.
+   * @param cron The schedule cron expression.
+   * @param func The function to schedule.
+   * @param args The function arguments.
+   * @returns The schedule object.
+   */
+  schedule<F extends Func>(name: string, cron: string, func: F, ...args: Params<F>): Promise<schedules.Schedule>;
+
+  /**
+   * Schedule a resonate function that is already registered.
+   *
+   * @param name The schedule name.
+   * @param cron The schedule cron expression.
+   * @param func The registered function name.
+   * @param version The registered function version.
+   * @param args The function arguments.
+   * @returns The schedule object.
+   */
+  schedule(name: string, cron: string, func: string, version?: number, ...args: any[]): Promise<schedules.Schedule>;
+  schedule(name: string, cron: string, func: Func | string, ...args: any[]): Promise<schedules.Schedule> {
+    return super.schedule(name, cron, func, typeof func === "string" ? args.shift() : undefined, ...args);
+  }
+
   protected execute<F extends Func>(
     name: string,
     version: number,
     id: string,
+    idempotencyKey: string | undefined,
     func: F,
     args: Params<F>,
     opts: Options,
   ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, version, id, func, args, opts);
+    return this.scheduler.add(name, version, id, idempotencyKey, func, args, opts);
   }
 }
 
@@ -243,6 +271,7 @@ class Scheduler {
     name: string,
     version: number,
     id: string,
+    idempotencyKey: string | undefined,
     func: F,
     args: Params<F>,
     opts: Options,
@@ -253,9 +282,6 @@ class Scheduler {
       // execute is idempotent
       return this.cache[id].execute();
     }
-
-    // the idempotency key is a hash of the id
-    const idempotencyKey = utils.hash(id);
 
     // params, used for recovery
     const param = {

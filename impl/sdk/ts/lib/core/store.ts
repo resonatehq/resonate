@@ -110,7 +110,9 @@ export interface IPromiseStore {
    * Search for promises.
    *
    * @param id Ids to match, can include wildcards.
+   * @param state State to match.
    * @param tags Tags to match.
+   * @param limit Maximum number of promises to return.
    * @returns A list of Durable Promises.
    */
   search(

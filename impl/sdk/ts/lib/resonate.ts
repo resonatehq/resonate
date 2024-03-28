@@ -4,9 +4,10 @@ import { ResonatePromise } from "./core/future";
 import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { ResonateOptions, Options } from "./core/options";
-import { DurablePromise, CreateOptions, CompleteOptions } from "./core/promises/promises";
+import * as promises from "./core/promises/promises";
 import { Retry } from "./core/retries/retry";
 import { IRetry } from "./core/retry";
+import * as schedules from "./core/schedules/schedules";
 import { IStore } from "./core/store";
 import { LocalStore } from "./core/stores/local";
 import { RemoteStore } from "./core/stores/remote";
@@ -24,6 +25,9 @@ type Func = (...args: any[]) => any;
 
 export abstract class ResonateBase {
   private readonly functions: Record<string, Record<number, { version: number; func: Func; opts: Options }>> = {};
+
+  public readonly promises: ResonatePromises;
+  public readonly schedules: ResonateSchedules;
 
   public readonly pid: string;
   public readonly timeout: number;
@@ -60,12 +64,57 @@ export abstract class ResonateBase {
     } else {
       this.store = new LocalStore(this.logger);
     }
+
+    // promises
+    this.promises = {
+      create: <T>(id: string, timeout: number, opts: Partial<promises.CreateOptions> = {}) =>
+        promises.DurablePromise.create<T>(this.store.promises, this.encoder, id, timeout, opts),
+
+      resolve: <T>(id: string, value: T, opts: Partial<promises.CompleteOptions> = {}) =>
+        promises.DurablePromise.resolve<T>(this.store.promises, this.encoder, id, value, opts),
+
+      reject: <T>(id: string, error: any, opts: Partial<promises.CompleteOptions> = {}) =>
+        promises.DurablePromise.reject<T>(this.store.promises, this.encoder, id, error, opts),
+
+      cancel: <T>(id: string, error: any, opts: Partial<promises.CompleteOptions> = {}) =>
+        promises.DurablePromise.cancel<T>(this.store.promises, this.encoder, id, error, opts),
+
+      get: <T>(id: string) => promises.DurablePromise.get<T>(this.store.promises, this.encoder, id),
+
+      search: (id: string, state?: string, tags?: Record<string, string>, limit?: number) =>
+        promises.DurablePromise.search(this.store.promises, this.encoder, id, state, tags, limit),
+    };
+
+    // schedules
+    this.schedules = {
+      create: (
+        id: string,
+        cron: string,
+        promiseId: string,
+        promiseTimeout: number,
+        opts: Partial<schedules.Options> = {},
+      ) => schedules.Schedule.create(this.store.schedules, this.encoder, id, cron, promiseId, promiseTimeout, opts),
+
+      get: (id: string) => schedules.Schedule.get(this.store.schedules, this.encoder, id),
+      search: (id: string, tags?: Record<string, string>, limit?: number) =>
+        schedules.Schedule.search(this.store.schedules, this.encoder, id, tags, limit),
+    };
   }
+
+  protected abstract execute(
+    name: string,
+    version: number,
+    id: string,
+    idempotencyKey: string | undefined,
+    func: Func,
+    args: any[],
+    opts: Options,
+  ): ResonatePromise<any>;
 
   register(
     name: string,
     funcOrVersion: Func | number,
-    funcOrOpts: Func | Partial<Options>,
+    funcOrOpts?: Func | Partial<Options>,
   ): (id: string, ...args: any) => ResonatePromise<any> {
     const version = typeof funcOrVersion === "number" ? funcOrVersion : 1;
     const func =
@@ -128,25 +177,18 @@ export abstract class ResonateBase {
    */
   run<T>(name: string, version: number, id: string, ...args: any[]): ResonatePromise<T>;
   run<T>(name: string, idOrVersion: string | number, ...args: any[]): ResonatePromise<T> {
-    const id = typeof idOrVersion === "string" ? idOrVersion : args.shift();
     const v = typeof idOrVersion === "number" ? idOrVersion : 0;
+
+    const id = typeof idOrVersion === "string" ? idOrVersion : args.shift();
+    const idempotencyKey = utils.hash(id);
 
     if (!this.functions[name] || !this.functions[name][v]) {
       throw new Error(`Function ${name} version ${v} not registered`);
     }
 
     const { version, func, opts } = this.functions[name][v];
-    return this.execute(name, version, id, func, args, opts);
+    return this.execute(name, version, id, idempotencyKey, func, args, opts);
   }
-
-  protected abstract execute(
-    name: string,
-    version: number,
-    id: string,
-    func: Func,
-    args: any[],
-    opts: Options,
-  ): ResonatePromise<any>;
 
   /**
    * Start the resonate service.
@@ -166,9 +208,9 @@ export abstract class ResonateBase {
   }
 
   private async _start() {
-    for await (const promises of this.promises.search("*", "pending", { "resonate:invocation": "true" })) {
-      for (const promise of promises) {
-        try {
+    try {
+      for await (const promises of this.promises.search("*", "pending", { "resonate:invocation": "true" })) {
+        for (const promise of promises) {
           const param = promise.param();
           if (
             param &&
@@ -180,34 +222,57 @@ export abstract class ResonateBase {
             "args" in param &&
             Array.isArray(param.args)
           ) {
-            this.run(param.func, param.version, promise.id, param.args);
+            const { func, opts } = this.functions[param.func][param.version];
+            this.execute(
+              param.func,
+              param.version,
+              promise.id,
+              promise.idempotencyKeyForCreate,
+              func,
+              param.args,
+              opts,
+            );
           }
-        } catch (e) {
-          this.logger.warn(e);
         }
       }
+    } catch (e) {
+      // squash all errors and log,
+      // transient errors will be ironed out in the next interval
+      this.logger.error(e);
     }
   }
 
-  get promises() {
-    return {
-      create: <T>(id: string, timeout: number, opts: Partial<CreateOptions> = {}) =>
-        DurablePromise.create<T>(this.store.promises, this.encoder, id, timeout, opts),
+  schedule(
+    name: string,
+    cron: string,
+    func: Func | string,
+    version: number = 1,
+    ...args: any[]
+  ): Promise<schedules.Schedule> {
+    if (typeof func === "function") {
+      this.register(name, version, func);
+    }
 
-      resolve: <T>(id: string, value: T, opts: Partial<CompleteOptions> = {}) =>
-        DurablePromise.resolve<T>(this.store.promises, this.encoder, id, value, opts),
+    const funcName = typeof func === "string" ? func : name;
 
-      reject: <T>(id: string, error: any, opts: Partial<CompleteOptions> = {}) =>
-        DurablePromise.reject<T>(this.store.promises, this.encoder, id, error, opts),
+    if (!this.functions[funcName] || !this.functions[funcName][version]) {
+      throw new Error(`Function ${funcName} version ${version} not registered`);
+    }
 
-      cancel: <T>(id: string, error: any, opts: Partial<CompleteOptions> = {}) =>
-        DurablePromise.cancel<T>(this.store.promises, this.encoder, id, error, opts),
+    const { opts } = this.functions[funcName][version];
 
-      get: <T>(id: string) => DurablePromise.get<T>(this.store.promises, this.encoder, id),
+    const idempotencyKey = utils.hash(funcName);
 
-      search: (id: string, state?: string, tags?: Record<string, string>, limit?: number) =>
-        DurablePromise.search(this.store.promises, this.encoder, id, state, tags, limit),
+    const promiseParam = {
+      func: funcName,
+      version,
+      args,
     };
+
+    return this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", opts.timeout, {
+      idempotencyKey,
+      promiseParam,
+    });
   }
 
   /**
@@ -237,4 +302,117 @@ export abstract class ResonateBase {
       timeout,
     };
   }
+}
+
+export interface ResonatePromises {
+  /**
+   * Create a durable promise.
+   *
+   * @template T The type of the promise.
+   * @param id Unique identifier for the promise.
+   * @param timeout Time (in milliseconds) after which the promise is considered expired.
+   * @param opts Additional options.
+   * @returns A durable promise.
+   */
+  create<T>(id: string, timeout: number, opts?: Partial<promises.CreateOptions>): Promise<promises.DurablePromise<T>>;
+
+  /**
+   * Resolve a durable promise.
+   *
+   * @template T The type of the promise.
+   * @param id Unique identifier for the promise.
+   * @param value The resolved value.
+   * @param opts Additional options.
+   * @returns A durable promise.
+   */
+  resolve<T>(id: string, value: T, opts?: Partial<promises.CompleteOptions>): Promise<promises.DurablePromise<T>>;
+
+  /**
+   * Reject a durable promise.
+   *
+   * @template T The type of the promise.
+   * @param id Unique identifier for the promise.
+   * @param error The reject value.
+   * @param opts Additional options.
+   * @returns A durable promise.
+   */
+  reject<T>(id: string, error: any, opts?: Partial<promises.CompleteOptions>): Promise<promises.DurablePromise<T>>;
+
+  /**
+   * Cancel a durable promise.
+   *
+   * @template T The type of the promise.
+   * @param id Unique identifier for the promise.
+   * @param error The cancel value.
+   * @param opts Additional options.
+   * @returns A durable promise.
+   */
+  cancel<T>(id: string, error: any, opts?: Partial<promises.CompleteOptions>): Promise<promises.DurablePromise<T>>;
+
+  /**
+   * Get a durable promise.
+   *
+   * @template T The type of the promise.
+   * @param id Id of the promise.
+   * @returns A durable promise.
+   */
+  get<T>(id: string): Promise<promises.DurablePromise<T>>;
+
+  /**
+   * Search durable promises.
+   *
+   * @param id Ids to match, can include wildcards.
+   * @param state State to match.
+   * @param tags Tags to match.
+   * @param limit Maximum number of promises to return.
+   * @returns A generator that yields durable promises.
+   */
+  search(
+    id: string,
+    state?: string,
+    tags?: Record<string, string>,
+    limit?: number,
+  ): AsyncGenerator<promises.DurablePromise<any>[]>;
+}
+
+export interface ResonateSchedules {
+  /**
+   * Create a new schedule.
+   *
+   * @param id Unique identifier for the schedule.
+   * @param cron CRON expression defining the schedule's execution time.
+   * @param promiseId Unique identifier for the associated promise.
+   * @param promiseTimeout Timeout for the associated promise in milliseconds.
+   * @param opts Additional options.
+   * @returns A schedule.
+   */
+  create(
+    id: string,
+    cron: string,
+    promiseId: string,
+    promiseTimeout: number,
+    opts?: Partial<schedules.Options>,
+  ): Promise<schedules.Schedule>;
+
+  /**
+   * Get a schedule.
+   *
+   * @param id Id of the schedule.
+   * @returns A schedule.
+   */
+  get(id: string): Promise<schedules.Schedule>;
+
+  /**
+   * Search for schedules.
+   *
+   * @param id Ids to match, can include wildcards.
+   * @param tags Tags to match.
+   * @param limit Maximum number of schedules to return.
+   * @returns A generator that yields schedules.
+   */
+  search(
+    id: string,
+    tags: Record<string, string> | undefined,
+    limit?: number,
+  ): AsyncGenerator<schedules.Schedule[], void>;
 }
