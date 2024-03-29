@@ -1,5 +1,5 @@
 import { Future } from "./future";
-import { Options, PartialOptions, isPartialOptions } from "./options";
+import { Options, PartialOptions, isOptions } from "./options";
 
 /////////////////////////////////////////////////////////////////////
 // Invocation
@@ -34,7 +34,6 @@ export class Invocation<T> {
    */
   constructor(
     public readonly name: string,
-    public readonly version: number,
     public readonly id: string,
     public readonly idempotencyKey: string | undefined,
     public readonly headers: Record<string, string> | undefined,
@@ -79,7 +78,7 @@ export class Invocation<T> {
     // and do no propagate to children
     const defaults = this.root.opts;
 
-    return isPartialOptions(opts)
+    return isOptions(opts)
       ? { args: args.slice(0, -1), opts: { ...defaults, ...opts, tags: { ...defaults.tags, ...opts.tags } } }
       : { args, opts: defaults };
   }

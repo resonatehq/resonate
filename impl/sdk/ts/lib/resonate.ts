@@ -3,7 +3,7 @@ import { JSONEncoder } from "./core/encoders/json";
 import { ResonatePromise } from "./core/future";
 import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
-import { ResonateOptions, Options } from "./core/options";
+import { ResonateOptions, Options, PartialOptions, isOptions } from "./core/options";
 import * as promises from "./core/promises/promises";
 import { Retry } from "./core/retries/retry";
 import { IRetry } from "./core/retry";
@@ -24,12 +24,13 @@ type Func = (...args: any[]) => any;
 /////////////////////////////////////////////////////////////////////
 
 export abstract class ResonateBase {
-  private readonly functions: Record<string, Record<number, { version: number; func: Func; opts: Options }>> = {};
+  private readonly functions: Record<string, Record<number, { func: Func; opts: Options }>> = {};
 
   public readonly promises: ResonatePromises;
   public readonly schedules: ResonateSchedules;
 
   public readonly pid: string;
+  public readonly poll: number;
   public readonly timeout: number;
   public readonly tags: Record<string, string>;
 
@@ -44,6 +45,7 @@ export abstract class ResonateBase {
     encoder = new JSONEncoder(),
     logger = new Logger(),
     pid = utils.randomId(),
+    poll = 5000, // 5s
     retry = Retry.exponential(),
     store = undefined,
     tags = {},
@@ -53,6 +55,7 @@ export abstract class ResonateBase {
     this.encoder = encoder;
     this.logger = logger;
     this.pid = pid;
+    this.poll = poll;
     this.retry = retry;
     this.tags = tags;
     this.timeout = timeout;
@@ -103,7 +106,6 @@ export abstract class ResonateBase {
 
   protected abstract execute(
     name: string,
-    version: number,
     id: string,
     idempotencyKey: string | undefined,
     func: Func,
@@ -111,21 +113,14 @@ export abstract class ResonateBase {
     opts: Options,
   ): ResonatePromise<any>;
 
-  register(
-    name: string,
-    funcOrVersion: Func | number,
-    funcOrOpts?: Func | Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<any> {
-    const version = typeof funcOrVersion === "number" ? funcOrVersion : 1;
-    const func =
-      typeof funcOrVersion === "function" ? funcOrVersion : typeof funcOrOpts === "function" ? funcOrOpts : null;
-    const opts = typeof funcOrOpts === "object" ? this.options(funcOrOpts) : this.options({});
+  register(name: string, func: Func, opts: Partial<Options> = {}): (id: string, ...args: any) => ResonatePromise<any> {
+    // set default version
+    opts.version = opts.version ?? 1;
 
-    if (!func) {
-      throw new Error("Must provide value for func");
-    }
+    // set default options
+    const options = this.options(opts);
 
-    if (version <= 0) {
+    if (options.version <= 0) {
       throw new Error("Version must be greater than 0");
     }
 
@@ -133,19 +128,19 @@ export abstract class ResonateBase {
       this.functions[name] = {};
     }
 
-    if (this.functions[name][version]) {
-      throw new Error(`Function ${name} version ${version} already registered`);
+    if (this.functions[name][options.version]) {
+      throw new Error(`Function ${name} version ${options.version} already registered`);
     }
 
     // register as latest (0) if version is greatest so far
-    if (version > Math.max(...Object.values(this.functions[name]).map((f) => f.version))) {
-      this.functions[name][0] = { version, func, opts };
+    if (options.version > Math.max(...Object.values(this.functions[name]).map((f) => f.opts.version))) {
+      this.functions[name][0] = { func, opts: options };
     }
 
     // register specific version
-    this.functions[name][version] = { version, func, opts };
+    this.functions[name][options.version] = { func, opts: options };
 
-    return (id: string, ...args: any[]) => this.run(name, version, id, ...args);
+    return (id: string, ...args: any[]) => this.run(name, id, ...args, options);
   }
 
   registerModule(module: Record<string, Func>, opts: Partial<Options> = {}) {
@@ -163,31 +158,86 @@ export abstract class ResonateBase {
    * @param args The function arguments.
    * @returns A promise that resolve to the function return value.
    */
-  run<T>(name: string, id: string, ...args: any[]): ResonatePromise<T>;
-
-  /**
-   * Run a Resonate function. Functions must first be registered with {@link register}.
-   *
-   * @template T The return type of the function.
-   * @param name The function name.
-   * @param version The function version.
-   * @param id A unique id for the function invocation.
-   * @param args The function arguments.
-   * @returns A promise that resolve to the function return value.
-   */
-  run<T>(name: string, version: number, id: string, ...args: any[]): ResonatePromise<T>;
-  run<T>(name: string, idOrVersion: string | number, ...args: any[]): ResonatePromise<T> {
-    const v = typeof idOrVersion === "number" ? idOrVersion : 0;
-
-    const id = typeof idOrVersion === "string" ? idOrVersion : args.shift();
+  run<T>(name: string, id: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T> {
+    const {
+      args,
+      opts: { version },
+    } = this.split(argsWithOpts);
     const idempotencyKey = utils.hash(id);
 
-    if (!this.functions[name] || !this.functions[name][v]) {
-      throw new Error(`Function ${name} version ${v} not registered`);
+    if (!this.functions[name] || !this.functions[name][version]) {
+      throw new Error(`Function ${name} version ${version} not registered`);
     }
 
-    const { version, func, opts } = this.functions[name][v];
-    return this.execute(name, version, id, idempotencyKey, func, args, opts);
+    const { func, opts } = this.functions[name][version];
+    return this.execute(name, id, idempotencyKey, func, args, opts);
+  }
+
+  schedule(
+    name: string,
+    cron: string,
+    func: Func | string,
+    ...argsWithOpts: [...any, PartialOptions?]
+  ): Promise<schedules.Schedule> {
+    const { args, opts } = this.split(argsWithOpts);
+
+    if (typeof func === "function") {
+      opts.version = opts.version || 1;
+      this.register(name, func, opts);
+    }
+
+    const funcName = typeof func === "string" ? func : name;
+
+    if (!this.functions[funcName] || !this.functions[funcName][opts.version]) {
+      throw new Error(`Function ${funcName} version ${opts.version} not registered`);
+    }
+
+    const {
+      opts: { timeout, version },
+    } = this.functions[funcName][opts.version];
+
+    const idempotencyKey = utils.hash(funcName);
+
+    const promiseParam = {
+      func: funcName,
+      version,
+      args,
+    };
+
+    return this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", timeout, {
+      idempotencyKey,
+      promiseParam,
+    });
+  }
+
+  /**
+   * Construct options.
+   *
+   * @param opts A partial {@link RegOptions} object.
+   * @returns Options with the __resonate flag set.
+   */
+  options({
+    encoder = this.encoder,
+    poll = this.poll,
+    retry = this.retry,
+    store = this.store,
+    tags = this.tags,
+    timeout = this.timeout,
+    version = 0,
+  }: Partial<Options>): Options {
+    // merge tags
+    tags = { ...this.tags, ...tags };
+
+    return {
+      __resonate: true,
+      encoder,
+      poll,
+      retry,
+      store,
+      tags,
+      timeout,
+      version,
+    };
   }
 
   /**
@@ -223,15 +273,8 @@ export abstract class ResonateBase {
             Array.isArray(param.args)
           ) {
             const { func, opts } = this.functions[param.func][param.version];
-            this.execute(
-              param.func,
-              param.version,
-              promise.id,
-              promise.idempotencyKeyForCreate,
-              func,
-              param.args,
-              opts,
-            );
+
+            this.execute(param.func, promise.id, promise.idempotencyKeyForCreate, func, param.args, opts);
           }
         }
       }
@@ -242,65 +285,12 @@ export abstract class ResonateBase {
     }
   }
 
-  schedule(
-    name: string,
-    cron: string,
-    func: Func | string,
-    version: number = 1,
-    ...args: any[]
-  ): Promise<schedules.Schedule> {
-    if (typeof func === "function") {
-      this.register(name, version, func);
-    }
+  private split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
+    const opts = args[args.length - 1];
 
-    const funcName = typeof func === "string" ? func : name;
+    const defaults = this.options({});
 
-    if (!this.functions[funcName] || !this.functions[funcName][version]) {
-      throw new Error(`Function ${funcName} version ${version} not registered`);
-    }
-
-    const { opts } = this.functions[funcName][version];
-
-    const idempotencyKey = utils.hash(funcName);
-
-    const promiseParam = {
-      func: funcName,
-      version,
-      args,
-    };
-
-    return this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", opts.timeout, {
-      idempotencyKey,
-      promiseParam,
-    });
-  }
-
-  /**
-   * Construct options.
-   *
-   * @param opts A partial {@link Options} object.
-   * @returns Options with the __resonate flag set.
-   */
-  options({
-    encoder = this.encoder,
-    poll = 5000, // every 5s
-    retry = this.retry,
-    store = this.store,
-    tags = {},
-    timeout = this.timeout,
-  }: Partial<Options>): Options {
-    // merge tags
-    tags = { ...this.tags, ...tags };
-
-    return {
-      __resonate: true,
-      encoder,
-      poll,
-      retry,
-      store,
-      tags,
-      timeout,
-    };
+    return isOptions(opts) ? { args: args.slice(0, -1), opts: this.options(opts) } : { args, opts: defaults };
   }
 }
 

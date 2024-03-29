@@ -88,30 +88,8 @@ export class Resonate extends ResonateBase {
     name: string,
     func: F,
     opts?: Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
-
-  /**
-   * Register a function with Resonate. Registered functions can be invoked by calling {@link run}, or by the returned function.
-   *
-   * @template F The type of the generator function.
-   * @param name A unique name to identify the function.
-   * @param version Version of the function.
-   * @param func The generator function to register with Resonate.
-   * @param opts Resonate options, can be constructed by calling {@link options}.
-   * @returns Resonate function
-   */
-  register<F extends GFunc>(
-    name: string,
-    version: number,
-    func: F,
-    opts?: Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
-  register<F extends GFunc>(
-    name: string,
-    funcOrVersion: F | number,
-    funcOrOpts: F | Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>> {
-    return super.register(name, funcOrVersion, funcOrOpts);
+  ): (id: string, ...args: Params<F>) => ResonatePromise<Return<F>> {
+    return super.register(name, func, opts);
   }
 
   /**
@@ -135,7 +113,12 @@ export class Resonate extends ResonateBase {
    * @param args The function arguments.
    * @returns The schedule object.
    */
-  schedule<F extends GFunc>(name: string, cron: string, func: F, ...args: Params<F>): Promise<schedules.Schedule>;
+  schedule<F extends GFunc>(
+    name: string,
+    cron: string,
+    func: F,
+    ...args: [...Params<F>, PartialOptions?]
+  ): Promise<schedules.Schedule>;
 
   /**
    * Schedule a resonate function that is already registered.
@@ -147,21 +130,20 @@ export class Resonate extends ResonateBase {
    * @param args The function arguments.
    * @returns The schedule object.
    */
-  schedule(name: string, cron: string, func: string, version?: number, ...args: any[]): Promise<schedules.Schedule>;
+  schedule(name: string, cron: string, func: string, ...args: [...any, PartialOptions?]): Promise<schedules.Schedule>;
   schedule(name: string, cron: string, func: GFunc | string, ...args: any[]): Promise<schedules.Schedule> {
-    return super.schedule(name, cron, func, typeof func === "string" ? args.shift() : undefined, ...args);
+    return super.schedule(name, cron, func, ...args);
   }
 
   protected execute<F extends GFunc>(
     name: string,
-    version: number,
     id: string,
     idempotencyKey: string | undefined,
     func: F,
     args: Params<F>,
     opts: Options,
   ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, version, id, idempotencyKey, func, args, opts);
+    return this.scheduler.add(name, id, idempotencyKey, func, args, opts);
   }
 }
 
@@ -204,7 +186,7 @@ export class Info {
    * The resonate function version.
    */
   get version() {
-    return this.invocation.version;
+    return this.invocation.root.opts.version;
   }
 }
 
@@ -243,7 +225,7 @@ export class Context {
    * The resonate function version.
    */
   get version() {
-    return this.invocation.version;
+    return this.invocation.root.opts.version;
   }
 
   /**
@@ -362,7 +344,6 @@ class Scheduler {
 
   add<F extends GFunc>(
     name: string,
-    version: number,
     id: string,
     idempotencyKey: string | undefined,
     func: F,
@@ -378,12 +359,12 @@ class Scheduler {
     // params, used for recovery
     const param = {
       func: name,
-      version,
+      version: opts.version,
       args,
     };
 
     // create a new invocation
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, opts);
+    const invocation = new Invocation(name, id, idempotencyKey, undefined, param, opts);
 
     // create a new execution
     const generator = func(new Context(invocation), ...args);
@@ -508,14 +489,11 @@ class Scheduler {
     // human readable name of the function
     const name = value.kind === "deferred" ? value.func : value.func.name;
 
-    // version is inherited from the parent
-    const version = parent.version;
-
     // param is only required for deferred executions
     const param = value.kind === "deferred" ? value.args[0] : undefined;
 
     // create a new invocation
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, value.opts, parent);
+    const invocation = new Invocation(name, id, idempotencyKey, undefined, param, value.opts, parent);
 
     // add child and increment counter
     parent.addChild(invocation);
@@ -633,7 +611,6 @@ class Scheduler {
     this.logger.table(
       this.executions.map((e) => ({
         name: e.invocation.name,
-        version: e.invocation.version,
         id: e.invocation.id,
         idempotencyKey: e.invocation.idempotencyKey,
         parent: e.invocation.parent ? e.invocation.parent.id : undefined,

@@ -21,6 +21,12 @@ export interface ResonateOptions {
   pid: string;
 
   /**
+   * The frequency in ms to poll the promise store for remote
+   * promises.
+   */
+  poll: number;
+
+  /**
    * A logger instance, if not provided a default logger will be
    * used.
    */
@@ -67,8 +73,7 @@ export interface Options {
   encoder: IEncoder<unknown, string | undefined>;
 
   /**
-   * The frequency in ms to poll the promise store for a completed
-   * remote promise.
+   * Overrides the default polling frequency.
    */
   poll: number;
 
@@ -91,10 +96,16 @@ export interface Options {
    * Overrides the default timeout.
    */
   timeout: number;
+
+  /**
+   * The function version to execute. Only applicable on calls to
+   * resonate.run.
+   */
+  version: number;
 }
 
 export type PartialOptions = Partial<Options> & { __resonate: true };
 
-export function isPartialOptions(o: unknown): o is PartialOptions {
+export function isOptions(o: unknown): o is PartialOptions {
   return typeof o === "object" && o !== null && (o as PartialOptions).__resonate === true;
 }

@@ -55,7 +55,7 @@ export class LocalStore implements IStore {
   }
 
   private async init() {
-    for await (const schedules of this.schedules.search("*", undefined, undefined)) {
+    for await (const schedules of this.schedules.search("*")) {
       this.toSchedule = this.toSchedule.concat(schedules);
     }
 
@@ -64,9 +64,7 @@ export class LocalStore implements IStore {
 
   private setSchedule() {
     // clear timeout
-    if (this.next) {
-      clearTimeout(this.next);
-    }
+    clearTimeout(this.next);
 
     // sort array in ascending order by nextRunTime
     this.toSchedule.sort((a, b) => a.nextRunTime - b.nextRunTime);
@@ -421,6 +419,10 @@ export class LocalScheduleStore implements IScheduleStore {
     const result = await this.storage.rmd(id, () => true);
     if (!result) {
       throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
+    }
+
+    if (this.store) {
+      this.store.deleteSchedule(id);
     }
   }
 

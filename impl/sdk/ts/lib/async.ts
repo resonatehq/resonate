@@ -47,30 +47,8 @@ export class Resonate extends ResonateBase {
     name: string,
     func: F,
     opts?: Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
-
-  /**
-   * Register a function with Resonate. Registered functions can be invoked by calling {@link run}, or by the returned function.
-   *
-   * @template F The type of the function.
-   * @param name A unique name to identify the function.
-   * @param version Version of the function.
-   * @param func The function to register with Resonate.
-   * @param opts Resonate options, can be constructed by calling {@link options}.
-   * @returns Resonate function
-   */
-  register<F extends Func>(
-    name: string,
-    version: number,
-    func: F,
-    opts?: Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>>;
-  register<F extends Func>(
-    name: string,
-    funcOrVersion: F | number,
-    funcOrOpts: F | Partial<Options>,
-  ): (id: string, ...args: any) => ResonatePromise<Return<F>> {
-    return super.register(name, funcOrVersion, funcOrOpts);
+  ): (id: string, ...args: Params<F>) => ResonatePromise<Return<F>> {
+    return super.register(name, func, opts);
   }
 
   /**
@@ -94,7 +72,12 @@ export class Resonate extends ResonateBase {
    * @param args The function arguments.
    * @returns The schedule object.
    */
-  schedule<F extends Func>(name: string, cron: string, func: F, ...args: Params<F>): Promise<schedules.Schedule>;
+  schedule<F extends Func>(
+    name: string,
+    cron: string,
+    func: F,
+    ...args: [...Params<F>, PartialOptions?]
+  ): Promise<schedules.Schedule>;
 
   /**
    * Schedule a resonate function that is already registered.
@@ -102,25 +85,23 @@ export class Resonate extends ResonateBase {
    * @param name The schedule name.
    * @param cron The schedule cron expression.
    * @param func The registered function name.
-   * @param version The registered function version.
    * @param args The function arguments.
    * @returns The schedule object.
    */
-  schedule(name: string, cron: string, func: string, version?: number, ...args: any[]): Promise<schedules.Schedule>;
+  schedule(name: string, cron: string, func: string, ...args: [...any, PartialOptions?]): Promise<schedules.Schedule>;
   schedule(name: string, cron: string, func: Func | string, ...args: any[]): Promise<schedules.Schedule> {
-    return super.schedule(name, cron, func, typeof func === "string" ? args.shift() : undefined, ...args);
+    return super.schedule(name, cron, func, ...args);
   }
 
   protected execute<F extends Func>(
     name: string,
-    version: number,
     id: string,
     idempotencyKey: string | undefined,
     func: F,
     args: Params<F>,
     opts: Options,
   ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, version, id, idempotencyKey, func, args, opts);
+    return this.scheduler.add(name, id, idempotencyKey, func, args, opts);
   }
 }
 
@@ -170,7 +151,7 @@ export class Context {
    * The resonate function version.
    */
   get version() {
-    return this.invocation.version;
+    return this.invocation.root.opts.version;
   }
 
   /**
@@ -215,9 +196,6 @@ export class Context {
     // human readable name of the function
     const name = typeof func === "string" ? func : func.name;
 
-    // version is inherited from the parent
-    const version = parent.version;
-
     // the idempotency key is a hash of the id
     const idempotencyKey = utils.hash(id);
 
@@ -228,7 +206,7 @@ export class Context {
     const param = typeof func === "string" ? args[0] : undefined;
 
     // create a new invocation
-    const invocation = new Invocation(name, version, id, idempotencyKey, undefined, param, opts, parent);
+    const invocation = new Invocation(name, id, idempotencyKey, undefined, param, opts, parent);
 
     let execution: Execution<any>;
     if (typeof func === "string") {
@@ -255,7 +233,7 @@ export class Context {
    * @param opts A partial {@link Options} object.
    * @returns Options with the __resonate flag set.
    */
-  options(opts: Partial<Options> = {}): Partial<Options> & { __resonate: true } {
+  options(opts: Partial<Options> = {}): PartialOptions {
     return { ...opts, __resonate: true };
   }
 }
@@ -269,7 +247,6 @@ class Scheduler {
 
   add<F extends Func>(
     name: string,
-    version: number,
     id: string,
     idempotencyKey: string | undefined,
     func: F,
@@ -286,12 +263,12 @@ class Scheduler {
     // params, used for recovery
     const param = {
       func: name,
-      version,
+      version: opts.version,
       args,
     };
 
     // create a new invocation
-    const invocation = new Invocation<Return<F>>(name, version, id, idempotencyKey, undefined, param, opts);
+    const invocation = new Invocation<Return<F>>(name, id, idempotencyKey, undefined, param, opts);
 
     // create a new execution
     const ctx = new Context(invocation);
