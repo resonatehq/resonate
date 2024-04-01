@@ -411,7 +411,7 @@ export class RemoteLockStore implements ILockStore {
           resourceId: resourceId,
           processId: this.pid,
           executionId: executionId,
-          expiryInSeconds: this.lockTimeout / 1000,
+          expiryInMilliseconds: this.lockTimeout,
         }),
       },
       this.logger,
