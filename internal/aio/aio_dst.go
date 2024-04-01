@@ -94,12 +94,14 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
-			if a.r.Float64() < a.failureProbability {
+			if a.r.Float64() < 5*a.failureProbability {
 				// Do the I/O
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
 				for i := range processedCQEs {
-					processedCQEs[i].Error = errors.New("aio dst: failure, after processing")
+					if a.r.Float64() < a.failureProbability {
+						processedCQEs[i].Error = errors.New("aio dst: failure, after processing")
+					}
 				}
 				a.cqes = append(a.cqes, processedCQEs...)
 			} else {

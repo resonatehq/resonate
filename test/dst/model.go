@@ -61,7 +61,7 @@ type Locks map[string]*LockModel
 type Tasks map[string]*TaskModel
 type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
 
-func (p Promises) Get(id string) *PromiseModel {
+func (p Promises) Get(id string) (*PromiseModel, error) {
 	if _, ok := p[id]; !ok {
 		p[id] = &PromiseModel{
 			id:            id,
@@ -69,47 +69,67 @@ func (p Promises) Get(id string) *PromiseModel {
 		}
 	}
 
-	return p[id]
+	if p[id].promise == nil {
+		return nil, errors.New("promise not found")
+	}
+
+	return p[id], nil
 }
 
-func (s Schedules) Get(id string) *ScheduleModel {
+func (s Schedules) Get(id string) (*ScheduleModel, error) {
 	if _, ok := s[id]; !ok {
 		s[id] = &ScheduleModel{
 			id: id,
 		}
 	}
 
-	return s[id]
+	if s[id].schedule == nil {
+		return nil, errors.New("schedule not found")
+	}
+
+	return s[id], nil
 }
 
-func (s Subscriptions) Get(id string) *SubscriptionModel {
+func (s Subscriptions) Get(id string) (*SubscriptionModel, error) {
 	if _, ok := s[id]; !ok {
 		s[id] = &SubscriptionModel{
 			id: id,
 		}
 	}
 
-	return s[id]
+	if s[id].subscription == nil {
+		return nil, errors.New("subscription not found")
+	}
+
+	return s[id], nil
 }
 
-func (l Locks) Get(id string) *LockModel {
+func (l Locks) Get(id string) (*LockModel, error) {
 	if _, ok := l[id]; !ok {
 		l[id] = &LockModel{
 			id: id,
 		}
 	}
 
-	return l[id]
+	if l[id].lock == nil {
+		return nil, errors.New("lock not found")
+	}
+
+	return l[id], nil
 }
 
-func (t Tasks) Get(id string) *TaskModel {
+func (t Tasks) Get(id string) (*TaskModel, error) {
 	if _, ok := t[id]; !ok {
 		t[id] = &TaskModel{
 			id: id,
 		}
 	}
 
-	return t[id]
+	if t[id].task == nil {
+		return nil, errors.New("task not found")
+	}
+
+	return t[id], nil
 }
 
 func NewModel() *Model {
@@ -164,7 +184,11 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 // PROMISES
 
 func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.ReadPromise.Id)
+	pm, err := m.promises.Get(req.ReadPromise.Id)
+
+	if err != nil {
+		return err
+	}
 
 	switch res.ReadPromise.Status {
 	case t_api.StatusOK:
@@ -198,7 +222,10 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
 
 		for _, p := range res.SearchPromises.Promises {
-			pm := m.promises.Get(p.Id)
+			pm, err := m.promises.Get(p.Id)
+			if err != nil {
+				return err
+			}
 
 			states := map[promise.State]bool{}
 			for _, state := range req.SearchPromises.States {
@@ -233,7 +260,10 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 }
 
 func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.CreatePromise.Id)
+	pm, err := m.promises.Get(req.CreatePromise.Id)
+	if err != nil {
+		return err
+	}
 
 	switch res.CreatePromise.Status {
 	case t_api.StatusOK:
@@ -254,7 +284,10 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 			}
 		}
 		if err == nil {
-			tm := m.tasks.Get(req.CreatePromise.Id)
+			tm, err := m.tasks.Get(req.CreatePromise.Id)
+			if err != nil {
+				return err
+			}
 			tm.task = &task.Task{
 				Id:             req.CreatePromise.Id,
 				Counter:        1, // updated, first tested.
@@ -290,7 +323,10 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 }
 
 func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.CompletePromise.Id)
+	pm, err := m.promises.Get(req.CompletePromise.Id)
+	if err != nil {
+		return err
+	}
 
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
@@ -348,7 +384,11 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 // SCHEDULES
 
 func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.ReadSchedule.Id)
+	sm, err := m.schedules.Get(req.ReadSchedule.Id)
+
+	if err != nil {
+		return err
+	}
 
 	switch res.ReadSchedule.Status {
 	case t_api.StatusOK:
@@ -386,7 +426,11 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchSchedules.Id, "*", ".*")))
 
 		for _, s := range res.SearchSchedules.Schedules {
-			sm := m.schedules.Get(s.Id)
+			sm, err := m.schedules.Get(s.Id)
+
+			if err != nil {
+				return err
+			}
 
 			if !regex.MatchString(s.Id) {
 				return fmt.Errorf("schedule id '%s' does not match search query '%s'", s.Id, req.SearchSchedules.Id)
@@ -417,7 +461,11 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 }
 
 func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.CreateSchedule.Id)
+	sm, err := m.schedules.Get(req.CreateSchedule.Id)
+
+	if err != nil {
+		return err
+	}
 
 	switch res.CreateSchedule.Status {
 	case t_api.StatusOK:
@@ -441,7 +489,11 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 }
 
 func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
-	sm := m.schedules.Get(req.DeleteSchedule.Id)
+	sm, err := m.schedules.Get(req.DeleteSchedule.Id)
+
+	if err != nil {
+		return err
+	}
 
 	switch res.DeleteSchedule.Status {
 	case t_api.StatusNoContent:
@@ -467,8 +519,14 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 	switch res.ReadSubscriptions.Status {
 	case t_api.StatusOK:
 		for _, s := range res.ReadSubscriptions.Subscriptions {
-			pm := m.promises.Get(s.PromiseId)
-			sm := pm.subscriptions.Get(s.Id)
+			pm, err := m.promises.Get(s.PromiseId)
+			if err != nil {
+				return err
+			}
+			sm, err := pm.subscriptions.Get(s.Id)
+			if err != nil {
+				return err
+			}
 
 			if req.ReadSubscriptions.SortId != nil && *req.ReadSubscriptions.SortId <= s.SortId {
 				return fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.ReadSubscriptions.SortId, s.SortId)
@@ -484,8 +542,14 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 }
 
 func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.CreateSubscription.PromiseId)
-	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
+	pm, err := m.promises.Get(req.CreateSubscription.PromiseId)
+	if err != nil {
+		return err
+	}
+	sm, err := pm.subscriptions.Get(req.CreateSubscription.Id)
+	if err != nil {
+		return err
+	}
 
 	switch res.CreateSubscription.Status {
 	case t_api.StatusOK:
@@ -500,8 +564,14 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 }
 
 func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
-	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
-	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
+	pm, err := m.promises.Get(req.DeleteSubscription.PromiseId)
+	if err != nil {
+		return err
+	}
+	sm, err := pm.subscriptions.Get(req.DeleteSubscription.Id)
+	if err != nil {
+		return err
+	}
 
 	switch res.DeleteSubscription.Status {
 	case t_api.StatusNoContent:
@@ -518,7 +588,10 @@ func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_a
 // LOCKS
 
 func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Response) error {
-	lm := m.locks.Get(req.AcquireLock.ResourceId)
+	lm, err := m.locks.Get(req.AcquireLock.ResourceId)
+	if err != nil {
+		return err
+	}
 
 	switch res.AcquireLock.Status {
 	case t_api.StatusCreated:
@@ -566,7 +639,10 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			}
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
-				owned := m.locks.Get(l.lock.ResourceId)
+				owned, err := m.locks.Get(l.lock.ResourceId)
+				if err != nil {
+					return err
+				}
 				owned.lock.ExpiresAt = owned.lock.ExpiresAt + (owned.lock.ExpiryInSeconds * 1000)
 			}
 		}
@@ -578,7 +654,10 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 }
 
 func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Response) error {
-	lm := m.locks.Get(req.ReleaseLock.ResourceId)
+	lm, err := m.locks.Get(req.ReleaseLock.ResourceId)
+	if err != nil {
+		return err
+	}
 
 	switch res.ReleaseLock.Status {
 	case t_api.StatusNoContent:
@@ -610,7 +689,10 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 // TASKS
 
 func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response) error {
-	tm := m.tasks.Get(req.ClaimTask.TaskId)
+	tm, err := m.tasks.Get(req.ClaimTask.TaskId)
+	if err != nil {
+		return err
+	}
 
 	switch res.ClaimTask.Status {
 	case t_api.StatusTaskNotFound:
@@ -644,7 +726,10 @@ func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Respon
 }
 
 func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response) error {
-	tm := m.tasks.Get(req.CompleteTask.TaskId)
+	tm, err := m.tasks.Get(req.CompleteTask.TaskId)
+	if err != nil {
+		return err
+	}
 
 	switch res.CompleteTask.Status {
 	case t_api.StatusTaskNotFound:
