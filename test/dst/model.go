@@ -61,6 +61,9 @@ type Locks map[string]*LockModel
 type Tasks map[string]*TaskModel
 type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
 
+// create a not found error for the given kind assign that to a var
+var ErrNotFound = errors.New("not found")
+
 func (p Promises) Get(id string) (*PromiseModel, error) {
 	if _, ok := p[id]; !ok {
 		p[id] = &PromiseModel{
@@ -70,7 +73,7 @@ func (p Promises) Get(id string) (*PromiseModel, error) {
 	}
 
 	if p[id].promise == nil {
-		return nil, errors.New("promise not found")
+		return nil, ErrNotFound
 	}
 
 	return p[id], nil
@@ -84,7 +87,7 @@ func (s Schedules) Get(id string) (*ScheduleModel, error) {
 	}
 
 	if s[id].schedule == nil {
-		return nil, errors.New("schedule not found")
+		return nil, ErrNotFound
 	}
 
 	return s[id], nil
@@ -98,7 +101,7 @@ func (s Subscriptions) Get(id string) (*SubscriptionModel, error) {
 	}
 
 	if s[id].subscription == nil {
-		return nil, errors.New("subscription not found")
+		return nil, ErrNotFound
 	}
 
 	return s[id], nil
@@ -112,7 +115,7 @@ func (l Locks) Get(id string) (*LockModel, error) {
 	}
 
 	if l[id].lock == nil {
-		return nil, errors.New("lock not found")
+		return nil, ErrNotFound
 	}
 
 	return l[id], nil
@@ -126,7 +129,7 @@ func (t Tasks) Get(id string) (*TaskModel, error) {
 	}
 
 	if t[id].task == nil {
-		return nil, errors.New("task not found")
+		return nil, ErrNotFound
 	}
 
 	return t[id], nil
@@ -175,10 +178,14 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
-		return f(t, req, res)
+		if f(t, req, res) != nil {
+			if errors.Is(err, ErrNotFound) {
+				return nil
+			}
+		}
 	}
 
-	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
+	return nil
 }
 
 // PROMISES
