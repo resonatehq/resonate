@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/announcements"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
@@ -69,10 +70,18 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 				res = &http.Response{
 					StatusCode: http.StatusOK,
 				}
+
+				event := announcements.NewEvent("HTTPResponse")
+				event.Set("StatusCode", res.StatusCode)
+				announcements.GetInstance().Announce(event)
 			} else {
 				res = &http.Response{
 					StatusCode: http.StatusInternalServerError,
 				}
+
+				event := announcements.NewEvent("HTTPResponse")
+				event.Set("StatusCode", res.StatusCode)
+				announcements.GetInstance().Announce(event)
 			}
 
 			cqe.Completion = &t_aio.Completion{

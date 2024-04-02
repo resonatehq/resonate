@@ -1,18 +1,50 @@
 package announcements
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
-type Announcement interface {
-	Announce(data map[string]string)
+type Event struct {
+	Type string
+	Data map[string]interface{}
 }
 
-// NopAnnouncement does nothing when announcements are made.
+func NewEvent(eventType string, initialData ...map[string]interface{}) *Event {
+	var data map[string]interface{}
+	if len(initialData) > 0 {
+		data = initialData[0] // Use the first map provided if any.
+	} else {
+		data = make(map[string]interface{})
+	}
+
+	return &Event{
+		Type: eventType,
+		Data: data,
+	}
+}
+
+func (e *Event) Set(key string, value interface{}) {
+	e.Data[key] = value
+}
+
+func (e *Event) Get(key string) (interface{}, error) {
+	value, exists := e.Data[key]
+	if !exists {
+		return nil, fmt.Errorf("key '%s' does not exist in event of type '%s'", key, e.Type)
+	}
+	return value, nil
+}
+
+type Announcement interface {
+	Announce(event *Event)
+}
+
 type NopAnnouncement struct{}
 
-// DstAnnouncement stores announcements for later verification.
 type DstAnnouncement struct {
-	announcements []map[string]string
-	mu            sync.Mutex // Mutex for thread safety
+	announcements []Event
+	mutex         sync.Mutex // Mutex for thread safety
 }
 
 var (
@@ -20,23 +52,22 @@ var (
 	once     sync.Once
 )
 
-// EnvironmentType represents different environments.
 type EnvironmentType int
 
-// Environment types.
 const (
 	Nop EnvironmentType = iota
 	Dst
 )
 
-// Initialize initializes the announcement system based on the environment type.
 func Initialize(envType EnvironmentType) {
 	once.Do(func() {
 		switch envType {
 		case Nop:
 			instance = &NopAnnouncement{}
 		case Dst:
-			instance = &DstAnnouncement{}
+			instance = &DstAnnouncement{
+				announcements: make([]Event, 0, 100), // Preallocate capacity to prevent frequent reallocations
+			}
 		default:
 			panic("Invalid environment type.")
 		}
@@ -44,15 +75,20 @@ func Initialize(envType EnvironmentType) {
 }
 
 func GetInstance() Announcement {
+	// check if the instance has been initialized
+	if instance == nil {
+		// initialize with the default environment type
+		Initialize(Dst)
+	}
 	return instance
 }
 
-func (n *NopAnnouncement) Announce(data map[string]string) {
+func (n *NopAnnouncement) Announce(event *Event) {
 	// Do nothing
 }
 
-func (d *DstAnnouncement) Announce(data map[string]string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.announcements = append(d.announcements, data)
+func (d *DstAnnouncement) Announce(event *Event) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.announcements = append(d.announcements, *event)
 }

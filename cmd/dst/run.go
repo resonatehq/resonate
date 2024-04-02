@@ -11,6 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/announcements"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
@@ -69,6 +70,8 @@ func RunDSTCmd() *cobra.Command {
 				},
 			}))
 			slog.SetDefault(logger)
+
+			announcements.Initialize(announcements.Dst)
 
 			// instantiate metrics
 			reg := prometheus.NewRegistry()
