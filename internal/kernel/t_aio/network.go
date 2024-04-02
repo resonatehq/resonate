@@ -3,8 +3,6 @@ package t_aio
 import (
 	"fmt"
 	"net/http"
-
-	"github.com/resonatehq/resonate/internal/announcements"
 )
 
 type NetworkKind int
@@ -19,16 +17,9 @@ type NetworkSubmission struct {
 }
 
 func (s *NetworkSubmission) String() string {
-	announcements.Initialize(announcements.Dst)
 
 	switch s.Kind {
 	case Http:
-		data := map[string]string{
-			"method": s.Http.Method,
-			"url":    s.Http.Url,
-		}
-		announcements.GetInstance().Announce(data)
-
 		return fmt.Sprintf("Network(http=Http(method=%s, url=%s))", s.Http.Method, s.Http.Url)
 	default:
 		panic("invalid aio network submission")
