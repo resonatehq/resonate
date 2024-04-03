@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/announcements"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
@@ -43,6 +44,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 
 	// model
 	model := NewModel()
+
+	// setup announcements
+	announcements.Initialize(announcements.Dst)
 
 	// add req/res
 	for _, req := range reqs {

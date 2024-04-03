@@ -57,14 +57,14 @@ var (
 type EnvironmentType int
 
 const (
-	Nop EnvironmentType = iota
+	Noop EnvironmentType = iota
 	Dst
 )
 
 func Initialize(envType EnvironmentType) {
 	once.Do(func() {
 		switch envType {
-		case Nop:
+		case Noop:
 			instance = &NoopAnnouncement{}
 		case Dst:
 			instance = &DstAnnouncement{
