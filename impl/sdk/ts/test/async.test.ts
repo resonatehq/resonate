@@ -37,7 +37,12 @@ describe("Functions: async", () => {
   test("success", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: Retry.linear(0, 3),
+      retry: Retry.exponential(
+        100, // initial delay (in ms)
+        2, // backoff factor
+        Infinity, // max attempts
+        60000, // max delay (in ms, 1 minute)
+      ),
     });
 
     resonate.register("run", run);
