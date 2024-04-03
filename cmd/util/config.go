@@ -27,6 +27,7 @@ type Config struct {
 }
 
 type APIConfig struct {
+	BaseURL    string
 	Size       int
 	Subsystems *APISubsystems
 }

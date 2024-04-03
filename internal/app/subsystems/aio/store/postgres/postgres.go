@@ -131,7 +131,7 @@ const (
 		PRIMARY KEY(id) 
 	);
 	
-	INSERT INTO migrations (id) VALUES (1);`
+	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE notifications;

@@ -126,7 +126,7 @@ const (
 		id    INTEGER PRIMARY KEY
 	);
 	
-	INSERT INTO migrations (id) VALUES (1);`
+	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
