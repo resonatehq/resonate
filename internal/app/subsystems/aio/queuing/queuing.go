@@ -43,8 +43,8 @@ type QueuingSubsystem struct {
 	stop context.CancelFunc
 }
 
-// NewSubsytemOrDie creates a new queuing subsystem with the given config.
-func NewSubsytemOrDie(baseURL string, config *Config) (*QueuingSubsystem, error) {
+// New creates a new queuing subsystem with the given config.
+func New(baseURL string, config *Config) (*QueuingSubsystem, error) {
 	var (
 		conns      = make(map[string]t_conn.Connection, len(config.Connections))
 		connSQ     = make(map[string]chan *t_conn.ConnectionSubmission, len(config.Connections))

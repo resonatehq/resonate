@@ -66,7 +66,7 @@ func ServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			queuing, err := queuing.NewSubsytemOrDie(config.API.BaseURL, config.AIO.Subsystems.Queuing.Config)
+			queuing, err := queuing.New(config.API.BaseURL, config.AIO.Subsystems.Queuing.Config)
 			if err != nil {
 				return err
 			}

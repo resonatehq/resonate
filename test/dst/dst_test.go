@@ -11,9 +11,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
-	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -47,36 +44,7 @@ func TestDST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// TODO: DST version so just test the kernel.
-	queuing, err := queuing.NewSubsytemOrDie("http://localhost:8001", &queuing.Config{
-		Connections: []*t_conn.ConnectionConfig{
-			{
-				Kind: t_conn.HTTP,
-				Name: "summarize",
-				Metadata: &queuing_metadata.Metadata{
-					Properties: map[string]interface{}{
-						"url": "http://localhost:5001",
-					},
-				},
-			},
-		},
-		Routes: []*t_route.RoutingConfig{
-			{
-				Kind: t_route.Pattern,
-				Name: "default",
-				Target: &t_route.Target{
-					Connection: "summarize",
-					Queue:      "analytics",
-				},
-				Metadata: &queuing_metadata.Metadata{
-					Properties: map[string]interface{}{
-						"pattern": "/gpu/summarize/*",
-					},
-				},
-			},
-		},
-	})
+	queuing, err := queuing.NewDST()
 	if err != nil {
 		t.Fatal(err)
 	}
