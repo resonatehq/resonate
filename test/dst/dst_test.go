@@ -65,7 +65,7 @@ func TestDST(t *testing.T) {
 			{
 				Kind: t_route.Pattern,
 				Name: "default",
-				Target: t_route.Target{
+				Target: &t_route.Target{
 					Connection: "summarize",
 					Queue:      "analytics",
 				},

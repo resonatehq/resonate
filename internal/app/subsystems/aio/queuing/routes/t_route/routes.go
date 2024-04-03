@@ -19,7 +19,7 @@ type (
 		Name string
 
 		// Target identifies the connection and queue to route the task to.
-		Target Target
+		Target *Target
 
 		// Metadata is the any additional information or configuration for the specific routing kind.
 		Metadata *metadata.Metadata
