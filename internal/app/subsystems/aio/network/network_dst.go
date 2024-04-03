@@ -73,6 +73,8 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 
 				event := announcements.NewEvent("HTTPResponse")
 				event.Set("StatusCode", res.StatusCode)
+				event.Set("URL", sqe.Submission.Network.Http.Url)
+				event.Set("Method", sqe.Submission.Network.Http.Method)
 				announcements.GetInstance().Announce(event)
 			} else {
 				res = &http.Response{
@@ -81,6 +83,8 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 
 				event := announcements.NewEvent("HTTPResponse")
 				event.Set("StatusCode", res.StatusCode)
+				event.Set("URL", sqe.Submission.Network.Http.Url)
+				event.Set("Method", sqe.Submission.Network.Http.Method)
 				announcements.GetInstance().Announce(event)
 			}
 

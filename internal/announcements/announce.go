@@ -3,6 +3,8 @@ package announcements
 import (
 	"fmt"
 	"sync"
+
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Event struct {
@@ -40,7 +42,7 @@ type Announcement interface {
 	Announce(event *Event)
 }
 
-type NopAnnouncement struct{}
+type NoopAnnouncement struct{}
 
 type DstAnnouncement struct {
 	announcements []Event
@@ -63,7 +65,7 @@ func Initialize(envType EnvironmentType) {
 	once.Do(func() {
 		switch envType {
 		case Nop:
-			instance = &NopAnnouncement{}
+			instance = &NoopAnnouncement{}
 		case Dst:
 			instance = &DstAnnouncement{
 				announcements: make([]Event, 0, 100), // Preallocate capacity to prevent frequent reallocations
@@ -76,14 +78,11 @@ func Initialize(envType EnvironmentType) {
 
 func GetInstance() Announcement {
 	// check if the instance has been initialized
-	if instance == nil {
-		// initialize with the default environment type
-		Initialize(Dst)
-	}
+	util.Assert(instance != nil, "Announcement instance has not been initialized.")
 	return instance
 }
 
-func (n *NopAnnouncement) Announce(event *Event) {
+func (n *NoopAnnouncement) Announce(event *Event) {
 	// Do nothing
 }
 
