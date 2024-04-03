@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -20,6 +21,18 @@ type (
 
 	Metadata struct {
 		URL string `mapstructure:"url"`
+	}
+
+	Payload struct {
+		Queue   string `json:"queue"`
+		TaskId  string `json:"taskId"`
+		Counter int    `json:"counter"`
+		Links   Links  `json:"links"`
+	}
+
+	Links struct {
+		Claim    string `json:"claim"`
+		Complete string `json:"complete"`
 	}
 )
 
@@ -46,10 +59,24 @@ func (c *HTTP) Task() <-chan *t_conn.ConnectionSubmission {
 }
 
 func (c *HTTP) Execute(sub *t_conn.ConnectionSubmission) error {
-	// Form request.
-	payload := fmt.Sprintf(`{"taskId":"%s", "counter":%d}`, sub.TaskId, sub.Counter)
+	// Form payload.
+	payload := Payload{
+		Queue:   sub.Queue,
+		TaskId:  sub.TaskId,
+		Counter: sub.Counter,
+		Links: Links{
+			Claim:    sub.Links.Claim,
+			Complete: sub.Links.Complete,
+		},
+	}
 
-	req, err := http.NewRequest("POST", c.meta.URL, bytes.NewBuffer([]byte(payload)))
+	// Marshal payload.
+	bs, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %v", err)
+	}
+
+	req, err := http.NewRequest("POST", c.meta.URL, bytes.NewBuffer(bs))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
 	}

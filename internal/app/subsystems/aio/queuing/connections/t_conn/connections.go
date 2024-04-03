@@ -20,17 +20,16 @@ type (
 		// kind identifies the type of queueing system to connect to (e.g. http, aws.sqs, etc.)
 		Kind ConnectionKind
 
-		// Pattern is the pattern to match the task id.
-		Pattern string
-
 		// Name identifies the existing connection to the queueing system.
 		Name string
 
-		// Queue identifies the task queue within the queueing system.
-		Queue string
-
 		// Metadata is the any additional information or configuration for the connection.
 		Metadata *metadata.Metadata
+	}
+
+	Links struct {
+		Claim    string `json:"claim"`
+		Complete string `json:"complete"`
 	}
 
 	ConnectionSubmission struct {
@@ -42,6 +41,9 @@ type (
 
 		// Counter is the version of the task for claiming purposes.
 		Counter int `json:"counter"`
+
+		// Links are the links to claim and complete the specific task.
+		Links Links `json:"links"`
 	}
 
 	Connection interface {
