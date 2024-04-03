@@ -172,6 +172,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
+	// Triggers the task framework.
 	if RandBool(r) {
 		id = fmt.Sprintf("/gpu/summarize/%s", id)
 	}

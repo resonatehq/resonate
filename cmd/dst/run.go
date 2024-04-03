@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -93,10 +94,15 @@ func RunDSTCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			queuing, err := queuing.NewDST()
+			if err != nil {
+				return err
+			}
 
 			// add api subsystems
 			aio.AddSubsystem(t_aio.Network, network)
 			aio.AddSubsystem(t_aio.Store, store)
+			aio.AddSubsystem(t_aio.Queuing, queuing)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
