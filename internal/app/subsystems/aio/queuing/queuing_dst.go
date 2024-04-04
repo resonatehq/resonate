@@ -1,7 +1,7 @@
 package queuing
 
 import (
-	"math/rand"
+	"math/rand" // nosemgrep
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
