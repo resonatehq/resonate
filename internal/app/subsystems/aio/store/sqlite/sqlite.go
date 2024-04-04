@@ -259,7 +259,7 @@ const (
 		complete_timeout < ? AND 
 		promise_timeout > ?
 	ORDER BY
-		created_on ASC`
+		created_on ASC, id`
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
