@@ -100,6 +100,7 @@ func (a *aioDST) Flush(t int64) {
 				// Randomly decide whether to return an error after processing SQE
 				for i := range processedCQEs {
 					if a.r.Float64() < a.failureProbability {
+						processedCQEs[i].Completion = nil
 						processedCQEs[i].Error = errors.New("aio dst: failure, after processing")
 					}
 				}
