@@ -47,10 +47,27 @@ describe("Resonate", () => {
     { name: "generator", module: generator },
   ]) {
     describe(name, () => {
-      test("Register", async () => {
+      test("Register without options", async () => {
         const resonate = new module.Resonate();
 
         register(resonate, "foo", () => "foo.1");
+        register(resonate, "foo", () => "foo.2", { version: 2 });
+        register(resonate, "bar", () => "bar.1", { version: 1 });
+        register(resonate, "bar", () => "bar.2", { version: 2 });
+
+        expect(await resonate.run("foo", "foo.0")).toBe("foo.2");
+        expect(await resonate.run("foo", "foo.1", resonate.options({ version: 1 }))).toBe("foo.1");
+        expect(await resonate.run("foo", "foo.2", resonate.options({ version: 2 }))).toBe("foo.2");
+
+        expect(await resonate.run("bar", "bar.0")).toBe("bar.2");
+        expect(await resonate.run("bar", "bar.1", resonate.options({ version: 1 }))).toBe("bar.1");
+        expect(await resonate.run("bar", "bar.2", resonate.options({ version: 2 }))).toBe("bar.2");
+      });
+
+      test("Register with options", async () => {
+        const resonate = new module.Resonate();
+
+        register(resonate, "foo", () => "foo.1", resonate.options({ timeout: 1000 }));
         register(resonate, "foo", () => "foo.2", { version: 2 });
         register(resonate, "bar", () => "bar.1", { version: 1 });
         register(resonate, "bar", () => "bar.2", { version: 2 });

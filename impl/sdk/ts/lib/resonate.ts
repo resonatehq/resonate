@@ -118,7 +118,7 @@ export abstract class ResonateBase {
     opts.version = opts.version ?? 1;
 
     // set default options
-    const options = this.options(opts);
+    const options = this.defaults(opts);
 
     if (options.version <= 0) {
       throw new Error("Version must be greater than 0");
@@ -142,7 +142,6 @@ export abstract class ResonateBase {
 
     return (id: string, ...args: any[]) => this.run(name, id, ...args, options);
   }
-
   registerModule(module: Record<string, Func>, opts: Partial<Options> = {}) {
     for (const key in module) {
       this.register(key, module[key], opts);
@@ -216,28 +215,8 @@ export abstract class ResonateBase {
    * @param opts A partial {@link RegOptions} object.
    * @returns Options with the __resonate flag set.
    */
-  options({
-    encoder = this.encoder,
-    poll = this.poll,
-    retry = this.retry,
-    store = this.store,
-    tags = this.tags,
-    timeout = this.timeout,
-    version = 0,
-  }: Partial<Options>): Options {
-    // merge tags
-    tags = { ...this.tags, ...tags };
-
-    return {
-      __resonate: true,
-      encoder,
-      poll,
-      retry,
-      store,
-      tags,
-      timeout,
-      version,
-    };
+  options(opts: Partial<Options> = {}): PartialOptions {
+    return { ...opts, __resonate: true };
   }
 
   /**
@@ -255,6 +234,30 @@ export abstract class ResonateBase {
    */
   stop() {
     clearInterval(this.interval);
+  }
+
+  private defaults({
+    encoder = this.encoder,
+    poll = this.poll,
+    retry = this.retry,
+    store = this.store,
+    tags = this.tags,
+    timeout = this.timeout,
+    version = 0,
+  }: Partial<Options> = {}): Options {
+    // merge tags
+    tags = { ...this.tags, ...tags };
+
+    return {
+      __resonate: true,
+      encoder,
+      poll,
+      retry,
+      store,
+      tags,
+      timeout,
+      version,
+    };
   }
 
   private async _start() {
@@ -288,9 +291,7 @@ export abstract class ResonateBase {
   private split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
     const opts = args[args.length - 1];
 
-    const defaults = this.options({});
-
-    return isOptions(opts) ? { args: args.slice(0, -1), opts: this.options(opts) } : { args, opts: defaults };
+    return isOptions(opts) ? { args: args.slice(0, -1), opts: this.defaults(opts) } : { args, opts: this.defaults() };
   }
 }
 
