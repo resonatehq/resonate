@@ -1,10 +1,14 @@
 package pattern
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
+)
+
+var (
+	ErrMissingPattern = errors.New("pattern is required")
 )
 
 type (
@@ -28,7 +32,7 @@ func New(meta *metadata.Metadata) (t_route.Route, error) {
 	p.meta = md
 
 	if p.meta.Pattern == "" {
-		return nil, fmt.Errorf("pattern is required")
+		return nil, ErrMissingPattern
 	}
 
 	return p, nil
