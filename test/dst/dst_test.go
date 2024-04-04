@@ -36,7 +36,7 @@ func TestDST(t *testing.T) {
 
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	aio := aio.NewDST(r, metrics, 0.5)
+	aio := aio.NewDST(r, metrics, 0.5, true)
 
 	// instatiate aio subsystems
 	network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
@@ -142,11 +142,10 @@ func TestDST(t *testing.T) {
 		Tags:               100,
 		Urls:               100,
 		Retries:            100,
-		FailureProbability: 0.5,
-		FaultInjection:     true,
+		FaultInjectionMode: true,
 	})
 
-	if errs := dst.Run(r, api, aio, system, reqs, dst.config.FaultInjection); len(errs) > 0 {
+	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
 		t.Fatal(errs)
 	}
 

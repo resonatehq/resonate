@@ -25,8 +25,7 @@ type Config struct {
 	Tags               int
 	Urls               int
 	Retries            int
-	FailureProbability float64
-	FaultInjection     bool
+	FaultInjectionMode bool
 }
 
 type DST struct {
@@ -39,7 +38,7 @@ func New(config *Config) *DST {
 	}
 }
 
-func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System, reqs []t_api.Kind, failure_injection_mode bool) []error {
+func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System, reqs []t_api.Kind) []error {
 	// generator
 	generator := NewGenerator(r, d.config)
 
@@ -128,7 +127,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					modelErr := model.Step(t, req, res, err, failure_injection_mode)
+					modelErr := model.Step(t, req, res, err, d.config.FaultInjectionMode)
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}

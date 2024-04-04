@@ -20,14 +20,16 @@ type aioDST struct {
 	subsystems         map[t_aio.Kind]Subsystem
 	metrics            *metrics.Metrics
 	failureProbability float64
+	faultInjectionMode bool
 }
 
-func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64) *aioDST {
+func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64, faultInjectionMode bool) *aioDST {
 	return &aioDST{
 		r:                  r,
 		subsystems:         map[t_aio.Kind]Subsystem{},
 		metrics:            metrics,
 		failureProbability: failureProbability,
+		faultInjectionMode: faultInjectionMode,
 	}
 }
 
@@ -94,7 +96,10 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
-			if a.r.Float64() < a.failureProbability {
+			if !a.faultInjectionMode {
+				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
+				a.cqes = append(a.cqes, processedCQEs...)
+			} else if a.r.Float64() < a.failureProbability && a.faultInjectionMode {
 				// Do the I/O
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE
