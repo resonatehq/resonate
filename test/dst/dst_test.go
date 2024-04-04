@@ -44,7 +44,7 @@ func TestDST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queuing, err := queuing.NewDST()
+	queuing, err := queuing.NewDST(&queuing.ConfigDST{P: 0.5}, r)
 	if err != nil {
 		t.Fatal(err)
 	}
