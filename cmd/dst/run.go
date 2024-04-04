@@ -94,7 +94,7 @@ func RunDSTCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			queuing, err := queuing.NewDST()
+			queuing, err := queuing.NewDST(config.AIO.Subsystems.QueuingDST.Config, rand.New(rand.NewSource(r.Int63())))
 			if err != nil {
 				return err
 			}
@@ -232,6 +232,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().String("aio-store-postgres-database", "resonate_dst", "postgres database name")
 	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 2*time.Second, "postgres transaction timeout")
 	cmd.Flags().Float32("aio-network-success-rate", 0.5, "simulated success rate of http requests")
+	cmd.Flags().Float32("aio-queuing-success-rate", 0.5, "simulated success rate of queuing requests")
 
 	_ = viper.BindPFlag("dst.aio.size", cmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
@@ -245,6 +246,7 @@ func RunDSTCmd() *cobra.Command {
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.database", cmd.Flags().Lookup("aio-store-postgres-database"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.txTimeout", cmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", cmd.Flags().Lookup("aio-network-success-rate"))
+	_ = viper.BindPFlag("dst.aio.subsystems.queuingDST.config.p", cmd.Flags().Lookup("aio-queuing-success-rate"))
 
 	// system
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")

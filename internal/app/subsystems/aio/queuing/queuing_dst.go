@@ -1,46 +1,88 @@
 package queuing
 
 import (
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
+	"math/rand" // nosemgrep
+
+	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/util"
+)
+
+type (
+	ConfigDST struct {
+		P float32
+	}
+
+	QueuingSubsystemDST struct {
+		config *ConfigDST
+		r      *rand.Rand
+	}
+
+	QueuingWorkerDST struct {
+		config *ConfigDST
+		r      *rand.Rand
+	}
 )
 
 // NewDST is a simple helper functions that wraps New and returns a pre-configured QueuingSubsystem.
 // This configurations aligns with the DST tests. Search for: 'id = fmt.Sprintf("/gpu/summarize/%s", id)'
-// TOOD: make a real DST one that just mocks network calls.
-func NewDST() (*QueuingSubsystem, error) {
-	queuing, err := New("http://localhost:8001", &Config{
-		Connections: []*t_conn.ConnectionConfig{
-			{
-				Kind: t_conn.HTTP,
-				Name: "summarize",
-				Metadata: &metadata.Metadata{
-					Properties: map[string]interface{}{
-						"url": "http://localhost:5001",
-					},
-				},
-			},
-		},
-		Routes: []*t_route.RoutingConfig{
-			{
-				Kind: t_route.Pattern,
-				Name: "default",
-				Target: &t_route.Target{
-					Connection: "summarize",
-					Queue:      "analytics",
-				},
-				Metadata: &metadata.Metadata{
-					Properties: map[string]interface{}{
-						"pattern": "/gpu/summarize/*",
-					},
-				},
-			},
-		},
+func NewDST(config *ConfigDST, r *rand.Rand) (aio.Subsystem, error) {
+	// Only need to configure coroutine router since mocking process function.
+	CoroutineRouter().Handle("/gpu/summarize/*", &RouteHandler{
+		Connection: "summarize",
+		Queue:      "analytics",
 	})
-	if err != nil {
-		return nil, err
+
+	return &QueuingSubsystemDST{
+		config: config,
+		r:      r,
+	}, nil
+}
+
+func (q *QueuingSubsystemDST) String() string {
+	return "queuing:dst"
+}
+
+func (q *QueuingSubsystemDST) Start() error {
+	return nil
+}
+
+func (q *QueuingSubsystemDST) Stop() error {
+	return nil
+}
+
+func (q *QueuingSubsystemDST) Reset() error {
+	return nil
+}
+
+func (q *QueuingSubsystemDST) NewWorker(int) aio.Worker {
+	return &QueuingWorkerDST{
+		config: q.config,
+		r:      q.r,
+	}
+}
+
+func (w *QueuingWorkerDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
+
+	for i, sqe := range sqes {
+		util.Assert(sqe.Submission.Queuing != nil, "submission must not be nil")
+
+		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Metadata: sqe.Metadata,
+			Callback: sqe.Callback,
+		}
+
+		cqe.Completion = &t_aio.Completion{
+			Kind: t_aio.Queuing,
+			Queuing: &t_aio.QueuingCompletion{
+				Result: t_aio.Success,
+			},
+		}
+
+		cqes[i] = cqe
 	}
 
-	return queuing, nil
+	return cqes
 }

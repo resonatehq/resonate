@@ -13,38 +13,40 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-// Config is the configuration for the queuing subsystem.
-type Config struct {
-	Connections []*t_conn.ConnectionConfig
-	Routes      []*t_route.RoutingConfig
-}
+type (
+	// Config is the configuration for the queuing subsystem.
+	Config struct {
+		Connections []*t_conn.ConnectionConfig
+		Routes      []*t_route.RoutingConfig
+	}
 
-// QueuingSubsystem is a subsystem that dispatches tasks to user defined connections.
-type QueuingSubsystem struct {
-	// baseURL is the base URL for the API to use by the workers.
-	baseURL string
+	// QueuingSubsystem is a subsystem that dispatches tasks to user defined connections.
+	QueuingSubsystem struct {
+		// baseURL is the base URL for the API to use by the workers.
+		baseURL string
 
-	// router contains the information for routing requests to connections.
-	connectionRouter Router
+		// router contains the information for routing requests to connections.
+		connectionRouter Router
 
-	// connections is a map of connection names to their connection instances.
-	connections map[string]t_conn.Connection
+		// connections is a map of connection names to their connection instances.
+		connections map[string]t_conn.Connection
 
-	// connectionsSQ is a map of connection names to their submission queues.
-	connectionsSQ map[string]chan *t_conn.ConnectionSubmission
+		// connectionsSQ is a map of connection names to their submission queues.
+		connectionsSQ map[string]chan *t_conn.ConnectionSubmission
 
-	// connectionsWG is a wait group to wait for all connections to finish before shutting down.
-	connectionsWG *sync.WaitGroup
+		// connectionsWG is a wait group to wait for all connections to finish before shutting down.
+		connectionsWG *sync.WaitGroup
 
-	// ctx is the parent context for all connections.
-	ctx context.Context
+		// ctx is the parent context for all connections.
+		ctx context.Context
 
-	// stop is the context cancel function to send a signal to all connections to stop.
-	stop context.CancelFunc
-}
+		// stop is the context cancel function to send a signal to all connections to stop.
+		stop context.CancelFunc
+	}
+)
 
 // New creates a new queuing subsystem with the given config.
-func New(baseURL string, config *Config) (*QueuingSubsystem, error) {
+func New(baseURL string, config *Config) (aio.Subsystem, error) {
 	var (
 		conns      = make(map[string]t_conn.Connection, len(config.Connections))
 		connSQ     = make(map[string]chan *t_conn.ConnectionSubmission, len(config.Connections))
