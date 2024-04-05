@@ -29,12 +29,21 @@ type Config struct {
 }
 
 type DST struct {
-	config *Config
+	config   *Config
+	scenario Scenario
 }
 
-func New(config *Config) *DST {
+type Scenario int
+
+const (
+	Default Scenario = iota
+	FaultInjection
+)
+
+func New(config *Config, scenario Scenario) *DST {
 	return &DST{
-		config: config,
+		config:   config,
+		scenario: Default,
 	}
 }
 
@@ -43,7 +52,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	generator := NewGenerator(r, d.config)
 
 	// model
-	model := NewModel()
+	model := NewModel(d.scenario)
 
 	// add req/res
 	for _, req := range reqs {
@@ -127,7 +136,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 				Metadata:   metadata,
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
-					modelErr := model.Step(t, req, res, err, d.config.FaultInjectionMode)
+					modelErr := model.Step(t, req, res, err)
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}

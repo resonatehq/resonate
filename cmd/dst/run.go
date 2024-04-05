@@ -37,7 +37,7 @@ func RunDSTCmd() *cobra.Command {
 		urls               = util.RangeIntFlag{Min: 1, Max: 1000}
 		retries            = util.RangeIntFlag{Min: 1, Max: 1000}
 		failureProbability float64
-		faultInjectionMode bool
+		faultInjectionMode int
 	)
 
 	cmd := &cobra.Command{
@@ -84,9 +84,15 @@ func RunDSTCmd() *cobra.Command {
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
+			scenario := dst.Default
+			aioScenario := aio.Default
+			if faultInjectionMode > 0 {
+				scenario, aioScenario = dst.FaultInjection, aio.FaultInjection
+			}
+
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			aio := aio.NewDST(r, metrics, failureProbability, faultInjectionMode)
+			aio := aio.NewDST(r, metrics, failureProbability, aioScenario)
 
 			// instatiate aio subsystems
 			network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
@@ -165,15 +171,14 @@ func RunDSTCmd() *cobra.Command {
 				Reqs: func() int {
 					return reqsPerTick.Resolve(r)
 				},
-				Ids:                ids.Resolve(r),
-				IdempotencyKeys:    idempotencyKeys.Resolve(r),
-				Headers:            headers.Resolve(r),
-				Data:               data.Resolve(r),
-				Tags:               tags.Resolve(r),
-				Urls:               urls.Resolve(r),
-				Retries:            retries.Resolve(r),
-				FaultInjectionMode: faultInjectionMode,
-			})
+				Ids:             ids.Resolve(r),
+				IdempotencyKeys: idempotencyKeys.Resolve(r),
+				Headers:         headers.Resolve(r),
+				Data:            data.Resolve(r),
+				Tags:            tags.Resolve(r),
+				Urls:            urls.Resolve(r),
+				Retries:         retries.Resolve(r),
+			}, scenario)
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
 			if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {

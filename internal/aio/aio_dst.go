@@ -13,6 +13,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
+type Scenario int
 type aioDST struct {
 	r                  *rand.Rand
 	sqes               []*bus.SQE[t_aio.Submission, t_aio.Completion]
@@ -20,10 +21,15 @@ type aioDST struct {
 	subsystems         map[t_aio.Kind]Subsystem
 	metrics            *metrics.Metrics
 	failureProbability float64
-	faultInjectionMode bool
+	faultInjectionMode Scenario
 }
 
-func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64, faultInjectionMode bool) *aioDST {
+const (
+	Default Scenario = iota
+	FaultInjection
+)
+
+func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64, faultInjectionMode Scenario) *aioDST {
 	return &aioDST{
 		r:                  r,
 		subsystems:         map[t_aio.Kind]Subsystem{},
@@ -96,10 +102,10 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// Randomly decide whether to process SQE or return an error
-			if !a.faultInjectionMode {
+			if a.faultInjectionMode == FaultInjection {
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				a.cqes = append(a.cqes, processedCQEs...)
-			} else if a.r.Float64() < a.failureProbability && a.faultInjectionMode {
+			} else if a.r.Float64() < a.failureProbability && a.faultInjectionMode == FaultInjection {
 				// Do the I/O
 				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
 				// Randomly decide whether to return an error after processing SQE

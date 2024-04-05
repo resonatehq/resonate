@@ -20,12 +20,13 @@ import (
 // Model
 
 type Model struct {
-	promises  Promises
-	schedules Schedules
-	locks     Locks
-	tasks     Tasks
-	cursors   []*t_api.Request
-	responses map[t_api.Kind]ResponseValidator
+	promises           Promises
+	schedules          Schedules
+	locks              Locks
+	tasks              Tasks
+	cursors            []*t_api.Request
+	responses          map[t_api.Kind]ResponseValidator
+	faultInjectionMode bool
 }
 
 type PromiseModel struct {
@@ -59,10 +60,7 @@ type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
 type Locks map[string]*LockModel
 type Tasks map[string]*TaskModel
-type ResponseValidator func(int64, *t_api.Request, *t_api.Response, bool) error
-
-// create a not found error for the given kind assign that to a var
-var ErrNotFound = errors.New("not found")
+type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
 	if _, ok := p[id]; !ok {
@@ -115,13 +113,19 @@ func (t Tasks) Get(id string) *TaskModel {
 	return t[id]
 }
 
-func NewModel() *Model {
+func NewModel(dstScenario Scenario) *Model {
+	faultInjectionMode := false
+	if dstScenario == 1 {
+		faultInjectionMode = true
+	}
+
 	return &Model{
-		promises:  map[string]*PromiseModel{},
-		schedules: map[string]*ScheduleModel{},
-		locks:     map[string]*LockModel{},
-		tasks:     map[string]*TaskModel{},
-		responses: map[t_api.Kind]ResponseValidator{},
+		promises:           map[string]*PromiseModel{},
+		schedules:          map[string]*ScheduleModel{},
+		locks:              map[string]*LockModel{},
+		tasks:              map[string]*TaskModel{},
+		responses:          map[t_api.Kind]ResponseValidator{},
+		faultInjectionMode: faultInjectionMode,
 	}
 }
 
@@ -135,7 +139,7 @@ func (m *Model) addCursor(next *t_api.Request) {
 
 // Validation
 
-func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error, failure_injection bool) error {
+func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
 		if !errors.As(err, &resErr) {
@@ -158,7 +162,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
-		return f(t, req, res, true)
+		return f(t, req, res)
 	}
 
 	return nil
@@ -166,7 +170,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 
 // PROMISES
 
-func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
@@ -188,7 +192,7 @@ func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
-func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchPromises.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:           t_api.SearchPromises,
@@ -235,12 +239,12 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
 	case t_api.StatusOK:
-		if pm.promise != nil && !failure_injection_mode {
+		if pm.promise != nil && !m.faultInjectionMode {
 			if !pm.idempotencyKeyForCreateMatch(res.CreatePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate)
 			} else if req.CreatePromise.Strict && pm.promise.State != promise.Pending {
@@ -292,12 +296,12 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 	}
 }
 
-func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CompletePromise.Id)
 
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
-		if pm.completed() && !failure_injection_mode {
+		if pm.completed() && !m.faultInjectionMode {
 			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) &&
 				(req.CompletePromise.Strict || pm.promise.State != promise.Timedout) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
@@ -350,14 +354,14 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 
 // SCHEDULES
 
-func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.ReadSchedule.Id)
 
 	switch res.ReadSchedule.Status {
 	case t_api.StatusOK:
 		s := res.ReadSchedule.Schedule // schedule response
 
-		if !failure_injection_mode { //because we won't know the order of ops
+		if !m.faultInjectionMode { //because we won't know the order of ops
 			if s.NextRunTime < sm.schedule.NextRunTime {
 				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
 			}
@@ -369,7 +373,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 		sm.schedule = s
 		return nil
 	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil && !failure_injection_mode {
+		if sm.schedule != nil && !m.faultInjectionMode {
 			return fmt.Errorf("schedule exists %s", sm.schedule)
 		}
 		return nil
@@ -378,7 +382,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 	}
 }
 
-func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchSchedules.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:            t_api.SearchSchedules,
@@ -405,7 +409,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if !failure_injection_mode {
+			if !m.faultInjectionMode {
 				if s.NextRunTime < sm.schedule.NextRunTime {
 					return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
 				}
@@ -414,7 +418,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if failure_injection_mode {
+			if m.faultInjectionMode {
 				return nil
 			}
 			// update schedule state
@@ -426,12 +430,12 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 	}
 }
 
-func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
 	switch res.CreateSchedule.Status {
 	case t_api.StatusOK:
-		if sm.schedule != nil && !failure_injection_mode {
+		if sm.schedule != nil && !m.faultInjectionMode {
 			if !sm.idempotencyKeyMatch(res.CreateSchedule.Schedule) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey)
 			}
@@ -450,7 +454,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.DeleteSchedule.Id)
 
 	switch res.DeleteSchedule.Status {
@@ -466,7 +470,7 @@ func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.R
 
 // SUBSCRIPTIONS
 
-func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:              t_api.ReadSubscriptions,
@@ -493,7 +497,7 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 	}
 }
 
-func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreateSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
 
@@ -509,7 +513,7 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 	}
 }
 
-func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
 	switch res.DeleteSubscription.Status {
@@ -526,7 +530,7 @@ func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_a
 
 // LOCKS
 
-func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Response) error {
 	lm := m.locks.Get(req.AcquireLock.ResourceId)
 
 	switch res.AcquireLock.Status {
@@ -534,7 +538,7 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = res.AcquireLock.Lock
 		return nil
 	case t_api.StatusLockAlreadyAcquired:
-		if !failure_injection_mode {
+		if !m.faultInjectionMode {
 			if lm.lock == nil {
 				return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
 			}
@@ -548,7 +552,7 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
-func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response) error {
 	switch res.HeartbeatLocks.Status {
 	case t_api.StatusOK:
 		if res.HeartbeatLocks.LocksAffected == 0 {
@@ -588,18 +592,18 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Response) error {
 	lm := m.locks.Get(req.ReleaseLock.ResourceId)
 
 	switch res.ReleaseLock.Status {
 	case t_api.StatusNoContent:
-		if lm.lock == nil && !failure_injection_mode {
+		if lm.lock == nil && !m.faultInjectionMode {
 			return fmt.Errorf("lock %s does not exist", req.ReleaseLock.ResourceId)
 		}
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if !failure_injection_mode {
+		if !m.faultInjectionMode {
 			if lm.lock != nil {
 				if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
 					return nil
@@ -622,7 +626,7 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 
 // TASKS
 
-func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response) error {
 	tm := m.tasks.Get(req.ClaimTask.TaskId)
 
 	switch res.ClaimTask.Status {
@@ -656,7 +660,7 @@ func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Respon
 	}
 }
 
-func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response, failure_injection_mode bool) error {
+func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response) error {
 	tm := m.tasks.Get(req.CompleteTask.TaskId)
 
 	switch res.CompleteTask.Status {

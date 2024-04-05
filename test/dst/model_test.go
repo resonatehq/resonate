@@ -53,7 +53,7 @@ func TestModelStep(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.m.Step(0, tc.req, tc.res, tc.err, false)
+			err := tc.m.Step(0, tc.req, tc.res, tc.err)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
