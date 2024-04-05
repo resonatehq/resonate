@@ -20,13 +20,13 @@ import (
 // Model
 
 type Model struct {
-	promises           Promises
-	schedules          Schedules
-	locks              Locks
-	tasks              Tasks
-	cursors            []*t_api.Request
-	responses          map[t_api.Kind]ResponseValidator
-	faultInjectionMode bool
+	scenario  *Scenario
+	promises  Promises
+	schedules Schedules
+	locks     Locks
+	tasks     Tasks
+	cursors   []*t_api.Request
+	responses map[t_api.Kind]ResponseValidator
 }
 
 type PromiseModel struct {
@@ -113,19 +113,14 @@ func (t Tasks) Get(id string) *TaskModel {
 	return t[id]
 }
 
-func NewModel(dstScenario Scenario) *Model {
-	faultInjectionMode := false
-	if dstScenario == 1 {
-		faultInjectionMode = true
-	}
-
+func NewModel(scenario *Scenario) *Model {
 	return &Model{
-		promises:           map[string]*PromiseModel{},
-		schedules:          map[string]*ScheduleModel{},
-		locks:              map[string]*LockModel{},
-		tasks:              map[string]*TaskModel{},
-		responses:          map[t_api.Kind]ResponseValidator{},
-		faultInjectionMode: faultInjectionMode,
+		scenario:  scenario,
+		promises:  map[string]*PromiseModel{},
+		schedules: map[string]*ScheduleModel{},
+		locks:     map[string]*LockModel{},
+		tasks:     map[string]*TaskModel{},
+		responses: map[t_api.Kind]ResponseValidator{},
 	}
 }
 
