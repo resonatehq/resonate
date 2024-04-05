@@ -32,14 +32,19 @@
   <br /><br />
 </div>
 
-An SDK for writing simple and elegant distributed async await applications.
+## Distributed Async Await
+
+Resonate's Distributed Async Await is a new programming model that simplifies coding for the cloud. It ensures code completion even if hardware or software failures occur during execution. The programming model does this with just functions and promises, making it trivial to build `coordinated` and `reliable` distributed applications.
 
 ## Why Resonate?
-Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
 
-## What is Distributed Async Await?
+- **Cloud Computing Made Dead Simple**: Resonate offers a dead simple programming model that simplifies coding for the cloud using an intuitive paradigm you already know — async await.
 
-Distributed Async Await extends the async await programming model beyond the boundaries of a single process and makes distributed computing a first-class citizen.
+- **Single Binary**: Resonate simplifies your deployment and operations with a single binary.
+
+- **Incremental Adoption and No Vendor Lock-In**: Resonate was designed to allow for incremental adoption without vendor lock-in ever.
+
+- **Built on an Open Standard**: Resonate's programming model is built on top of [durable promises](https://github.com/resonatehq/durable-promise-specification), an open standard with an intentionally minimal API surface area.
 
 ## Features
 
