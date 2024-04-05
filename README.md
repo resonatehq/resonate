@@ -65,7 +65,7 @@ Resonate provides client SDKs for different programming languages to easily inte
 
 ## Core features
 
-The basic features Resonate offers to simplify facilitate the reliability & coordination of distributed processes are the following:
+The basic features Resonate offers to simplify the reliability and coordination of distributed processes are the following:
 
 - **Retries**: If a process fails while executing a durable promise due to a transient issue, such as network connectivity problems, it can be transparently retried, minimizing the impact of temporary failures.
 
