@@ -63,19 +63,6 @@ Resonate provides client SDKs for different programming languages to easily inte
 | ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | TS SDK      | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/>             | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk)                     |
 
-## Install 
-
-#### Homebrew (MacOS and Linux)
-
-```shell
-brew install --build-from-source resonate-hq/resonate/installation/brew/Formula/resonate.rb
-```
-
-#### Install Script (Linux):
-
-```shell
-curl -fsSL https://github.com/resonatehq/resonate/blob/main/installation/linux/install.sh | sh
-```
 ## Core features
 
 The basic features Resonate offers to simplify facilitate the reliability & coordination of distributed processes are the following:
