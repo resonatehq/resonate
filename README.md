@@ -52,8 +52,9 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 
 ## Getting Started
 
-1. [Check out our quickstart](https://docs.resonatehq.io/getting-started/quickstart) to get up and running with Resonate in 30 seconds!
-2. [The concepts page](https://docs.resonatehq.io/getting-started/concepts) walks you through the 4 fundamental concepts of distributed async/await applications.
+1. [Get started with Resonate in just 30 seconds](https://docs.resonatehq.io/getting-started/quickstart) by following our quickstart guide!
+2. [Familiarize yourself with the 4 core concepts](https://docs.resonatehq.io/getting-started/concepts) of distributed async/await applications by exploring our concepts page.
+3. [Take a closer look at the internals](https://docs.resonatehq.io/resonate/overview) of the Resonate server in our comprehensive overview.
 
 ## SDKs
 
