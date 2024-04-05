@@ -82,10 +82,11 @@ export class OrdinaryExecution<T> extends Execution<T> {
 
       if (promise.pending) {
         // if pending, invoke the function and resolve/reject the durable promise
-        await this.run().then(
-          (v) => promise.resolve(v, { idempotencyKey: this.invocation.idempotencyKey }),
-          (e) => promise.reject(e, { idempotencyKey: this.invocation.idempotencyKey }),
-        );
+        try {
+          await promise.resolve(await this.run(), { idempotencyKey: this.invocation.idempotencyKey });
+        } catch (e) {
+          await promise.reject(e, { idempotencyKey: this.invocation.idempotencyKey });
+        }
       }
 
       // resolve/reject the invocation
@@ -111,8 +112,9 @@ export class OrdinaryExecution<T> extends Execution<T> {
 
     // invoke the function according to the retry policy
     for (const delay of this.retry.iterator(this.invocation)) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
       try {
-        await new Promise((resolve) => setTimeout(resolve, delay));
         return await this.func();
       } catch (e) {
         error = e;

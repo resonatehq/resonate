@@ -142,6 +142,7 @@ export abstract class ResonateBase {
 
     return (id: string, ...args: any[]) => this.run(name, id, ...args, options);
   }
+
   registerModule(module: Record<string, Func>, opts: Partial<Options> = {}) {
     for (const key in module) {
       this.register(key, module[key], opts);
@@ -212,8 +213,8 @@ export abstract class ResonateBase {
   /**
    * Construct options.
    *
-   * @param opts A partial {@link RegOptions} object.
-   * @returns Options with the __resonate flag set.
+   * @param opts A partial {@link Options} object.
+   * @returns PartialOptions.
    */
   options(opts: Partial<Options> = {}): PartialOptions {
     return { ...opts, __resonate: true };

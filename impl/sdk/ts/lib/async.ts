@@ -2,6 +2,7 @@ import { Execution, OrdinaryExecution, DeferredExecution } from "./core/executio
 import { ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
+import { Retry } from "./core/retries/retry";
 import * as schedules from "./core/schedules/schedules";
 import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
@@ -31,7 +32,7 @@ export class Resonate extends ResonateBase {
    */
   constructor(opts: Partial<ResonateOptions> = {}) {
     super(opts);
-    this.scheduler = new Scheduler();
+    this.scheduler = new Scheduler(this);
   }
 
   /**
@@ -110,7 +111,10 @@ export class Resonate extends ResonateBase {
 /////////////////////////////////////////////////////////////////////
 
 export class Context {
-  constructor(private invocation: Invocation<any>) {}
+  constructor(
+    private resonate: Resonate,
+    private invocation: Invocation<any>,
+  ) {}
 
   /**
    * The running count of function execution attempts.
@@ -216,7 +220,7 @@ export class Context {
     } else {
       // create an ordinary execution
       // this execution wraps a user-provided function
-      const ctx = new Context(invocation);
+      const ctx = new Context(this.resonate, invocation);
       execution = new OrdinaryExecution(invocation, () => func(ctx, ...args));
     }
 
@@ -228,13 +232,150 @@ export class Context {
   }
 
   /**
+   * Creates a Promise that is resolved with an array of results when all of the provided Promises
+   * resolve, or rejected when any Promise is rejected.
+   *
+   * @param values An array of Promises.
+   * @param opts Optional {@link options}.
+   * @returns A new ResonatePromise.
+   */
+  all<T extends readonly unknown[] | []>(
+    values: T,
+    opts: Partial<Options> = {},
+  ): ResonatePromise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
+    // catch all promises to prevent unhandled promise rejections,
+    // since Promise.all will not be called in the case where the
+    // durable promise already completed
+    for (const value of values) {
+      if (value instanceof Promise) {
+        value.catch(() => {});
+      }
+    }
+
+    // prettier-ignore
+    return this.run(() => Promise.all(values), this.options({
+      retry: Retry.never(),
+      ...opts,
+    }));
+  }
+
+  /**
+   * Creates a Promise that is fulfilled by the first given promise to be fulfilled, or rejected
+   * with an AggregateError.
+   *
+   * @param values An array of Promises.
+   * @param opts Optional {@link options}.
+   * @returns A new ResonatePromise.
+   */
+  any<T extends readonly unknown[] | []>(values: T, opts: Partial<Options> = {}): ResonatePromise<Awaited<T[number]>> {
+    // catch all promises to prevent unhandled promise rejections,
+    // since Promise.any will not be called in the case where the
+    // durable promise already completed
+    for (const value of values) {
+      if (value instanceof Promise) {
+        value.catch(() => {});
+      }
+    }
+
+    // prettier-ignore
+    return this.run(() => Promise.any(values), this.options({
+      retry: Retry.never(),
+      ...opts,
+    }));
+  }
+
+  /**
+   * Creates a Promise that is resolved or rejected when any of the provided Promises are resolved
+   * or rejected.
+   *
+   * @param values An array of Promises.
+   * @param opts Optional {@link options}.
+   * @returns A new ResonatePromise.
+   */
+  race<T extends readonly unknown[] | []>(values: T, opts: Partial<Options> = {}): ResonatePromise<Awaited<T[number]>> {
+    // catch all promises to prevent unhandled promise rejections,
+    // since Promise.race will not be called in the case where the
+    // durable promise already completed
+    for (const value of values) {
+      if (value instanceof Promise) {
+        value.catch(() => {});
+      }
+    }
+
+    // prettier-ignore
+    return this.run(() => Promise.race(values), this.options({
+      retry: Retry.never(),
+      ...opts,
+    }));
+  }
+
+  /**
+   * Creates a Promise that is resolved with an array of results when all of the provided Promises
+   * resolve or reject.
+   *
+   * @param values An array of Promises.
+   * @param opts Optional {@link options}.
+   * @returns A new ResonatePromise.
+   */
+  allSettled<T extends readonly unknown[] | []>(
+    values: T,
+    opts: Partial<Options> = {},
+  ): ResonatePromise<{ -readonly [P in keyof T]: PromiseSettledResult<Awaited<T[P]>> }> {
+    // catch all promises to prevent unhandled promise rejections,
+    // since Promise.allSettled will not be called in the case where the
+    // durable promise already completed
+    for (const value of values) {
+      if (value instanceof Promise) {
+        value.catch(() => {});
+      }
+    }
+
+    // prettier-ignore
+    return this.run(() => Promise.allSettled(values), this.options({
+      retry: Retry.never(),
+      ...opts,
+    }));
+  }
+
+  /**
+   * Generate a deterministic random number.
+   *
+   * @returns A random number.
+   */
+  random(): ResonatePromise<number> {
+    return this.run(Math.random);
+  }
+
+  /**
+   * Get a deterministic timestamp.
+   *
+   * @returns A timestamp in ms.
+   */
+  now(): ResonatePromise<number> {
+    return this.run(Date.now);
+  }
+
+  /**
+   * Run a Resonate function in detached mode. Functions must first be registered with Resonate.
+   *
+   * @template T The return type of the function.
+   * @param id A unique id for the function invocation.
+   * @param name The function name.
+   * @param args The function arguments.
+   * @returns A ResonatePromise.
+   */
+  detached<T>(name: string, id: string, ...args: [...any, PartialOptions?]): ResonatePromise<T> {
+    return this.resonate.run(name, id, ...args);
+  }
+
+  /**
    * Construct options.
    *
    * @param opts A partial {@link Options} object.
-   * @returns Options with the __resonate flag set.
+   * @returns PartialOptions.
    */
   options(opts: Partial<Options> = {}): PartialOptions {
-    return { ...opts, __resonate: true };
+    return this.resonate.options(opts);
   }
 }
 
@@ -244,6 +385,8 @@ export class Context {
 
 class Scheduler {
   private cache: Record<string, Execution<any>> = {};
+
+  constructor(private resonate: Resonate) {}
 
   add<F extends Func>(
     name: string,
@@ -271,7 +414,7 @@ class Scheduler {
     const invocation = new Invocation<Return<F>>(name, id, idempotencyKey, undefined, param, opts);
 
     // create a new execution
-    const ctx = new Context(invocation);
+    const ctx = new Context(this.resonate, invocation);
     const execution = new OrdinaryExecution(invocation, () => func(ctx, ...args));
 
     // store the execution,

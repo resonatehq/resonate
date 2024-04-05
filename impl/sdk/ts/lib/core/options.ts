@@ -6,7 +6,7 @@ import { IStore } from "./store";
 /**
  * Resonate configuration options.
  */
-export interface ResonateOptions {
+export type ResonateOptions = {
   /**
    * An encoder instance used for encoding and decoding values
    * returned (or thrown) by registered functions. If not provided,
@@ -59,12 +59,12 @@ export interface ResonateOptions {
    * promise store will be used.
    */
   url: string;
-}
+};
 
 /**
  * Resonate function invocation options.
  */
-export interface Options {
+export type Options = {
   __resonate: true;
 
   /**
@@ -102,7 +102,7 @@ export interface Options {
    * resonate.run.
    */
   version: number;
-}
+};
 
 export type PartialOptions = Partial<Options> & { __resonate: true };
 

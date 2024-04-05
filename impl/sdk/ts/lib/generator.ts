@@ -312,7 +312,7 @@ export class Context {
    * @param opts A partial {@link Options} object.
    * @returns Options with the __resonate flag set.
    */
-  options(opts: Partial<Options> = {}): Partial<Options> & { __resonate: true } {
+  options(opts: Partial<Options> = {}): PartialOptions {
     return { ...opts, __resonate: true };
   }
 }
