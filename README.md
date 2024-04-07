@@ -64,7 +64,7 @@ Resonate provides client SDKs for different programming languages to easily inte
 | ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | TS SDK      | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/>             | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk)                     |
 
-## Core features
+## Core Features
 
 The basic features Resonate offers to simplify the reliability and coordination of distributed processes are the following:
 
