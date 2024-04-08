@@ -14,7 +14,12 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
+type DST struct {
+	config *Config
+}
+
 type Config struct {
+	Scenario           *Scenario
 	Ticks              int64
 	TimeElapsedPerTick int64
 	Reqs               func() int
@@ -25,25 +30,30 @@ type Config struct {
 	Tags               int
 	Urls               int
 	Retries            int
-	FaultInjectionMode bool
 }
 
-type DST struct {
-	config   *Config
-	scenario Scenario
+type Scenario struct {
+	Kind           Kind
+	Default        *DefaultScenario
+	FaultInjection *FaultInjectionScenario
 }
 
-type Scenario int
+type Kind string
 
 const (
-	Default Scenario = iota
-	FaultInjection
+	Default        Kind = "default"
+	FaultInjection      = "fault"
 )
 
-func New(config *Config, scenario Scenario) *DST {
+type DefaultScenario struct{}
+
+type FaultInjectionScenario struct {
+	P float64
+}
+
+func New(config *Config) *DST {
 	return &DST{
-		config:   config,
-		scenario: Default,
+		config: config,
 	}
 }
 
@@ -52,7 +62,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	generator := NewGenerator(r, d.config)
 
 	// model
-	model := NewModel(d.scenario)
+	model := NewModel(d.config.Scenario)
 
 	// add req/res
 	for _, req := range reqs {
