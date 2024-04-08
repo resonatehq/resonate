@@ -239,7 +239,7 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 
 	switch res.CreatePromise.Status {
 	case t_api.StatusOK:
-		if pm.promise != nil && !m.faultInjectionMode {
+		if pm.promise != nil && m.scenario.Kind == Default {
 			if !pm.idempotencyKeyForCreateMatch(res.CreatePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate)
 			} else if req.CreatePromise.Strict && pm.promise.State != promise.Pending {
@@ -296,7 +296,7 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
-		if pm.completed() && !m.faultInjectionMode {
+		if pm.completed() && m.scenario.Kind == Default {
 			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) &&
 				(req.CompletePromise.Strict || pm.promise.State != promise.Timedout) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
@@ -356,7 +356,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 	case t_api.StatusOK:
 		s := res.ReadSchedule.Schedule // schedule response
 
-		if !m.faultInjectionMode { //because we won't know the order of ops
+		if m.scenario.Kind == Default { //because we won't know the order of ops
 			if s.NextRunTime < sm.schedule.NextRunTime {
 				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
 			}
@@ -368,7 +368,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 		sm.schedule = s
 		return nil
 	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil && !m.faultInjectionMode {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			return fmt.Errorf("schedule exists %s", sm.schedule)
 		}
 		return nil
@@ -404,7 +404,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if !m.faultInjectionMode {
+			if m.scenario.Kind == Default {
 				if s.NextRunTime < sm.schedule.NextRunTime {
 					return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
 				}
@@ -413,7 +413,7 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if m.faultInjectionMode {
+			if m.scenario.Kind == Default {
 				return nil
 			}
 			// update schedule state
@@ -430,7 +430,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 
 	switch res.CreateSchedule.Status {
 	case t_api.StatusOK:
-		if sm.schedule != nil && !m.faultInjectionMode {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			if !sm.idempotencyKeyMatch(res.CreateSchedule.Schedule) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey)
 			}
@@ -533,7 +533,7 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = res.AcquireLock.Lock
 		return nil
 	case t_api.StatusLockAlreadyAcquired:
-		if !m.faultInjectionMode {
+		if m.scenario.Kind == Default {
 			if lm.lock == nil {
 				return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
 			}
@@ -592,13 +592,13 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 
 	switch res.ReleaseLock.Status {
 	case t_api.StatusNoContent:
-		if lm.lock == nil && !m.faultInjectionMode {
+		if lm.lock == nil && m.scenario.Kind == Default {
 			return fmt.Errorf("lock %s does not exist", req.ReleaseLock.ResourceId)
 		}
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if !m.faultInjectionMode {
+		if m.scenario.Kind == Default {
 			if lm.lock != nil {
 				if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
 					return nil
