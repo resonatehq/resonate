@@ -92,7 +92,8 @@ func (s *Scheduler) Tick(t int64, batchSize int) {
 				},
 			}
 
-			util.Assert(sqe.Callback != nil, "sqe is nil")
+			util.Assert(sqe.Submission != nil, "submission is nil")
+			util.Assert(sqe.Metadata != nil, "metadata is nil")
 			s.aio.Enqueue(sqe)
 
 		} else {
