@@ -42,7 +42,7 @@ type Kind string
 
 const (
 	Default        Kind = "default"
-	FaultInjection      = "fault"
+	FaultInjection Kind = "fault"
 )
 
 type DefaultScenario struct{}
