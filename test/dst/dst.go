@@ -3,7 +3,7 @@ package dst
 import (
 	"fmt"
 	"log/slog"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"

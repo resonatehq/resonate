@@ -582,7 +582,7 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
 				owned := m.locks.Get(l.lock.ResourceId)
-				owned.lock.ExpiresAt = owned.lock.ExpiresAt + (owned.lock.ExpiryInSeconds * 1000)
+				owned.lock.ExpiresAt = owned.lock.ExpiresAt + owned.lock.ExpiryInMilliseconds
 			}
 		}
 

@@ -1,7 +1,7 @@
 package dst
 
 import (
-	"math/rand"
+	"math/rand" // nosemgrep
 )
 
 func RangeIntn(r *rand.Rand, min int, max int) int {

@@ -11,8 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
-	queuing_metadata "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
+
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -44,23 +43,7 @@ func TestDST(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// TODO: DST version so just test the kernel.
-	queuing, err := queuing.NewSubsytemOrDie(&queuing.Config{
-		Connections: []*t_conn.ConnectionConfig{
-			{
-				Kind:    t_conn.HTTP,
-				Pattern: "/payments/*",
-				Name:    "payments-demo",
-				Queue:   "payments-demo",
-				Metadata: &queuing_metadata.Metadata{
-					Properties: map[string]interface{}{
-						"url": "http://localhost:5001",
-					},
-				},
-			},
-		},
-	})
+	queuing, err := queuing.NewDST(&queuing.ConfigDST{P: 0.5}, r)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -168,7 +168,7 @@ func isClaimableTask(c *Coroutine, req *t_api.Request, task *task.Task) *t_api.R
 }
 
 func tryClaimTask(c *Coroutine, req *t_api.Request, task *task.Task) (*t_aio.Completion, error) {
-	timeout := c.Time() + (req.ClaimTask.ExpiryInSeconds * 1000) // from s to ms
+	timeout := c.Time() + req.ClaimTask.ExpiryInMilliseconds
 
 	// Optimizing for the happy path. JUST GO FOR IT and avoid two writes.
 	completion, err := c.Yield(&t_aio.Submission{
@@ -179,11 +179,11 @@ func tryClaimTask(c *Coroutine, req *t_api.Request, task *task.Task) (*t_aio.Com
 					{
 						Kind: t_aio.AcquireLock,
 						AcquireLock: &t_aio.AcquireLockCommand{
-							ResourceId:      task.PromiseId,
-							ProcessId:       req.ClaimTask.ProcessId,
-							ExecutionId:     req.ClaimTask.ExecutionId,
-							ExpiryInSeconds: req.ClaimTask.ExpiryInSeconds,
-							Timeout:         timeout, // from s to ms
+							ResourceId:           task.PromiseId,
+							ProcessId:            req.ClaimTask.ProcessId,
+							ExecutionId:          req.ClaimTask.ExecutionId,
+							ExpiryInMilliseconds: req.ClaimTask.ExpiryInMilliseconds,
+							Timeout:              timeout, // from s to ms
 						},
 					},
 					{
