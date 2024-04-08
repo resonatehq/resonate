@@ -49,6 +49,14 @@ func TestModelStep(t *testing.T) {
 			err:     errors.New("unexpected non-resonate error"),
 			wantErr: true,
 		},
+		{
+			name:    "error with fault injection",
+			m:       &Model{scenario: &Scenario{Kind: FaultInjection, FaultInjection: &FaultInjectionScenario{P: 1}}},
+			req:     &t_api.Request{},
+			res:     &t_api.Response{},
+			err:     errors.New("error with fault injection"),
+			wantErr: true,
+		},
 	}
 
 	for _, tc := range tcs {
