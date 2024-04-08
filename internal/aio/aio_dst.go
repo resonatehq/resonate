@@ -13,29 +13,21 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-type Scenario int
 type aioDST struct {
-	r                  *rand.Rand
-	sqes               []*bus.SQE[t_aio.Submission, t_aio.Completion]
-	cqes               []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	subsystems         map[t_aio.Kind]Subsystem
-	metrics            *metrics.Metrics
-	failureProbability float64
-	faultInjectionMode Scenario
+	r          *rand.Rand
+	p          float64
+	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
+	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	subsystems map[t_aio.Kind]Subsystem
+	metrics    *metrics.Metrics
 }
 
-const (
-	Default Scenario = iota
-	FaultInjection
-)
-
-func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64, faultInjectionMode Scenario) *aioDST {
+func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	return &aioDST{
-		r:                  r,
-		subsystems:         map[t_aio.Kind]Subsystem{},
-		metrics:            metrics,
-		failureProbability: failureProbability,
-		faultInjectionMode: faultInjectionMode,
+		r:          r,
+		p:          p,
+		subsystems: map[t_aio.Kind]Subsystem{},
+		metrics:    metrics,
 	}
 }
 
