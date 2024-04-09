@@ -72,7 +72,7 @@ The basic features Resonate offers to simplify the reliability and coordination 
 
 - **Recoverability**: If a process crashes while executing a durable promise, it can recover and continue from where it left off, ensuring your application remains resilient.
 
-- **Schedules**: Durable promises can be used to schedule statefule reminders using a simple HTTP/gRPC call.
+- **Schedules**: Durable promises can be used to schedule stateful reminders using a simple HTTP/gRPC call.
 
 - **Task Framework**: Durable promises allow you to fan out tasks across multiple processes or machines, enabling parallel execution and load balancing, making your application more scalable.
 
