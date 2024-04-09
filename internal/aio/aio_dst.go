@@ -93,32 +93,26 @@ func (a *aioDST) Flush(t int64) {
 
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
-			if a.p == 0 {
-				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
-				a.cqes = append(a.cqes, processedCQEs...)
-			} else if a.r.Float64() < a.p {
-				// Do the I/O
-				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
-				// Randomly decide whether to return an error after processing SQE
-				for i := range processedCQEs {
-					if a.r.Float64() < a.p {
-						processedCQEs[i].Completion = nil
-						processedCQEs[i].Error = errors.New("aio dst: failure, after processing")
-					}
-				}
-				a.cqes = append(a.cqes, processedCQEs...)
-			} else {
-				// error without processing
-				res := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes.Value))
-				for i := range sqes.Value {
-					res[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			for i := range sqes.Value {
+				// Simulate failure before processing
+				if a.r.Float64() < a.p {
+					cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
 						Metadata:   sqes.Value[i].Metadata,
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
 						Error:      errors.New("aio dst: failure, before processing"),
 					}
+					a.cqes = append(a.cqes, cqe)
+				} else {
+					// Process the SQE
+					processedCQEs := subsystem.NewWorker(0).Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqes.Value[i]})
+					// Simulate failure after processing
+					if a.r.Float64() < a.p {
+						processedCQEs[0].Completion = nil
+						processedCQEs[0].Error = errors.New("aio dst: failure, after processing")
+					}
+					a.cqes = append(a.cqes, processedCQEs...)
 				}
-				a.cqes = append(a.cqes, res...)
 			}
 		} else {
 			panic("invalid aio submission")

@@ -239,7 +239,7 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 
 	switch res.CreatePromise.Status {
 	case t_api.StatusOK:
-		if pm.promise != nil && m.scenario.Kind == Default {
+		if pm.promise != nil {
 			if !pm.idempotencyKeyForCreateMatch(res.CreatePromise.Promise) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate)
 			} else if req.CreatePromise.Strict && pm.promise.State != promise.Pending {
@@ -296,7 +296,7 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
-		if pm.completed() && m.scenario.Kind == Default {
+		if pm.completed() {
 			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) &&
 				(req.CompletePromise.Strict || pm.promise.State != promise.Timedout) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
