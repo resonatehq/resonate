@@ -286,7 +286,7 @@ const (
 	UPDATE
 		locks
 	SET
-		timeout = timeout + expiry_in_milliseconds 
+		timeout = ? + expiry_in_milliseconds
 	WHERE
 		process_id = ?`
 
@@ -941,7 +941,7 @@ func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.A
 
 func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
 	// update
-	res, err := stmt.Exec(cmd.ProcessId)
+	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
 		return nil, err
 	}
