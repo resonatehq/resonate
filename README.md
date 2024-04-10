@@ -36,76 +36,27 @@
   <br />
 </div>
 
+## Distributed Async Await
+
+Resonate's Distributed Async Await is a new programming model that simplifies coding for the cloud. It ensures code completion even if hardware or software failures occur during execution. The programming model does this with just functions and promises, making it trivial to build `coordinated` and `reliable` distributed applications.
+
 ## Why Resonate?
 
-Resonate offers a programming model that allows you to build distributed applications using an intuitive paradigm you already know — async await.
+- **Cloud Computing Made Dead Simple**: Resonate offers a dead simple programming model that simplifies coding for the cloud using an intuitive paradigm you already know — async await.
 
-## What is Distributed Async Await?
+- **Single Binary**: Resonate simplifies your deployment and operations with a single binary.
 
-Distributed Async Await extends the async await programming model beyond the boundaries of a single process and makes distributed computing a first-class citizen.
+- **Incremental Adoption and No Vendor Lock-In**: Resonate was designed to allow for incremental adoption without vendor lock-in ever.
 
-## Install the Latest Release
-
-#### MacOS 
-
-```shell
-brew install --build-from-source resonate-hq/resonate/installation/brew/Formula/resonate.rb
-```
-
-#### Linux
-
-```shell
-curl -fsSL https://github.com/resonatehq/resonate/blob/main/installation/linux/install.sh | sh
-```
+- **Built on an Open Standard**: Resonate's programming model is built on top of [durable promises](https://github.com/resonatehq/durable-promise-specification), an open standard with an intentionally minimal API surface area.
 
 ## Getting Started
 
-Resonate makes it easy to get started creating and interacting with durable promises. Follow these steps to build and run Resonate, then start creating and completing promises.
+1. [Start building in just 30 seconds](https://docs.resonatehq.io/getting-started/quickstart) with our quickstart guide!
+2. [Grasp the 4 core concepts](https://docs.resonatehq.io/getting-started/concepts) of distributed async/await applications by delving into our concepts page.
+3. [Dive into the Resonate Server docs](https://docs.resonatehq.io/resonate/overview) and learn how to configure, deploy, and more.
 
-1. **Build and Run**
-
-   The resonate server supports `http` and `grpc` protocols as well as `sqlite` and `postgres` as a data store.
-
-   ```console
-   # Build
-   go build -o resonate
-
-   # Start
-   ./resonate serve
-   ```
-
-   Once running, you'll see log output like:
-
-   ```console
-   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting http server" addr=0.0.0.0:8001
-   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting grpc server" addr=0.0.0.0:50051
-   time=2023-01-01T00:00:00.000-00:00 level=INFO msg="starting metrics server" addr=:9090
-   ```
-
-2. **Create a Promise**
-
-   On a separate terminal, create a durable promise.
-
-   ```console
-   # Create a promise with data, headers and tags
-   resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=baz
-   ```
-
-3. **Complete a Promise**
-
-   Finally, complete the promise by resolving or rejecting.
-
-   ```console
-   # Resolve a promise with data and headers 
-   resonate promises resolve foo --data foo --header bar=bar
-   ```
-
-   ```console
-   # Reject a promise with data and headers
-   resonate promises reject foo --data foo --header bar=bar
-   ```
-
-## Write Distributed Async Await Applications   
+## SDKs
 
 Resonate provides client SDKs for different programming languages to easily interact with the Resonate server and write elegant distributed async await applications. More are coming soon!
 
@@ -113,16 +64,25 @@ Resonate provides client SDKs for different programming languages to easily inte
 | ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | TS SDK      | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/>             | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk)                     |
 
+## Core Features
+
+The basic features Resonate offers to simplify the reliability and coordination of distributed processes are the following:
+
+- **Retries**: If a process fails while executing a durable promise due to a transient issue, such as network connectivity problems, it can be transparently retried, minimizing the impact of temporary failures.
+
+- **Recoverability**: If a process crashes while executing a durable promise, it can recover and continue from where it left off, ensuring your application remains resilient.
+
+- **Schedules**: Durable promises can be used to schedule stateful reminders using a simple HTTP/gRPC call.
+
+- **Task Framework**: Durable promises allow you to fan out tasks across multiple processes or machines, enabling parallel execution and load balancing, making your application more scalable.
+
+- **Notifications**: When a durable promise is created or completed, it can trigger notifications to other processes or services that are interested in the result, enabling efficient communication and coordination.
+
+- **Human in the Loop**: Durable promises can seamlessly integrate human input into your automated workflows, allowing for manual intervention or approval steps when needed.
+
 ## Contributing
 
 See our [contribution guidelines](CONTRIBUTING.md).
-
-### Development
-
-```console
-go run ./...
-go test -v ./...
-```
 
 ## License
 

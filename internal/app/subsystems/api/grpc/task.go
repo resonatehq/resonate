@@ -23,11 +23,11 @@ func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (
 	}
 
 	body := &service.ClaimTaskBody{
-		TaskId:          req.TaskId,
-		Counter:         int(req.Counter),
-		ProcessId:       req.ProcessId,
-		ExecutionId:     req.ExecutionId,
-		ExpiryInSeconds: req.ExpiryInSeconds,
+		TaskId:               req.TaskId,
+		Counter:              int(req.Counter),
+		ProcessId:            req.ProcessId,
+		ExecutionId:          req.ExecutionId,
+		ExpiryInMilliseconds: req.ExpiryInMilliseconds,
 	}
 
 	resp, err := s.service.ClaimTask(header, body)

@@ -1,14 +1,24 @@
 package queuing
 
 import (
+	"fmt"
+
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
+const (
+	taskClaimEndpoint    string = "tasks/claim" // TODO: make this configurable ? so no broken link ? testing..
+	taskCompleteEndpoint string = "tasks/complete"
+)
+
 // QueuingWorker is a worker that dispatches submissions to the appropriate connections.
 type QueuingWorker struct {
+	// BaseURL is the base URL for the API.
+	BaseURL string
+
 	// ConnectionRouter is the router to route requests to the appropriate connections.
 	ConnectionRouter Router
 
@@ -38,6 +48,10 @@ func (w *QueuingWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completi
 				Queue:   matchResult.Queue,
 				TaskId:  sqe.Submission.Queuing.TaskId,
 				Counter: sqe.Submission.Queuing.Counter,
+				Links: t_conn.Links{
+					Claim:    fmt.Sprintf("%s/%s", w.BaseURL, taskClaimEndpoint),
+					Complete: fmt.Sprintf("%s/%s", w.BaseURL, taskCompleteEndpoint),
+				},
 			}
 		}
 	}

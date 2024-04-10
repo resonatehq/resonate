@@ -2,43 +2,51 @@ package queuing
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-// Config is the configuration for the queuing subsystem.
-type Config struct {
-	Connections []*t_conn.ConnectionConfig
-}
+type (
+	// Config is the configuration for the queuing subsystem.
+	Config struct {
+		Connections []*t_conn.ConnectionConfig
+		Routes      []*t_route.RoutingConfig
+	}
 
-// QueuingSubsystem is a subsystem that dispatches tasks to user defined connections.
-type QueuingSubsystem struct {
-	// router contains the information for routing requests to connections.
-	connectionRouter Router
+	// QueuingSubsystem is a subsystem that dispatches tasks to user defined connections.
+	QueuingSubsystem struct {
+		// baseURL is the base URL for the API to use by the workers.
+		baseURL string
 
-	// connections is a map of connection names to their connection instances.
-	connections map[string]t_conn.Connection
+		// router contains the information for routing requests to connections.
+		connectionRouter Router
 
-	// connectionsSQ is a map of connection names to their submission queues.
-	connectionsSQ map[string]chan *t_conn.ConnectionSubmission
+		// connections is a map of connection names to their connection instances.
+		connections map[string]t_conn.Connection
 
-	// connectionsWG is a wait group to wait for all connections to finish before shutting down.
-	connectionsWG *sync.WaitGroup
+		// connectionsSQ is a map of connection names to their submission queues.
+		connectionsSQ map[string]chan *t_conn.ConnectionSubmission
 
-	// ctx is the parent context for all connections.
-	ctx context.Context
+		// connectionsWG is a wait group to wait for all connections to finish before shutting down.
+		connectionsWG *sync.WaitGroup
 
-	// stop is the context cancel function to send a signal to all connections to stop.
-	stop context.CancelFunc
-}
+		// ctx is the parent context for all connections.
+		ctx context.Context
 
-// NewSubsytemOrDie creates a new queuing subsystem with the given config.
-func NewSubsytemOrDie(config *Config) (*QueuingSubsystem, error) {
-	// TODO: if nil, no need to do anything.
+		// stop is the context cancel function to send a signal to all connections to stop.
+		stop context.CancelFunc
+	}
+)
+
+// New creates a new queuing subsystem with the given config.
+func New(baseURL string, config *Config) (aio.Subsystem, error) {
 	var (
 		conns      = make(map[string]t_conn.Connection, len(config.Connections))
 		connSQ     = make(map[string]chan *t_conn.ConnectionSubmission, len(config.Connections))
@@ -46,18 +54,9 @@ func NewSubsytemOrDie(config *Config) (*QueuingSubsystem, error) {
 		err        error
 	)
 
+	// Create a connection for each connection configuration.
 	for _, cfg := range config.Connections {
-		tsq := make(chan *t_conn.ConnectionSubmission, 100) // TODO: make this configurable
-
-		connRouter.Handle(cfg.Pattern, &RouteHandler{ // for routing requests to the appropriate connection
-			Connection: cfg.Name,
-			Queue:      cfg.Queue,
-		})
-		// Workaround for no dependency injection in coroutines. (TODO: consider alternatives)
-		CoroutineRouter().Handle(cfg.Pattern, &RouteHandler{
-			Connection: cfg.Name,
-			Queue:      cfg.Queue,
-		})
+		tsq := make(chan *t_conn.ConnectionSubmission, 100)        // TODO: make this configurable
 		connSQ[cfg.Name] = tsq                                     // for communication between worker and connection
 		conns[cfg.Name], err = connections.NewConnection(tsq, cfg) // for starting the connection
 		if err != nil {
@@ -65,9 +64,34 @@ func NewSubsytemOrDie(config *Config) (*QueuingSubsystem, error) {
 		}
 	}
 
+	// Register the routes with the desired router (right now only the default pattern router is supported).
+	for _, cfg := range config.Routes {
+
+		// Check if target connection exists.
+		if _, ok := conns[cfg.Target.Connection]; !ok {
+			return nil, fmt.Errorf("connection %q not found for routing %q", cfg.Target.Connection, cfg.Name)
+		}
+
+		route, err := routes.NewRoute(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		connRouter.Handle(route.Route(), &RouteHandler{ // for routing requests to the appropriate connection
+			Connection: cfg.Target.Connection,
+			Queue:      cfg.Target.Queue,
+		})
+		// Workaround for no dependency injection in coroutines. (TODO: consider alternatives)
+		CoroutineRouter().Handle(route.Route(), &RouteHandler{
+			Connection: cfg.Target.Connection,
+			Queue:      cfg.Target.Queue,
+		})
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &QueuingSubsystem{
+		baseURL:          baseURL,
 		connectionRouter: connRouter,
 		connections:      conns,
 		connectionsSQ:    connSQ,
@@ -85,6 +109,7 @@ func (t *QueuingSubsystem) String() string {
 // NewWorker creates a new worker for the queuing subsystem with the submission queues for each connection.
 func (t *QueuingSubsystem) NewWorker(i int) aio.Worker {
 	return &QueuingWorker{
+		BaseURL:          t.baseURL,
 		ConnectionRouter: t.connectionRouter,
 		ConnectionsSQ:    t.connectionsSQ,
 		i:                i,

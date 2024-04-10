@@ -86,11 +86,11 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
 
 	CREATE TABLE IF NOT EXISTS locks (
-		resource_id       TEXT,
-		process_id        TEXT,
-		execution_id      TEXT,  
-		expiry_in_seconds BIGINT,
-		timeout           BIGINT, 
+		resource_id            TEXT,
+		process_id             TEXT,
+		execution_id           TEXT,  
+		expiry_in_milliseconds BIGINT,
+		timeout                BIGINT, 
 		PRIMARY KEY(resource_id)
 	);
 	  
@@ -131,7 +131,7 @@ const (
 		PRIMARY KEY(id) 
 	);
 	
-	INSERT INTO migrations (id) VALUES (1);`
+	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE notifications;
@@ -274,11 +274,11 @@ const (
 		complete_timeout < $2 AND 
 		promise_timeout > $2
 	ORDER BY
-		created_on ASC`
+		created_on ASC, id`
 
 	LOCK_READ_STATEMENT = `
 	SELECT 
-		resource_id, process_id, execution_id, expiry_in_seconds, timeout
+		resource_id, process_id, execution_id, expiry_in_milliseconds, timeout
 	FROM
 		locks
 	WHERE
@@ -286,13 +286,13 @@ const (
 
 	LOCK_ACQUIRE_STATEMENT = `
   	INSERT INTO locks 
-		(resource_id, process_id, execution_id, expiry_in_seconds, timeout) 
+		(resource_id, process_id, execution_id, expiry_in_milliseconds, timeout) 
   	VALUES 
 		($1, $2, $3, $4, $5)
   	ON CONFLICT(resource_id)
 	DO UPDATE SET 
 	  process_id = EXCLUDED.process_id,
-	  expiry_in_seconds = EXCLUDED.expiry_in_seconds,
+	  expiry_in_milliseconds = EXCLUDED.expiry_in_milliseconds,
 	  timeout = EXCLUDED.timeout
   	WHERE locks.execution_id = EXCLUDED.execution_id`
 
@@ -300,7 +300,7 @@ const (
   	UPDATE 
 		locks 
   	SET 
-		timeout = timeout + (expiry_in_seconds * 1000) 
+		timeout = timeout + expiry_in_milliseconds
   	WHERE 
 		process_id = $1`
 
@@ -937,7 +937,7 @@ func (w *PostgresStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (
 		&record.ResourceId,
 		&record.ProcessId,
 		&record.ExecutionId,
-		&record.ExpiryInSeconds,
+		&record.ExpiryInMilliseconds,
 		&record.Timeout,
 	); err != nil {
 		if err == sql.ErrNoRows {
@@ -963,7 +963,7 @@ func (w *PostgresStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (
 
 func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.ExpiryInSeconds, cmd.Timeout)
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.ExpiryInMilliseconds, cmd.Timeout)
 	if err != nil {
 		return nil, err
 	}

@@ -27,6 +27,7 @@ type Config struct {
 }
 
 type APIConfig struct {
+	BaseURL    string
 	Size       int
 	Subsystems *APISubsystems
 }
@@ -46,6 +47,7 @@ type AIOSubsystems struct {
 	Network    *AIOSubsystemConfig[network.Config]
 	NetworkDST *AIOSubsystemConfig[network.ConfigDST]
 	Queuing    *AIOSubsystemConfig[queuing.Config]
+	QueuingDST *AIOSubsystemConfig[queuing.ConfigDST]
 }
 
 type AIOSubsystemConfig[T any] struct {

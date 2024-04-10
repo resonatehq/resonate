@@ -14,7 +14,7 @@ message Lock {
     string resource_id = 1;
     string process_id = 2; 
     string execution_id = 3;
-    int64 expiry_in_seconds = 4;  
+    int64 expiry_in_milliseconds = 4;  
     int64 expires_at = 5;
 }
 

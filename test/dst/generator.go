@@ -172,8 +172,9 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
+	// Triggers the task framework.
 	if RandBool(r) {
-		id = fmt.Sprintf("payments/%s", id)
+		id = fmt.Sprintf("/gpu/summarize/%s", id)
 	}
 
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
@@ -349,15 +350,15 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	resourceId := g.idSet[r.Intn(len(g.idSet))]
 	processId := g.idSet[r.Intn(len(g.idSet))]
 	executionId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInSeconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	expiryInMilliseconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
 	return &t_api.Request{
 		Kind: t_api.AcquireLock,
 		AcquireLock: &t_api.AcquireLockRequest{
-			ResourceId:      resourceId,
-			ProcessId:       processId,
-			ExecutionId:     executionId,
-			ExpiryInSeconds: expiryInSeconds,
+			ResourceId:           resourceId,
+			ProcessId:            processId,
+			ExecutionId:          executionId,
+			ExpiryInMilliseconds: expiryInMilliseconds,
 		},
 	}
 }
@@ -393,16 +394,16 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	counter := r.Int()
 	processId := g.idSet[r.Intn(len(g.idSet))]
 	executionId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInSeconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	expiryInMilliseconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
 	return &t_api.Request{
 		Kind: t_api.ClaimTask,
 		ClaimTask: &t_api.ClaimTaskRequest{
-			TaskId:          taskId,
-			Counter:         counter,
-			ProcessId:       processId,
-			ExecutionId:     executionId,
-			ExpiryInSeconds: expiryInSeconds,
+			TaskId:               taskId,
+			Counter:              counter,
+			ProcessId:            processId,
+			ExecutionId:          executionId,
+			ExpiryInMilliseconds: expiryInMilliseconds,
 		},
 	}
 }

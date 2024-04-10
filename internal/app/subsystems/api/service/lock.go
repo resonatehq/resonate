@@ -15,13 +15,13 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 	util.Assert(body.ResourceId != "", "lock.resource_id must be provided")
 	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
 	util.Assert(body.ExecutionId != "", "lock.execution_id must be provided")
-	util.Assert(body.ExpiryInSeconds != 0, "lock.timeout must be provided")
+	util.Assert(body.ExpiryInMilliseconds != 0, "lock.expiry_in_milliseconds must be provided")
 
 	acquireLock := &t_api.AcquireLockRequest{
-		ResourceId:      body.ResourceId,
-		ProcessId:       body.ProcessId,
-		ExecutionId:     body.ExecutionId,
-		ExpiryInSeconds: body.ExpiryInSeconds,
+		ResourceId:           body.ResourceId,
+		ProcessId:            body.ProcessId,
+		ExecutionId:          body.ExecutionId,
+		ExpiryInMilliseconds: body.ExpiryInMilliseconds,
 	}
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)

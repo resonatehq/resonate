@@ -66,7 +66,7 @@ func ServeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			queuing, err := queuing.NewSubsytemOrDie(config.AIO.Subsystems.Queuing.Config)
+			queuing, err := queuing.New(config.API.BaseURL, config.AIO.Subsystems.Queuing.Config)
 			if err != nil {
 				return err
 			}
@@ -189,11 +189,13 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
 	cmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
 	cmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
+	cmd.Flags().String("api-base-url", "http://localhost:8001", "base url to automatically generate absolute URLs for the server's resources")
 
 	_ = viper.BindPFlag("api.size", cmd.Flags().Lookup("api-size"))
 	_ = viper.BindPFlag("api.subsystems.http.addr", cmd.Flags().Lookup("api-http-addr"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", cmd.Flags().Lookup("api-http-timeout"))
 	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
+	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
 
 	// aio
 	// Store
@@ -219,9 +221,11 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
 	// Queuing
 	cmd.Flags().Int("aio-queuing-size", 100, "size of queuing submission queue buffered channel")
-	cmd.Flags().Int("aio-queuing-workers", 1, "number of queuing workers") // must be 1.
+	cmd.Flags().Int("aio-queuing-workers", 1, "number of queuing workers")
+	cmd.Flags().Lookup("aio-queuing-workers").Hidden = true // must be 1.
 	cmd.Flags().Int("aio-queuing-batch-size", 100, "max submissions processed each tick by a queuing worker")
 	cmd.Flags().Var(&ConnectionSlice{}, "aio-queuing-connections", "queuing subsystem connections")
+	cmd.Flags().Var(&RouteSlice{}, "aio-queuing-routes", "queuing subsystem routes")
 
 	// Store
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
@@ -250,6 +254,7 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.workers", cmd.Flags().Lookup("aio-queuing-workers"))
 	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.batchSize", cmd.Flags().Lookup("aio-queuing-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.queuing.config.connections", cmd.Flags().Lookup("aio-queuing-connections"))
+	_ = viper.BindPFlag("aio.subsystems.queuing.config.routes", cmd.Flags().Lookup("aio-queuing-routes"))
 
 	// system
 	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")

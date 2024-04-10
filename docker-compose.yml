@@ -33,6 +33,11 @@ services:
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
     - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d resonate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # dst
   resonate-dst:
@@ -68,3 +73,8 @@ services:
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
     - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U username -d resonate_dst"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
