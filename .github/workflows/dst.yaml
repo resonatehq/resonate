@@ -133,7 +133,7 @@ jobs:
     - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }}) > logs.txt
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt
     # - name: Create issue if dst failed
     #   env:
     #     GITHUB_TOKEN: ${{ secrets.github_token }}
