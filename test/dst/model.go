@@ -142,8 +142,8 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 			return fmt.Errorf("unexpected non-resonate error '%v'", err)
 		}
 
-		var dstErr *aio.AioDSTError
-		if errors.As(err, &dstErr) {
+		// ignore dst injected errors, these are expected
+		if errors.Is(err, &aio.AioDSTError{}) {
 			return nil
 		}
 

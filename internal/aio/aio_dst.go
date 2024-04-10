@@ -21,6 +21,11 @@ func (e *AioDSTError) Error() string {
 	return e.msg
 }
 
+func (e *AioDSTError) Is(target error) bool {
+	_, ok := target.(*AioDSTError)
+	return ok
+}
+
 type aioDST struct {
 	r          *rand.Rand
 	p          float64
@@ -30,7 +35,7 @@ type aioDST struct {
 	metrics    *metrics.Metrics
 }
 
-func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
+func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) AIO {
 	return &aioDST{
 		r:          r,
 		p:          p,
@@ -39,7 +44,7 @@ func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	}
 }
 
-func (a *aioDST) AddSubsystem(kind t_aio.Kind, subsystem Subsystem) {
+func (a *aioDST) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig) {
 	a.subsystems[kind] = subsystem
 }
 
@@ -64,6 +69,10 @@ func (a *aioDST) Stop() error {
 }
 
 func (a *aioDST) Shutdown() {}
+
+func (a *aioDST) Errors() <-chan error {
+	return nil
+}
 
 func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	slog.Debug("aio:enqueue", "sqe", sqe)
