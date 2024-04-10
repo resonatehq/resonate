@@ -33,10 +33,14 @@ func TestDST(t *testing.T) {
 		CompletionBatchSize:   100,
 	}
 
+	scenario := Scenario{
+		Kind:           FaultInjection,
+		FaultInjection: &FaultInjectionScenario{P: 0.5},
+	}
+
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	failureProbability := 0.5
-	aio := aio.NewDST(r, metrics, failureProbability)
+	aio := aio.NewDST(r, scenario.FaultInjection.P, metrics)
 
 	// instatiate aio subsystems
 	network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
@@ -126,6 +130,7 @@ func TestDST(t *testing.T) {
 		Tags:               100,
 		Urls:               100,
 		Retries:            100,
+		Scenario:           &scenario,
 	})
 
 	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {

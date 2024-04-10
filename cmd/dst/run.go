@@ -1,6 +1,7 @@
 package dst
 
 import (
+	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
 	netHttp "net/http"
@@ -27,17 +28,17 @@ import (
 
 func RunDSTCmd() *cobra.Command {
 	var (
-		seed               int64
-		ticks              int64
-		reqsPerTick        = util.RangeIntFlag{Min: 1, Max: 1000}
-		ids                = util.RangeIntFlag{Min: 1, Max: 1000}
-		idempotencyKeys    = util.RangeIntFlag{Min: 1, Max: 1000}
-		headers            = util.RangeIntFlag{Min: 1, Max: 1000}
-		data               = util.RangeIntFlag{Min: 1, Max: 1000}
-		tags               = util.RangeIntFlag{Min: 1, Max: 1000}
-		urls               = util.RangeIntFlag{Min: 1, Max: 1000}
-		retries            = util.RangeIntFlag{Min: 1, Max: 1000}
-		failureProbability float64
+		seed            int64
+		ticks           int64
+		scenario        string
+		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 1000}
+		ids             = util.RangeIntFlag{Min: 1, Max: 1000}
+		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 1000}
+		headers         = util.RangeIntFlag{Min: 1, Max: 1000}
+		data            = util.RangeIntFlag{Min: 1, Max: 1000}
+		tags            = util.RangeIntFlag{Min: 1, Max: 1000}
+		urls            = util.RangeIntFlag{Min: 1, Max: 1000}
+		retries         = util.RangeIntFlag{Min: 1, Max: 1000}
 	)
 
 	cmd := &cobra.Command{
@@ -84,9 +85,24 @@ func RunDSTCmd() *cobra.Command {
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
+			// scenario
+			var p float64
+			var dstScenario *dst.Scenario
+
+			switch scenario {
+			case "default":
+				p = 0
+				dstScenario = &dst.Scenario{Kind: dst.Default, Default: &dst.DefaultScenario{}}
+			case "fault":
+				p = r.Float64()
+				dstScenario = &dst.Scenario{Kind: dst.FaultInjection, FaultInjection: &dst.FaultInjectionScenario{P: p}}
+			default:
+				return fmt.Errorf("invalid scenario: %s, permitted scenarios: {default, fault}", scenario)
+			}
+
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			aio := aio.NewDST(r, metrics, failureProbability)
+			aio := aio.NewDST(r, p, metrics)
 
 			// instatiate aio subsystems
 			network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
@@ -165,6 +181,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			dst := dst.New(&dst.Config{
+				Scenario:           dstScenario,
 				Ticks:              ticks,
 				TimeElapsedPerTick: 50_000, // milliseconds
 				Reqs: func() int {
@@ -203,6 +220,7 @@ func RunDSTCmd() *cobra.Command {
 
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
+	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault}")
 
 	// dst related values
 	cmd.Flags().Var(&reqsPerTick, "reqs-per-tick", "number of requests per tick")
@@ -213,7 +231,6 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&tags, "tags", "number promise tags")
 	cmd.Flags().Var(&urls, "urls", "number subscription urls")
 	cmd.Flags().Var(&retries, "retries", "number subscription retries")
-	cmd.Flags().Float64Var(&failureProbability, "failure-probability", 0.5, "probability of aio failure")
 
 	// api
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000000}, "api-size", "size of the submission queue buffered channel")

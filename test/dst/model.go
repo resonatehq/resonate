@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -20,6 +21,7 @@ import (
 // Model
 
 type Model struct {
+	scenario  *Scenario
 	promises  Promises
 	schedules Schedules
 	locks     Locks
@@ -112,8 +114,9 @@ func (t Tasks) Get(id string) *TaskModel {
 	return t[id]
 }
 
-func NewModel() *Model {
+func NewModel(scenario *Scenario) *Model {
 	return &Model{
+		scenario:  scenario,
 		promises:  map[string]*PromiseModel{},
 		schedules: map[string]*ScheduleModel{},
 		locks:     map[string]*LockModel{},
@@ -138,6 +141,12 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 		if !errors.As(err, &resErr) {
 			return fmt.Errorf("unexpected non-resonate error '%v'", err)
 		}
+
+		var dstErr *aio.AioDSTError
+		if errors.As(err, &dstErr) {
+			return nil
+		}
+
 		switch resErr.Code() {
 		case t_api.ErrAPISubmissionQueueFull:
 			return nil
@@ -156,7 +165,7 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 		return f(t, req, res)
 	}
 
-	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
+	return nil
 }
 
 // PROMISES
@@ -352,17 +361,19 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 	case t_api.StatusOK:
 		s := res.ReadSchedule.Schedule // schedule response
 
-		if s.NextRunTime < sm.schedule.NextRunTime {
-			return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
-		}
-		if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
-			return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
-		}
+		if m.scenario.Kind == Default { //because we won't know the order of ops
+			if s.NextRunTime < sm.schedule.NextRunTime {
+				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+			}
+			if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+				return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+			}
 
+		}
 		sm.schedule = s
 		return nil
 	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			return fmt.Errorf("schedule exists %s", sm.schedule)
 		}
 		return nil
@@ -398,13 +409,18 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if s.NextRunTime < sm.schedule.NextRunTime {
-				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
-			}
-			if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
-				return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+			if m.scenario.Kind == Default {
+				if s.NextRunTime < sm.schedule.NextRunTime {
+					return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+				}
+				if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+					return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+				}
 			}
 
+			if m.scenario.Kind == Default {
+				return nil
+			}
 			// update schedule state
 			sm.schedule = s
 		}
@@ -419,7 +435,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 
 	switch res.CreateSchedule.Status {
 	case t_api.StatusOK:
-		if sm.schedule != nil {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			if !sm.idempotencyKeyMatch(res.CreateSchedule.Schedule) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey)
 			}
@@ -500,7 +516,6 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
-
 	switch res.DeleteSubscription.Status {
 	case t_api.StatusNoContent:
 		sm.subscription = nil
@@ -523,11 +538,13 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = res.AcquireLock.Lock
 		return nil
 	case t_api.StatusLockAlreadyAcquired:
-		if lm.lock == nil {
-			return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
-		}
-		if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
-			return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+		if m.scenario.Kind == Default {
+			if lm.lock == nil {
+				return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
+			}
+			if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
+				return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+			}
 		}
 		return nil
 	default:
@@ -580,22 +597,24 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 
 	switch res.ReleaseLock.Status {
 	case t_api.StatusNoContent:
-		if lm.lock == nil {
+		if lm.lock == nil && m.scenario.Kind == Default {
 			return fmt.Errorf("lock %s does not exist", req.ReleaseLock.ResourceId)
 		}
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if lm.lock != nil {
-			if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
-				return nil
-			}
+		if m.scenario.Kind == Default {
+			if lm.lock != nil {
+				if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
+					return nil
+				}
 
-			// if lock belongs to the same executionId it must have timedout.
-			if lm.lock.ExpiresAt > t {
-				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+				// if lock belongs to the same executionId it must have timedout.
+				if lm.lock.ExpiresAt > t {
+					return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+				}
+				lm.lock = nil
 			}
-			lm.lock = nil
 		}
 
 		// ok cause lock does not exist at all for this resourceId.

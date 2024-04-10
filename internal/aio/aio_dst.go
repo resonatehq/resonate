@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"math/rand" // nosemgrep
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 
@@ -13,21 +12,30 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-type aioDST struct {
-	r                  *rand.Rand
-	sqes               []*bus.SQE[t_aio.Submission, t_aio.Completion]
-	cqes               []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	subsystems         map[t_aio.Kind]Subsystem
-	metrics            *metrics.Metrics
-	failureProbability float64
+// create a DST fault injection error
+type AioDSTError struct {
+	msg string
 }
 
-func NewDST(r *rand.Rand, metrics *metrics.Metrics, failureProbability float64) *aioDST {
+func (e *AioDSTError) Error() string {
+	return e.msg
+}
+
+type aioDST struct {
+	r          *rand.Rand
+	p          float64
+	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
+	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	subsystems map[t_aio.Kind]Subsystem
+	metrics    *metrics.Metrics
+}
+
+func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	return &aioDST{
-		r:                  r,
-		subsystems:         map[t_aio.Kind]Subsystem{},
-		metrics:            metrics,
-		failureProbability: failureProbability,
+		r:          r,
+		p:          p,
+		subsystems: map[t_aio.Kind]Subsystem{},
+		metrics:    metrics,
 	}
 }
 
@@ -93,49 +101,43 @@ func (a *aioDST) Flush(t int64) {
 
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
-			// Randomly decide whether to process SQE or return an error
-			if a.r.Float64() < a.failureProbability {
-				// Create a new CQE
-				errorCqe := createErrorCQE("aio dst error occurred while processing SQE", "aio dst failure", simpleCallback)
-				errorCqe.Completion = &t_aio.Completion{}
-
-				slog.Debug("aio dst: failure", "err", errorCqe)
-				a.cqes = append(a.cqes, errorCqe)
-			} else {
-				// Do the I/O
-				processedCQEs := subsystem.NewWorker(0).Process(sqes.Value)
-				// Randomly decide whether to return an error after processing SQE
-				if a.r.Float64() < a.failureProbability {
-					for _, cqe := range processedCQEs {
-						errorCqe := createErrorCQE("aio dst error occurred after processing SQE", "aio dst failure", simpleCallback)
-						errorCqe.Completion = &t_aio.Completion{}
-
-						slog.Debug("aio dst: failure", "err", errorCqe, "cqe", cqe)
-						a.cqes = append(a.cqes, cqe, errorCqe)
+			// maintain a list of sqes that were not marked as errors
+			sqesOk := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
+			for i := range sqes.Value {
+				// Simulate failure before processing
+				if a.r.Float64() < a.p {
+					cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+						Metadata:   sqes.Value[i].Metadata,
+						Completion: nil,
+						Callback:   sqes.Value[i].Callback,
+						Error:      &AioDSTError{msg: "aio dst: failure, before processing"},
 					}
+					a.cqes = append(a.cqes, cqe)
 				} else {
-					a.cqes = append(a.cqes, processedCQEs...)
+					sqesOk = append(sqesOk, sqes.Value[i])
 				}
 			}
+
+			// don't process if all sqes were marked as errors
+			if len(sqesOk) == 0 {
+				continue
+			}
+
+			// Process the SQE
+			processedCQEs := subsystem.NewWorker(0).Process(sqesOk)
+			// Simulate failure after processing
+			if a.r.Float64() < a.p {
+				processedCQEs[0].Completion = nil
+				processedCQEs[0].Error = &AioDSTError{msg: "aio dst: failure, after processing"}
+			}
+			a.cqes = append(a.cqes, processedCQEs...)
+
 		} else {
 			panic("invalid aio submission")
 		}
 	}
 
 	a.sqes = nil
-}
-
-func simpleCallback(completion *t_aio.Completion, err error) {
-}
-
-func createErrorCQE(errorMsg string, tags string, callback func(*t_aio.Completion, error)) *bus.CQE[t_aio.Submission, t_aio.Completion] {
-	errorCqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-		Error:    fmt.Errorf(errorMsg),
-		Metadata: metadata.New("dst error"),
-	}
-	errorCqe.Metadata.Tags.Set("aio", tags)
-	errorCqe.Callback = callback
-	return errorCqe
 }
 
 func (a *aioDST) String() string {
