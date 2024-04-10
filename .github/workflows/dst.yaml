@@ -55,6 +55,7 @@ jobs:
     timeout-minutes: 150
 
     strategy:
+      fail-fast: false
       matrix:
         scenario: [default, fault]
         store: [sqlite, postgres]
@@ -121,6 +122,7 @@ jobs:
     needs: [build, seed, dst]
 
     strategy:
+      fail-fast: false
       matrix:
         scenario: [default, fault]
         store: [sqlite, postgres, sqlite/postgres]
