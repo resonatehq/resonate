@@ -1,7 +1,6 @@
 package aio
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
@@ -12,6 +11,15 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/util"
 )
+
+// create a DST fault injection error
+type AioDSTError struct {
+	msg string
+}
+
+func (e *AioDSTError) Error() string {
+	return e.msg
+}
 
 type aioDST struct {
 	r          *rand.Rand
@@ -102,7 +110,7 @@ func (a *aioDST) Flush(t int64) {
 						Metadata:   sqes.Value[i].Metadata,
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
-						Error:      errors.New("aio dst: failure, before processing"),
+						Error:      &AioDSTError{msg: "aio dst: failure, before processing"},
 					}
 					a.cqes = append(a.cqes, cqe)
 				} else {
@@ -120,7 +128,7 @@ func (a *aioDST) Flush(t int64) {
 			// Simulate failure after processing
 			if a.r.Float64() < a.p {
 				processedCQEs[0].Completion = nil
-				processedCQEs[0].Error = errors.New("aio dst: failure, after processing")
+				processedCQEs[0].Error = &AioDSTError{msg: "aio dst: failure, after processing"}
 			}
 			a.cqes = append(a.cqes, processedCQEs...)
 

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -140,12 +141,16 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 		if !errors.As(err, &resErr) {
 			return fmt.Errorf("unexpected non-resonate error '%v'", err)
 		}
+
+		var dstErr *aio.AioDSTError
+		if errors.As(err, &dstErr) {
+			return nil
+		}
+
 		switch resErr.Code() {
 		case t_api.ErrAPISubmissionQueueFull:
 			return nil
 		case t_api.ErrAIOSubmissionQueueFull:
-			return nil
-		case t_api.ErrAIOStoreFailure:
 			return nil
 		default:
 			return fmt.Errorf("unexpected resonate error '%v'", resErr)
