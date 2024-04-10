@@ -96,20 +96,20 @@ jobs:
       run: |
         chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt
-    # - name: Create issue if dst failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: ${{ failure() && matrix.run == 1 }}
-    #   run: |
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --scenario ${{ matrix.scenario }} \
-    #       --store postgres \
-    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=postgres." \
-    #       --file logs.txt \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA \
-    #       --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+    - name: Create issue if dst failed
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: ${{ failure() && matrix.run == 1 }}
+      run: |
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --scenario ${{ matrix.scenario }} \
+          --store ${{ matrix.store }} \
+          --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+          --file logs.txt \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
     - uses: actions/upload-artifact@v4
       if: ${{ always() }}
       with:
@@ -155,17 +155,17 @@ jobs:
     - name: Diff
       run: |
         diff logs-1.txt logs-2.txt
-    # - name: Create issue if diff
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: ${{ failure() }}
-    #   run: |
-    #     chmod +x resonate
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --scenario ${{ matrix.scenario }} \
-    #       --store ${{ matrix.store }} \
-    #       --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA \
-    #       --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+    - name: Create issue if diff
+      env:
+        GITHUB_TOKEN: ${{ secrets.github_token }}
+      if: ${{ failure() }}
+      run: |
+        chmod +x resonate
+        ./resonate dst issue \
+          --seed ${{ needs.seed.outputs.seed }} \
+          --scenario ${{ matrix.scenario }} \
+          --store ${{ matrix.store }} \
+          --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+          --repo $GITHUB_REPOSITORY \
+          --commit $GITHUB_SHA \
+          --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
