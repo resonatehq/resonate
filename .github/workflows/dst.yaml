@@ -49,7 +49,48 @@ jobs:
     outputs:
       seed: ${{ inputs.seed || steps.seed.outputs.seed }}
 
-  dst-sqlite:
+  # dst-sqlite:
+  #   runs-on: ubuntu-latest
+  #   needs: [build, seed]
+  #   timeout-minutes: 150
+
+  #   strategy:
+  #     matrix:
+  #       scenario: [default, fault]
+  #       run: [1, 2]
+
+  #   steps:
+  #   - name: Restore resonate binary
+  #     uses: actions/cache/restore@v4
+  #     with:
+  #       path: resonate
+  #       key: resonate-${{ github.sha }}
+  #       fail-on-cache-miss: true
+  #   - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }})
+  #     run: |
+  #       chmod +x resonate
+  #       ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store sqlite > logs.txt
+  #   # - name: Create issue if dst failed
+  #   #   env:
+  #   #     GITHUB_TOKEN: ${{ secrets.github_token }}
+  #   #   if: ${{ failure() && matrix.run == 1 }}
+  #   #   run: |
+  #   #     ./resonate dst issue \
+  #   #       --seed ${{ needs.seed.outputs.seed }} \
+  #   #       --scenario ${{ matrix.scenario }} \
+  #   #       --store sqlite \
+  #   #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=sqlite." \
+  #   #       --file logs.txt \
+  #   #       --repo $GITHUB_REPOSITORY \
+  #   #       --commit $GITHUB_SHA \
+  #   #       --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+  #   - uses: actions/upload-artifact@v4
+  #     if: ${{ always() }}
+  #     with:
+  #       name: ${{ matrix.scenario }}-sqlite-logs-${{ matrix.run }}
+  #       path: logs.txt
+
+  dst:
     runs-on: ubuntu-latest
     needs: [build, seed]
     timeout-minutes: 150
@@ -57,47 +98,7 @@ jobs:
     strategy:
       matrix:
         scenario: [default, fault]
-        run: [1, 2]
-
-    steps:
-    - name: Restore resonate binary
-      uses: actions/cache/restore@v4
-      with:
-        path: resonate
-        key: resonate-${{ github.sha }}
-        fail-on-cache-miss: true
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }})
-      run: |
-        chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store sqlite > logs.txt
-    # - name: Create issue if dst failed
-    #   env:
-    #     GITHUB_TOKEN: ${{ secrets.github_token }}
-    #   if: ${{ failure() && matrix.run == 1 }}
-    #   run: |
-    #     ./resonate dst issue \
-    #       --seed ${{ needs.seed.outputs.seed }} \
-    #       --scenario ${{ matrix.scenario }} \
-    #       --store sqlite \
-    #       --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=sqlite." \
-    #       --file logs.txt \
-    #       --repo $GITHUB_REPOSITORY \
-    #       --commit $GITHUB_SHA \
-    #       --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-    - uses: actions/upload-artifact@v4
-      if: ${{ always() }}
-      with:
-        name: ${{ matrix.scenario }}-sqlite-logs-${{ matrix.run }}
-        path: logs.txt
-
-  dst-postgres:
-    runs-on: ubuntu-latest
-    needs: [build, seed]
-    timeout-minutes: 150
-
-    strategy:
-      matrix:
-        scenario: [default, fault]
+        store: [sqlite, postgres]
         run: [1, 2]
 
     env:
@@ -109,8 +110,7 @@ jobs:
 
     services:
       postgres:
-        if: matrix.run == 1
-        image: postgres:15
+        image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
           POSTGRES_USER: ${{ env.DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME }}
           POSTGRES_PASSWORD: ${{ env.DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD }}
@@ -130,10 +130,10 @@ jobs:
         path: resonate
         key: resonate-${{ github.sha }}
         fail-on-cache-miss: true
-    - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }})
+    - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
       run: |
         chmod +x resonate
-        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store postgres > logs.txt
+        ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }}) > logs.txt
     # - name: Create issue if dst failed
     #   env:
     #     GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -151,12 +151,12 @@ jobs:
     - uses: actions/upload-artifact@v4
       if: ${{ always() }}
       with:
-        name: ${{ matrix.scenario }}-postgres-logs-${{ matrix.run }}
+        name: ${{ matrix.scenario }}-${{ matrix.store }})-logs-${{ matrix.run }}
         path: logs.txt
 
-  dst-diff:
+  diff:
     runs-on: ubuntu-latest
-    needs: [build, seed, dst-sqlite, dst-postgres]
+    needs: [build, seed, dst]
 
     strategy:
       matrix:
