@@ -16,10 +16,14 @@ import (
 
 type API interface {
 	String() string
+	AddSubsystem(subsystem Subsystem)
 	Enqueue(*bus.SQE[t_api.Request, t_api.Response])
 	Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response]
+	Start() error
+	Stop() error
 	Shutdown()
 	Done() bool
+	Errors() <-chan error
 }
 
 type api struct {
@@ -30,7 +34,7 @@ type api struct {
 	metrics    *metrics.Metrics
 }
 
-func New(size int, metrics *metrics.Metrics) *api {
+func New(size int, metrics *metrics.Metrics) API {
 	return &api{
 		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
 		errors:  make(chan error),

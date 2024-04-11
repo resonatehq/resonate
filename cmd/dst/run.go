@@ -116,9 +116,9 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			// add api subsystems
-			aio.AddSubsystem(t_aio.Network, network)
-			aio.AddSubsystem(t_aio.Store, store)
-			aio.AddSubsystem(t_aio.Queuing, queuing)
+			aio.AddSubsystem(t_aio.Network, network, nil)
+			aio.AddSubsystem(t_aio.Store, store, nil)
+			aio.AddSubsystem(t_aio.Queuing, queuing, nil)
 
 			// start api/aio
 			if err := api.Start(); err != nil {

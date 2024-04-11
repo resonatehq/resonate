@@ -14,10 +14,14 @@ import (
 
 type AIO interface {
 	String() string
+	AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig)
+	Start() error
+	Stop() error
+	Shutdown()
 	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
 	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 	Flush(int64)
-	Shutdown()
+	Errors() <-chan error
 }
 
 type aio struct {
@@ -41,7 +45,7 @@ type workerWrapper struct {
 	batchSize int
 }
 
-func New(size int, metrics *metrics.Metrics) *aio {
+func New(size int, metrics *metrics.Metrics) AIO {
 	return &aio{
 		cq:         make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], size),
 		subsystems: map[t_aio.Kind]*subsystemWrapper{},
