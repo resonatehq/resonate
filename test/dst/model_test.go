@@ -62,7 +62,7 @@ func TestModelStep(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.m.Step(0, tc.req, tc.res, tc.err)
+			err := tc.m.Step(0, 0, tc.req, tc.res, tc.err)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
@@ -111,16 +111,16 @@ func TestModelValidateReadSchedule(t *testing.T) {
 			},
 		},
 	}
-	err := model.ValidateReadSchedule(0, request, response)
+	err := model.ValidateReadSchedule(0, 0, request, response)
 	assert.NoError(t, err)
 
 	// Test case 2: Schedule not found
 	response.ReadSchedule.Status = t_api.StatusScheduleNotFound
-	err = model.ValidateReadSchedule(0, request, response)
+	err = model.ValidateReadSchedule(0, 0, request, response)
 	assert.NoError(t, err) // Expecting no error for schedule not found
 
 	// Test case 3: Unexpected response status
 	response.ReadSchedule.Status = t_api.StatusNoContent
-	err = model.ValidateReadSchedule(0, request, response)
+	err = model.ValidateReadSchedule(0, 0, request, response)
 	assert.Error(t, err) // Expecting error for unexpected response status
 }
