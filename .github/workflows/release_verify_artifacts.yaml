@@ -9,6 +9,11 @@ on:
         type: string
         
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag version to use for verification'
+        required: true
+        type: string
 
 permissions:
   contents: read
