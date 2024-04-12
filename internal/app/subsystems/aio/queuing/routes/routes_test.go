@@ -55,6 +55,31 @@ func TestNewRoute(t *testing.T) {
 			expectedError: ErrMissingFieldQueue,
 		},
 		{
+			name: "nil metadata",
+			config: &t_route.RoutingConfig{
+				Name: "test",
+				Kind: t_route.Pattern,
+				Target: &t_route.Target{
+					Connection: "amqp://localhost",
+					Queue:      "test_queue",
+				},
+			},
+			expectedError: ErrMissingMetadata,
+		},
+		{
+			name: "nil metadata properties",
+			config: &t_route.RoutingConfig{
+				Name: "test",
+				Kind: t_route.Pattern,
+				Target: &t_route.Target{
+					Connection: "amqp://localhost",
+					Queue:      "test_queue",
+				},
+				Metadata: &metadata.Metadata{},
+			},
+			expectedError: ErrMissingMetadataProperties,
+		},
+		{
 			name: "invalid routing kind",
 			config: &t_route.RoutingConfig{
 				Name: "test",
@@ -62,6 +87,11 @@ func TestNewRoute(t *testing.T) {
 				Target: &t_route.Target{
 					Connection: "amqp://localhost",
 					Queue:      "test_queue",
+				},
+				Metadata: &metadata.Metadata{
+					Properties: map[string]interface{}{
+						"pattern": "/test/*",
+					},
 				},
 			},
 			expectedError: ErrInvalidRoutingKind,

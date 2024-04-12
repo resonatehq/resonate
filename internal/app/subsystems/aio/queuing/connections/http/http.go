@@ -8,15 +8,24 @@ import (
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
+	"github.com/resonatehq/resonate/internal/util"
+)
+
+var (
+	ErrMissingURL = fmt.Errorf("missing field 'url'")
 )
 
 type (
 	// HTTP is a connection to an HTTP endpoint. It implements the Connection interface and
 	// is the only connection type that does not require a queue.
 	HTTP struct {
-		client *http.Client
+		client HTTPClient
 		tasks  <-chan *t_conn.ConnectionSubmission
-		meta   Metadata
+		meta   *Metadata
+	}
+
+	HTTPClient interface {
+		Do(req *http.Request) (*http.Response, error)
 	}
 
 	Metadata struct {
@@ -36,20 +45,36 @@ type (
 	}
 )
 
-func New() t_conn.Connection {
-	return &HTTP{}
+// New creates a new connection with the type specific client.
+func New(c HTTPClient) t_conn.Connection {
+	return &HTTP{
+		client: c,
+		meta:   &Metadata{},
+	}
 }
 
-func (c *HTTP) Init(tasks <-chan *t_conn.ConnectionSubmission, meta *metadata.Metadata) error {
-	c.client = &http.Client{}
-	c.tasks = tasks
-	md := Metadata{}
+// Init initializes the connection with the generic & type specific connection configuration.
+func (c *HTTP) Init(tasks <-chan *t_conn.ConnectionSubmission, cfg *t_conn.ConnectionConfig) error {
+	util.Assert(c.client != nil, "client must not be nil")
+	util.Assert(c.meta != nil, "meta must not be nil")
+	util.Assert(tasks != nil, "tasks must not be nil")
+	util.Assert(cfg != nil, "config must not be nil")
+	util.Assert(cfg.Metadata != nil, "metadata must not be nil")
+	util.Assert(cfg.Metadata.Properties != nil, "metadata properties must not be nil")
 
-	if err := metadata.Decode(meta.Properties, &md); err != nil {
+	c.tasks = tasks
+
+	if err := metadata.Decode(cfg.Metadata.Properties, c.meta); err != nil {
 		return err
 	}
 
-	c.meta = md
+	if c.meta.URL == "" {
+		return fmt.Errorf("validation error for connection '%s': %w", cfg.Name, ErrMissingURL)
+	}
+
+	util.Assert(c.client != nil, "client must not be nil")
+	util.Assert(c.tasks != nil, "tasks must not be nil")
+	util.Assert(c.meta.URL != "", "url must not be empty")
 
 	return nil
 }
@@ -59,6 +84,13 @@ func (c *HTTP) Task() <-chan *t_conn.ConnectionSubmission {
 }
 
 func (c *HTTP) Execute(sub *t_conn.ConnectionSubmission) error {
+	util.Assert(sub != nil, "submission must not be nil")
+	util.Assert(sub.Queue != "", "queue must not be empty")
+	util.Assert(sub.TaskId != "", "task id must not be empty")
+	util.Assert(sub.Counter >= 0, "counter must be greater than or equal to 0")
+	util.Assert(sub.Links.Claim != "", "claim link must not be empty")
+	util.Assert(sub.Links.Complete != "", "complete link must not be empty")
+
 	// Form payload.
 	payload := Payload{
 		Queue:   sub.Queue,
