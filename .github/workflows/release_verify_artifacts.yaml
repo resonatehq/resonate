@@ -37,10 +37,10 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
           # Pull the test image
-          docker pull ghcr.io/guergabo/resonate:${{ inputs.tag }}
+          docker pull ghcr.io/resonatehq/resonate:${{ inputs.tag }}
 
           # Run the test image
-          docker run --rm ghcr.io/guergabo/resonate:${{ inputs.tag }} dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+          docker run --rm ghcr.io/resonatehq/resonate:${{ inputs.tag }} dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
 
   
   verify-github-release:
@@ -52,7 +52,7 @@ jobs:
       - name: Download and test GH release
         run: |
           # Download the release artifact
-          curl -L -O "https://github.com/guergabo/resonate/releases/download/${{ inputs.tag }}/resonate_linux_x86_64.tar.gz"
+          curl -L -O "https://github.com/resonatehq/resonate/releases/download/${{ inputs.tag }}/resonate_linux_x86_64.tar.gz"
 
           # Extract the artifact
           tar -xzf resonate_linux_x86_64.tar.gz
