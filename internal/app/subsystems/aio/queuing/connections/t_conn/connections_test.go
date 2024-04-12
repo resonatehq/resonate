@@ -89,11 +89,14 @@ func TestConnectionEventLoop(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel() // simulate a cancelled context from queuing subsystem.
 
-			tc.connection.Init(taskCh, &ConnectionConfig{
+			err := tc.connection.Init(taskCh, &ConnectionConfig{
 				Kind:     HTTP,
 				Name:     "test",
 				Metadata: &metadata.Metadata{},
 			})
+			if err != nil {
+				t.Fatalf("Failed to init connection: %v", err)
+			}
 
 			Start(ctx, tc.connection)
 
