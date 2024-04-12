@@ -189,9 +189,10 @@ export interface ILockStore {
    *
    * @param id Id of lock.
    * @param eid Execution id of lock.
+   * @param expiry Time in ms before lock will expire.
    * @returns A boolean indicating whether or not the lock was acquired.
    */
-  tryAcquire(id: string, eid: string): Promise<boolean>;
+  tryAcquire(id: string, eid: string, expiry?: number): Promise<boolean>;
 
   /**
    * Release a lock.
@@ -199,5 +200,5 @@ export interface ILockStore {
    * @param id Id of lock.
    * @param eid Execution id of lock.
    */
-  release(id: string, eid: string): Promise<void>;
+  release(id: string, eid: string): Promise<boolean>;
 }

@@ -50,7 +50,7 @@ describe("Functions: async", () => {
     resonate.register("successAsync", ordinarySuccessAsync);
 
     // pre-resolve deferred
-    const deferred = await resonate.promises.create("success", 1000, {
+    const deferred = await resonate.promises.create("success", Date.now() + 1000, {
       idempotencyKey: utils.hash("success"),
     });
     deferred.resolve("foo");
@@ -79,7 +79,7 @@ describe("Functions: async", () => {
     resonate.register("failureAsync", ordinaryFailureAsync);
 
     // pre-reject deferred
-    const deferred = await resonate.promises.create("failure", 1000, {
+    const deferred = await resonate.promises.create("failure", Date.now() + 1000, {
       idempotencyKey: utils.hash("failure"),
     });
     deferred.reject(new Error("foo"));

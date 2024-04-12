@@ -10,6 +10,10 @@ export class Invocation<T> {
   resolve: (v: T) => void;
   reject: (e: unknown) => void;
 
+  eid: string;
+  idempotencyKey: string;
+  timeout: number;
+
   killed: boolean = false;
 
   createdAt: number = Date.now();
@@ -35,12 +39,13 @@ export class Invocation<T> {
   constructor(
     public readonly name: string,
     public readonly id: string,
-    public readonly idempotencyKey: string | undefined,
     public readonly headers: Record<string, string> | undefined,
     public readonly param: unknown,
     public readonly opts: Options,
+    public readonly defaults: Options,
     parent?: Invocation<any>,
   ) {
+    // create a future and hold on to its resolvers
     const { future, resolve, reject } = Future.deferred<T>(this);
     this.future = future;
     this.resolve = resolve;
@@ -48,10 +53,22 @@ export class Invocation<T> {
 
     this.root = parent?.root ?? this;
     this.parent = parent ?? null;
-  }
 
-  get timeout(): number {
-    return Math.min(this.createdAt + this.opts.timeout, this.parent?.timeout ?? Infinity);
+    // get the execution id from either:
+    // - a hard coded string
+    // - a function that returns a string given the invocation id
+    this.eid = typeof this.opts.eid === "function" ? this.opts.eid(this.id) : this.opts.eid;
+
+    // get the idempotency key from either:
+    // - a hard coded string
+    // - a function that returns a string given the invocation id
+    this.idempotencyKey =
+      typeof this.opts.idempotencyKey === "function" ? this.opts.idempotencyKey(this.id) : this.opts.idempotencyKey;
+
+    // the timeout is the minimum of:
+    // - the current time plus the user provided relative time
+    // - the parent timeout
+    this.timeout = Math.min(this.createdAt + this.opts.timeout, this.parent?.timeout ?? Infinity);
   }
 
   addChild(child: Invocation<any>) {
@@ -71,15 +88,27 @@ export class Invocation<T> {
   }
 
   split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
-    const opts = args[args.length - 1];
+    let opts = args[args.length - 1];
 
-    // defaults are specified on the root invocation
-    // this means that overrides only apply to the current invocation
-    // and do no propagate to children
-    const defaults = this.root.opts;
+    // merge opts
+    if (isOptions(opts)) {
+      args = args.slice(0, -1);
+      opts = {
+        ...this.defaults,
+        ...opts,
+        tags: { ...this.defaults.tags, ...opts.tags }, // tags are merged
+      };
+    } else {
+      // copy defaults
+      opts = { ...this.defaults };
+    }
 
-    return isOptions(opts)
-      ? { args: args.slice(0, -1), opts: { ...defaults, ...opts, tags: { ...defaults.tags, ...opts.tags } } }
-      : { args, opts: defaults };
+    // lock is false by default
+    opts.lock = opts.lock ?? false;
+
+    // version cannot be overridden
+    opts.version = this.defaults.version;
+
+    return { args, opts };
   }
 }

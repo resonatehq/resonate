@@ -475,14 +475,16 @@ export class LocalLockStore implements ILockStore {
       throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
     }
 
-    return lock.eid === eid;
+    return true;
   }
 
-  async release(id: string, eid: string) {
+  async release(id: string, eid: string): Promise<boolean> {
     const result = await this.storage.rmd(id, (lock) => lock.eid === eid);
     if (!result) {
       throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
     }
+
+    return true;
   }
 }
 

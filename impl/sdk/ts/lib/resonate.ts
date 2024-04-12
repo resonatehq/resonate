@@ -34,10 +34,10 @@ export abstract class ResonateBase {
   public readonly timeout: number;
   public readonly tags: Record<string, string>;
 
-  protected readonly encoder: IEncoder<unknown, string | undefined>;
-  protected readonly logger: ILogger;
-  protected readonly retry: IRetry;
-  protected readonly store: IStore;
+  public readonly encoder: IEncoder<unknown, string | undefined>;
+  public readonly logger: ILogger;
+  public readonly retry: IRetry;
+  public readonly store: IStore;
 
   private interval: NodeJS.Timeout | undefined;
 
@@ -107,10 +107,11 @@ export abstract class ResonateBase {
   protected abstract execute(
     name: string,
     id: string,
-    idempotencyKey: string | undefined,
     func: Func,
     args: any[],
     opts: Options,
+    defaults: Options,
+    durablePromise?: promises.DurablePromise<any>,
   ): ResonatePromise<any>;
 
   register(name: string, func: Func, opts: Partial<Options> = {}): (id: string, ...args: any) => ResonatePromise<any> {
@@ -139,7 +140,6 @@ export abstract class ResonateBase {
 
     // register specific version
     this.functions[name][options.version] = { func, opts: options };
-
     return (id: string, ...args: any[]) => this.run(name, id, ...args, options);
   }
 
@@ -162,15 +162,48 @@ export abstract class ResonateBase {
     const {
       args,
       opts: { version },
+      part: { durable, idempotencyKey, tags, timeout },
     } = this.split(argsWithOpts);
-    const idempotencyKey = utils.hash(id);
 
     if (!this.functions[name] || !this.functions[name][version]) {
       throw new Error(`Function ${name} version ${version} not registered`);
     }
 
-    const { func, opts } = this.functions[name][version];
-    return this.execute(name, id, idempotencyKey, func, args, opts);
+    // the options registered with the function are the defaults
+    const { func, opts: defaults } = this.functions[name][version];
+
+    // only the following options can be overridden, this information is persisted
+    // in the durable promise and therefore not required on the recovery path
+    const override: Partial<Options> = {};
+
+    if (durable !== undefined) {
+      override.durable = durable;
+    }
+
+    if (idempotencyKey !== undefined) {
+      override.idempotencyKey = idempotencyKey;
+    }
+
+    if (tags !== undefined) {
+      override.tags = { ...defaults.tags, ...tags, "resonate:invocation": "true" };
+    } else {
+      override.tags = { ...defaults.tags, "resonate:invocation": "true" };
+    }
+
+    if (timeout !== undefined) {
+      override.timeout = timeout;
+    }
+
+    // merge defaults with override to get opts
+    const opts = {
+      ...defaults,
+      ...override,
+    };
+
+    // lock on top level is true by default
+    opts.lock = opts.lock ?? true;
+
+    return this.execute(name, id, func, args, opts, defaults);
   }
 
   schedule(
@@ -182,6 +215,8 @@ export abstract class ResonateBase {
     const { args, opts } = this.split(argsWithOpts);
 
     if (typeof func === "function") {
+      // if function is provided, the default version is 1
+      // as opposed to 0 (alias for latest version)
       opts.version = opts.version || 1;
       this.register(name, func, opts);
     }
@@ -193,10 +228,11 @@ export abstract class ResonateBase {
     }
 
     const {
-      opts: { timeout, version },
+      opts: { version, timeout, tags: promiseTags },
     } = this.functions[funcName][opts.version];
 
-    const idempotencyKey = utils.hash(funcName);
+    const idempotencyKey =
+      typeof opts.idempotencyKey === "function" ? opts.idempotencyKey(funcName) : opts.idempotencyKey;
 
     const promiseParam = {
       func: funcName,
@@ -207,6 +243,7 @@ export abstract class ResonateBase {
     return this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", timeout, {
       idempotencyKey,
       promiseParam,
+      promiseTags,
     });
   }
 
@@ -238,11 +275,14 @@ export abstract class ResonateBase {
   }
 
   private defaults({
+    durable = true,
+    eid = utils.randomId,
     encoder = this.encoder,
+    idempotencyKey = utils.hash,
+    lock = undefined,
     poll = this.poll,
     retry = this.retry,
-    store = this.store,
-    tags = this.tags,
+    tags = {},
     timeout = this.timeout,
     version = 0,
   }: Partial<Options> = {}): Options {
@@ -251,10 +291,13 @@ export abstract class ResonateBase {
 
     return {
       __resonate: true,
+      eid,
+      durable,
       encoder,
+      idempotencyKey,
+      lock,
       poll,
       retry,
-      store,
       tags,
       timeout,
       version,
@@ -277,8 +320,7 @@ export abstract class ResonateBase {
             Array.isArray(param.args)
           ) {
             const { func, opts } = this.functions[param.func][param.version];
-
-            this.execute(param.func, promise.id, promise.idempotencyKeyForCreate, func, param.args, opts);
+            this.execute(param.func, promise.id, func, param.args, opts, opts, promise);
           }
         }
       }
@@ -289,10 +331,11 @@ export abstract class ResonateBase {
     }
   }
 
-  private split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
-    const opts = args[args.length - 1];
-
-    return isOptions(opts) ? { args: args.slice(0, -1), opts: this.defaults(opts) } : { args, opts: this.defaults() };
+  private split(args: [...any, PartialOptions?]): { args: any[]; opts: Options; part: Partial<Options> } {
+    const part = args[args.length - 1];
+    return isOptions(part)
+      ? { args: args.slice(0, -1), opts: this.defaults(part), part }
+      : { args, opts: this.defaults(), part: {} };
   }
 }
 

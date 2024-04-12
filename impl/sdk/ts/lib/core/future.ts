@@ -108,6 +108,14 @@ export class Future<T> {
     return this._value;
   }
 
+  get pending() {
+    return this._value.kind === "pending";
+  }
+
+  get completed() {
+    return !this.pending;
+  }
+
   private resolve(value: T) {
     this._resolve(value);
     this._value = { kind: "resolved", value };

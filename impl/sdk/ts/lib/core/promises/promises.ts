@@ -53,6 +53,10 @@ export class DurablePromise<T> {
     return this.promise.idempotencyKeyForComplete;
   }
 
+  get timeout() {
+    return this.promise.timeout;
+  }
+
   get pending() {
     return this.promise.state === "PENDING";
   }
@@ -120,7 +124,7 @@ export class DurablePromise<T> {
         opts.strict ?? false,
         opts.headers,
         encoder.encode(opts.param),
-        Date.now() + timeout,
+        timeout,
         opts.tags,
       ),
       opts.poll,

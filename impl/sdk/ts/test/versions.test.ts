@@ -48,8 +48,11 @@ describe("Functions: versions", () => {
         const r1 = await resonate.run("test", "c", resonate.options({ version: 3 }));
         expect(r1).toMatchObject({ v: "v3", c: 3 });
 
-        const r2 = await resonate.run("test", "d");
+        const r2 = await resonate.run("test", "d", resonate.options({ version: 0 }));
         expect(r2).toMatchObject({ v: "v3", c: 3 });
+
+        const r3 = await resonate.run("test", "e");
+        expect(r3).toMatchObject({ v: "v3", c: 3 });
       });
     });
   }

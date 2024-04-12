@@ -68,9 +68,29 @@ export type Options = {
   __resonate: true;
 
   /**
+   * Persist the result to durable storage.
+   */
+  durable: boolean;
+
+  /**
+   * A unique id for this execution, defaults to a random id.
+   */
+  eid: string | ((id: string) => string);
+
+  /**
    * Overrides the default encoder.
    */
   encoder: IEncoder<unknown, string | undefined>;
+
+  /**
+   * Overrides the default idempotency key.
+   */
+  idempotencyKey: string | ((id: string) => string);
+
+  /**
+   * Acquire a lock for the execution.
+   */
+  lock: boolean | undefined;
 
   /**
    * Overrides the default polling frequency.
@@ -81,11 +101,6 @@ export type Options = {
    * Overrides the default retry policy.
    */
   retry: IRetry;
-
-  /**
-   * Overrides the default store.
-   */
-  store: IStore;
 
   /**
    * Additional tags to add to the durable promise.

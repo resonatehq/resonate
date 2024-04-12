@@ -62,7 +62,7 @@ describe("Functions: generator", () => {
     resonate.register("success", generatorSuccess);
 
     // pre-resolve deferred
-    const deferred = await resonate.promises.create("success", 1000, {
+    const deferred = await resonate.promises.create("success", Date.now() + 1000, {
       idempotencyKey: utils.hash("success"),
     });
     deferred.resolve("foo");
@@ -100,7 +100,7 @@ describe("Functions: generator", () => {
     resonate.register("failure", generatorFailure);
 
     // pre-reject deferred
-    const deferred = await resonate.promises.create("failure", 1000, {
+    const deferred = await resonate.promises.create("failure", Date.now() + 1000, {
       idempotencyKey: utils.hash("failure"),
     });
     deferred.reject(new Error("foo"));

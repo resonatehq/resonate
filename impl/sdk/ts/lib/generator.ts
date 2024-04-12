@@ -1,11 +1,9 @@
 import { DeferredExecution, Execution, GeneratorExecution, OrdinaryExecution } from "./core/execution";
 import { Future, ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
-import { ILogger } from "./core/logger";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import { DurablePromise } from "./core/promises/promises";
 import * as schedules from "./core/schedules/schedules";
-import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
 
 /////////////////////////////////////////////////////////////////////
@@ -51,7 +49,6 @@ type DeferredFunction = {
 
 type Continuation<T> = {
   execution: GeneratorExecution<T>;
-  promise: DurablePromise<T>;
   next: Next;
 };
 
@@ -72,7 +69,19 @@ export class Resonate extends ResonateBase {
    */
   constructor(opts: Partial<ResonateOptions> = {}) {
     super(opts);
-    this.scheduler = new Scheduler(this.logger);
+    this.scheduler = new Scheduler(this);
+  }
+
+  protected execute<F extends GFunc>(
+    name: string,
+    id: string,
+    func: F,
+    args: Params<F>,
+    opts: Options,
+    defaults: Options,
+    durablePromise?: DurablePromise<any>,
+  ): ResonatePromise<Return<F>> {
+    return this.scheduler.add(name, id, func, args, opts, defaults, durablePromise);
   }
 
   /**
@@ -134,17 +143,6 @@ export class Resonate extends ResonateBase {
   schedule(name: string, cron: string, func: GFunc | string, ...args: any[]): Promise<schedules.Schedule> {
     return super.schedule(name, cron, func, ...args);
   }
-
-  protected execute<F extends GFunc>(
-    name: string,
-    id: string,
-    idempotencyKey: string | undefined,
-    func: F,
-    args: Params<F>,
-    opts: Options,
-  ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, id, idempotencyKey, func, args, opts);
-  }
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -173,6 +171,13 @@ export class Info {
    */
   get idempotencyKey() {
     return this.invocation.idempotencyKey;
+  }
+
+  /**
+   * All configured options for this info.
+   */
+  get opts() {
+    return this.invocation.opts;
   }
 
   /**
@@ -212,6 +217,13 @@ export class Context {
    */
   get idempotencyKey() {
     return this.invocation.idempotencyKey;
+  }
+
+  /**
+   * All configured options for this context.
+   */
+  get opts() {
+    return this.invocation.opts;
   }
 
   /**
@@ -340,19 +352,20 @@ class Scheduler {
   // executions that have been killed
   private killed: Execution<any>[] = [];
 
-  constructor(private logger: ILogger) {}
+  constructor(private resonate: Resonate) {}
 
   add<F extends GFunc>(
     name: string,
     id: string,
-    idempotencyKey: string | undefined,
     func: F,
     args: Params<F>,
     opts: Options,
+    defaults: Options,
+    durablePromise?: DurablePromise<any>,
   ): ResonatePromise<Return<F>> {
     // if the execution is already running, and not killed,
     // return the promise
-    if (this.cache[id] && !this.cache[id].killed) {
+    if (opts.durable && this.cache[id] && !this.cache[id].killed) {
       return this.cache[id].execute();
     }
 
@@ -364,28 +377,27 @@ class Scheduler {
     };
 
     // create a new invocation
-    const invocation = new Invocation(name, id, idempotencyKey, undefined, param, opts);
+    const invocation = new Invocation(name, id, undefined, param, opts, defaults);
 
     // create a new execution
     const generator = func(new Context(invocation), ...args);
-    const execution = new GeneratorExecution(invocation, generator);
-    const promise = execution.execute();
+    const execution = new GeneratorExecution(this.resonate, invocation, generator, durablePromise);
 
     // once the durable promise has been created,
-    // add the execution to runnable
-    execution.create().then((promise) => {
-      if (promise && promise.pending) {
-        this.runnable.push({ execution, promise, next: { kind: "init" } });
+    // add the execution to runnable if the future is pending
+    execution.create().then(() => {
+      if (invocation.future.pending) {
+        this.runnable.push({ execution, next: { kind: "init" } });
         this.tick();
       }
     });
 
-    // store the invocation, execution, and promise
+    // store the invocation and execution,
     // will be used if run is called again with the same id
     this.cache[id] = execution;
     this.executions.push(execution);
 
-    return promise;
+    return execution.execute();
   }
 
   private async tick() {
@@ -399,7 +411,7 @@ class Scheduler {
       const continuation = this.runnable.shift();
 
       // step through the generator if in debug mode
-      if (this.logger.level === "debug" && (await this.keypress()) === "\u001b") {
+      if (this.resonate.logger.level === "debug" && (await this.keypress()) === "\u001b") {
         // kill when escape key is pressed
         continuation?.execution.kill("manual kill");
       }
@@ -414,12 +426,12 @@ class Scheduler {
             // need to handle the special case where a generator returns a future
             if (result.value instanceof Future) {
               result.value.promise.then(
-                (v) => continuation.execution.resolve(continuation.promise, v),
-                (e) => continuation.execution.reject(continuation.promise, e),
+                (v) => continuation.execution.resolve(v),
+                (e) => continuation.execution.reject(e),
               );
             } else {
               // resolve the durable promise
-              await continuation.execution.resolve(continuation.promise, result.value);
+              await continuation.execution.resolve(result.value);
             }
           } else {
             // apply the yielded value to the generator
@@ -427,7 +439,7 @@ class Scheduler {
           }
         } catch (error) {
           // if anything goes wrong, reject the durable promise
-          await continuation.execution.reject(continuation.promise, error);
+          await continuation.execution.reject(error);
         }
 
         // housekeeping
@@ -483,17 +495,17 @@ class Scheduler {
     // 2. a generated string in the case of an ordinary execution
     const id = value.kind === "deferred" ? value.func : `${parent.id}.${parent.counter}`;
 
-    // the idempotency key is a hash of the id
-    const idempotencyKey = utils.hash(id);
-
     // human readable name of the function
     const name = value.kind === "deferred" ? value.func : value.func.name;
+
+    // default opts never change
+    const defaults = parent.defaults;
 
     // param is only required for deferred executions
     const param = value.kind === "deferred" ? value.args[0] : undefined;
 
     // create a new invocation
-    const invocation = new Invocation(name, id, idempotencyKey, undefined, param, value.opts, parent);
+    const invocation = new Invocation(name, id, undefined, param, value.opts, defaults, parent);
 
     // add child and increment counter
     parent.addChild(invocation);
@@ -504,21 +516,22 @@ class Scheduler {
     if (value.kind === "resonate") {
       // create a generator execution
       const ctx = new Context(invocation);
-      execution = new GeneratorExecution(invocation, value.func(ctx, ...value.args));
-      const promise = await execution.create();
+      execution = new GeneratorExecution(this.resonate, invocation, value.func(ctx, ...value.args));
 
-      if (promise && promise.pending) {
-        // if the durable promise is pending, add to runnable
-        this.runnable.push({ execution, promise, next: { kind: "init" } });
+      await execution.create();
+
+      // if the future is pending, add to runnable
+      if (invocation.future.pending) {
+        this.runnable.push({ execution, next: { kind: "init" } });
       }
     } else if (value.kind === "ordinary") {
       // create an ordinary execution
       const info = new Info(invocation);
-      execution = new OrdinaryExecution(invocation, () => value.func(info, ...value.args));
+      execution = new OrdinaryExecution(this.resonate, invocation, () => value.func(info, ...value.args));
       execution.execute().catch(() => {});
     } else if (value.kind === "deferred") {
       // create a deferred execution
-      execution = new DeferredExecution(invocation);
+      execution = new DeferredExecution(this.resonate, invocation);
       execution.execute().catch(() => {});
     } else {
       this.yeet(`permitted call values are (resonate, ordinary, deferred), received ${value}`);
@@ -531,7 +544,6 @@ class Scheduler {
       // if the call is expected to yield a future, add the future to runnable
       this.runnable.push({
         execution: continuation.execution,
-        promise: continuation.promise,
         next: { kind: "value", value: invocation.future },
       });
     } else {
@@ -540,7 +552,7 @@ class Scheduler {
     }
   }
 
-  private applyFuture({ execution, promise }: Continuation<any>, future: Future<any>) {
+  private applyFuture({ execution }: Continuation<any>, future: Future<any>) {
     if (execution.invocation.future.root !== future.root) {
       this.yeet(
         `yielded future originates from ${future.root.id}, but this execution originates from ${execution.invocation.future.root.id}`,
@@ -560,7 +572,7 @@ class Scheduler {
       this.awaiting = this.awaiting.filter((e) => e !== execution);
 
       // add to runnable
-      this.runnable.push({ execution, promise, next });
+      this.runnable.push({ execution, next });
 
       // tick again
       this.tick();
@@ -584,7 +596,7 @@ class Scheduler {
   }
 
   private async keypress(): Promise<string> {
-    this.logger.debug("Press any key to continue...");
+    this.resonate.logger.debug("Press any key to continue...");
 
     return new Promise((resolve) => {
       const onData = (data: Buffer) => {
@@ -594,7 +606,7 @@ class Scheduler {
 
         const c = data.toString();
         if (c === "\u0003") {
-          this.logger.debug("^C");
+          this.resonate.logger.debug("^C");
           process.exit(1);
         }
         resolve(c);
@@ -607,8 +619,8 @@ class Scheduler {
   }
 
   private print() {
-    this.logger.debug("Executions");
-    this.logger.table(
+    this.resonate.logger.debug("Executions");
+    this.resonate.logger.table(
       this.executions.map((e) => ({
         name: e.invocation.name,
         id: e.invocation.id,
@@ -624,7 +636,7 @@ class Scheduler {
 
   private yeet(msg: string): never {
     // an unrecoverable error has occurred, log and exit
-    this.logger.error(msg);
+    this.resonate.logger.error(msg);
     process.exit(1);
   }
 }
