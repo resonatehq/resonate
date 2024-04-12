@@ -1,4 +1,4 @@
-name: CI
+name: CICD
 
 on:
   push:
@@ -14,12 +14,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
+
     services:
       postgres:
         image: postgres:15
@@ -34,28 +36,35 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: false
+
       - name: Install and run golangci-lint
         uses: golangci/golangci-lint-action@v4 # nosemgrep
         with:
           version: v1.54
           args: --verbose --timeout=3m
+
       - name: Run go test and generate coverage report
         run: |
           go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v4 # nosemgrep
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Build resonate
         run: go build -o resonate
+
       - name: Cache resonate binary
         uses: actions/cache/save@v4
         with:
@@ -72,21 +81,26 @@ jobs:
           path: resonate
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
+
       - name: Run resonate server
         run: |
           chmod +x resonate
           ./resonate serve --aio-store-sqlite-path :memory: &
+
       - name: Checkout test harness
         uses: actions/checkout@v4
         with:
           repository: resonatehq/durable-promise-test-harness
+
       - name: Build test harness
         run: |
           go build -o harness
+
       - name: Run linearizability check
         run: |
           chmod +x harness
           ./harness verify -r 1000 -c 10
+
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
