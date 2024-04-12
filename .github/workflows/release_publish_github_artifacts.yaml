@@ -16,7 +16,6 @@ permissions:
 jobs:
   release-linux-artifact:
     runs-on: ubuntu-latest
-    needs: [create-release]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,7 +55,6 @@ jobs:
 
   release-darwin-artifact:
     runs-on: macos-latest
-    needs: [create-release]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
