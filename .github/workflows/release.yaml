@@ -1,62 +1,25 @@
-name: Release
+# Release workflow is the main workflow that coordinates various GitHub workflows involved in a release of Resonate.
+name: Release Workflow
 
 on:
   release:
     types:
-      - created
-
-permissions:
-  contents: write
+      - published
+  workflow_dispatch:
 
 jobs:
-  release-linux-artifact:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Go 1.21
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Install cross-compiler for linux/arm64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build for both amd64 and arm64
-        run: |
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
-          CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
-          chmod +x ./bin/linux-x86_64/resonate
-          chmod +x ./bin/linux-aarch64/resonate
-          mv ./bin/linux-x86_64/resonate ./bin/resonate_linux_x86_64 
-          mv ./bin/linux-aarch64/resonate ./bin/resonate_linux_aarch64
-      - name: Upload Artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_x86_64 --clobber
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_linux_aarch64 --clobber
+  publish-github-image:
+    uses: ./.github/workflows/release_publish_github_image.yaml
+    with:
+      tag: ${{ github.ref_name }}
 
-  release-darwin-artifact:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Build for both amd64 and arm64
-        run: |
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-          chmod +x ./bin/darwin-x86_64/resonate
-          chmod +x ./bin/darwin-aarch64/resonate
-          mv ./bin/darwin-x86_64/resonate ./bin/resonate_darwin_x86_64 
-          mv ./bin/darwin-aarch64/resonate ./bin/resonate_darwin_aarch64
-      - name: Upload Artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_x86_64 --clobber
-          gh release upload ${{ github.event.release.tag_name }} ./bin/resonate_darwin_aarch64 --clobber
+  publish-github-artifacts:
+    uses: ./.github/workflows/release_publish_github_artifacts.yaml
+    with:
+      tag: ${{ github.ref_name }}
+
+  verify-github-artifacts:
+    needs: [publish-github-image, publish-github-artifacts]
+    uses: ./.github/workflows/release_verify_artifacts.yaml
+    with:
+      tag: ${{ github.ref_name }}
