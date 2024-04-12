@@ -9,19 +9,17 @@ on:
 
 jobs:
   publish-github-image:
-    needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_image.yaml
     with:
       tag: ${{ github.ref_name }}
 
   publish-github-artifacts:
-    needs: [bump-version]
     uses: ./.github/workflows/release_publish_github_artifacts.yaml
     with:
       tag: ${{ github.ref_name }}
 
   verify-github-artifacts:
-    needs: [bump-version, publish-github-image, publish-github-release]
+    needs: [publish-github-image, publish-github-release]
     uses: ./.github/workflows/release_verify_artifacts.yaml
     with:
       tag: ${{ github.ref_name }}
