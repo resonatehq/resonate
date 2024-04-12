@@ -19,7 +19,7 @@ jobs:
       tag: ${{ github.ref_name }}
 
   verify-github-artifacts:
-    needs: [publish-github-image, publish-github-release]
+    needs: [publish-github-image, publish-github-artifacts]
     uses: ./.github/workflows/release_verify_artifacts.yaml
     with:
       tag: ${{ github.ref_name }}
