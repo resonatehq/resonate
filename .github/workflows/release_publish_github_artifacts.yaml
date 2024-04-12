@@ -4,34 +4,16 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: 'The tag version to use for verification'
+        description: "The tag version to use for verification"
         required: true
         type: string
-        
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
-jobs:      
-  create-release:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Build
-        run: echo ${{ github.sha }} > Release.txt
-      - name: Test
-        run: cat Release.txt
-      - name: Release
-        uses: softprops/action-gh-release@v2
-        with:
-          body_path: Release.txt
-          name: Resonate ${{ inputs.tag }}
-          tag_name: ${{ inputs.tag }}
-          generate_release_notes: true
-          make_latest: true
-          
+jobs:
   release-linux-artifact:
     runs-on: ubuntu-latest
     needs: [create-release]
@@ -87,7 +69,7 @@ jobs:
           # Build resonate binaries
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-          
+
           # Change permissions
           chmod +x ./bin/darwin-x86_64/resonate
           chmod +x ./bin/darwin-aarch64/resonate
@@ -107,4 +89,3 @@ jobs:
           gh release upload ${{ inputs.tag }} resonate_darwin_x86_64.tar.gz.sha256 --clobber
           gh release upload ${{ inputs.tag }} resonate_darwin_aarch64.tar.gz --clobber
           gh release upload ${{ inputs.tag }} resonate_darwin_aarch64.tar.gz.sha256 --clobber
-
