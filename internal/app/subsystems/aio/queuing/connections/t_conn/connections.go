@@ -47,8 +47,8 @@ type (
 	}
 
 	Connection interface {
-		// Init initializes the connection with the given tasks channel and metadata.
-		Init(tasks <-chan *ConnectionSubmission, meta *metadata.Metadata) error
+		// Init initializes the connection with the given tasks channel and configuration.
+		Init(tasks <-chan *ConnectionSubmission, cfg *ConnectionConfig) error
 
 		// Tasks returns the tasks channel.
 		Task() <-chan *ConnectionSubmission

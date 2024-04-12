@@ -5,36 +5,59 @@ import (
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/metadata"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
 )
 
 func TestPattern(t *testing.T) {
 	tcs := []struct {
 		name          string
-		meta          *metadata.Metadata
+		config        *t_route.RoutingConfig
 		expectedError error
 	}{
 		{
 			name: "empty pattern",
-			meta: &metadata.Metadata{
-				Properties: map[string]interface{}{},
+			config: &t_route.RoutingConfig{
+				Kind: "pattern",
+				Name: "test",
+				Target: &t_route.Target{
+					Connection: "test",
+					Queue:      "test",
+				},
+				Metadata: &metadata.Metadata{
+					Properties: map[string]interface{}{},
+				},
 			},
 			expectedError: ErrMissingPattern,
 		},
 		{
 			name: "missing pattern",
-			meta: &metadata.Metadata{
-				Properties: map[string]interface{}{
-					"pattern": "",
+			config: &t_route.RoutingConfig{
+				Kind: "pattern",
+				Name: "test",
+				Target: &t_route.Target{
+					Connection: "test",
+					Queue:      "test",
 				},
+				Metadata: &metadata.Metadata{
+					Properties: map[string]interface{}{
+						"pattern": "",
+					}},
 			},
 			expectedError: ErrMissingPattern,
 		},
 		{
 			name: "normal",
-			meta: &metadata.Metadata{
-				Properties: map[string]interface{}{
-					"pattern": "/gpu/summarize/*",
+			config: &t_route.RoutingConfig{
+				Kind: "pattern",
+				Name: "test",
+				Target: &t_route.Target{
+					Connection: "test",
+					Queue:      "test",
 				},
+				Metadata: &metadata.Metadata{
+					Properties: map[string]interface{}{
+						"pattern": "/gpu/summarize/*",
+					}},
 			},
 			expectedError: nil,
 		},
@@ -42,7 +65,7 @@ func TestPattern(t *testing.T) {
 
 	for _, tc := range tcs {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := New(tc.meta)
+			_, err := New(tc.config)
 			if tc.expectedError != nil {
 				if err == nil {
 					t.Errorf("expected error: %v, got nil", tc.expectedError)

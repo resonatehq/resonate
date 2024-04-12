@@ -2,6 +2,7 @@ package queuing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -11,6 +12,10 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/routes/t_route"
 	"github.com/resonatehq/resonate/internal/util"
+)
+
+var (
+	ErrConnectionNotFound = errors.New("connection not found")
 )
 
 type (
@@ -69,7 +74,7 @@ func New(baseURL string, config *Config) (aio.Subsystem, error) {
 
 		// Check if target connection exists.
 		if _, ok := conns[cfg.Target.Connection]; !ok {
-			return nil, fmt.Errorf("connection %q not found for routing %q", cfg.Target.Connection, cfg.Name)
+			return nil, fmt.Errorf("validation error for route '%s': %w", cfg.Name, ErrConnectionNotFound)
 		}
 
 		route, err := routes.NewRoute(cfg)
