@@ -91,3 +91,12 @@ func (d *DstAnnouncement) Announce(event *Event) {
 	defer d.mutex.Unlock()
 	d.announcements = append(d.announcements, *event)
 }
+
+func (d *DstAnnouncement) GetAnnouncements() []Event {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	// Return a copy of the announcements slice to ensure thread safety
+	announcementsCopy := make([]Event, len(d.announcements))
+	copy(announcementsCopy, d.announcements)
+	return announcementsCopy
+}
