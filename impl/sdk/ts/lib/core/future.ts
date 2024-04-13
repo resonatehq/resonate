@@ -40,14 +40,17 @@ export class ResonatePromise<T> extends Promise<T> {
 // Future
 /////////////////////////////////////////////////////////////////////
 
-export type Value<T> = { kind: "pending" } | { kind: "resolved"; value: T } | { kind: "rejected"; error: unknown };
+export type FutureValue<T> =
+  | { kind: "pending" }
+  | { kind: "resolved"; value: T }
+  | { kind: "rejected"; error: unknown };
 
 export class Future<T> {
   // a discriminate property
   readonly kind = "future";
 
   // initial value
-  private _value: Value<T> = { kind: "pending" };
+  private _value: FutureValue<T> = { kind: "pending" };
 
   /**
    * Represents the eventual return value of a Resonate function.

@@ -155,7 +155,7 @@ export abstract class ResonateBase {
    * @template T The return type of the function.
    * @param id A unique id for the function invocation.
    * @param name The function name.
-   * @param args The function arguments.
+   * @param argsWithOpts The function arguments.
    * @returns A promise that resolve to the function return value.
    */
   run<T>(name: string, id: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T> {

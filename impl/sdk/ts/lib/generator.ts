@@ -135,7 +135,6 @@ export class Resonate extends ResonateBase {
    * @param name The schedule name.
    * @param cron The schedule cron expression.
    * @param func The registered function name.
-   * @param version The registered function version.
    * @param args The function arguments.
    * @returns The schedule object.
    */
