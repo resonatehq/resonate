@@ -42,7 +42,7 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 
 ## Why Resonate?
 
-- **Cloud Computing Made Dead Simple**: Resonate offers a dead simple programming model that simplifies coding for the cloud using an intuitive paradigm you already know — async await.
+- **Cloud Computing Made Dead Simple**: Resonate simplifies coding for the cloud using an intuitive paradigm you already know — async await.
 
 - **Single Binary**: Resonate simplifies your deployment and operations with a single binary.
 
