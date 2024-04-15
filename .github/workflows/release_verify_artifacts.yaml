@@ -35,7 +35,7 @@ jobs:
     needs: [seed]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download and test GHCR image
         run: |
           # Login to GHCR
@@ -53,7 +53,7 @@ jobs:
     needs: [seed]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download and test GH release
         run: |
           # Download the release artifact
