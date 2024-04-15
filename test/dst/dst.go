@@ -48,6 +48,11 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	// setup announcements
 	announcements.Initialize(announcements.Dst)
 
+	// Instantiate monitors
+	monitor := announcements.NewMonitor()
+	// Start listening to announcements
+	go monitor.Listen()
+
 	// add req/res
 	for _, req := range reqs {
 		switch req {

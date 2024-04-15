@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/rand" // nosemgrep
 
+	"github.com/resonatehq/resonate/internal/announcements"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -90,6 +91,10 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqe := range a.sqes {
 		flush[sqe.Submission.Kind] = append(flush[sqe.Submission.Kind], sqe)
 	}
+
+	// Announce flush
+	event := announcements.NewEvent("Flush", map[string]interface{}{"time": t})
+	announcements.GetInstance().Announce(event)
 
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {

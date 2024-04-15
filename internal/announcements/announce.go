@@ -90,6 +90,8 @@ func (d *DstAnnouncement) Announce(event *Event) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.announcements = append(d.announcements, *event)
+	// print
+	fmt.Println("Announcement:", event.Type, event.Data)
 }
 
 func (d *DstAnnouncement) GetAnnouncements() []Event {
