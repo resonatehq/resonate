@@ -9,7 +9,16 @@ on:
       - main
 
 jobs:
-  build:
+  check-nix:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check Nix flake
+        uses: DeterminateSystems/flake-checker-action@v5
+
+  build-nix:
     runs-on: ${{ matrix.systems.runner }}
     strategy:
       matrix:
@@ -21,10 +30,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@v10
 
       - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+        uses: DeterminateSystems/magic-nix-cache-action@v4
 
       - name: Run golangci-lint
         run: |
@@ -32,6 +41,21 @@ jobs:
             golangci-lint run \
               --verbose \
               --timeout=3m
+      
+      - name: Run go test and generate coverage report
+        run: |
+          nix develop --command \
+            go test \
+              -v \
+              -coverprofile=coverage.out \
+              -coverpkg=./... \
+              ./...
+      
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v4 # nosemgrep
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          codecov_yml_path: codecov.yml
 
       - name: Build resonate (Nix)
         run: |
