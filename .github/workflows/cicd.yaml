@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  check-nix-linux:
+  check:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -49,7 +49,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
-  build-nix-linux:
+  build:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -88,9 +88,9 @@ jobs:
           path: durable-promise-test-harness
           key: durable-promise-test-harness-${{ github.sha }}
 
-  test-nix-linux:
+  test-linux:
     runs-on: ubuntu-22.04
-    needs: [build-nix-linux]
+    needs: [build]
     steps:
       - name: Restore resonate binary
         uses: actions/cache/restore@v4
@@ -125,7 +125,7 @@ jobs:
   scan:
     name: semgrep
     runs-on: ubuntu-20.04
-    needs: [build-nix-linux]
+    needs: [build]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
     if: (github.actor != 'dependabot[bot]')
