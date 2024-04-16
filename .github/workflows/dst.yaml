@@ -27,7 +27,7 @@ jobs:
     
     - name: Build resonate (Nix)
       run: |
-        nix build ".#packages.x86_64-linux.resonate"
+        nix build ".#resonate"
         cp ./result/bin/resonate resonate
 
     - name: Cache resonate binary

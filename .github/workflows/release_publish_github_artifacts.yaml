@@ -37,12 +37,11 @@ jobs:
       
       - name: Build Resonate binary
         run: |
-          NIX_SYSTEM="${{ matrix.systems.arch }}-${{ matrix.systems.os }}"
           TARBALL="resonate_${{ matrix.systems.arch }}_${{ matrix.systems.os }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate binary
-          nix build ".#packages.${NIX_SYSTEM}.resonate"
+          nix build ".#resonate"
 
           # Copy and change permissions
           cp ./result/bin/resonate resonate
