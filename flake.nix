@@ -48,6 +48,7 @@
             # Nix formatter
             nixpkgs-fmt
 
+            # Misc CI
             semgrep
           ];
         };

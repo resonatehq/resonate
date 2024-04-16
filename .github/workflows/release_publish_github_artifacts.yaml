@@ -14,76 +14,46 @@ permissions:
   contents: write
 
 jobs:
-  release-linux-artifact:
-    runs-on: ubuntu-latest
+  release-artifacts-nix:
+    runs-on: ${{ matrix.systems.runner }}
+    strategy:
+      matrix:
+        systems:
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+          - os: darwin
+            arch: x86_64
+            runner: macos-12
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
-      - name: Set up Go 1.21
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Install cross-compiler for linux/arm64
+      
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+      
+      - name: Build Resonate binary
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build for both amd64 and arm64
-        run: |
-          # Build resonate binaries
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/linux-x86_64/ ./...
-          CC=aarch64-linux-gnu-gcc GOOS=linux GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/linux-aarch64/ ./...
+          # Build resonate binary
+          nix build ".#packages.${{ matrix.systems.arch }}-${{ matrix.systems.os }}.resonate"
 
-          # Change permissions
-          chmod +x ./bin/linux-x86_64/resonate
-          chmod +x ./bin/linux-aarch64/resonate
+          # Copy and change permissions
+          cp ./result/bin/resonate resonate
+          chmod +x resonate
 
-          # Compress binaries
-          tar -czvf resonate_linux_x86_64.tar.gz ./bin/linux-x86_64/resonate
-          tar -czvf resonate_linux_aarch64.tar.gz ./bin/linux-aarch64/resonate
+          # Compress binary
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
+          tar -czvf "${TARBALL}" resonate
 
-          # Create checksums 
-          sha256sum resonate_linux_x86_64.tar.gz > resonate_linux_x86_64.tar.gz.sha256          
-          sha256sum resonate_linux_aarch64.tar.gz > resonate_linux_aarch64.tar.gz.sha256
-      - name: Upload Artifacts
+          # Create checksum
+          sha256sum "${TARBALL}" > "${TARBALL}.sha256"
+
+      - name: Upload binary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload ${{ inputs.tag }} resonate_linux_x86_64.tar.gz --clobber
-          gh release upload ${{ inputs.tag }} resonate_linux_x86_64.tar.gz.sha256 --clobber
-          gh release upload ${{ inputs.tag }} resonate_linux_aarch64.tar.gz --clobber
-          gh release upload ${{ inputs.tag }} resonate_linux_aarch64.tar.gz.sha256 --clobber
-
-  release-darwin-artifact:
-    runs-on: macos-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: 1.21
-      - name: Build for both amd64 and arm64
-        run: |
-          # Build resonate binaries
-          GOOS=darwin GOARCH=amd64 CGO_ENABLED=1 go build -o ./bin/darwin-x86_64/ ./... 
-          GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -o ./bin/darwin-aarch64/ ./...
-
-          # Change permissions
-          chmod +x ./bin/darwin-x86_64/resonate
-          chmod +x ./bin/darwin-aarch64/resonate
-
-          # Compress binaries
-          tar -czvf resonate_darwin_x86_64.tar.gz ./bin/darwin-x86_64/resonate          
-          tar -czvf resonate_darwin_aarch64.tar.gz ./bin/darwin-aarch64/resonate
-
-          # Create checksums 
-          shasum -a 256 resonate_darwin_x86_64.tar.gz > resonate_darwin_x86_64.tar.gz.sha256
-          shasum -a 256 resonate_darwin_aarch64.tar.gz > resonate_darwin_aarch64.tar.gz.sha256
-      - name: Upload Artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release upload ${{ inputs.tag }} resonate_darwin_x86_64.tar.gz --clobber
-          gh release upload ${{ inputs.tag }} resonate_darwin_x86_64.tar.gz.sha256 --clobber
-          gh release upload ${{ inputs.tag }} resonate_darwin_aarch64.tar.gz --clobber
-          gh release upload ${{ inputs.tag }} resonate_darwin_aarch64.tar.gz.sha256 --clobber
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
+          gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
