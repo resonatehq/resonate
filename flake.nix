@@ -13,10 +13,14 @@
   outputs = { self, nixpkgs, flake-schemas }:
     let
       # Helpers for producing system-specific outputs
+      pkgsFor = system: import nixpkgs { inherit system; };
       supportedSystems = [ "x86_64-linux" "aarch64-darwin" "x86_64-darwin" "aarch64-linux" ];
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = pkgsFor system;
       });
+
+      # Global metadata (update this when the Resonate version changes)
+      version = "0.5.0";
     in
     {
       # Schemas tell Nix about the structure of your flake's outputs
@@ -49,7 +53,7 @@
         # The Resonate server
         resonate = pkgs.buildGo121Module rec {
           pname = "resonate";
-          version = "0.5.0";
+          inherit version;
           src = self;
 
           # A hash of all Go dependencies
@@ -72,6 +76,21 @@
 
         # This enables you to use the shorthand `nix build` to build the server
         default = resonate;
+      });
+
+      # Docker image outputs
+      dockerImages = forEachSupportedSystem ({ pkgs }: rec {
+        # The Resonate server as an image
+        resonate = pkgs.dockerTools.buildLayeredImage {
+          name = "resonate-${version}";
+          config = {
+            Entrypoint = [ "${self.packages.x86_64-linux.default}/bin/resonate" ];
+            ExposedPorts = {
+              "8001" = { };
+              "50051" = { };
+            };
+          };
+        };
       });
     };
 }
