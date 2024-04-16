@@ -110,8 +110,8 @@ jobs:
 
       - name: Run linearizability check
         run: |
-          chmod +x harness
-          ./harness verify -r 1000 -c 10
+          chmod +x durable-promise-test-harness
+          ./durable-promise-test-harness verify -r 1000 -c 10
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
