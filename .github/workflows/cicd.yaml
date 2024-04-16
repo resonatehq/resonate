@@ -1,4 +1,4 @@
-name: Nix CICD
+name: CICD
 
 on:
   push:
@@ -7,6 +7,9 @@ on:
   pull_request:
     branches:
       - main
+
+permissions:
+  contents: read
 
 jobs:
   check-nix-linux:
