@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  check-nix:
+  check-nix-linux:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -17,17 +17,6 @@ jobs:
 
       - name: Check Nix flake
         uses: DeterminateSystems/flake-checker-action@v5
-
-  build-nix:
-    runs-on: ${{ matrix.systems.runner }}
-    strategy:
-      matrix:
-        systems:
-          - nix-system: x86_64-linux
-            runner: ubuntu-22.04
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v10
@@ -41,7 +30,7 @@ jobs:
             golangci-lint run \
               --verbose \
               --timeout=3m
-      
+
       - name: Run go test and generate coverage report
         run: |
           nix develop --command \
@@ -50,19 +39,98 @@ jobs:
               -coverprofile=coverage.out \
               -coverpkg=./... \
               ./...
-      
+
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v4 # nosemgrep
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
+  build-nix-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      # time-saving smoke test to ensure that `nix build` will likely succeed
+      - name: Basic Go build
+        run: |
+          nix develop --command go build
+
       - name: Build resonate (Nix)
         run: |
-          nix build ".#packages.${{ matrix.systems.nix-system }}.resonate"
-      
+          nix build ".#packages.x86_64-linux.resonate"
+          cp ./result/bin/resonate resonate
+
       - name: Cache resonate binary
         uses: actions/cache/save@v4
         with:
-          path: ./result/bin/resonate
+          path: resonate
           key: resonate-${{ github.sha }}
+     
+      - name: Build test harness
+        run: |
+          nix build ".#packages.x86_64-linux.durable-promise-test-harness"
+          cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
+
+      - name: Cache test harness binary
+        uses: actions/cache/save@v4
+        with:
+          path: durable-promise-test-harness
+          key: durable-promise-test-harness-${{ github.sha }}
+
+  test-nix-linux:
+    runs-on: ubuntu-22.04
+    needs: [build-nix-linux]
+    steps:
+      - name: Restore resonate binary
+        uses: actions/cache/restore@v4
+        with:
+          path: resonate
+          key: resonate-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Restore test harness binary
+        uses: actions/cache/restore@v4
+        with:
+          path: durable-promise-test-harness
+          key: durable-promise-test-harness-${{ github.sha }}
+          fail-on-cache-miss: true
+
+      - name: Run resonate server
+        run: |
+          chmod +x resonate
+          ./resonate serve --aio-store-sqlite-path :memory: &
+
+      - name: Run linearizability check
+        run: |
+          chmod +x harness
+          ./harness verify -r 1000 -c 10
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: test-harness-results
+          path: test/results/
+
+  scan:
+    name: semgrep
+    runs-on: ubuntu-20.04
+    needs: [build-nix-linux]
+    env:
+      SEMGREP_RULES: "auto semgrep.yml"
+    if: (github.actor != 'dependabot[bot]')
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: semgrep
+        run: |
+          nix develop --command \
+            semgrep ci

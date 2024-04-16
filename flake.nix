@@ -47,6 +47,8 @@
 
             # Nix formatter
             nixpkgs-fmt
+
+            semgrep
           ];
         };
       });
@@ -75,6 +77,18 @@
               --zsh <($out/bin/${pname} completion zsh) \
               --fish <($out/bin/${pname} completion fish)
           '';
+        };
+
+        # Test harness (TODO: make this a flake as well)
+        durable-promise-test-harness = pkgs.buildGo121Module rec {
+          name = "durable-promise-test-harness";
+          src = pkgs.fetchFromGitHub {
+            owner = "resonatehq";
+            repo = name;
+            rev = "43a2b602ca1ed5a019f0e9341efdab3484b3e2e0";
+            hash = "sha256-9IfrHQ+8CB/yLHtmZwcajvQ2yWrqZJi2frS+wBRsGfY=";
+          };
+          vendorHash = "sha256-n15ECdUjvwg8H0uVZzP40E9vpNSJrkvqxQWBTGkqcs8=";
         };
 
         # This enables you to use the shorthand `nix build` to build the server
