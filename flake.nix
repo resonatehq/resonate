@@ -12,15 +12,16 @@
   # Flake outputs that other flakes can use
   outputs = { self, nixpkgs, flake-schemas }:
     let
+      # Version inference
+      lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
+      version = "${builtins.substring 0 8 lastModifiedDate}-${self.shortRev or "dirty"}";
+
       # Helpers for producing system-specific outputs
       pkgsFor = system: import nixpkgs { inherit system; };
       supportedSystems = [ "x86_64-linux" "aarch64-darwin" "x86_64-darwin" "aarch64-linux" ];
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
         pkgs = pkgsFor system;
       });
-
-      # Global metadata (update this when the Resonate version changes)
-      version = "0.5.0";
     in
     {
       # Schemas tell Nix about the structure of your flake's outputs
