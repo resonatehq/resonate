@@ -38,6 +38,8 @@
 
             # protoc
             protobuf
+            protoc-gen-go
+            protoc-gen-go-grpc
 
             # OpenAPI generator
             oapi-codegen

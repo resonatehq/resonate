@@ -92,6 +92,72 @@ project.
     git branch -D awesome_branch
     ```
 
+## Working with Nix
+
+This repo currently has some optional [Nix] stuff that you can experiment with.
+
+To get started, [install Nix][nix-install] on either Linux or macOS (the install script infers which system you're on):
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+This could take a few minutes.
+If you need to cleanly uninstall Nix and all of its system dependencies at any time:
+
+```bash
+/nix/nix-installer uninstall
+```
+
+Once Nix is on your system, you can activate the Nix [development environment][dev-env] in this repo:
+
+```bash
+nix develop
+```
+
+With that command, you enter a project-specific shell with pinned packages for all of the tools required for the project (Go 1.21, protoc plus plugins, etc.).
+All the `make` commands in the [`Makefile`](./Makefile), for example, should just work inside the shell.
+
+In addition to the development environment, you can build the Resonate server as a Nix package:
+
+```bash
+nix build
+```
+
+When that succeeds, the binary will be available at `./result/bin/resonate`:
+
+```bash
+./result/bin/resonate serve
+```
+
+`result` is actually a symlink to a Nix store path:
+
+```bash
+realpath result
+/nix/store/xmjcz2rm3l8k8wjnvm4yk7m8fkp59apj-resonate-0.5.0 # the hash will differ on your system
+```
+
+As an alternative, you can run the server directly using Nix:
+
+```bash
+nix run
+
+# To pass in args
+nix run . -- serve
+```
+
+For x64 Linux users, you can even build the Resonate Docker image using Nix (with no dependence on the `Dockerfile` or the Docker CLI):
+
+```bash
+nix build .#dockerImages.x86_64-linux.default
+```
+
+To load the image:
+
+```bash
+docker load < result
+```
+
 ## What to contribute to?
 
 Here are some areas where your contributions would be valuable:
@@ -102,3 +168,9 @@ Here are some areas where your contributions would be valuable:
 * Add support for the following databases: MySQL, Elasticsearch, MongoDB.
 
 Thank you for your contributions and support in building a better Resonate! 🚀
+
+[dev-env]: https://zero-to-nix.com/concepts/dev-env
+[direnv]: https://direnv.net
+[direnv-install]: https://direnv.net/docs/installation.html
+[nix]: https://nixos.org
+[nix-install]: https://zero-to-nix.com/start/install
