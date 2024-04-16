@@ -81,16 +81,22 @@
       # Docker image outputs
       dockerImages = forEachSupportedSystem ({ pkgs }: rec {
         # The Resonate server as an image
-        resonate = pkgs.dockerTools.buildLayeredImage {
-          name = "resonate-${version}";
-          config = {
-            Entrypoint = [ "${self.packages.x86_64-linux.default}/bin/resonate" ];
-            ExposedPorts = {
-              "8001" = { };
-              "50051" = { };
+        resonate =
+          let
+            # A version of Nixpkgs solely for x86_64 Linux (the built image's system)
+            linuxPkgs = pkgsFor "x86_64-linux";
+          in
+          pkgs.dockerTools.buildLayeredImage {
+            name = "resonate-${version}";
+            contents = with linuxPkgs.dockerTools; [ caCertificates ];
+            config = {
+              Entrypoint = [ "${self.packages.x86_64-linux.default}/bin/resonate" ];
+              ExposedPorts = {
+                "8001" = { };
+                "50051" = { };
+              };
             };
           };
-        };
       });
     };
 }
