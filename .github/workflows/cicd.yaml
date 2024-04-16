@@ -49,7 +49,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
-  build:
+  test:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -61,60 +61,13 @@ jobs:
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v4
 
-      # time-saving smoke test to ensure that `nix build` will likely succeed
-      - name: Basic Go build
-        run: |
-          nix develop --command go build
-
-      - name: Build resonate (Nix)
-        run: |
-          nix build ".#packages.x86_64-linux.resonate"
-          cp ./result/bin/resonate resonate
-
-      - name: Cache resonate binary
-        uses: actions/cache/save@v4
-        with:
-          path: resonate
-          key: resonate-${{ github.sha }}
-     
-      - name: Build test harness
-        run: |
-          nix build ".#packages.x86_64-linux.durable-promise-test-harness"
-          cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
-
-      - name: Cache test harness binary
-        uses: actions/cache/save@v4
-        with:
-          path: durable-promise-test-harness
-          key: durable-promise-test-harness-${{ github.sha }}
-
-  test-linux:
-    runs-on: ubuntu-22.04
-    needs: [build]
-    steps:
-      - name: Restore resonate binary
-        uses: actions/cache/restore@v4
-        with:
-          path: resonate
-          key: resonate-${{ github.sha }}
-          fail-on-cache-miss: true
-
       - name: Run resonate server
         run: |
-          chmod +x resonate
-          ./resonate serve --aio-store-sqlite-path :memory: &
-
-      - name: Restore test harness binary
-        uses: actions/cache/restore@v4
-        with:
-          path: durable-promise-test-harness
-          key: durable-promise-test-harness-${{ github.sha }}
-          fail-on-cache-miss: true
+          nix run ".#resonate" -- serve --aio-store-sqlite-path :memory: &
 
       - name: Run linearizability check
         run: |
-          chmod +x durable-promise-test-harness
-          ./durable-promise-test-harness verify -r 1000 -c 10
+          nix run ".#durable-promise-test-harness" -- verify -r 1000 -c 10
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
@@ -125,7 +78,7 @@ jobs:
   scan:
     name: semgrep
     runs-on: ubuntu-20.04
-    needs: [build]
+    needs: [test]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
     if: (github.actor != 'dependabot[bot]')
