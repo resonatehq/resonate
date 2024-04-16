@@ -27,3 +27,6 @@ coverage.out
 
 # ignore goland files
 .idea
+
+# Nix artifacts
+result*
