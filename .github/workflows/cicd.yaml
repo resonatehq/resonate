@@ -18,8 +18,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check Nix flake
+      - name: Check Nixpkgs input
         uses: DeterminateSystems/flake-checker-action@v5
+
+      # basic check to verify that all Nix flake outputs are soundly typed
+      - name: Check flake
+        run: |
+          nix flake check \
+            --all-systems \
+            --no-build
 
   lint-plus-coverage:
     runs-on: ubuntu-22.04

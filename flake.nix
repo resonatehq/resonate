@@ -47,10 +47,9 @@
 
             # Nix formatter
             nixpkgs-fmt
-
-            # Misc CI
-            semgrep
-          ];
+          ]
+          # Broken on aarch64-linux
+          ++ pkgs.lib.optional (system != "aarch64-linux") (with pkgs; [ semgrep ]);
         };
       });
 
