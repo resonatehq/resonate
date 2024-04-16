@@ -67,13 +67,23 @@ jobs:
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v4
 
+      - name: Build server and harness
+        run: |
+          nix build ".#resonate"
+          cp ./result/bin/resonate resonate
+          chmod +x resonate
+
+          nix build ".#durable-promise-test-harness"
+          cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
+          chmod +x durable-promise-test-harness
+
       - name: Run resonate server
         run: |
-          nix run ".#resonate" -- serve --aio-store-sqlite-path :memory: &
+          ./resonate serve --aio-store-sqlite-path :memory: &
 
       - name: Run linearizability check
         run: |
-          nix run ".#durable-promise-test-harness" -- verify -r 1000 -c 10
+          ./durable-promise-test-harness verify -r 1000 -c 10
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
