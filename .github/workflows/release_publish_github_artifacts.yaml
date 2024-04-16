@@ -37,24 +37,29 @@ jobs:
       
       - name: Build Resonate binary
         run: |
+          NIX_SYSTEM="${{ matrix.systems.arch }}-${{ matrix.systems.os }}"
+          TARBALL="resonate_${{ matrix.systems.arch }}_${{ matrix.systems.os }}.tar.gz"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+
           # Build resonate binary
-          nix build ".#packages.${{ matrix.systems.arch }}-${{ matrix.systems.os }}.resonate"
+          nix build ".#packages.${NIX_SYSTEM}.resonate"
 
           # Copy and change permissions
           cp ./result/bin/resonate resonate
           chmod +x resonate
 
           # Compress binary
-          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           tar -czvf "${TARBALL}" resonate
 
           # Create checksum
-          sha256sum "${TARBALL}" > "${TARBALL}.sha256"
+          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}
 
       - name: Upload binary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+          
           gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
-          gh release upload ${{ inputs.tag }} "${TARBALL}.sha256" --clobber
+          gh release upload ${{ inputs.tag }} "${TARBALL_CHECKSUM}" --clobber
