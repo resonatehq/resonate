@@ -130,6 +130,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+      
       - name: semgrep
         run: |
           nix develop --command \
