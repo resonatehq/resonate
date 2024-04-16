@@ -57,3 +57,4 @@ jobs:
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
           gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
+          gh release upload ${{ inputs.tag }} "${TARBALL}.sha256" --clobber
