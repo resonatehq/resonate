@@ -1,0 +1,44 @@
+name: Nix CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ${{ matrix.systems.runner }}
+    strategy:
+      matrix:
+        systems:
+          - nix-system: x86_64-linux
+            runner: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Run golangci-lint
+        run: |
+          nix develop --command \
+            golangci-lint run \
+              --verbose \
+              --timeout=3m
+
+      - name: Build resonate (Nix)
+        run: |
+          nix build ".#packages.${{ matrix.systems.nix-system }}.resonate"
+      
+      - name: Cache resonate binary
+        uses: actions/cache/save@v4
+        with:
+          path: ./result/bin/resonate
+          key: resonate-${{ github.sha }}
