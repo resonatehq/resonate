@@ -96,17 +96,17 @@ jobs:
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
 
+      - name: Run resonate server
+        run: |
+          chmod +x resonate
+          ./resonate serve --aio-store-sqlite-path :memory: &
+
       - name: Restore test harness binary
         uses: actions/cache/restore@v4
         with:
           path: durable-promise-test-harness
           key: durable-promise-test-harness-${{ github.sha }}
           fail-on-cache-miss: true
-
-      - name: Run resonate server
-        run: |
-          chmod +x resonate
-          ./resonate serve --aio-store-sqlite-path :memory: &
 
       - name: Run linearizability check
         run: |
