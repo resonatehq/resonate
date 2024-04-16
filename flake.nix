@@ -88,9 +88,17 @@
           in
           pkgs.dockerTools.buildLayeredImage {
             name = "resonate-${version}";
-            contents = with linuxPkgs.dockerTools; [ caCertificates ];
+
+            # Extra packages for the image
+            contents = with linuxPkgs.dockerTools; [
+              # Standard requirement for HTTP and the like
+              caCertificates
+            ];
+
             config = {
+              # The image ENTRYPOINT (Nix automatically builds this path)
               Entrypoint = [ "${self.packages.x86_64-linux.default}/bin/resonate" ];
+              # EXPOSE statements for ports
               ExposedPorts = {
                 "8001" = { };
                 "50051" = { };
