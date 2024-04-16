@@ -47,21 +47,26 @@
       # Package outputs
       packages = forEachSupportedSystem ({ pkgs }: rec {
         # The Resonate server
-        resonate = pkgs.buildGo121Module {
+        resonate = pkgs.buildGo121Module rec {
           pname = "resonate";
-          src = ./.;
+          version = "0.5.0";
+          src = self;
+
+          # A hash of all Go dependencies
           vendorHash = "sha256-Xpd+wVW5bFrRjzuhs9PsdB5zeyrFmR5k2vNCLe/e5Vs=";
 
           # Required for SQLite
           CGO_ENABLED = 1;
 
+          # Provides the `installShellCompletion` shell function
           nativeBuildInputs = with pkgs; [ installShellFiles ];
 
+          # Provides shell completion for bash, zsh, and fish
           postInstall = ''
-            installShellCompletion --cmd resonate \
-              --bash <($out/bin/resonate completion bash) \
-              --zsh <($out/bin/resonate completion zsh) \
-              --fish <($out/bin/resonate completion fish)
+            installShellCompletion --cmd ${pname} \
+              --bash <($out/bin/${pname} completion bash) \
+              --zsh <($out/bin/${pname} completion zsh) \
+              --fish <($out/bin/${pname} completion fish)
           '';
         };
 
