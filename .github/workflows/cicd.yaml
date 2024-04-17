@@ -31,6 +31,13 @@ jobs:
             --all-systems \
             --no-build
 
+      # If running `gomod2nix` changes `gomod2nix.toml`, that means that the
+      # file is not up to date and the build needs to fail
+      - name: Ensure gomod2nix dependencies are up to date
+        run: |
+          nix develop --command gomod2nix
+          test $(git status --porcelain=v1 2>/dev/null | wc -l) -eq 0
+
       - name: Run golangci-lint
         run: |
           nix develop --command \

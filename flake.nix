@@ -37,6 +37,7 @@
       # Custom attributes for Nixpkgs
       overlays.default = final: prev: {
         buildGoApplication = gomod2nix.legacyPackages.${prev.stdenv.system}.buildGoApplication;
+        gomod2nixPkg = gomod2nix.packages.${prev.stdenv.system}.default;
       };
 
       # Development environments
@@ -49,8 +50,8 @@
             gotools # goimports, godoc, etc.
             golangci-lint # Go linter
 
-            # Nix + Go
-            gomod2nix.packages.${system}.default
+            # Nix + Go dependency management
+            gomod2nixPkg
 
             # protoc
             protobuf
