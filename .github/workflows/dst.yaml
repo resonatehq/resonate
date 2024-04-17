@@ -27,8 +27,7 @@ jobs:
     
     - name: Build resonate (Nix)
       run: |
-        nix build ".#resonate"
-        cp ./result/bin/resonate resonate
+        nix develop --command go build -o resonate
 
     - name: Cache resonate binary
       uses: actions/cache/save@v4
