@@ -25,7 +25,7 @@ jobs:
     - name: Use Magic Nix Cache
       uses: DeterminateSystems/magic-nix-cache-action@v4
     
-    - name: Build resonate (Nix)
+    - name: Build resonate binary
       run: |
         nix develop --command go build -o resonate
 
