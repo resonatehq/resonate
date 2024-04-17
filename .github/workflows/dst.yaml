@@ -37,7 +37,7 @@ jobs:
         key: resonate-${{ github.sha }}
 
   seed:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - id: seed
       name: Set random seed
@@ -46,7 +46,7 @@ jobs:
       seed: ${{ inputs.seed || steps.seed.outputs.seed }}
 
   dst:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [build, seed]
     timeout-minutes: 150
 
@@ -113,7 +113,7 @@ jobs:
         path: logs.txt
 
   diff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [build, seed, dst]
 
     strategy:
