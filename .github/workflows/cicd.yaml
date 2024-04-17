@@ -32,7 +32,9 @@ jobs:
             --no-build
 
       # If running `gomod2nix` changes `gomod2nix.toml`, that means that the
-      # file is not up to date and the build needs to fail
+      # file is not up to date and the build needs to fail. If that happens,
+      # run `gomod2nix` inside the Nix development environment to regenerate
+      # that file and then commit the changes to Git.
       - name: Ensure gomod2nix dependencies are up to date
         run: |
           nix develop --command gomod2nix
