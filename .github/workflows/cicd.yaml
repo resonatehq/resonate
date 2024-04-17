@@ -78,11 +78,9 @@ jobs:
         run: |
           nix build ".#resonate"
           cp ./result/bin/resonate resonate
-          chmod +x resonate
 
           nix build ".#durable-promise-test-harness"
           cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
-          chmod +x durable-promise-test-harness
 
       - name: Run resonate server
         run: |
