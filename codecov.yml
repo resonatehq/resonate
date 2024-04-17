@@ -5,3 +5,4 @@ ignore:
   - "test/*"
   - "**/*.nix"
   - "flake.lock"
+  - "gomod2nix.toml"
