@@ -122,6 +122,13 @@ nix develop
 With that command, you enter a project-specific shell with pinned packages for all of the tools required for the project (Go 1.21, protoc plus plugins, etc.).
 All the `make` commands in the [`Makefile`](./Makefile), for example, should just work inside the shell.
 
+In order to [streamline][nix-direnv-post] activating the development shell, it's recommended to [install direnv][direnv-install].
+If you install [direnv] and run `direnv allow` in this repo, the Nix development shell will be activated automatically every time you `cd` into the repo, which makes explicitly running `nix develop` unnecessary.
+If you'd like to disable direnv in this repo, you can run `direnv revoke`.
+
+Optionally, you can install [nix-direnv] in addition to [direnv].
+nix-direnv provides a faster implementation of direnv's Nix functionality (though direnv should work just fine in this repo without it).
+
 ### Building the server as a package
 
 In addition to the development environment, you can build the Resonate server as a Nix package:
@@ -191,4 +198,6 @@ Thank you for your contributions and support in building a better Resonate! 🚀
 [direnv-install]: https://direnv.net/docs/installation.html
 [gomod2nix]: https://github.com/nix-community/gomod2nix
 [nix]: https://nixos.org
+[nix-direnv]: https://github.com/nix-community/nix-direnv
+[nix-direnv-post]: https://determinate.systems/posts/nix-direnv
 [nix-install]: https://zero-to-nix.com/start/install
