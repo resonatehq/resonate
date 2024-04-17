@@ -6,29 +6,41 @@
   # Flake inputs
   inputs = {
     nixpkgs.url = "https://flakehub.com/f/NixOS/nixpkgs/*";
+    gomod2nix = {
+      url = "github:nix-community/gomod2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     flake-schemas.url = "https://flakehub.com/f/DeterminateSystems/flake-schemas/*";
   };
 
   # Flake outputs that other flakes can use
-  outputs = { self, nixpkgs, flake-schemas }:
+  outputs = { self, nixpkgs, gomod2nix, flake-schemas }:
     let
       # Version inference
       lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
       version = "${builtins.substring 0 8 lastModifiedDate}-${self.shortRev or "dirty"}";
 
       # Helpers for producing system-specific outputs
-      pkgsFor = system: import nixpkgs { inherit system; };
       supportedSystems = [ "x86_64-linux" "aarch64-darwin" "x86_64-darwin" "aarch64-linux" ];
       forEachSupportedSystem = f: nixpkgs.lib.genAttrs supportedSystems (system: f {
-        pkgs = pkgsFor system;
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ self.overlays.default ];
+        };
+        inherit system;
       });
     in
     {
       # Schemas tell Nix about the structure of your flake's outputs
       inherit (flake-schemas) schemas;
 
+      # Custom attributes for Nixpkgs
+      overlays.default = final: prev: {
+        buildGoApplication = gomod2nix.legacyPackages.${prev.stdenv.system}.buildGoApplication;
+      };
+
       # Development environments
-      devShells = forEachSupportedSystem ({ pkgs }: {
+      devShells = forEachSupportedSystem ({ pkgs, system }: {
         default = pkgs.mkShell {
           # Pinned packages available in the environment
           packages = with pkgs; [
@@ -36,6 +48,9 @@
             go_1_21
             gotools # goimports, godoc, etc.
             golangci-lint # Go linter
+
+            # Nix + Go
+            gomod2nix.packages.${system}.default
 
             # protoc
             protobuf
@@ -54,15 +69,13 @@
       });
 
       # Package outputs
-      packages = forEachSupportedSystem ({ pkgs }: rec {
+      packages = forEachSupportedSystem ({ pkgs, ... }: rec {
         # The Resonate server
-        resonate = pkgs.buildGo121Module rec {
+        resonate = pkgs.buildGoApplication rec {
           pname = "resonate";
           inherit version;
           src = self;
-
-          # A hash of all Go dependencies
-          vendorHash = "sha256-Xpd+wVW5bFrRjzuhs9PsdB5zeyrFmR5k2vNCLe/e5Vs=";
+          modules = ./gomod2nix.toml;
 
           # Required for SQLite
           CGO_ENABLED = 1;
@@ -96,12 +109,12 @@
       });
 
       # Docker image outputs
-      dockerImages = forEachSupportedSystem ({ pkgs }: rec {
+      dockerImages = forEachSupportedSystem ({ pkgs, ... }: rec {
         # The Resonate server as an image
         resonate =
           let
             # A version of Nixpkgs solely for x86_64 Linux (the built image's system)
-            linuxPkgs = pkgsFor "x86_64-linux";
+            linuxPkgs = pkgs.legacyPackages.x86_64-linux;
           in
           pkgs.dockerTools.buildLayeredImage {
             name = "resonate-${version}";
