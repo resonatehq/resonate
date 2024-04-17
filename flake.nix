@@ -89,7 +89,12 @@
             "-s"
             "-w"
             "-extldflags=-static"
+            "-linkmode=external"
           ];
+
+          buildInputs = pkgs.lib.optionals
+            (pkgs.stdenv.hostPlatform.isLinux)
+            (with pkgs; [ glibc glibc.static ]);
 
           # Provides the `installShellCompletion` shell function
           nativeBuildInputs = with pkgs; [ installShellFiles ];
