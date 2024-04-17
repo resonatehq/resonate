@@ -38,7 +38,7 @@ jobs:
       - name: Ensure gomod2nix dependencies are up to date
         run: |
           nix develop --command gomod2nix
-          test $(git status --porcelain=v1 2>/dev/null | wc -l) -eq 0
+          git diff --exit-code gomod2nix.toml
 
       - name: Run golangci-lint
         run: |
