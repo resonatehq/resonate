@@ -84,16 +84,18 @@
           # Required for SQLite on Linux
           CGO_ENABLED = 1;
 
-          # Make the binary static
+          # Make the binary static on Linux
           ldflags = [
             "-s"
             "-w"
+          ] ++ pkgs.lib.optional (pkgs.stdenv.isLinux) [
             "-extldflags=-static"
             "-linkmode=external"
           ];
 
-          buildInputs = pkgs.lib.optionals
-            (pkgs.stdenv.hostPlatform.isLinux)
+          # Use glibc on Linux
+          buildInputs = pkgs.lib.optional
+            (pkgs.stdenv.isLinux)
             (with pkgs; [ glibc glibc.static ]);
 
           # Provides the `installShellCompletion` shell function
