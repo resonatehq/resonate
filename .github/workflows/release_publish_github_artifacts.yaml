@@ -43,9 +43,8 @@ jobs:
           # Build resonate binary
           nix build ".#resonate"
 
-          # Copy and change permissions
+          # Copy into root
           cp ./result/bin/resonate resonate
-          chmod +x resonate
 
           # Compress binary
           tar -czvf "${TARBALL}" resonate

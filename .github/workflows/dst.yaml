@@ -91,7 +91,6 @@ jobs:
         fail-on-cache-miss: true
     - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
       run: |
-        chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
     - name: Create issue if dst failed
       env:
@@ -158,7 +157,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: ${{ failure() }}
       run: |
-        chmod +x resonate
         ./resonate dst issue \
           --seed ${{ needs.seed.outputs.seed }} \
           --scenario ${{ matrix.scenario }} \
