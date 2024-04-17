@@ -53,6 +53,9 @@
             # Nix + Go dependency management
             gomod2nixPkg
 
+            # Tool for generating mocks
+            mockgen
+
             # protoc
             protobuf
             protoc-gen-go

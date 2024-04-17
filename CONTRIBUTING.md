@@ -96,6 +96,8 @@ project.
 
 This repo currently has some optional [Nix] stuff that you can experiment with.
 
+### Getting started
+
 To get started, [install Nix][nix-install] on either Linux or macOS (the install script infers which system you're on):
 
 ```bash
@@ -109,6 +111,8 @@ If you need to cleanly uninstall Nix and all of its system dependencies at any t
 /nix/nix-installer uninstall
 ```
 
+### The development environment
+
 Once Nix is on your system, you can activate the Nix [development environment][dev-env] in this repo:
 
 ```bash
@@ -117,6 +121,8 @@ nix develop
 
 With that command, you enter a project-specific shell with pinned packages for all of the tools required for the project (Go 1.21, protoc plus plugins, etc.).
 All the `make` commands in the [`Makefile`](./Makefile), for example, should just work inside the shell.
+
+### Building the server as a package
 
 In addition to the development environment, you can build the Resonate server as a Nix package:
 
@@ -137,6 +143,14 @@ realpath result
 /nix/store/xmjcz2rm3l8k8wjnvm4yk7m8fkp59apj-resonate-0.5.0 # the hash will differ on your system
 ```
 
+In order to handle Go dependencies, this project uses a tool called [gomod2nix].
+What this tool essentially does is inspect [`go.mod`](./go.mod) and generate a [`gomod2nix.toml`](./gomod2nix.toml) file that Nix can use to generate [derivations] for each Go dependency.
+
+Whenever you update the `go.mod` file, you need to run `gomod2nix` (included in the Nix development environment) to regenerate `gomod2nix.toml`.
+If you update `go.mod` but forget to regenerate `gomod2nix.toml`, the [`Ensure gomod2nix dependencies are up to date`](./.github/workflows/cicd.yaml) job will fail in CI.
+
+### Running the server directly using Nix
+
 As an alternative, you can run the server directly using Nix:
 
 ```bash
@@ -145,6 +159,8 @@ nix run
 # To pass in args
 nix run . -- serve
 ```
+
+### Building the Docker image with Nix
 
 For x64 Linux users, you can even build the Resonate Docker image using Nix (with no dependence on the `Dockerfile` or the Docker CLI):
 
@@ -169,8 +185,10 @@ Here are some areas where your contributions would be valuable:
 
 Thank you for your contributions and support in building a better Resonate! 🚀
 
+[derivations]: https://zero-to-nix.com/concepts/derivations
 [dev-env]: https://zero-to-nix.com/concepts/dev-env
 [direnv]: https://direnv.net
 [direnv-install]: https://direnv.net/docs/installation.html
+[gomod2nix]: https://github.com/nix-community/gomod2nix
 [nix]: https://nixos.org
 [nix-install]: https://zero-to-nix.com/start/install
