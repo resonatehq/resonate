@@ -81,8 +81,15 @@
           src = self;
           modules = ./gomod2nix.toml;
 
-          # Required for SQLite
+          # Required for SQLite on Linux
           CGO_ENABLED = 1;
+
+          # Make the binary static
+          ldflags = [
+            "-s"
+            "-w"
+            "-extldflags=-static"
+          ];
 
           # Provides the `installShellCompletion` shell function
           nativeBuildInputs = with pkgs; [ installShellFiles ];
