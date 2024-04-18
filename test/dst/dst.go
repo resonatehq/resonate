@@ -65,13 +65,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	// model
 	model := NewModel(d.config.Scenario)
 
-	// setup announcements
-	announcements.Initialize(announcements.Dst)
-
-	// Instantiate monitors
 	monitor := announcements.NewMonitor()
-	// Start listening to announcements
-	go monitor.Listen()
+	monitor.RegisterEventHandler("TaskClaimed", announcements.TaskClaimedHandler)
+	monitor.RegisterEventHandler("TaskCompleted", announcements.TaskCompletedHandler)
+
+	// setup announcements
+	announcements.Initialize(announcements.Dst, monitor)
 
 	// add req/res
 	for _, req := range reqs {

@@ -6,6 +6,7 @@ import (
 	"math/rand" // nosemgrep
 	"strconv"
 
+	"github.com/resonatehq/resonate/internal/announcements"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -396,6 +397,11 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	executionId := g.idSet[r.Intn(len(g.idSet))]
 	expiryInMilliseconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
+	// claim task event announcement
+	event := announcements.NewEvent("TaskClaimed", map[string]interface{}{"taskId": taskId, "counter": counter, "processId": processId, "executionId": executionId, "expiryInMilliseconds": expiryInMilliseconds})
+
+	announcements.GetInstance().Announce(event)
+
 	return &t_api.Request{
 		Kind: t_api.ClaimTask,
 		ClaimTask: &t_api.ClaimTaskRequest{
@@ -419,6 +425,10 @@ func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
 	if RandBool(r) {
 		state = promise.Rejected
 	}
+
+	// complete task event announcement
+	event := announcements.NewEvent("TaskCompleted", map[string]interface{}{"taskId": taskId, "counter": counter, "executionId": executionId, "state": state, "headers": headers, "data": data})
+	announcements.GetInstance().Announce(event)
 
 	return &t_api.Request{
 		Kind: t_api.CompleteTask,

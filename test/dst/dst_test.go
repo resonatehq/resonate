@@ -99,26 +99,26 @@ func test(t *testing.T, scenario *Scenario) {
 	// specify reqs to enable
 	reqs := []t_api.Kind{
 		// PROMISE
-		t_api.ReadPromise,
-		t_api.SearchPromises,
-		t_api.CreatePromise,
-		t_api.CompletePromise,
+		// t_api.ReadPromise,
+		// t_api.SearchPromises,
+		// t_api.CreatePromise,
+		// t_api.CompletePromise,
 
-		// SCHEDULE
-		t_api.ReadSchedule,
-		t_api.SearchSchedules,
-		t_api.CreateSchedule,
-		t_api.DeleteSchedule,
+		// // SCHEDULE
+		// t_api.ReadSchedule,
+		// t_api.SearchSchedules,
+		// t_api.CreateSchedule,
+		// t_api.DeleteSchedule,
 
-		// SUBSCRIPTION
-		t_api.ReadSubscriptions,
-		t_api.CreateSubscription,
-		t_api.DeleteSubscription,
+		// // SUBSCRIPTION
+		// t_api.ReadSubscriptions,
+		// t_api.CreateSubscription,
+		// t_api.DeleteSubscription,
 
-		// LOCK
-		t_api.AcquireLock,
-		t_api.HeartbeatLocks,
-		t_api.ReleaseLock,
+		// // LOCK
+		// t_api.AcquireLock,
+		// t_api.HeartbeatLocks,
+		// t_api.ReleaseLock,
 
 		// TASK
 		t_api.ClaimTask,

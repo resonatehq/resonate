@@ -45,8 +45,17 @@ type NoopAnnouncement struct{}
 
 type DstAnnouncement struct {
 	announcements []Event
-	monitors      []*Monitor // Slice to store registered monitors
+	monitor       *Monitor
 	mutex         sync.Mutex // Mutex for thread safety
+}
+
+// Register implements Announcement.
+func (d *NoopAnnouncement) Register(monitor *Monitor) {
+	// Do nothing
+}
+
+func (d *DstAnnouncement) Register(monitor *Monitor) {
+	panic("unimplemented")
 }
 
 var (
@@ -61,7 +70,7 @@ const (
 	Dst
 )
 
-func Initialize(envType EnvironmentType) {
+func Initialize(envType EnvironmentType, monitor *Monitor) {
 	once.Do(func() {
 		switch envType {
 		case Noop:
@@ -69,7 +78,7 @@ func Initialize(envType EnvironmentType) {
 		case Dst:
 			instance = &DstAnnouncement{
 				announcements: make([]Event, 0, 100), // Preallocate capacity to prevent frequent reallocations
-				monitors:      make([]*Monitor, 0),
+				monitor:       monitor,
 			}
 		default:
 			panic("Invalid environment type.")
@@ -92,27 +101,15 @@ func (d *DstAnnouncement) Announce(event *Event) {
 	d.announcements = append(d.announcements, *event)
 	// Print the announcement
 	fmt.Println("Announcement:", event.Type, event.Data)
-	// Apply the event to all registered monitors
-	for _, monitor := range d.monitors {
-		monitor.Apply(*event)
-	}
+	// Apply the event to the monitor
+	d.monitor.Apply(*event)
 }
 
-func (n *NoopAnnouncement) Register(monitor *Monitor) {
-	// Do nothing
-}
-
-func (d *DstAnnouncement) Register(monitor *Monitor) {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	d.monitors = append(d.monitors, monitor)
-}
-
-func (d *DstAnnouncement) GetAnnouncements() []Event {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-	// Return a copy of the announcements slice to ensure thread safety
-	announcementsCopy := make([]Event, len(d.announcements))
-	copy(announcementsCopy, d.announcements)
-	return announcementsCopy
-}
+// func (d *DstAnnouncement) GetAnnouncements() []Event {
+// 	d.mutex.Lock()
+// 	defer d.mutex.Unlock()
+// 	// Return a copy of the announcements slice to ensure thread safety
+// 	announcementsCopy := make([]Event, len(d.announcements))
+// 	copy(announcementsCopy, d.announcements)
+// 	return announcementsCopy
+// }
