@@ -1,10 +1,3 @@
-> Resonate is in the **Design Phase**
-> 
-> Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
->
-> [Join our slack](https://resonatehqcommunity.slack.com)
-
-<br /><br />
 <p align="center">
    <img height="170"src="https://raw.githubusercontent.com/resonatehq/resonate/main/docs/img/echo.png">
 </p>
