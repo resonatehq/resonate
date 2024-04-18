@@ -73,7 +73,11 @@ func RunDSTCmd() *cobra.Command {
 			}))
 			slog.SetDefault(logger)
 
-			announcements.Initialize(announcements.Dst)
+			monitor := announcements.NewMonitor()
+			monitor.RegisterEventHandler("TaskClaimed", announcements.TaskClaimedHandler)
+			monitor.RegisterEventHandler("TaskCompleted", announcements.TaskCompletedHandler)
+
+			announcements.Initialize(announcements.Dst, monitor)
 
 			// instantiate metrics
 			reg := prometheus.NewRegistry()
