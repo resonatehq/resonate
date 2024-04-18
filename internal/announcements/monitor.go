@@ -4,15 +4,41 @@ import (
 	"fmt"
 )
 
-// Monitor is a simple struct representing an announcement monitor.
-type Monitor struct{}
+type MonitorInterface interface {
+	Apply(event Event)
+	Status() []error
+}
 
-// NewMonitor creates a new instance of Monitor.
+type Monitor struct {
+	errors []error
+}
+
 func NewMonitor() *Monitor {
 	return &Monitor{}
 }
 
-// Listen starts listening to announcements and handles them accordingly.
+func (m *Monitor) Apply(event Event) {
+	switch event.Type {
+	case "HTTPResponse":
+		statusCode, err := event.Get("StatusCode")
+		if err != nil {
+			m.errors = append(m.errors, fmt.Errorf("error getting StatusCode from event: %v", err))
+			return
+		}
+		fmt.Printf("Received HTTP response with status code: %v\n", statusCode)
+		// Add more handling logic as needed
+	case "Flush":
+		fmt.Printf("Received flush event at time: %v\n", event.Data["time"])
+		// Add more handling logic as needed
+	default:
+		m.errors = append(m.errors, fmt.Errorf("unknown event type: %v", event.Type))
+	}
+}
+
+func (m *Monitor) Status() []error {
+	return m.errors
+}
+
 func (m *Monitor) Listen() {
 	// Get the announcement instance
 	announcement := GetInstance()
@@ -25,7 +51,7 @@ func (m *Monitor) Listen() {
 			// Process DstAnnouncement events
 			events := announcement.GetAnnouncements()
 			for _, event := range events {
-				m.handleDstAnnouncement(event)
+				m.Apply(event)
 			}
 		case *NoopAnnouncement:
 			// Do nothing for NoopAnnouncement
@@ -37,7 +63,6 @@ func (m *Monitor) Listen() {
 
 // handleDstAnnouncement is a helper function to handle DstAnnouncement events.
 func (m *Monitor) handleDstAnnouncement(event Event) {
-	// Example: Routing logic based on event type
 	switch event.Type {
 	case "HTTPResponse":
 		statusCode, err := event.Get("StatusCode")

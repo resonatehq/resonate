@@ -3,8 +3,6 @@ package announcements
 import (
 	"fmt"
 	"sync"
-
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Event struct {
@@ -40,12 +38,14 @@ func (e *Event) Get(key string) (interface{}, error) {
 
 type Announcement interface {
 	Announce(event *Event)
+	Register(monitor *Monitor)
 }
 
 type NoopAnnouncement struct{}
 
 type DstAnnouncement struct {
 	announcements []Event
+	monitors      []*Monitor // Slice to store registered monitors
 	mutex         sync.Mutex // Mutex for thread safety
 }
 
@@ -69,6 +69,7 @@ func Initialize(envType EnvironmentType) {
 		case Dst:
 			instance = &DstAnnouncement{
 				announcements: make([]Event, 0, 100), // Preallocate capacity to prevent frequent reallocations
+				monitors:      make([]*Monitor, 0),
 			}
 		default:
 			panic("Invalid environment type.")
@@ -78,7 +79,6 @@ func Initialize(envType EnvironmentType) {
 
 func GetInstance() Announcement {
 	// check if the instance has been initialized
-	util.Assert(instance != nil, "Announcement instance has not been initialized.")
 	return instance
 }
 
@@ -90,8 +90,22 @@ func (d *DstAnnouncement) Announce(event *Event) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.announcements = append(d.announcements, *event)
-	// print
+	// Print the announcement
 	fmt.Println("Announcement:", event.Type, event.Data)
+	// Apply the event to all registered monitors
+	for _, monitor := range d.monitors {
+		monitor.Apply(*event)
+	}
+}
+
+func (n *NoopAnnouncement) Register(monitor *Monitor) {
+	// Do nothing
+}
+
+func (d *DstAnnouncement) Register(monitor *Monitor) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.monitors = append(d.monitors, monitor)
 }
 
 func (d *DstAnnouncement) GetAnnouncements() []Event {
