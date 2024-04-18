@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -20,6 +21,7 @@ import (
 // Model
 
 type Model struct {
+	scenario  *Scenario
 	promises  Promises
 	schedules Schedules
 	locks     Locks
@@ -59,7 +61,7 @@ type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
 type Locks map[string]*LockModel
 type Tasks map[string]*TaskModel
-type ResponseValidator func(int64, *t_api.Request, *t_api.Response) error
+type ResponseValidator func(int64, int64, *t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
 	if _, ok := p[id]; !ok {
@@ -112,8 +114,9 @@ func (t Tasks) Get(id string) *TaskModel {
 	return t[id]
 }
 
-func NewModel() *Model {
+func NewModel(scenario *Scenario) *Model {
 	return &Model{
+		scenario:  scenario,
 		promises:  map[string]*PromiseModel{},
 		schedules: map[string]*ScheduleModel{},
 		locks:     map[string]*LockModel{},
@@ -132,12 +135,18 @@ func (m *Model) addCursor(next *t_api.Request) {
 
 // Validation
 
-func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error) error {
+func (m *Model) Step(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response, err error) error {
 	if err != nil {
 		var resErr *t_api.ResonateError
 		if !errors.As(err, &resErr) {
 			return fmt.Errorf("unexpected non-resonate error '%v'", err)
 		}
+
+		// ignore dst injected errors, these are expected
+		if errors.Is(err, &aio.AioDSTError{}) {
+			return nil
+		}
+
 		switch resErr.Code() {
 		case t_api.ErrAPISubmissionQueueFull:
 			return nil
@@ -153,15 +162,15 @@ func (m *Model) Step(t int64, req *t_api.Request, res *t_api.Response, err error
 	}
 
 	if f, ok := m.responses[req.Kind]; ok {
-		return f(t, req, res)
+		return f(reqTime, resTime, req, res)
 	}
 
-	return fmt.Errorf("unexpected request/response kind '%d'", req.Kind)
+	return nil
 }
 
 // PROMISES
 
-func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadPromise(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
@@ -183,7 +192,7 @@ func (m *Model) ValidateReadPromise(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
-func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchPromises(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchPromises.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:           t_api.SearchPromises,
@@ -230,7 +239,7 @@ func (m *Model) ValidateSearchPromises(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreatePromise(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreatePromise.Id)
 
 	switch res.CreatePromise.Status {
@@ -287,7 +296,7 @@ func (m *Model) ValidateCreatePromise(t int64, req *t_api.Request, res *t_api.Re
 	}
 }
 
-func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCompletePromise(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CompletePromise.Id)
 
 	switch res.CompletePromise.Status {
@@ -345,24 +354,26 @@ func (m *Model) ValidateCompletePromise(t int64, req *t_api.Request, res *t_api.
 
 // SCHEDULES
 
-func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSchedule(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.ReadSchedule.Id)
 
 	switch res.ReadSchedule.Status {
 	case t_api.StatusOK:
 		s := res.ReadSchedule.Schedule // schedule response
 
-		if s.NextRunTime < sm.schedule.NextRunTime {
-			return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
-		}
-		if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
-			return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
-		}
+		if m.scenario.Kind == Default { //because we won't know the order of ops
+			if s.NextRunTime < sm.schedule.NextRunTime {
+				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+			}
+			if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+				return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+			}
 
+		}
 		sm.schedule = s
 		return nil
 	case t_api.StatusScheduleNotFound:
-		if sm.schedule != nil {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			return fmt.Errorf("schedule exists %s", sm.schedule)
 		}
 		return nil
@@ -371,7 +382,7 @@ func (m *Model) ValidateReadSchedule(t int64, req *t_api.Request, res *t_api.Res
 	}
 }
 
-func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateSearchSchedules(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	if res.SearchSchedules.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:            t_api.SearchSchedules,
@@ -398,13 +409,18 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 				}
 			}
 
-			if s.NextRunTime < sm.schedule.NextRunTime {
-				return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
-			}
-			if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
-				return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+			if m.scenario.Kind == Default {
+				if s.NextRunTime < sm.schedule.NextRunTime {
+					return fmt.Errorf("unexpected nextRunTime, schedule nextRunTime %d is greater than the request nextRunTime %d", s.NextRunTime, sm.schedule.NextRunTime)
+				}
+				if (s.LastRunTime != nil && sm.schedule.LastRunTime != nil) && *s.LastRunTime < *sm.schedule.LastRunTime {
+					return fmt.Errorf("unexpected lastRunTime, schedule lastRunTime %d is greater than the request lastRunTime %d", s.LastRunTime, sm.schedule.LastRunTime)
+				}
 			}
 
+			if m.scenario.Kind == Default {
+				return nil
+			}
 			// update schedule state
 			sm.schedule = s
 		}
@@ -414,12 +430,12 @@ func (m *Model) ValidateSearchSchedules(t int64, req *t_api.Request, res *t_api.
 	}
 }
 
-func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSchedule(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.CreateSchedule.Id)
 
 	switch res.CreateSchedule.Status {
 	case t_api.StatusOK:
-		if sm.schedule != nil {
+		if sm.schedule != nil && m.scenario.Kind == Default {
 			if !sm.idempotencyKeyMatch(res.CreateSchedule.Schedule) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", sm.schedule.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey)
 			}
@@ -438,7 +454,7 @@ func (m *Model) ValidateCreateSchedule(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSchedule(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	sm := m.schedules.Get(req.DeleteSchedule.Id)
 
 	switch res.DeleteSchedule.Status {
@@ -454,7 +470,7 @@ func (m *Model) ValidateDeleteSchedule(t int64, req *t_api.Request, res *t_api.R
 
 // SUBSCRIPTIONS
 
-func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReadSubscriptions(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	if res.ReadSubscriptions.Cursor != nil {
 		m.addCursor(&t_api.Request{
 			Kind:              t_api.ReadSubscriptions,
@@ -481,7 +497,7 @@ func (m *Model) ValidateReadSubscriptions(t int64, req *t_api.Request, res *t_ap
 	}
 }
 
-func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCreateSubscription(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.CreateSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.CreateSubscription.Id)
 
@@ -497,10 +513,9 @@ func (m *Model) ValidateCreateSubscription(t int64, req *t_api.Request, res *t_a
 	}
 }
 
-func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateDeleteSubscription(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	pm := m.promises.Get(req.DeleteSubscription.PromiseId)
 	sm := pm.subscriptions.Get(req.DeleteSubscription.Id)
-
 	switch res.DeleteSubscription.Status {
 	case t_api.StatusNoContent:
 		sm.subscription = nil
@@ -515,7 +530,7 @@ func (m *Model) ValidateDeleteSubscription(t int64, req *t_api.Request, res *t_a
 
 // LOCKS
 
-func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateAcquireLock(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	lm := m.locks.Get(req.AcquireLock.ResourceId)
 
 	switch res.AcquireLock.Status {
@@ -523,11 +538,13 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 		lm.lock = res.AcquireLock.Lock
 		return nil
 	case t_api.StatusLockAlreadyAcquired:
-		if lm.lock == nil {
-			return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
-		}
-		if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
-			return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+		if m.scenario.Kind == Default {
+			if lm.lock == nil {
+				return fmt.Errorf("lock %s does not exist", req.AcquireLock.ResourceId)
+			}
+			if lm.lock.ExecutionId == req.AcquireLock.ExecutionId {
+				return fmt.Errorf("lock %s already acquired by executionId %s", req.AcquireLock.ResourceId, req.AcquireLock.ExecutionId)
+			}
 		}
 		return nil
 	default:
@@ -535,7 +552,7 @@ func (m *Model) ValidateAcquireLock(t int64, req *t_api.Request, res *t_api.Resp
 	}
 }
 
-func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateHeartbeatLocks(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	switch res.HeartbeatLocks.Status {
 	case t_api.StatusOK:
 		if res.HeartbeatLocks.LocksAffected == 0 {
@@ -565,7 +582,7 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 			if l.lock.ProcessId == req.HeartbeatLocks.ProcessId {
 				// update local model for processId's locks
 				owned := m.locks.Get(l.lock.ResourceId)
-				owned.lock.ExpiresAt = owned.lock.ExpiresAt + owned.lock.ExpiryInMilliseconds
+				owned.lock.ExpiresAt = reqTime + owned.lock.ExpiryInMilliseconds
 			}
 		}
 
@@ -575,27 +592,29 @@ func (m *Model) ValidateHeartbeatLocks(t int64, req *t_api.Request, res *t_api.R
 	}
 }
 
-func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateReleaseLock(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	lm := m.locks.Get(req.ReleaseLock.ResourceId)
 
 	switch res.ReleaseLock.Status {
 	case t_api.StatusNoContent:
-		if lm.lock == nil {
+		if lm.lock == nil && m.scenario.Kind == Default {
 			return fmt.Errorf("lock %s does not exist", req.ReleaseLock.ResourceId)
 		}
 		lm.lock = nil
 		return nil
 	case t_api.StatusLockNotFound:
-		if lm.lock != nil {
-			if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
-				return nil
-			}
+		if m.scenario.Kind == Default {
+			if lm.lock != nil {
+				if lm.lock.ExecutionId != req.ReleaseLock.ExecutionId {
+					return nil
+				}
 
-			// if lock belongs to the same executionId it must have timedout.
-			if lm.lock.ExpiresAt > t {
-				return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+				// if lock belongs to the same executionId it must have timedout.
+				if lm.lock.ExpiresAt > resTime {
+					return fmt.Errorf("executionId %s still has the lock for resourceId %s", req.ReleaseLock.ExecutionId, req.ReleaseLock.ResourceId)
+				}
+				lm.lock = nil
 			}
-			lm.lock = nil
 		}
 
 		// ok cause lock does not exist at all for this resourceId.
@@ -607,7 +626,7 @@ func (m *Model) ValidateReleaseLock(t int64, req *t_api.Request, res *t_api.Resp
 
 // TASKS
 
-func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateClaimTask(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	tm := m.tasks.Get(req.ClaimTask.TaskId)
 
 	switch res.ClaimTask.Status {
@@ -630,7 +649,7 @@ func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Respon
 		}
 		return nil
 	case t_api.StatusTaskAlreadyTimedOut:
-		if tm.task.PromiseTimeout > t {
+		if tm.task.PromiseTimeout > resTime {
 			return fmt.Errorf("task %s has not yet timed out", tm.task)
 		}
 		return nil
@@ -641,7 +660,7 @@ func (m *Model) ValidateClaimTask(t int64, req *t_api.Request, res *t_api.Respon
 	}
 }
 
-func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Response) error {
+func (m *Model) ValidateCompleteTask(reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) error {
 	tm := m.tasks.Get(req.CompleteTask.TaskId)
 
 	switch res.CompleteTask.Status {
@@ -661,7 +680,7 @@ func (m *Model) ValidateCompleteTask(t int64, req *t_api.Request, res *t_api.Res
 		}
 		return nil
 	case t_api.StatusTaskAlreadyTimedOut:
-		if tm.task.PromiseTimeout > t {
+		if tm.task.PromiseTimeout > resTime {
 			return fmt.Errorf("task %s has not yet timed out", tm.task)
 		}
 		return nil

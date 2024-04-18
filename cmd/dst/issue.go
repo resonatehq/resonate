@@ -25,6 +25,11 @@ const issueFmt = `# DST Failed
 %d
 ~~~
 
+**Scenario**
+~~~
+%s
+~~~
+
 **Store**
 ~~~
 %s
@@ -37,7 +42,7 @@ const issueFmt = `# DST Failed
 
 **Command**
 ~~~
-go run ./... dst run --seed %d --aio-store %s
+go run ./... dst run --seed %d --scenario %s --aio-store %s
 ~~~
 
 **Logs**
@@ -50,13 +55,14 @@ go run ./... dst run --seed %d --aio-store %s
 
 func CreateDSTIssueCmd() *cobra.Command {
 	var (
-		seed   int64
-		store  string
-		reason string
-		file   string
-		repo   string
-		commit string
-		url    string
+		seed     int64
+		scenario string
+		store    string
+		reason   string
+		file     string
+		repo     string
+		commit   string
+		url      string
 	)
 
 	cmd := &cobra.Command{
@@ -81,7 +87,7 @@ func CreateDSTIssueCmd() *cobra.Command {
 			// create github issue
 			issue := &Issue{
 				Title: fmt.Sprintf("DST: %d", seed),
-				Body:  fmt.Sprintf(issueFmt, reason, seed, store, commit, seed, store, logs, url),
+				Body:  fmt.Sprintf(issueFmt, reason, seed, scenario, store, commit, seed, scenario, store, logs, url),
 			}
 
 			return createGitHubIssue(repo, token, issue)
@@ -89,6 +95,7 @@ func CreateDSTIssueCmd() *cobra.Command {
 	}
 
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
+	cmd.Flags().StringVar(&scenario, "scenario", "", "dst scenario")
 	cmd.Flags().StringVar(&store, "store", "", "dst store")
 	cmd.Flags().StringVar(&reason, "reason", "", "dst failure reason")
 	cmd.Flags().StringVar(&file, "file", "", "dst logs file")

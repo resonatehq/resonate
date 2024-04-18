@@ -514,6 +514,7 @@ type AcquireLockCommand struct {
 
 type HeartbeatLocksCommand struct {
 	ProcessId string
+	Time      int64
 }
 
 type ReleaseLockCommand struct {

@@ -178,3 +178,8 @@ func (e *ResonateError) Unwrap() error {
 func (e *ResonateError) Code() ResonateErrorCode {
 	return e.code
 }
+
+func (e *ResonateError) Is(target error) bool {
+	_, ok := target.(*ResonateError)
+	return ok
+}

@@ -20,6 +20,17 @@ import (
 )
 
 func TestDST(t *testing.T) {
+	test(t, &Scenario{Kind: Default})
+}
+
+func TestDSTFaultInjection(t *testing.T) {
+	test(t, &Scenario{
+		Kind:           FaultInjection,
+		FaultInjection: &FaultInjectionScenario{P: 0.5},
+	})
+}
+
+func test(t *testing.T, scenario *Scenario) {
 	r := rand.New(rand.NewSource(0))
 
 	// instantiate metrics
@@ -33,10 +44,17 @@ func TestDST(t *testing.T) {
 		CompletionBatchSize:   100,
 	}
 
+	var _aio aio.AIO
+	switch scenario.Kind {
+	case FaultInjection:
+		_aio = aio.NewDST(r, scenario.FaultInjection.P, metrics)
+	default:
+		_aio = aio.NewDST(r, 0, metrics)
+	}
+
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	failureProbability := 0.5
-	aio := aio.NewDST(r, metrics, failureProbability)
+	aio := _aio
 
 	// instatiate aio subsystems
 	network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
@@ -50,9 +68,9 @@ func TestDST(t *testing.T) {
 	}
 
 	// add api subsystems
-	aio.AddSubsystem(t_aio.Network, network)
-	aio.AddSubsystem(t_aio.Store, store)
-	aio.AddSubsystem(t_aio.Queuing, queuing)
+	aio.AddSubsystem(t_aio.Network, network, nil)
+	aio.AddSubsystem(t_aio.Store, store, nil)
+	aio.AddSubsystem(t_aio.Queuing, queuing, nil)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -126,6 +144,7 @@ func TestDST(t *testing.T) {
 		Tags:               100,
 		Urls:               100,
 		Retries:            100,
+		Scenario:           scenario,
 	})
 
 	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {

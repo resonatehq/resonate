@@ -1,0 +1,63 @@
+name: Publish GitHub Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The tag version to use for verification"
+        required: true
+        type: string
+
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release-artifacts-nix:
+    runs-on: ${{ matrix.systems.runner }}
+    strategy:
+      matrix:
+        systems:
+          - os: linux
+            arch: x86_64
+            runner: ubuntu-22.04
+          - os: darwin
+            arch: x86_64
+            runner: macos-12
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+      
+      - name: Build Resonate binary
+        run: |
+          TARBALL="resonate_${{ matrix.systems.arch }}_${{ matrix.systems.os }}.tar.gz"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+
+          # Build resonate binary
+          nix build ".#resonate"
+
+          # Copy into root
+          cp ./result/bin/resonate resonate
+
+          # Compress binary
+          tar -czvf "${TARBALL}" resonate
+
+          # Create checksum
+          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}
+
+      - name: Upload binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
+          
+          gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
+          gh release upload ${{ inputs.tag }} "${TARBALL_CHECKSUM}" --clobber

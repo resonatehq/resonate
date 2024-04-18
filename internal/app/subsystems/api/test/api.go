@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -37,8 +38,22 @@ func (a *API) Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Res
 	return nil
 }
 
+func (a *API) AddSubsystem(subsystem api.Subsystem) {}
+
+func (a *API) Start() error {
+	return nil
+}
+
+func (a *API) Stop() error {
+	return nil
+}
+
 func (a *API) Shutdown() {}
 
 func (a *API) Done() bool {
 	return false
+}
+
+func (a *API) Errors() <-chan error {
+	return nil
 }

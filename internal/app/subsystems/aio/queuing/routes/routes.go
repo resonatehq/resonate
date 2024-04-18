@@ -9,17 +9,19 @@ import (
 )
 
 var (
-	ErrMissingRoutingConfig = errors.New("routing config is nil")
-	ErrMissingFieldName     = errors.New("missing field 'name'")
-	ErrMissingFieldKind     = errors.New("missing field 'kind'")
-	ErrMissingFieldTarget   = errors.New("missing field 'target'")
-	ErrMissingFieldConn     = errors.New("missing field 'target.connection'")
-	ErrMissingFieldQueue    = errors.New("missing field 'target.queue'")
-	ErrInvalidRoutingKind   = errors.New("invalid routing kind")
+	ErrMissingRoutingConfig      = errors.New("routing config is nil")
+	ErrMissingFieldName          = errors.New("missing field 'name'")
+	ErrMissingFieldKind          = errors.New("missing field 'kind'")
+	ErrMissingFieldTarget        = errors.New("missing field 'target'")
+	ErrMissingFieldConn          = errors.New("missing field 'target.connection'")
+	ErrMissingFieldQueue         = errors.New("missing field 'target.queue'")
+	ErrMissingMetadata           = errors.New("missing field `metadata`")
+	ErrMissingMetadataProperties = errors.New("missing field `metadata.properties`")
+	ErrInvalidRoutingKind        = errors.New("invalid routing kind")
 )
 
 func NewRoute(cfg *t_route.RoutingConfig) (t_route.Route, error) {
-	// Validate all required fields are present.
+	// Validate all common required fields are present.
 	if cfg == nil {
 		return nil, ErrMissingRoutingConfig
 	}
@@ -38,6 +40,12 @@ func NewRoute(cfg *t_route.RoutingConfig) (t_route.Route, error) {
 	if cfg.Target.Queue == "" {
 		return nil, fmt.Errorf("validation error for route '%s': %w", cfg.Name, ErrMissingFieldQueue)
 	}
+	if cfg.Metadata == nil {
+		return nil, fmt.Errorf("validation error for route '%s': %w", cfg.Name, ErrMissingMetadata)
+	}
+	if cfg.Metadata.Properties == nil {
+		return nil, fmt.Errorf("validation error for route '%s': %w", cfg.Name, ErrMissingMetadataProperties)
+	}
 
 	var (
 		route t_route.Route
@@ -46,7 +54,7 @@ func NewRoute(cfg *t_route.RoutingConfig) (t_route.Route, error) {
 
 	switch cfg.Kind {
 	case t_route.Pattern:
-		route, err = pattern.New(cfg.Metadata)
+		route, err = pattern.New(cfg)
 	default:
 		return nil, fmt.Errorf("validation error for route '%s': %w", cfg.Name, ErrInvalidRoutingKind)
 	}
