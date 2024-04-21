@@ -1,7 +1,7 @@
 # this approach is indebted to this blog post from GitHub user hallettj:
 # https://sitr.us/2024/03/08/nix-npm-and-dependabot.html
 
-name: Update dependencies
+name: Update gomod2nix.toml upon Dependabot changes to Go dependencies
 
 on:
   push:
