@@ -8,6 +8,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/announcements"
+	"github.com/resonatehq/resonate/internal/announcements/monitors"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
@@ -65,12 +66,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	// model
 	model := NewModel(d.config.Scenario)
 
-	monitor := announcements.NewMonitor()
-	monitor.RegisterEventHandler("TaskClaimed", announcements.TaskClaimedHandler)
-	monitor.RegisterEventHandler("TaskCompleted", announcements.TaskCompletedHandler)
-
 	// setup announcements
-	announcements.Initialize(announcements.Dst, monitor)
+	announcements.Initialize(announcements.Dst, []announcements.Monitors{})
+
+	// register monitors
+	taskMonitor := monitors.NewTaskMonitor()
+	announcements.GetInstance().Register(taskMonitor)
 
 	// add req/res
 	for _, req := range reqs {

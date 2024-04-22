@@ -13,6 +13,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/announcements"
+	"github.com/resonatehq/resonate/internal/announcements/monitors"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
@@ -73,11 +74,11 @@ func RunDSTCmd() *cobra.Command {
 			}))
 			slog.SetDefault(logger)
 
-			monitor := announcements.NewMonitor()
-			monitor.RegisterEventHandler("TaskClaimed", announcements.TaskClaimedHandler)
-			monitor.RegisterEventHandler("TaskCompleted", announcements.TaskCompletedHandler)
+			announcements.Initialize(announcements.Dst, []announcements.Monitors{})
 
-			announcements.Initialize(announcements.Dst, monitor)
+			// register monitors
+			taskMonitor := monitors.NewTaskMonitor()
+			announcements.GetInstance().Register(taskMonitor)
 
 			// instantiate metrics
 			reg := prometheus.NewRegistry()

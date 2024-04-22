@@ -38,24 +38,26 @@ func (e *Event) Get(key string) (interface{}, error) {
 
 type Announcement interface {
 	Announce(event *Event)
-	Register(monitor *Monitor)
+	Register(monitor Monitors)
 }
 
 type NoopAnnouncement struct{}
 
 type DstAnnouncement struct {
 	announcements []Event
-	monitor       *Monitor
+	monitors      []Monitors
 	mutex         sync.Mutex // Mutex for thread safety
 }
 
 // Register implements Announcement.
-func (d *NoopAnnouncement) Register(monitor *Monitor) {
+func (d *NoopAnnouncement) Register(monitor Monitors) {
 	// Do nothing
 }
 
-func (d *DstAnnouncement) Register(monitor *Monitor) {
-	panic("unimplemented")
+func (d *DstAnnouncement) Register(monitor Monitors) {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+	d.monitors = append(d.monitors, monitor)
 }
 
 var (
@@ -70,7 +72,7 @@ const (
 	Dst
 )
 
-func Initialize(envType EnvironmentType, monitor *Monitor) {
+func Initialize(envType EnvironmentType, monitors []Monitors) {
 	once.Do(func() {
 		switch envType {
 		case Noop:
@@ -78,7 +80,7 @@ func Initialize(envType EnvironmentType, monitor *Monitor) {
 		case Dst:
 			instance = &DstAnnouncement{
 				announcements: make([]Event, 0, 100), // Preallocate capacity to prevent frequent reallocations
-				monitor:       monitor,
+				monitors:      monitors,
 			}
 		default:
 			panic("Invalid environment type.")
@@ -101,15 +103,8 @@ func (d *DstAnnouncement) Announce(event *Event) {
 	d.announcements = append(d.announcements, *event)
 	// Print the announcement
 	fmt.Println("Announcement:", event.Type, event.Data)
-	// Apply the event to the monitor
-	d.monitor.Apply(*event)
+	// Apply the all the registered monitors
+	for _, monitor := range d.monitors {
+		monitor.Apply(*event)
+	}
 }
-
-// func (d *DstAnnouncement) GetAnnouncements() []Event {
-// 	d.mutex.Lock()
-// 	defer d.mutex.Unlock()
-// 	// Return a copy of the announcements slice to ensure thread safety
-// 	announcementsCopy := make([]Event, len(d.announcements))
-// 	copy(announcementsCopy, d.announcements)
-// 	return announcementsCopy
-// }
