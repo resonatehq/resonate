@@ -19,7 +19,6 @@ export type CompleteOptions = {
 };
 
 export class DurablePromise<T> {
-  readonly created: Promise<DurablePromise<T>>;
   readonly completed: Promise<DurablePromise<T>>;
   private complete!: (value: DurablePromise<T>) => void;
 
@@ -31,7 +30,6 @@ export class DurablePromise<T> {
     private promise: PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise,
     poll?: number,
   ) {
-    this.created = Promise.resolve(this);
     this.completed = new Promise((resolve) => {
       this.complete = resolve;
     });

@@ -23,7 +23,7 @@ export class ResonatePromise<T> extends Promise<T> {
    */
   constructor(
     public id: string,
-    created: Promise<any>,
+    created: Promise<Future<T>>,
     completed: Promise<T>,
   ) {
     // bind the promise to the completed promise
@@ -32,7 +32,7 @@ export class ResonatePromise<T> extends Promise<T> {
     });
 
     // expose the id when the durable promise has been created
-    this.created = created.then(() => this.id);
+    this.created = created.then((future) => future.id);
   }
 }
 
