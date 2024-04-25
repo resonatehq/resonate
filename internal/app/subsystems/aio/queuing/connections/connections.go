@@ -50,7 +50,9 @@ func NewConnection(tasks <-chan *t_conn.ConnectionSubmission, cfg *t_conn.Connec
 
 	switch cfg.Kind {
 	case t_conn.HTTP:
-		param := &http.Client{}
+		param := &http.Client{
+			Timeout: 10 * time.Second,
+		}
 		conn = http_conn.New(param)
 		err = conn.Init(tasks, cfg)
 	default:
