@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	http_conn "github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/http"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing/connections/t_conn"
