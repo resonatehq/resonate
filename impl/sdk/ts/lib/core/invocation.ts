@@ -16,7 +16,7 @@ export class Invocation<T> {
 
   killed: boolean = false;
 
-  createdAt: number = Date.now();
+  createdOn: number = Date.now();
   counter: number = 0;
   attempt: number = 0;
 
@@ -68,7 +68,7 @@ export class Invocation<T> {
     // the timeout is the minimum of:
     // - the current time plus the user provided relative time
     // - the parent timeout
-    this.timeout = Math.min(this.createdAt + this.opts.timeout, this.parent?.timeout ?? Infinity);
+    this.timeout = Math.min(this.createdOn + this.opts.timeout, this.parent?.timeout ?? Infinity);
   }
 
   addChild(child: Invocation<any>) {

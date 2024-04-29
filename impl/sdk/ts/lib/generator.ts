@@ -205,6 +205,13 @@ export class Context {
   }
 
   /**
+   * The time the invocation was created. Will use the durable promise creation time if available.
+   */
+  get createdOn() {
+    return this.invocation.createdOn;
+  }
+
+  /**
    * Uniquely identifies the function invocation.
    */
   get id() {

@@ -51,6 +51,10 @@ export class DurablePromise<T> {
     return this.promise.idempotencyKeyForComplete;
   }
 
+  get createdOn() {
+    return this.promise.createdOn;
+  }
+
   get timeout() {
     return this.promise.timeout;
   }

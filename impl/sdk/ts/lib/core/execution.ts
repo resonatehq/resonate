@@ -107,13 +107,18 @@ export class OrdinaryExecution<T> extends Execution<T> {
               tags: this.invocation.opts.tags,
             },
           ));
-
-        // override the invocation timeout
-        this.invocation.timeout = this.durablePromise.timeout;
       } catch (e) {
         // if an error occurs, kill the execution
         this.kill(e);
       }
+    }
+
+    if (this.durablePromise) {
+      // override the invocation creation time
+      this.invocation.createdOn = this.durablePromise.createdOn;
+
+      // override the invocation timeout
+      this.invocation.timeout = this.durablePromise.timeout;
     }
 
     return this.invocation.future;
@@ -219,6 +224,9 @@ export class DeferredExecution<T> extends Execution<T> {
         },
       );
 
+      // override the invocation creation time
+      this.invocation.createdOn = this.durablePromise.createdOn;
+
       // override the invocation timeout
       this.invocation.timeout = this.durablePromise.timeout;
     } catch (e) {
@@ -274,15 +282,20 @@ export class GeneratorExecution<T> extends Execution<T> {
             },
           ));
 
-        // override the invocation timeout
-        this.invocation.timeout = this.durablePromise.timeout;
-
         // resolve/reject the invocation if already completed
         if (this.durablePromise.resolved) {
           this.invocation.resolve(this.durablePromise.value());
         } else if (this.durablePromise.rejected || this.durablePromise.canceled || this.durablePromise.timedout) {
           this.invocation.reject(this.durablePromise.error());
         }
+      }
+
+      if (this.durablePromise) {
+        // override the invocation creation time
+        this.invocation.createdOn = this.durablePromise.createdOn;
+
+        // override the invocation timeout
+        this.invocation.timeout = this.durablePromise.timeout;
       }
     } catch (e) {
       // if an error occurs, kill the execution
