@@ -20,8 +20,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "resonate",
-	Short: "Durable promises",
+	Use:     "resonate",
+	Version: "v0.5.0",
+	Short:   "Durable promises",
 }
 
 func init() {
