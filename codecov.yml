@@ -6,3 +6,4 @@ ignore:
   - "**/*.nix"
   - "flake.lock"
   - "gomod2nix.toml"
+  - "version.json"
