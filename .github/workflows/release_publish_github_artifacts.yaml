@@ -56,7 +56,7 @@ jobs:
           tar -czvf "${TARBALL}" resonate
 
           # Create checksum
-          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}
+          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
 
       - name: Upload binary
         env:
