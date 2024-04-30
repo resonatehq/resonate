@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
+	"github.com/resonatehq/resonate/cmd/version"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -20,9 +21,8 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:     "resonate",
-	Version: "v0.5.0",
-	Short:   "Durable promises",
+	Use:   "resonate",
+	Short: "Durable promises",
 }
 
 func init() {
@@ -43,6 +43,7 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(quickstart.NewCmd())
+	rootCmd.AddCommand(version.VersionCmd)
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)
