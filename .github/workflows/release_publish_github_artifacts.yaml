@@ -22,8 +22,14 @@ jobs:
           - os: linux
             arch: x86_64
             runner: ubuntu-22.04
+          - os: linux
+            arch: aarch64
+            runner: ubuntu-22.04
           - os: darwin
             arch: x86_64
+            runner: macos-12
+          - os: darwin
+            arch: aarch64
             runner: macos-12
     steps:
       - name: Check out repository
@@ -37,7 +43,7 @@ jobs:
       
       - name: Build Resonate binary
         run: |
-          TARBALL="resonate_${{ matrix.systems.arch }}_${{ matrix.systems.os }}.tar.gz"
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate binary
@@ -50,13 +56,17 @@ jobs:
           tar -czvf "${TARBALL}" resonate
 
           # Create checksum
-          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}
+          if [[ "${{ matrix.systems.os }}" == "darwin" ]]; then
+            shasum -a 256 "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          else
+            sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          fi
 
       - name: Upload binary
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
           
           gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
