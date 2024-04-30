@@ -56,7 +56,11 @@ jobs:
           tar -czvf "${TARBALL}" resonate
 
           # Create checksum
-          sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          if [[ "${{ matrix.systems.os }}" == "darwin" ]]; then
+            shasum -a 256 "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          else
+            sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
+          fi
 
       - name: Upload binary
         env:
