@@ -17,11 +17,15 @@ import (
 
 var (
 	server, cfgFile string
+
+	// Set externally by ldflags
+	version = "unknown"
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "resonate",
-	Short: "Durable promises",
+	Use:     "resonate",
+	Short:   "Durable promises",
+	Version: version,
 }
 
 func init() {

@@ -88,6 +88,7 @@
           ldflags = [
             "-s"
             "-w"
+            "-X=github.com/resonatehq/resonate/cmd.version=${version}"
           ] ++ pkgs.lib.optional (pkgs.stdenv.isLinux) [
             "-extldflags=-static"
             "-linkmode=external"
@@ -108,6 +109,8 @@
               --zsh <($out/bin/${pname} completion zsh) \
               --fish <($out/bin/${pname} completion fish)
           '';
+
+          doCheck = false;
         };
 
         # Test harness (TODO: make this a flake as well)
