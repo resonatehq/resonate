@@ -1,12 +1,3 @@
-> Resonate is in the **Design Phase**
->
-> Our code base is constantly evolving as we are exploring Resonate's programming model. If you are passionate about a dead simple developer experience, join us on this journey of discovery and share your thoughts.
->
-> [Join our slack](https://resonatehq.io/slack)
-
-
-<br /><br />
-
 <p align="center">
     <img height="170"src="./docs/img/echo.png">
 </p>
@@ -17,7 +8,6 @@
 
 [![ci](https://github.com/resonatehq/resonate/actions/workflows/cicd.yaml/badge.svg)](https://github.com/resonatehq/resonate/actions/workflows/cicd.yaml)
 [![dst](https://github.com/resonatehq/resonate/actions/workflows/dst.yaml/badge.svg)](https://github.com/resonatehq/resonate/actions/workflows/dst.yaml)
-[![codecov](https://codecov.io/gh/resonatehq/resonate/branch/main/graph/badge.svg)](https://codecov.io/gh/resonatehq/resonate)
 [![Go Report Card](https://goreportcard.com/badge/github.com/resonatehq/resonate)](https://goreportcard.com/report/github.com/resonatehq/resonate)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
@@ -42,7 +32,7 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 
 ## Why Resonate?
 
-- **Cloud Computing Made Dead Simple**: Resonate offers a dead simple programming model that simplifies coding for the cloud using an intuitive paradigm you already know — async await.
+- **Cloud Computing Made Dead Simple**: Resonate simplifies coding for the cloud using an intuitive paradigm you already know — async await.
 
 - **Single Binary**: Resonate simplifies your deployment and operations with a single binary.
 

@@ -14,34 +14,30 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
-    - id: cache
-      uses: actions/cache/restore@v4
-      with:
-        path: resonate
-        key: resonate-${{ github.sha }}
-    - name: Checkout repository
-      if: steps.cache.outputs.cache-hit != 'true'
+    - name: Check out repository
       uses: actions/checkout@v4
-    - name: Set up Go
-      if: steps.cache.outputs.cache-hit != 'true'
-      uses: actions/setup-go@v5
-      with:
-        go-version-file: go.mod
-        cache: false
-    - name: Build resonate
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: go build -o resonate
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@v10
+
+    - name: Use Magic Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@v4
+    
+    - name: Build resonate binary
+      run: |
+        nix build ".#resonate"
+        cp ./result/bin/resonate resonate
+
     - name: Cache resonate binary
-      if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v4
       with:
         path: resonate
         key: resonate-${{ github.sha }}
 
   seed:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - id: seed
       name: Set random seed
@@ -50,7 +46,7 @@ jobs:
       seed: ${{ inputs.seed || steps.seed.outputs.seed }}
 
   dst:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [build, seed]
     timeout-minutes: 150
 
@@ -95,7 +91,6 @@ jobs:
         fail-on-cache-miss: true
     - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
       run: |
-        chmod +x resonate
         ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
     - name: Create issue if dst failed
       env:
@@ -118,7 +113,7 @@ jobs:
         path: logs.txt
 
   diff:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [build, seed, dst]
 
     strategy:
@@ -162,7 +157,6 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.github_token }}
       if: ${{ failure() }}
       run: |
-        chmod +x resonate
         ./resonate dst issue \
           --seed ${{ needs.seed.outputs.seed }} \
           --scenario ${{ matrix.scenario }} \

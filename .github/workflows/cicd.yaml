@@ -12,50 +12,49 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    env:
-      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
-      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_USER: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE }}
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
+  checks:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Checkout repository
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: false
+      - name: Check Nixpkgs input
+        uses: DeterminateSystems/flake-checker-action@v5
 
-      - name: Install and run golangci-lint
-        uses: golangci/golangci-lint-action@v4 # nosemgrep
-        with:
-          version: v1.54
-          args: --verbose --timeout=3m
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      # basic check to verify that all Nix flake outputs are soundly typed
+      - name: Check flake
+        run: |
+          nix flake check \
+            --all-systems \
+            --no-build
+
+      # If running `gomod2nix` changes `gomod2nix.toml`, that means that the
+      # file is not up to date and the build needs to fail. If that happens,
+      # run `gomod2nix` inside the Nix development environment to regenerate
+      # that file and then commit the changes to Git.
+      - name: Ensure gomod2nix dependencies are up to date
+        run: |
+          nix develop --command gomod2nix
+          git diff --exit-code gomod2nix.toml
+
+      - name: Run golangci-lint
+        run: |
+          nix develop --command \
+            golangci-lint run \
+              --verbose \
+              --timeout=3m
 
       - name: Run go test and generate coverage report
         run: |
-          go test -v -coverprofile=coverage.out -coverpkg=./... ./...
+          nix develop --command \
+            go test \
+              -v \
+              -coverprofile=coverage.out \
+              -coverpkg=./... \
+              ./...
 
       - name: Upload coverage report to Codecov
         uses: codecov/codecov-action@v4 # nosemgrep
@@ -63,44 +62,33 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
-      - name: Build resonate
-        run: go build -o resonate
-
-      - name: Cache resonate binary
-        uses: actions/cache/save@v4
-        with:
-          path: resonate
-          key: resonate-${{ github.sha }}
-
   test:
-    runs-on: ubuntu-latest
-    needs: [build]
+    runs-on: ubuntu-22.04
     steps:
-      - name: Restore resonate binary
-        uses: actions/cache/restore@v4
-        with:
-          path: resonate
-          key: resonate-${{ github.sha }}
-          fail-on-cache-miss: true
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+
+      - name: Build server and harness
+        run: |
+          nix build ".#resonate"
+          cp ./result/bin/resonate resonate
+
+          nix build ".#durable-promise-test-harness"
+          cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
 
       - name: Run resonate server
         run: |
-          chmod +x resonate
           ./resonate serve --aio-store-sqlite-path :memory: &
-
-      - name: Checkout test harness
-        uses: actions/checkout@v4
-        with:
-          repository: resonatehq/durable-promise-test-harness
-
-      - name: Build test harness
-        run: |
-          go build -o harness
 
       - name: Run linearizability check
         run: |
-          chmod +x harness
-          ./harness verify -r 1000 -c 10
+          ./durable-promise-test-harness verify -r 1000 -c 10
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
@@ -110,13 +98,22 @@ jobs:
 
   scan:
     name: semgrep
-    needs: [build]
     runs-on: ubuntu-20.04
+    needs: [test]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
-    container:
-      image: returntocorp/semgrep
     if: (github.actor != 'dependabot[bot]')
     steps:
-      - uses: actions/checkout@v4
-      - run: semgrep ci
+      - name: Check out repository
+        uses: actions/checkout@v4
+      
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v10
+
+      - name: Use Magic Nix Cache
+        uses: DeterminateSystems/magic-nix-cache-action@v4
+      
+      - name: semgrep
+        run: |
+          nix develop --command \
+            semgrep ci

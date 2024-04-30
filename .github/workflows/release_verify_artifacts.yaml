@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   seed:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - id: seed
       name: Set random seed
@@ -31,11 +31,11 @@ jobs:
 
       
   verify-github-image:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [seed]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download and test GHCR image
         run: |
           # Login to GHCR
@@ -49,11 +49,11 @@ jobs:
 
   
   verify-github-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: [seed]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Download and test GH release
         run: |
           # Download the release artifact
