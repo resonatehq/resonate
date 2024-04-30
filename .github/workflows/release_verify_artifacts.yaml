@@ -63,4 +63,4 @@ jobs:
           tar -xzf resonate_linux_x86_64.tar.gz
 
           # Run the extracted artifact
-          ./bin/linux-x86_64/resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
