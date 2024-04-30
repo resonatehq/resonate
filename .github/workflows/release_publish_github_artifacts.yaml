@@ -43,7 +43,7 @@ jobs:
       
       - name: Build Resonate binary
         run: |
-          TARBALL="resonate_${{ matrix.systems.arch }}_${{ matrix.systems.os }}.tar.gz"
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate binary
@@ -62,7 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}"
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
           
           gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
