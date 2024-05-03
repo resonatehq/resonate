@@ -226,7 +226,7 @@ func (m *Model) ValidateSearchPromises(reqTime int64, resTime int64, req *t_api.
 			}
 			for k, v := range req.SearchPromises.Tags {
 				if _v, ok := p.Tags[k]; !ok || v != _v {
-					return fmt.Errorf("unexpected tag '%s:%s', expected '%s:%s'", k, _v, k, v)
+					return fmt.Errorf("promise %s has unexpected tag '%s:%s', expected '%s:%s'", p.Id, k, _v, k, v)
 				}
 			}
 
@@ -405,7 +405,7 @@ func (m *Model) ValidateSearchSchedules(reqTime int64, resTime int64, req *t_api
 			}
 			for k, v := range req.SearchSchedules.Tags {
 				if _v, ok := s.Tags[k]; !ok || v != _v {
-					return fmt.Errorf("unexpected tag '%s:%s', expected '%s:%s'", k, _v, k, v)
+					return fmt.Errorf("schedule %s has unexpected tag '%s:%s', expected '%s:%s'", s.Id, k, _v, k, v)
 				}
 			}
 

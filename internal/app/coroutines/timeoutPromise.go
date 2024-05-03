@@ -12,12 +12,8 @@ import (
 
 func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission], res func(error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		completedState := promise.Timedout
-		if v, ok := p.Tags["resonate:timeout"]; ok {
-			if v == "true" {
-				completedState = promise.Resolved
-			}
-		}
+		completedState := promise.GetTimedoutState(p)
+		util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
 
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,

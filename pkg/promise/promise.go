@@ -107,3 +107,14 @@ func (v Value) String() string {
 		string(v.Data),
 	)
 }
+
+func GetTimedoutState(p *Promise) State {
+	completedState := Timedout
+	if v, ok := p.Tags["resonate:timeout"]; ok {
+		if v == "true" {
+			completedState = Resolved
+		}
+	}
+
+	return completedState
+}
