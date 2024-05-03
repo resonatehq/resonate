@@ -47,6 +47,7 @@ const (
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
 	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
+	CREATE INDEX IF NOT EXISTS idx_promises_timeout ON promises(json_extract(tags, '$.resonate:timeout'));
 
 	CREATE TABLE IF NOT EXISTS schedules (
 		id                    TEXT UNIQUE,
