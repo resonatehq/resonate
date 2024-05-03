@@ -3317,7 +3317,9 @@ var TestCases = []*testCase{
 						Headers: map[string]string{},
 						Data:    []byte{},
 					},
-					Tags:      map[string]string{},
+					Tags: map[string]string{
+						"resonate:timeout": "true",
+					},
 					CreatedOn: 1,
 				},
 			},
@@ -3542,8 +3544,8 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.SearchPromises,
 				SearchPromises: &t_aio.QueryPromisesResult{
-					RowsReturned: 3,
-					LastSortId:   1,
+					RowsReturned: 2,
+					LastSortId:   2,
 					Records: []*promise.PromiseRecord{
 						{
 							Id:           "baz",
@@ -3567,17 +3569,7 @@ var TestCases = []*testCase{
 							Tags:         []byte("{}"),
 							SortId:       2,
 						},
-						{
-							Id:           "foo",
-							State:        16,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							Timeout:      2,
-							CreatedOn:    util.ToPointer(int64(1)),
-							CompletedOn:  util.ToPointer(int64(2)),
-							Tags:         []byte("{}"),
-							SortId:       1,
-						},
+						// foo is not here because it was resolved.
 					},
 				},
 			},
