@@ -3435,6 +3435,12 @@ var TestCases = []*testCase{
 					Limit:  5,
 				},
 			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
+					Id: "foo",
+				},
+			},
 		},
 		expected: []*t_aio.Result{
 			{
@@ -3571,6 +3577,22 @@ var TestCases = []*testCase{
 						},
 						// foo is not here because it was resolved.
 					},
+				},
+			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					Records: []*promise.PromiseRecord{{
+						Id:           "foo",
+						State:        2,
+						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
+						Timeout:      2,
+						Tags:         []byte("{\"resonate:timeout\":\"true\"}"),
+						CreatedOn:    util.ToPointer(int64(1)),
+						CompletedOn:  util.ToPointer(int64(2)),
+					}},
 				},
 			},
 		},
