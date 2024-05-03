@@ -10,8 +10,17 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
+// TODO: this is to time out a single promise.
+// just change behavior of this coroutine depending on the promise tag: resonate:timeout.
 func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission], res func(error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
 	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+		completeState := promise.Timedout
+		if v, ok := p.Tags["resonate:timeout"]; ok {
+			if v == "true" {
+				completeState = promise.Resolved
+			}
+		}
+
 		completion, err := c.Yield(&t_aio.Submission{
 			Kind: t_aio.Store,
 			Store: &t_aio.StoreSubmission{
@@ -21,7 +30,7 @@ func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *sche
 							Kind: t_aio.UpdatePromise,
 							UpdatePromise: &t_aio.UpdatePromiseCommand{
 								Id:    p.Id,
-								State: promise.Timedout,
+								State: completeState,
 								Value: promise.Value{
 									Headers: map[string]string{},
 									Data:    []byte{},

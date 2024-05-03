@@ -39,11 +39,11 @@ func (p *Promise) String() string {
 type State int
 
 const (
-	Pending State = 1 << iota
-	Resolved
-	Rejected
-	Canceled
-	Timedout
+	Pending  State = 1 << iota // 1
+	Resolved                   // 2
+	Rejected                   // 4
+	Canceled                   // 8
+	Timedout                   // 16
 )
 
 func (s State) String() string {

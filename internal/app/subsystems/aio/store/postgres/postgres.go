@@ -186,7 +186,10 @@ const (
 	UPDATE
 		promises
 	SET
-		state = 16, completed_on = timeout
+		state = CASE
+					WHEN tags ->> 'resonate:timeout' IS NOT NULL AND tags ->> 'resonate:timeout' = 'true' THEN 2 
+					ELSE 16
+				END
 	WHERE
 		state = 1 AND timeout <= $1`
 

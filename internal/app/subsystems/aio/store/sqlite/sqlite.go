@@ -171,7 +171,11 @@ const (
 	UPDATE
 		promises
 	SET
-		state = 16, completed_on = timeout
+		state = CASE
+					WHEN json_extract(tags, '$.resonate:timeout') IS NOT NULL AND json_extract(tags, '$.resonate:timeout') = 'true' THEN 2
+					ELSE 16
+				END, 
+		completed_on = timeout
 	WHERE
 		state = 1 AND timeout <= ?`
 
