@@ -19,6 +19,7 @@ type Config struct {
 	NotificationCacheSize int
 	SubmissionBatchSize   int
 	CompletionBatchSize   int
+	MaxSchedulesSize      int
 }
 
 func (c *Config) String() string {

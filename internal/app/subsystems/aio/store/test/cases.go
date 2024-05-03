@@ -2551,6 +2551,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.ReadSchedules,
 				ReadSchedules: &t_aio.ReadSchedulesCommand{
 					NextRunTime: 2500,
+					Limit:       2,
 				},
 			},
 		},
