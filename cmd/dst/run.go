@@ -269,10 +269,12 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-submission-batch-size", "size of the completion queue buffered channel")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-completion-batch-size", "max number of completions to process on each tick")
+	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 10000}, "system-schedule-batch-size", "max number of schedules to process on each tick")
 
 	_ = viper.BindPFlag("dst.system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
+	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
 
 	cmd.Flags().SortFlags = false
 

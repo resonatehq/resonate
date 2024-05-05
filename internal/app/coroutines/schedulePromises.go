@@ -35,7 +35,7 @@ func SchedulePromises(t int64, config *system.Config) *Coroutine {
 							Kind: t_aio.ReadSchedules,
 							ReadSchedules: &t_aio.ReadSchedulesCommand{
 								NextRunTime: c.Time(),
-								Limit:       int64(config.MaxSchedulesSize),
+								Limit:       int64(config.ScheduleBatchSize),
 							},
 						},
 					},
