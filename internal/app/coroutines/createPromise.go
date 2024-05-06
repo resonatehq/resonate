@@ -155,13 +155,16 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 						return
 					}
 
+					completedState := promise.GetTimedoutState(p)
+					util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
+
 					res(&t_api.Response{
 						Kind: t_api.CreatePromise,
 						CreatePromise: &t_api.CreatePromiseResponse{
 							Status: status,
 							Promise: &promise.Promise{
 								Id:    p.Id,
-								State: promise.Timedout,
+								State: completedState,
 								Param: p.Param,
 								Value: promise.Value{
 									Headers: map[string]string{},

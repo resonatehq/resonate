@@ -400,6 +400,9 @@ type DeleteTimeoutCommand struct {
 	Id string
 }
 
+// This timeout promises command takes into account 'regular' and 'timeout' promises.
+// Regular promises are those that have their state updated to REJECTED_TIMEDOUT when the timeout is reached.
+// Timeout promises are those that have their state updated to RESOLVED when the timeout is reached.
 type TimeoutPromisesCommand struct {
 	Time int64
 }

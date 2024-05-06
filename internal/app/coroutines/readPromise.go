@@ -63,13 +63,16 @@ func ReadPromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_ap
 						return
 					}
 
+					completedState := promise.GetTimedoutState(p)
+					util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
+
 					res(&t_api.Response{
 						Kind: t_api.ReadPromise,
 						ReadPromise: &t_api.ReadPromiseResponse{
 							Status: t_api.StatusOK,
 							Promise: &promise.Promise{
 								Id:    p.Id,
-								State: promise.Timedout,
+								State: completedState,
 								Param: p.Param,
 								Value: promise.Value{
 									Headers: map[string]string{},

@@ -184,6 +184,16 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	strict := r.Intn(2) == 0
 
+	// Create a simple timeout promise (deep copy so it's not shared with other generator functions).
+	if tags != nil && RandBool(r) {
+		tempTags := make(map[string]string, len(tags)+1)
+		for k, v := range tags {
+			tempTags[k] = v
+		}
+		tempTags["resonate:timeout"] = "true"
+		tags = tempTags
+	}
+
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
 		CreatePromise: &t_api.CreatePromiseRequest{
