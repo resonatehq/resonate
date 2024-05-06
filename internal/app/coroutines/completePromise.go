@@ -71,13 +71,16 @@ func CompletePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*
 							return
 						}
 
+						completedState := promise.GetTimedoutState(p)
+						util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
+
 						res(&t_api.Response{
 							Kind: req.Kind,
 							CompletePromise: &t_api.CompletePromiseResponse{
 								Status: t_api.StatusPromiseAlreadyTimedOut,
 								Promise: &promise.Promise{
 									Id:    p.Id,
-									State: promise.Timedout,
+									State: completedState,
 									Param: p.Param,
 									Value: promise.Value{
 										Headers: map[string]string{},
