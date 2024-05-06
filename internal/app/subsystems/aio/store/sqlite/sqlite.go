@@ -40,13 +40,12 @@ const (
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
 		tags                         BLOB,
-		invocation                   TEXT GENERATED ALWAYS AS (json_extract(tags, '$.resonate:invocation')) STORED,
 		created_on                   INTEGER,
 		completed_on                 INTEGER
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
-	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
+	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(json_extract(tags, '$.resonate:invocation'));
 	CREATE INDEX IF NOT EXISTS idx_promises_timeout ON promises(json_extract(tags, '$.resonate:timeout'));
 
 	CREATE TABLE IF NOT EXISTS schedules (
@@ -145,8 +144,7 @@ const (
 	WHERE
 		(? IS NULL OR sort_id < ?) AND
 		id LIKE ? AND
-		state & ? != 0 AND
-		(? IS NULL OR invocation = ?)
+		state & ? != 0
 		%s
 	ORDER BY
 		sort_id DESC
@@ -1062,39 +1060,32 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 	}
 
 	// tags
-	var invocation *string
 	placeholders := []string{}
-	placeholderVars := []any{}
+	placeholderArgs := []any{}
 
 	for k, v := range cmd.Tags {
-		if k == "resonate:invocation" {
-			invocation = &v
-			continue
-		}
-
 		placeholders = append(placeholders, "json_extract(tags, ?) = ?")
-		placeholderVars = append(placeholderVars, "$."+k, v)
+		placeholderArgs = append(placeholderArgs, "$."+k, v)
 	}
 
-	vars := []any{
+	args := []any{
 		cmd.SortId,
 		cmd.SortId,
 		id,
 		mask,
-		invocation,
-		invocation,
 	}
 
-	vars = append(vars, placeholderVars...)
-	vars = append(vars, cmd.Limit)
+	args = append(args, placeholderArgs...)
+	args = append(args, cmd.Limit)
 
+	// Dynamic placeholders for tags.
 	var placeholder string
 	if len(placeholders) > 0 {
 		placeholder = "AND " + strings.Join(placeholders, " AND ")
 	}
 
 	// select
-	rows, err := tx.Query(fmt.Sprintf(PROMISE_SEARCH_STATEMENT, placeholder), vars...)
+	rows, err := tx.Query(fmt.Sprintf(PROMISE_SEARCH_STATEMENT, placeholder), args...)
 	if err != nil {
 		return nil, err
 	}

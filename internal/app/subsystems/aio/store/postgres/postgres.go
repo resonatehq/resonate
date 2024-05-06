@@ -40,14 +40,13 @@ const (
 		idempotency_key_for_create   TEXT,
 		idempotency_key_for_complete TEXT,
 		tags                         JSONB,
-		invocation                   TEXT GENERATED ALWAYS AS (tags->>'resonate:invocation') STORED,
 		created_on                   BIGINT,
 		completed_on                 BIGINT,
 		PRIMARY KEY(id)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
-	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(invocation);
+	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises((tags->>'resonate:invocation'));
 	CREATE INDEX IF NOT EXISTS idx_promises_timeout ON promises((tags->>'resonate:timeout'));
 
 	CREATE TABLE IF NOT EXISTS schedules (
@@ -161,7 +160,7 @@ const (
 		($1::int IS NULL OR sort_id < $1) AND
 		id LIKE $2 AND
 		state & $3 != 0 AND
-		($4::text IS NULL OR invocation = $4) AND
+		$4::text IS NULL AND
 		($5::jsonb IS NULL OR tags @> $5)
 	ORDER BY
 		sort_id DESC
@@ -1103,13 +1102,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 	}
 
 	// tags
-	var invocation *string
 	var tags *string
-
-	if v, ok := cmd.Tags["resonate:invocation"]; ok {
-		invocation = &v
-		delete(cmd.Tags, "resonate:invocation")
-	}
 
 	if len(cmd.Tags) > 0 {
 		t, err := json.Marshal(cmd.Tags)
@@ -1120,8 +1113,16 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 		tags = util.ToPointer(string(t))
 	}
 
+	args := []any{
+		cmd.SortId,
+		id,
+		mask,
+		tags,
+		cmd.Limit,
+	}
+
 	// select
-	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, cmd.SortId, id, mask, invocation, tags, cmd.Limit)
+	rows, err := tx.Query(PROMISE_SEARCH_STATEMENT, args...)
 	if err != nil {
 		return nil, err
 	}
