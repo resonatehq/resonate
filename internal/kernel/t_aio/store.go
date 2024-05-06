@@ -339,6 +339,7 @@ type ReadScheduleCommand struct {
 
 type ReadSchedulesCommand struct {
 	NextRunTime int64
+	Limit       int64
 }
 
 type SearchSchedulesCommand struct {

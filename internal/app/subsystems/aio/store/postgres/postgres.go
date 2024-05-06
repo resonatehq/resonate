@@ -206,7 +206,9 @@ const (
 	WHERE
 		next_run_time <= $1
 	ORDER BY
-		next_run_time ASC, sort_id ASC`
+		next_run_time ASC, sort_id ASC
+	LIMIT
+		$2`
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
@@ -1292,7 +1294,7 @@ func (w *PostgresStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCo
 }
 
 func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
-	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
+	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

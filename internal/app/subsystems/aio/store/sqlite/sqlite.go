@@ -191,7 +191,9 @@ const (
 	WHERE
 		next_run_time <= ?
 	ORDER BY
-		next_run_time ASC, sort_id ASC`
+		next_run_time ASC, sort_id ASC
+	LIMIT
+		?`
 
 	SCHEDULE_SEARCH_STATEMENT = `
 	SELECT
@@ -1263,7 +1265,7 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 }
 
 func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
-	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime)
+	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime, cmd.Limit)
 	if err != nil {
 		return nil, err
 	}

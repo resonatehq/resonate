@@ -19,14 +19,16 @@ type Config struct {
 	NotificationCacheSize int
 	SubmissionBatchSize   int
 	CompletionBatchSize   int
+	ScheduleBatchSize     int
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(ncs=%d, sbs=%d, cbs=%d)",
+		"Config(ncs=%d, sbs=%d, cbs=%d, sbs=%d)",
 		c.NotificationCacheSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
+		c.ScheduleBatchSize,
 	)
 }
 

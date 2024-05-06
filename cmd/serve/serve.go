@@ -260,11 +260,12 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	cmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	cmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
+	cmd.Flags().Int("system-schedule-batch-size", 10000, "max number of schedules to process on each tick")
 
 	_ = viper.BindPFlag("system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
-
+	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
 	// metrics
 	cmd.Flags().Int("metrics-port", 9090, "prometheus metrics server port")
 	_ = viper.BindPFlag("metrics.port", cmd.Flags().Lookup("metrics-port"))
