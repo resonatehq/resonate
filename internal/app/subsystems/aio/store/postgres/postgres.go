@@ -160,12 +160,11 @@ const (
 		($1::int IS NULL OR sort_id < $1) AND
 		id LIKE $2 AND
 		state & $3 != 0 AND
-		$4::text IS NULL AND
-		($5::jsonb IS NULL OR tags @> $5)
+		($4::jsonb IS NULL OR tags @> $4)
 	ORDER BY
 		sort_id DESC
 	LIMIT
-		$6`
+		$5`
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
