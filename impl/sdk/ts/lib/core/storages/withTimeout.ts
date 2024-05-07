@@ -1,4 +1,4 @@
-import { DurablePromise, TimedoutPromise, isPendingPromise } from "../promises/types";
+import { DurablePromise, ResolvedPromise, TimedoutPromise, isPendingPromise } from "../promises/types";
 import { IStorage } from "../storage";
 import { MemoryStorage } from "./memory";
 
@@ -20,10 +20,9 @@ export class WithTimeout implements IStorage<DurablePromise> {
   }
 }
 
-function timeout<T extends DurablePromise>(promise: T): T | TimedoutPromise {
+function timeout<T extends DurablePromise>(promise: T): T | ResolvedPromise | TimedoutPromise {
   if (isPendingPromise(promise) && Date.now() >= promise.timeout) {
-    return {
-      state: "REJECTED_TIMEDOUT",
+    const body = {
       id: promise.id,
       timeout: promise.timeout,
       param: promise.param,
@@ -37,6 +36,18 @@ function timeout<T extends DurablePromise>(promise: T): T | TimedoutPromise {
       idempotencyKeyForComplete: undefined,
       tags: promise.tags,
     };
+
+    if (promise.tags?.["resonate:timeout"] === "true") {
+      return {
+        state: "RESOLVED",
+        ...body,
+      };
+    } else {
+      return {
+        state: "REJECTED_TIMEDOUT",
+        ...body,
+      };
+    }
   }
 
   return promise;
