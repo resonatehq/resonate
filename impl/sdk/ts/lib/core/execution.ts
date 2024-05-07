@@ -220,7 +220,6 @@ export class DeferredExecution<T> extends Execution<T> {
           headers: this.invocation.headers,
           param: this.invocation.param,
           tags: this.invocation.opts.tags,
-          poll: this.invocation.opts.poll,
         },
       );
 
@@ -240,7 +239,7 @@ export class DeferredExecution<T> extends Execution<T> {
   protected async join(future: Future<T>) {
     if (this.durablePromise) {
       // poll the completion of the durable promise
-      await this.durablePromise.completed;
+      await this.durablePromise.sync(this.invocation.opts.poll);
 
       if (this.durablePromise.resolved) {
         this.invocation.resolve(this.durablePromise.value());
