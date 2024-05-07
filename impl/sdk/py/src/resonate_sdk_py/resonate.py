@@ -5,6 +5,7 @@ from typing import Callable, Any, Tuple, Generator, NamedTuple, List, Union
 ## Classes
 #####################################################################
 
+
 class Promise:
     def __init__(self):
         self.state = "pending"
@@ -27,15 +28,19 @@ class Promise:
     def is_completed(self):
         return not self.is_pending()
 
+
 class Invocation:
     """Encapsulates a function call, potentially asynchronous, with its arguments."""
+
     def __init__(self, func: Callable, *args: Any, **kwargs: Any):
         self.func = func
         self.args = args
         self.kwargs = kwargs
 
+
 class Call(Invocation):
     pass
+
 
 #####################################################################
 ## Types
@@ -45,24 +50,29 @@ Coro = Generator[Any, Any, Any]
 
 Yielded = Union[Promise, Invocation, Call]
 
+
 class Next(NamedTuple):
     init: bool = False
     throw: Any = None
     value: Any = None
+
 
 class Runnable(NamedTuple):
     coro: Coro
     next: Next
     resv: Promise
 
+
 class Awaiting(NamedTuple):
     coro: Coro
     prom: Promise
     resv: Promise
 
+
 #####################################################################
 ## Resonate
 #####################################################################
+
 
 class Scheduler:
     def __init__(self):
@@ -91,8 +101,12 @@ class Scheduler:
                 if isinstance(retv, Promise):
                     if retv.is_completed():
                         # If the Promise is already completed, handle it immediately
-                        next = Next(value=retv.value) if retv.state == 'resolved' else Next(throw=retv.error)
-                        self.runnable.append(Runnable(coro, next, resv))                        
+                        next = (
+                            Next(value=retv.value)
+                            if retv.state == "resolved"
+                            else Next(throw=retv.error)
+                        )
+                        self.runnable.append(Runnable(coro, next, resv))
                     else:
                         self.awaiting.append(Awaiting(coro, retv, resv))
                 elif isinstance(retv, Invocation):
@@ -128,21 +142,22 @@ class Scheduler:
                         self.runnable.append(Runnable(coro, Next(value=e), resv))
                 else:
                     assert False, "Coroutine must return Promise, Invocation, or Call."
-                    
+
             else:
                 resv.resolve(retv)
-                for (coro, prom, resv) in self.awaiting:
+                for coro, prom, resv in self.awaiting:
                     if prom == resv:
                         self.runnable.append(Runnable(coro, Next(value=retv), prom))
                         self.awaiting.remove(Awaiting(coro, prom, resv))
-        
+
         if isinstance(retv, Promise):
-            if retv.state == 'resolved':
+            if retv.state == "resolved":
                 return retv.value
             else:
                 raise retv.error
 
         return retv
+
 
 class Resonate:
     def __init__(self, scheduler: Scheduler):
@@ -151,6 +166,7 @@ class Resonate:
     def run(self, func: Callable, *args: Any, **kwargs: Any):
         self.scheduler.add(func, *args, **kwargs)
         return self.scheduler.run()
+
 
 def advance(coro: Coro, resv: Next) -> Tuple[bool, Yielded]:
     try:

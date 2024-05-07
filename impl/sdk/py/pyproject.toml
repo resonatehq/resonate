@@ -1,0 +1,31 @@
+[project]
+name = "resonate-sdk-py"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
+]
+dependencies = []
+readme = "README.md"
+requires-python = ">= 3.9"
+license = { text = "Apache-2.0" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [
+    "mypy>=1.10.0",
+    "pytest>=8.2.0",
+]
+
+[tool.rye.scripts]
+check-types = "dmypy run --timeout 60 -- src tests"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/resonate_sdk_py"]
