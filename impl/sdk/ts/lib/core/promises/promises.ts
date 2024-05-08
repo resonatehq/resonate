@@ -394,8 +394,8 @@ export class DurablePromise<T> {
 
   /**
    * Polls the Durable Promise store to sychronize the state, stops when the promise is complete.
-   * @param frequency - The frequency in ms to poll.
    * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @param frequency - The frequency in ms to poll.
    * @returns A Promise that resolves when the Durable Promise is complete.
    */
   async sync(timeout: number = Infinity, frequency: number = 5000): Promise<void> {
@@ -431,8 +431,8 @@ export class DurablePromise<T> {
 
   /**
    * Polls the Durable Promise store, and returns the value when the Durable Promise is complete.
-   * @param frequency - The frequency in ms to poll.
    * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @param frequency - The frequency in ms to poll.
    * @returns The promise value, or throws an error.
    */
   async wait(timeout: number = Infinity, frequency: number = 5000): Promise<T> {
