@@ -353,6 +353,31 @@ export class Context {
   }
 
   /**
+   * Sleep for the specified time.
+   *
+   * @param ms Amount of time to sleep in milliseconds.
+   * @returns A Promise that resolves after the specified time has elapsed.
+   */
+  async sleep(ms: number): Promise<void> {
+    // generate id
+    const id = `${this.invocation.id}.${this.invocation.counter++}`;
+
+    // create a promise that resolves when it times out
+    const promise = await this.resonate.promises.create(id, Date.now() + ms, {
+      tags: { "resonate:timeout": "true" },
+    });
+
+    // wait for the promise to resolve
+    // if wait time < 1, delay will be set to 1
+    if (promise.pending) {
+      await new Promise((resolve) => setTimeout(resolve, promise.timeout - Date.now()));
+    }
+
+    // tight loop in case the promise is not yet resolved
+    await promise.wait(Infinity, this.invocation.opts.poll);
+  }
+
+  /**
    * Generate a deterministic random number.
    *
    * @returns A random number.

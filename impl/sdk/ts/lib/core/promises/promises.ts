@@ -394,18 +394,24 @@ export class DurablePromise<T> {
 
   /**
    * Polls the Durable Promise store to sychronize the state, stops when the promise is complete.
-   * @param frequency - The frequency in ms to poll.
    * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @param frequency - The frequency in ms to poll.
    * @returns A Promise that resolves when the Durable Promise is complete.
    */
-  async sync(frequency: number, timeout?: number): Promise<void> {
+  async sync(timeout: number = Infinity, frequency: number = 5000): Promise<void> {
+    if (!this.pending) return;
+
     // reset polling interval
     clearInterval(this.interval);
     this.interval = setInterval(() => this.poll(), frequency);
 
+    // poll immediately for now
+    // we can revisit when we implement a cache subsystem
+    await this.poll();
+
     // set timeout promise
     const timeoutPromise =
-      timeout === undefined
+      timeout === Infinity
         ? new Promise(() => {}) // wait forever
         : new Promise((resolve) => setTimeout(resolve, timeout));
 
@@ -425,12 +431,12 @@ export class DurablePromise<T> {
 
   /**
    * Polls the Durable Promise store, and returns the value when the Durable Promise is complete.
-   * @param frequency - The frequency in ms to poll.
    * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @param frequency - The frequency in ms to poll.
    * @returns The promise value, or throws an error.
    */
-  async wait(frequency: number, timeout?: number): Promise<T> {
-    await this.sync(frequency, timeout);
+  async wait(timeout: number = Infinity, frequency: number = 5000): Promise<T> {
+    await this.sync(timeout, frequency);
 
     if (this.resolved) {
       return this.value();
