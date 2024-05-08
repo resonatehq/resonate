@@ -3,86 +3,159 @@ import { ErrorCodes, ResonateError } from "../errors";
 import { IPromiseStore } from "../store";
 import { PendingPromise, ResolvedPromise, RejectedPromise, CanceledPromise, TimedoutPromise } from "./types";
 
+/**
+ * Durable Promise create options.
+ */
 export type CreateOptions = {
+  /**
+   * Durable Promise idempotency key.
+   */
   idempotencyKey: string | undefined;
+
+  /**
+   * Durable Promise headers.
+   */
   headers: Record<string, string>;
+
+  /**
+   * Durable Promise param, will be encoded with the provided encoder.
+   */
   param: unknown;
+
+  /**
+   * Durable Promise tags.
+   */
   tags: Record<string, string>;
+
+  /**
+   * Create the Durable Promise in strict mode.
+   */
   strict: boolean;
-  poll: number | undefined; // TODO
 };
 
+/**
+ * Durable Promise complete options.
+ */
 export type CompleteOptions = {
+  /**
+   * Durable Promise idempotency key.
+   */
   idempotencyKey: string | undefined;
+
+  /**
+   * Durable Promise headers.
+   */
   headers: Record<string, string>;
+
+  /**
+   * Create the Durable Promise in strict mode.
+   */
   strict: boolean;
 };
 
 export class DurablePromise<T> {
-  readonly completed: Promise<DurablePromise<T>>;
+  private readonly completed: Promise<DurablePromise<T>>;
   private complete!: (value: DurablePromise<T>) => void;
-
   private interval: NodeJS.Timeout | undefined;
 
+  /**
+   * Creates a Durable Promise instance. This is provided as a lower level API, used by the Resonate class internally.
+   *
+   * @constructor
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param promise - The raw Durable Promise.
+   */
   constructor(
     private store: IPromiseStore,
     private encoder: IEncoder<unknown, string | undefined>,
     private promise: PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise,
-    poll?: number,
   ) {
     this.completed = new Promise((resolve) => {
       this.complete = resolve;
     });
-
-    if (poll !== undefined) {
-      this.interval = setInterval(() => this.poll(), poll);
-    }
   }
 
+  /**
+   * The Durable Promise id.
+   */
   get id() {
     return this.promise.id;
   }
 
+  /**
+   * The Durable Promise create idempotency key.
+   */
   get idempotencyKeyForCreate() {
     return this.promise.idempotencyKeyForCreate;
   }
 
+  /**
+   * The Durable Promise complete idempotency key.
+   */
   get idempotencyKeyForComplete() {
     return this.promise.idempotencyKeyForComplete;
   }
 
+  /**
+   * The Durable Promise created on time.
+   */
   get createdOn() {
     return this.promise.createdOn;
   }
 
+  /**
+   * The Durable Promise timeout time.
+   */
   get timeout() {
     return this.promise.timeout;
   }
 
+  /**
+   * Returns true when the Durable Promise is pending.
+   */
   get pending() {
     return this.promise.state === "PENDING";
   }
 
+  /**
+   * Returns true when the Durable Promise is resolved.
+   */
   get resolved() {
     return this.promise.state === "RESOLVED";
   }
 
+  /**
+   * Returns true when the Durable Promise is rejected.
+   */
   get rejected() {
     return this.promise.state === "REJECTED";
   }
 
+  /**
+   * Returns true when the Durable Promise is canceled.
+   */
   get canceled() {
     return this.promise.state === "REJECTED_CANCELED";
   }
 
+  /**
+   * Returns true when the Durable Promise is timedout.
+   */
   get timedout() {
     return this.promise.state === "REJECTED_TIMEDOUT";
   }
 
+  /**
+   * Returns the decoded promise param data.
+   */
   param() {
     return this.encoder.decode(this.promise.param.data);
   }
 
+  /**
+   * Returns the decoded promise value data.
+   */
   value() {
     if (!this.resolved) {
       throw new Error("Promise is not resolved");
@@ -91,6 +164,9 @@ export class DurablePromise<T> {
     return this.encoder.decode(this.promise.value.data) as T;
   }
 
+  /**
+   * Returns the decoded promise value data as an error.
+   */
   error() {
     if (this.rejected) {
       return this.encoder.decode(this.promise.value.data);
@@ -110,6 +186,15 @@ export class DurablePromise<T> {
     }
   }
 
+  /**
+   * Creates a Durable Promise.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - The Durable Promise id.
+   * @param timeout - The Durable Promise timeout in milliseconds.
+   * @param opts - A partial Durable Promise create options.
+   * @returns A Durable Promise instance.
+   */
   static async create<T>(
     store: IPromiseStore,
     encoder: IEncoder<unknown, string | undefined>,
@@ -129,10 +214,18 @@ export class DurablePromise<T> {
         timeout,
         opts.tags,
       ),
-      opts.poll,
     );
   }
 
+  /**
+   * Resolves a Durable Promise.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - The Durable Promise id.
+   * @param value - The Durable Promise value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns A Durable Promise instance.
+   */
   static async resolve<T>(
     store: IPromiseStore,
     encoder: IEncoder<unknown, string | undefined>,
@@ -147,6 +240,15 @@ export class DurablePromise<T> {
     );
   }
 
+  /**
+   * Rejects a Durable Promise.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - The Durable Promise id.
+   * @param error - The Durable Promise error value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns A Durable Promise instance.
+   */
   static async reject<T>(
     store: IPromiseStore,
     encoder: IEncoder<unknown, string | undefined>,
@@ -161,6 +263,15 @@ export class DurablePromise<T> {
     );
   }
 
+  /**
+   * Cancels a Durable Promise.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - The Durable Promise id.
+   * @param error - The Durable Promise error value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns A Durable Promise instance.
+   */
   static async cancel<T>(
     store: IPromiseStore,
     encoder: IEncoder<unknown, string | undefined>,
@@ -175,10 +286,27 @@ export class DurablePromise<T> {
     );
   }
 
+  /**
+   * Gets a Durable Promise.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - The Durable Promise id.
+   * @returns A Durable Promise instance.
+   */
   static async get<T>(store: IPromiseStore, encoder: IEncoder<unknown, string | undefined>, id: string) {
     return new DurablePromise<T>(store, encoder, await store.get(id));
   }
 
+  /**
+   * Search for Durable Promises.
+   * @param store - A reference to a promise store.
+   * @param encoder - An encoder instance used for encode and decode promise data.
+   * @param id - An id to match against Durable Promise ids, can include wilcards.
+   * @param state - A state to search for, can be one of {pending, resolved, rejected}, matches all states if undefined.
+   * @param tags - Tags to search against.
+   * @param limit - The maximum number of Durable Promises to return per page.
+   * @returns An async generator that yields Durable Promise instances.
+   */
   static async *search(
     store: IPromiseStore,
     encoder: IEncoder<unknown, string | undefined>,
@@ -192,6 +320,12 @@ export class DurablePromise<T> {
     }
   }
 
+  /**
+   * Resolves the Durable Promise.
+   * @param value - The Durable Promise value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns this instance.
+   */
   async resolve(value: T, opts: Partial<CompleteOptions> = {}) {
     this.promise = !this.pending
       ? this.promise
@@ -210,6 +344,12 @@ export class DurablePromise<T> {
     return this;
   }
 
+  /**
+   * Rejects the Durable Promise.
+   * @param error - The Durable Promise error value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns this instance.
+   */
   async reject(error: any, opts: Partial<CompleteOptions> = {}) {
     this.promise = !this.pending
       ? this.promise
@@ -228,6 +368,12 @@ export class DurablePromise<T> {
     return this;
   }
 
+  /**
+   * Cancels the Durable Promise.
+   * @param error - The Durable Promise error value, will be encoded with the provided encoder.
+   * @param opts - A partial Durable Promise create options.
+   * @returns this instance.
+   */
   async cancel(error: any, opts: Partial<CompleteOptions> = {}) {
     this.promise = !this.pending
       ? this.promise
@@ -246,13 +392,59 @@ export class DurablePromise<T> {
     return this;
   }
 
+  /**
+   * Polls the Durable Promise store to sychronize the state, stops when the promise is complete.
+   * @param frequency - The frequency in ms to poll.
+   * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @returns A Promise that resolves when the Durable Promise is complete.
+   */
+  async sync(frequency: number, timeout?: number): Promise<void> {
+    // reset polling interval
+    clearInterval(this.interval);
+    this.interval = setInterval(() => this.poll(), frequency);
+
+    // set timeout promise
+    const timeoutPromise =
+      timeout === undefined
+        ? new Promise(() => {}) // wait forever
+        : new Promise((resolve) => setTimeout(resolve, timeout));
+
+    // await either:
+    // - completion of the promise
+    // - timeout
+    await Promise.any([this.completed, timeoutPromise]);
+
+    // stop polling interval
+    clearInterval(this.interval);
+
+    // throw error if timeout occcured
+    if (this.pending) {
+      throw new Error("Timeout occured while waiting for promise to complete");
+    }
+  }
+
+  /**
+   * Polls the Durable Promise store, and returns the value when the Durable Promise is complete.
+   * @param frequency - The frequency in ms to poll.
+   * @param timeout - The time at which to stop polling if the promise is still pending.
+   * @returns The promise value, or throws an error.
+   */
+  async wait(frequency: number, timeout?: number): Promise<T> {
+    await this.sync(frequency, timeout);
+
+    if (this.resolved) {
+      return this.value();
+    } else {
+      throw this.error();
+    }
+  }
+
   private async poll() {
     try {
       this.promise = await this.store.get(this.id);
 
       if (!this.pending) {
         this.complete(this);
-        clearInterval(this.interval);
       }
     } catch (e) {
       // TODO: log
