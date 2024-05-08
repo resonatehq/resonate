@@ -398,14 +398,20 @@ export class DurablePromise<T> {
    * @param timeout - The time at which to stop polling if the promise is still pending.
    * @returns A Promise that resolves when the Durable Promise is complete.
    */
-  async sync(frequency: number, timeout?: number): Promise<void> {
+  async sync(timeout: number = Infinity, frequency: number = 5000): Promise<void> {
+    if (!this.pending) return;
+
     // reset polling interval
     clearInterval(this.interval);
     this.interval = setInterval(() => this.poll(), frequency);
 
+    // poll immediately for now
+    // we can revisit when we implement a cache subsystem
+    await this.poll();
+
     // set timeout promise
     const timeoutPromise =
-      timeout === undefined
+      timeout === Infinity
         ? new Promise(() => {}) // wait forever
         : new Promise((resolve) => setTimeout(resolve, timeout));
 
@@ -429,8 +435,8 @@ export class DurablePromise<T> {
    * @param timeout - The time at which to stop polling if the promise is still pending.
    * @returns The promise value, or throws an error.
    */
-  async wait(frequency: number, timeout?: number): Promise<T> {
-    await this.sync(frequency, timeout);
+  async wait(timeout: number = Infinity, frequency: number = 5000): Promise<T> {
+    await this.sync(timeout, frequency);
 
     if (this.resolved) {
       return this.value();

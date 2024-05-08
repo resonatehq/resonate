@@ -374,7 +374,7 @@ export class Context {
     }
 
     // tight loop in case the promise is not yet resolved
-    await promise.wait(1000);
+    await promise.wait(Infinity, this.invocation.opts.poll);
   }
 
   /**
