@@ -368,6 +368,7 @@ export class Context {
     });
 
     // wait for the promise to resolve
+    // if wait time < 1, delay will be set to 1
     if (promise.pending) {
       await new Promise((resolve) => setTimeout(resolve, promise.timeout - Date.now()));
     }
