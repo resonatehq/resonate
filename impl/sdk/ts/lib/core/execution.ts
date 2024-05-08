@@ -239,7 +239,7 @@ export class DeferredExecution<T> extends Execution<T> {
   protected async join(future: Future<T>) {
     if (this.durablePromise) {
       // poll the completion of the durable promise
-      await this.durablePromise.sync(this.invocation.opts.poll);
+      await this.durablePromise.sync(Infinity, this.invocation.opts.poll);
 
       if (this.durablePromise.resolved) {
         this.invocation.resolve(this.durablePromise.value());
