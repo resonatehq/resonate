@@ -410,18 +410,22 @@ export class DurablePromise<T> {
     await this.poll();
 
     // set timeout promise
+    let timeoutId: NodeJS.Timeout | undefined;
     const timeoutPromise =
       timeout === Infinity
         ? new Promise(() => {}) // wait forever
-        : new Promise((resolve) => setTimeout(resolve, timeout));
+        : new Promise((resolve) => (timeoutId = setTimeout(resolve, timeout)));
 
     // await either:
     // - completion of the promise
     // - timeout
-    await Promise.any([this.completed, timeoutPromise]);
+    await Promise.race([this.completed, timeoutPromise]);
 
-    // stop polling interval
+    // clear polling interval
     clearInterval(this.interval);
+
+    // clear timeout
+    clearTimeout(timeoutId);
 
     // throw error if timeout occcured
     if (this.pending) {
