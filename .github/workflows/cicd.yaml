@@ -72,7 +72,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v10
 
       - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
+        uses: DeterminateSystems/magic-nix-cache-action@v6
 
       - name: Build server and harness
         run: |
@@ -111,7 +111,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v10
 
       - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v4
+        uses: DeterminateSystems/magic-nix-cache-action@v6
       
       - name: semgrep
         run: |
