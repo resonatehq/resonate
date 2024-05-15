@@ -437,8 +437,8 @@ type PostgresStoreWorker struct {
 
 func New(config *Config, workers int) (aio.Subsystem, error) {
 	var rawQuery string
-	for k, v := range config.Query {
-		query := fmt.Sprintf("%s=%s", k, v)
+	for _, q := range util.OrderedRangeKV(config.Query) {
+		query := fmt.Sprintf("%s=%s", q.Key, q.Value)
 		rawQuery += query + "&"
 	}
 
