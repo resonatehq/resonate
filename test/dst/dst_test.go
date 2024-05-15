@@ -90,11 +90,11 @@ func test(t *testing.T, scenario *Scenario) {
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-	system.AddOnTick(2, coroutines.EnqueueTasks)
-	system.AddOnTick(2, coroutines.TimeoutLocks)
-	system.AddOnTick(2, coroutines.SchedulePromises)
-	system.AddOnTick(2, coroutines.TimeoutPromises)
-	system.AddOnTick(10, coroutines.NotifySubscriptions)
+	system.AddOnTick(1000, coroutines.EnqueueTasks)
+	system.AddOnTick(1000, coroutines.TimeoutLocks)
+	system.AddOnTick(1000, coroutines.SchedulePromises)
+	system.AddOnTick(1000, coroutines.TimeoutPromises)
+	system.AddOnTick(1000, coroutines.NotifySubscriptions)
 
 	// specify reqs to enable
 	reqs := []t_api.Kind{

@@ -420,6 +420,7 @@ type Config struct {
 	Username  string
 	Password  string
 	Database  string
+	Query     map[string]string
 	TxTimeout time.Duration
 	Reset     bool
 }
@@ -435,12 +436,18 @@ type PostgresStoreWorker struct {
 }
 
 func New(config *Config, workers int) (aio.Subsystem, error) {
+	var rawQuery string
+	for k, v := range config.Query {
+		query := fmt.Sprintf("%s=%s", k, v)
+		rawQuery += query + "&"
+	}
+
 	dbUrl := &url.URL{
 		User:     url.UserPassword(config.Username, config.Password),
 		Host:     fmt.Sprintf("%s:%s", config.Host, config.Port),
 		Path:     config.Database,
 		Scheme:   "postgres",
-		RawQuery: "sslmode=disable",
+		RawQuery: rawQuery,
 	}
 
 	db, err := sql.Open("postgres", dbUrl.String())
