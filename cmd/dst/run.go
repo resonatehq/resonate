@@ -146,11 +146,11 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick(2, coroutines.EnqueueTasks)
-			system.AddOnTick(2, coroutines.TimeoutLocks)
-			system.AddOnTick(2, coroutines.SchedulePromises)
-			system.AddOnTick(2, coroutines.TimeoutPromises)
-			system.AddOnTick(10, coroutines.NotifySubscriptions)
+			system.AddOnTick(1000, coroutines.EnqueueTasks)
+			system.AddOnTick(1000, coroutines.TimeoutLocks)
+			system.AddOnTick(1000, coroutines.SchedulePromises)
+			system.AddOnTick(1000, coroutines.TimeoutPromises)
+			system.AddOnTick(1000, coroutines.NotifySubscriptions)
 
 			reqs := []t_api.Kind{
 				// PROMISE
@@ -247,6 +247,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().String("aio-store-postgres-username", "", "postgres username")
 	cmd.Flags().String("aio-store-postgres-password", "", "postgres password")
 	cmd.Flags().String("aio-store-postgres-database", "resonate_dst", "postgres database name")
+	cmd.Flags().StringToString("aio-store-postgres-query", make(map[string]string, 0), "postgres query options")
 	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 2*time.Second, "postgres transaction timeout")
 	cmd.Flags().Float32("aio-network-success-rate", 0.5, "simulated success rate of http requests")
 	cmd.Flags().Float32("aio-queuing-success-rate", 0.5, "simulated success rate of queuing requests")
@@ -261,6 +262,7 @@ func RunDSTCmd() *cobra.Command {
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.username", cmd.Flags().Lookup("aio-store-postgres-username"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.password", cmd.Flags().Lookup("aio-store-postgres-password"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.database", cmd.Flags().Lookup("aio-store-postgres-database"))
+	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.query", cmd.Flags().Lookup("aio-store-postgres-query"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.txTimeout", cmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", cmd.Flags().Lookup("aio-network-success-rate"))
 	_ = viper.BindPFlag("dst.aio.subsystems.queuingDST.config.p", cmd.Flags().Lookup("aio-queuing-success-rate"))

@@ -497,142 +497,31 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 }
 
 func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
-	scheduleInsertStmt, err := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleInsertStmt.Close()
+	// Lazily defined prepared statements
+	var promiseInsertStmt *sql.Stmt
+	var promiseUpdateStmt *sql.Stmt
+	var promiseUpdateTimeoutStmt *sql.Stmt
+	var scheduleInsertStmt *sql.Stmt
+	var scheduleUpdateStmt *sql.Stmt
+	var scheduleDeleteStmt *sql.Stmt
+	var timeoutInsertStmt *sql.Stmt
+	var timeoutDeleteStmt *sql.Stmt
+	var subscriptionInsertStmt *sql.Stmt
+	var subscriptionDeleteStmt *sql.Stmt
+	var subscriptionDeleteAllStmt *sql.Stmt
+	var subscriptionDeleteAllTimeoutStmt *sql.Stmt
+	var notificationInsertStmt *sql.Stmt
+	var notificationUpdateStmt *sql.Stmt
+	var notificationDeleteStmt *sql.Stmt
+	var notificationInsertTimeoutStmt *sql.Stmt
+	var lockAcquireStmt *sql.Stmt
+	var lockHeartbeatStmt *sql.Stmt
+	var lockReleaseStmt *sql.Stmt
+	var lockTimeoutStmt *sql.Stmt
+	var taskInsertStmt *sql.Stmt
+	var taskUpdateStmt *sql.Stmt
 
-	scheduleUpdateStmt, err := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleUpdateStmt.Close()
-
-	scheduleDeleteStmt, err := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer scheduleDeleteStmt.Close()
-
-	promiseInsertStmt, err := tx.Prepare(PROMISE_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer promiseInsertStmt.Close()
-
-	promiseUpdateStmt, err := tx.Prepare(PROMISE_UPDATE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer promiseUpdateStmt.Close()
-
-	promiseUpdateTimeoutStmt, err := tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer promiseUpdateTimeoutStmt.Close()
-
-	timeoutInsertStmt, err := tx.Prepare(TIMEOUT_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer timeoutInsertStmt.Close()
-
-	timeoutDeleteStmt, err := tx.Prepare(TIMEOUT_DELETE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer timeoutDeleteStmt.Close()
-
-	subscriptionInsertStmt, err := tx.Prepare(SUBSCRIPTION_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer subscriptionInsertStmt.Close()
-
-	subscriptionDeleteStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer subscriptionDeleteStmt.Close()
-
-	subscriptionDeleteAllStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer subscriptionDeleteAllStmt.Close()
-
-	subscriptionDeleteAllTimeoutStmt, err := tx.Prepare(SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer subscriptionDeleteAllTimeoutStmt.Close()
-
-	notificationInsertStmt, err := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer notificationInsertStmt.Close()
-
-	notificationInsertTimeoutStmt, err := tx.Prepare(NOTIFICATION_INSERT_TIMEOUT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer notificationInsertTimeoutStmt.Close()
-
-	notificationUpdateStmt, err := tx.Prepare(NOTIFICATION_UPDATE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer notificationUpdateStmt.Close()
-
-	notificationDeleteStmt, err := tx.Prepare(NOTIFICATION_DELETE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer notificationDeleteStmt.Close()
-
-	// LOCKS
-
-	lockAcquireStmt, err := tx.Prepare(LOCK_ACQUIRE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer lockAcquireStmt.Close()
-
-	lockHeartbeatStmt, err := tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer lockHeartbeatStmt.Close()
-
-	lockReleaseStmt, err := tx.Prepare(LOCK_RELEASE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer lockReleaseStmt.Close()
-
-	lockTimeoutStmt, err := tx.Prepare(LOCK_TIMEOUT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer lockTimeoutStmt.Close()
-
-	// TASKS
-
-	taskInsertStmt, err := tx.Prepare(TASK_INSERT_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer taskInsertStmt.Close()
-
-	taskUpdateStmf, err := tx.Prepare(TASK_UPDATE_STATEMENT)
-	if err != nil {
-		return nil, err
-	}
-	defer taskUpdateStmf.Close()
-
+	// Results
 	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
@@ -651,12 +540,36 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.SearchPromises != nil, "command must not be nil")
 				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
 			case t_aio.CreatePromise:
+				if promiseInsertStmt == nil {
+					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseInsertStmt.Close()
+				}
+
 				util.Assert(command.CreatePromise != nil, "command must not be nil")
 				results[i][j], err = w.createPromise(tx, promiseInsertStmt, command.CreatePromise)
 			case t_aio.UpdatePromise:
+				if promiseUpdateStmt == nil {
+					promiseUpdateStmt, err = tx.Prepare(PROMISE_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseUpdateStmt.Close()
+				}
+
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
 			case t_aio.TimeoutPromises:
+				if promiseUpdateTimeoutStmt == nil {
+					promiseUpdateTimeoutStmt, err = tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseUpdateTimeoutStmt.Close()
+				}
+
 				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
 				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
@@ -671,12 +584,36 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.SearchSchedules != nil, "command must not be nil")
 				results[i][j], err = w.searchSchedules(tx, command.SearchSchedules)
 			case t_aio.CreateSchedule:
+				if scheduleInsertStmt == nil {
+					scheduleInsertStmt, err = tx.Prepare(SCHEDULE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateSchedule != nil, "command must not be nil")
 				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
 			case t_aio.UpdateSchedule:
+				if scheduleUpdateStmt == nil {
+					scheduleUpdateStmt, err = tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleUpdateStmt.Close()
+				}
+
 				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
 				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
 			case t_aio.DeleteSchedule:
+				if scheduleDeleteStmt == nil {
+					scheduleDeleteStmt, err = tx.Prepare(SCHEDULE_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleDeleteStmt.Close()
+				}
+
 				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
 				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
 
@@ -685,9 +622,25 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadTimeouts != nil, "command must not be nil")
 				results[i][j], err = w.readTimeouts(tx, command.ReadTimeouts)
 			case t_aio.CreateTimeout:
+				if timeoutInsertStmt == nil {
+					timeoutInsertStmt, err = tx.Prepare(TIMEOUT_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer timeoutInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateTimeout != nil, "command must not be nil")
 				results[i][j], err = w.createTimeout(tx, timeoutInsertStmt, command.CreateTimeout)
 			case t_aio.DeleteTimeout:
+				if timeoutDeleteStmt == nil {
+					timeoutDeleteStmt, err = tx.Prepare(TIMEOUT_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer timeoutDeleteStmt.Close()
+				}
+
 				util.Assert(command.DeleteTimeout != nil, "command must not be nil")
 				results[i][j], err = w.deleteTimeout(tx, timeoutDeleteStmt, command.DeleteTimeout)
 
@@ -699,15 +652,47 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.readSubscriptions(tx, command.ReadSubscriptions)
 			case t_aio.CreateSubscription:
+				if subscriptionInsertStmt == nil {
+					subscriptionInsertStmt, err = tx.Prepare(SUBSCRIPTION_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateSubscription != nil, "command must not be nil")
 				results[i][j], err = w.createSubscription(tx, subscriptionInsertStmt, command.CreateSubscription)
 			case t_aio.DeleteSubscription:
+				if subscriptionDeleteStmt == nil {
+					subscriptionDeleteStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteStmt.Close()
+				}
+
 				util.Assert(command.DeleteSubscription != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscription(tx, subscriptionDeleteStmt, command.DeleteSubscription)
 			case t_aio.DeleteSubscriptions:
+				if subscriptionDeleteAllStmt == nil {
+					subscriptionDeleteAllStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteAllStmt.Close()
+				}
+
 				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
 			case t_aio.TimeoutDeleteSubscriptions:
+				if subscriptionDeleteAllTimeoutStmt == nil {
+					subscriptionDeleteAllTimeoutStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteAllTimeoutStmt.Close()
+				}
+
 				util.Assert(command.TimeoutDeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.timeoutDeleteSubscriptions(tx, subscriptionDeleteAllTimeoutStmt, command.TimeoutDeleteSubscriptions)
 
@@ -716,15 +701,47 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadNotifications != nil, "command must not be nil")
 				results[i][j], err = w.readNotifications(tx, command.ReadNotifications)
 			case t_aio.CreateNotifications:
+				if notificationInsertStmt == nil {
+					notificationInsertStmt, err = tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.createNotifications(tx, notificationInsertStmt, command.CreateNotifications)
 			case t_aio.UpdateNotification:
+				if notificationUpdateStmt == nil {
+					notificationUpdateStmt, err = tx.Prepare(NOTIFICATION_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationUpdateStmt.Close()
+				}
+
 				util.Assert(command.UpdateNotification != nil, "command must not be nil")
 				results[i][j], err = w.updateNotification(tx, notificationUpdateStmt, command.UpdateNotification)
 			case t_aio.DeleteNotification:
+				if notificationDeleteStmt == nil {
+					notificationDeleteStmt, err = tx.Prepare(NOTIFICATION_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationDeleteStmt.Close()
+				}
+
 				util.Assert(command.DeleteNotification != nil, "command must not be nil")
 				results[i][j], err = w.deleteNotification(tx, notificationDeleteStmt, command.DeleteNotification)
 			case t_aio.TimeoutCreateNotifications:
+				if notificationInsertTimeoutStmt == nil {
+					notificationInsertTimeoutStmt, err = tx.Prepare(NOTIFICATION_INSERT_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationInsertTimeoutStmt.Close()
+				}
+
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
 
@@ -733,25 +750,73 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadLock != nil, "command must not be nil")
 				results[i][j], err = w.readLock(tx, command.ReadLock)
 			case t_aio.AcquireLock:
+				if lockAcquireStmt == nil {
+					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockAcquireStmt.Close()
+				}
+
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
 				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
 			case t_aio.HeartbeatLocks:
+				if lockHeartbeatStmt == nil {
+					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockHeartbeatStmt.Close()
+				}
+
 				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
 				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.ReleaseLock:
+				if lockReleaseStmt == nil {
+					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockReleaseStmt.Close()
+				}
+
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
 				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
 			case t_aio.TimeoutLocks:
+				if lockTimeoutStmt == nil {
+					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockTimeoutStmt.Close()
+				}
+
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
 				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
 			// Task
 			case t_aio.CreateTask:
+				if taskInsertStmt == nil {
+					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateTask != nil, "command must not be nil")
 				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
 			case t_aio.UpdateTask:
+				if taskUpdateStmt == nil {
+					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskUpdateStmt.Close()
+				}
+
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
-				results[i][j], err = w.updateTask(tx, taskUpdateStmf, command.UpdateTask)
+				results[i][j], err = w.updateTask(tx, taskUpdateStmt, command.UpdateTask)
 			case t_aio.ReadTask:
 				util.Assert(command.ReadTask != nil, "command must not be nil")
 				results[i][j], err = w.readTask(tx, command.ReadTask)
