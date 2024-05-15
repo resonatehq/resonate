@@ -436,10 +436,9 @@ type PostgresStoreWorker struct {
 }
 
 func New(config *Config, workers int) (aio.Subsystem, error) {
-	var rawQuery string
-	for _, q := range util.OrderedRangeKV(config.Query) {
-		query := fmt.Sprintf("%s=%s", q.Key, q.Value)
-		rawQuery += query + "&"
+	rawQuery := make([]string, len(config.Query))
+	for i, q := range util.OrderedRangeKV(config.Query) {
+		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
 	}
 
 	dbUrl := &url.URL{
@@ -447,7 +446,7 @@ func New(config *Config, workers int) (aio.Subsystem, error) {
 		Host:     fmt.Sprintf("%s:%s", config.Host, config.Port),
 		Path:     config.Database,
 		Scheme:   "postgres",
-		RawQuery: rawQuery,
+		RawQuery: strings.Join(rawQuery, "&"),
 	}
 
 	db, err := sql.Open("postgres", dbUrl.String())
@@ -535,7 +534,31 @@ func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t
 }
 
 func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
+	// Lazily defined prepared statements
+	var promiseInsertStmt *sql.Stmt
+	var promiseUpdateStmt *sql.Stmt
+	var promiseUpdateTimeoutStmt *sql.Stmt
+	var scheduleInsertStmt *sql.Stmt
+	var scheduleUpdateStmt *sql.Stmt
+	var scheduleDeleteStmt *sql.Stmt
+	var timeoutInsertStmt *sql.Stmt
+	var timeoutDeleteStmt *sql.Stmt
+	var subscriptionInsertStmt *sql.Stmt
+	var subscriptionDeleteStmt *sql.Stmt
+	var subscriptionDeleteAllStmt *sql.Stmt
+	var subscriptionDeleteAllTimeoutStmt *sql.Stmt
+	var notificationInsertStmt *sql.Stmt
+	var notificationUpdateStmt *sql.Stmt
+	var notificationDeleteStmt *sql.Stmt
+	var notificationInsertTimeoutStmt *sql.Stmt
+	var lockAcquireStmt *sql.Stmt
+	var lockHeartbeatStmt *sql.Stmt
+	var lockReleaseStmt *sql.Stmt
+	var lockTimeoutStmt *sql.Stmt
+	var taskInsertStmt *sql.Stmt
+	var taskUpdateStmt *sql.Stmt
 
+	// Results
 	results := make([][]*t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
@@ -554,29 +577,35 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.SearchPromises != nil, "command must not be nil")
 				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
 			case t_aio.CreatePromise:
-				promiseInsertStmt, pErr := tx.Prepare(PROMISE_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if promiseInsertStmt == nil {
+					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseInsertStmt.Close()
 				}
-				defer promiseInsertStmt.Close()
 
 				util.Assert(command.CreatePromise != nil, "command must not be nil")
 				results[i][j], err = w.createPromise(tx, promiseInsertStmt, command.CreatePromise)
 			case t_aio.UpdatePromise:
-				promiseUpdateStmt, pErr := tx.Prepare(PROMISE_UPDATE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if promiseUpdateStmt == nil {
+					promiseUpdateStmt, err = tx.Prepare(PROMISE_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseUpdateStmt.Close()
 				}
-				defer promiseUpdateStmt.Close()
 
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
 			case t_aio.TimeoutPromises:
-				promiseUpdateTimeoutStmt, pErr := tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if promiseUpdateTimeoutStmt == nil {
+					promiseUpdateTimeoutStmt, err = tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseUpdateTimeoutStmt.Close()
 				}
-				defer promiseUpdateTimeoutStmt.Close()
 
 				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
 				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
@@ -592,29 +621,35 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.SearchSchedules != nil, "command must not be nil")
 				results[i][j], err = w.searchSchedules(tx, command.SearchSchedules)
 			case t_aio.CreateSchedule:
-				scheduleInsertStmt, pErr := tx.Prepare(SCHEDULE_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if scheduleInsertStmt == nil {
+					scheduleInsertStmt, err = tx.Prepare(SCHEDULE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleInsertStmt.Close()
 				}
-				defer scheduleInsertStmt.Close()
 
 				util.Assert(command.CreateSchedule != nil, "command must not be nil")
 				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
 			case t_aio.UpdateSchedule:
-				scheduleUpdateStmt, pErr := tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if scheduleUpdateStmt == nil {
+					scheduleUpdateStmt, err = tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleUpdateStmt.Close()
 				}
-				defer scheduleUpdateStmt.Close()
 
 				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
 				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
 			case t_aio.DeleteSchedule:
-				scheduleDeleteStmt, pErr := tx.Prepare(SCHEDULE_DELETE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if scheduleDeleteStmt == nil {
+					scheduleDeleteStmt, err = tx.Prepare(SCHEDULE_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer scheduleDeleteStmt.Close()
 				}
-				defer scheduleDeleteStmt.Close()
 
 				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
 				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
@@ -624,20 +659,24 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadTimeouts != nil, "command must not be nil")
 				results[i][j], err = w.readTimeouts(tx, command.ReadTimeouts)
 			case t_aio.CreateTimeout:
-				timeoutInsertStmt, pErr := tx.Prepare(TIMEOUT_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if timeoutInsertStmt == nil {
+					timeoutInsertStmt, err = tx.Prepare(TIMEOUT_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer timeoutInsertStmt.Close()
 				}
-				defer timeoutInsertStmt.Close()
 
 				util.Assert(command.CreateTimeout != nil, "command must not be nil")
 				results[i][j], err = w.createTimeout(tx, timeoutInsertStmt, command.CreateTimeout)
 			case t_aio.DeleteTimeout:
-				timeoutDeleteStmt, pErr := tx.Prepare(TIMEOUT_DELETE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if timeoutDeleteStmt == nil {
+					timeoutDeleteStmt, err = tx.Prepare(TIMEOUT_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer timeoutDeleteStmt.Close()
 				}
-				defer timeoutDeleteStmt.Close()
 
 				util.Assert(command.DeleteTimeout != nil, "command must not be nil")
 				results[i][j], err = w.deleteTimeout(tx, timeoutDeleteStmt, command.DeleteTimeout)
@@ -650,38 +689,46 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.readSubscriptions(tx, command.ReadSubscriptions)
 			case t_aio.CreateSubscription:
-				subscriptionInsertStmt, pErr := tx.Prepare(SUBSCRIPTION_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if subscriptionInsertStmt == nil {
+					subscriptionInsertStmt, err = tx.Prepare(SUBSCRIPTION_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionInsertStmt.Close()
 				}
-				defer subscriptionInsertStmt.Close()
 
 				util.Assert(command.CreateSubscription != nil, "command must not be nil")
 				results[i][j], err = w.createSubscription(tx, subscriptionInsertStmt, command.CreateSubscription)
 			case t_aio.DeleteSubscription:
-				subscriptionDeleteStmt, pErr := tx.Prepare(SUBSCRIPTION_DELETE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if subscriptionDeleteStmt == nil {
+					subscriptionDeleteStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteStmt.Close()
 				}
-				defer subscriptionDeleteStmt.Close()
 
 				util.Assert(command.DeleteSubscription != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscription(tx, subscriptionDeleteStmt, command.DeleteSubscription)
 			case t_aio.DeleteSubscriptions:
-				subscriptionDeleteAllStmt, pErr := tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if subscriptionDeleteAllStmt == nil {
+					subscriptionDeleteAllStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_ALL_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteAllStmt.Close()
 				}
-				defer subscriptionDeleteAllStmt.Close()
 
 				util.Assert(command.DeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.deleteSubscriptions(tx, subscriptionDeleteAllStmt, command.DeleteSubscriptions)
 			case t_aio.TimeoutDeleteSubscriptions:
-				subscriptionDeleteAllTimeoutStmt, pErr := tx.Prepare(SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if subscriptionDeleteAllTimeoutStmt == nil {
+					subscriptionDeleteAllTimeoutStmt, err = tx.Prepare(SUBSCRIPTION_DELETE_ALL_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer subscriptionDeleteAllTimeoutStmt.Close()
 				}
-				defer subscriptionDeleteAllTimeoutStmt.Close()
 
 				util.Assert(command.TimeoutDeleteSubscriptions != nil, "command must not be nil")
 				results[i][j], err = w.timeoutDeleteSubscriptions(tx, subscriptionDeleteAllTimeoutStmt, command.TimeoutDeleteSubscriptions)
@@ -691,38 +738,46 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadNotifications != nil, "command must not be nil")
 				results[i][j], err = w.readNotifications(tx, command.ReadNotifications)
 			case t_aio.CreateNotifications:
-				notificationInsertStmt, pErr := tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if notificationInsertStmt == nil {
+					notificationInsertStmt, err = tx.Prepare(NOTIFICATION_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationInsertStmt.Close()
 				}
-				defer notificationInsertStmt.Close()
 
 				util.Assert(command.CreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.createNotifications(tx, notificationInsertStmt, command.CreateNotifications)
 			case t_aio.UpdateNotification:
-				notificationUpdateStmt, pErr := tx.Prepare(NOTIFICATION_UPDATE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if notificationUpdateStmt == nil {
+					notificationUpdateStmt, err = tx.Prepare(NOTIFICATION_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationUpdateStmt.Close()
 				}
-				defer notificationUpdateStmt.Close()
 
 				util.Assert(command.UpdateNotification != nil, "command must not be nil")
 				results[i][j], err = w.updateNotification(tx, notificationUpdateStmt, command.UpdateNotification)
 			case t_aio.DeleteNotification:
-				notificationDeleteStmt, pErr := tx.Prepare(NOTIFICATION_DELETE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if notificationDeleteStmt == nil {
+					notificationDeleteStmt, err = tx.Prepare(NOTIFICATION_DELETE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationDeleteStmt.Close()
 				}
-				defer notificationDeleteStmt.Close()
 
 				util.Assert(command.DeleteNotification != nil, "command must not be nil")
 				results[i][j], err = w.deleteNotification(tx, notificationDeleteStmt, command.DeleteNotification)
 			case t_aio.TimeoutCreateNotifications:
-				notificationInsertTimeoutStmt, pErr := tx.Prepare(NOTIFICATION_INSERT_TIMEOUT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if notificationInsertTimeoutStmt == nil {
+					notificationInsertTimeoutStmt, err = tx.Prepare(NOTIFICATION_INSERT_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer notificationInsertTimeoutStmt.Close()
 				}
-				defer notificationInsertTimeoutStmt.Close()
 
 				util.Assert(command.TimeoutCreateNotifications != nil, "command must not be nil")
 				results[i][j], err = w.timeoutCreateNotifications(tx, notificationInsertTimeoutStmt, command.TimeoutCreateNotifications)
@@ -732,61 +787,73 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadLock != nil, "command must not be nil")
 				results[i][j], err = w.readLock(tx, command.ReadLock)
 			case t_aio.AcquireLock:
-				lockAcquireStmt, pErr := tx.Prepare(LOCK_ACQUIRE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if lockAcquireStmt == nil {
+					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockAcquireStmt.Close()
 				}
-				defer lockAcquireStmt.Close()
 
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
 				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
 			case t_aio.HeartbeatLocks:
-				lockHeartbeatStmt, pErr := tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if lockHeartbeatStmt == nil {
+					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockHeartbeatStmt.Close()
 				}
-				defer lockHeartbeatStmt.Close()
 
 				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
 				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.ReleaseLock:
-				lockReleaseStmt, pErr := tx.Prepare(LOCK_RELEASE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if lockReleaseStmt == nil {
+					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockReleaseStmt.Close()
 				}
-				defer lockReleaseStmt.Close()
 
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
 				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
 			case t_aio.TimeoutLocks:
-				lockTimeoutStmt, pErr := tx.Prepare(LOCK_TIMEOUT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if lockTimeoutStmt == nil {
+					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockTimeoutStmt.Close()
 				}
-				defer lockTimeoutStmt.Close()
 
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
 				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
 
 			// Task
 			case t_aio.CreateTask:
-				taskInsertStmt, pErr := tx.Prepare(TASK_INSERT_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if taskInsertStmt == nil {
+					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskInsertStmt.Close()
 				}
-				defer taskInsertStmt.Close()
 
 				util.Assert(command.CreateTask != nil, "command must not be nil")
 				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
 			case t_aio.UpdateTask:
-				taskUpdateStmf, pErr := tx.Prepare(TASK_UPDATE_STATEMENT)
-				if pErr != nil {
-					return nil, pErr
+				if taskUpdateStmt == nil {
+					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskUpdateStmt.Close()
 				}
-				defer taskUpdateStmf.Close()
 
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
-				results[i][j], err = w.updateTask(tx, taskUpdateStmf, command.UpdateTask)
+				results[i][j], err = w.updateTask(tx, taskUpdateStmt, command.UpdateTask)
 			case t_aio.ReadTask:
 				util.Assert(command.ReadTask != nil, "command must not be nil")
 				results[i][j], err = w.readTask(tx, command.ReadTask)
