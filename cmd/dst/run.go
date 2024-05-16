@@ -247,7 +247,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().String("aio-store-postgres-username", "", "postgres username")
 	cmd.Flags().String("aio-store-postgres-password", "", "postgres password")
 	cmd.Flags().String("aio-store-postgres-database", "resonate_dst", "postgres database name")
-	cmd.Flags().StringToString("aio-store-postgres-query", make(map[string]string, 0), "postgres query options")
+	cmd.Flags().StringToString("aio-store-postgres-query", map[string]string{"sslmode": "disable"}, "postgres query options")
 	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 2*time.Second, "postgres transaction timeout")
 	cmd.Flags().Float32("aio-network-success-rate", 0.5, "simulated success rate of http requests")
 	cmd.Flags().Float32("aio-queuing-success-rate", 0.5, "simulated success rate of queuing requests")
