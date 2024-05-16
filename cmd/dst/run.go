@@ -262,7 +262,7 @@ func RunDSTCmd() *cobra.Command {
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.username", cmd.Flags().Lookup("aio-store-postgres-username"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.password", cmd.Flags().Lookup("aio-store-postgres-password"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.database", cmd.Flags().Lookup("aio-store-postgres-database"))
-	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.query", cmd.Flags().Lookup("aio-store-postgres-query"))
+	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.query", cmd.Flags().Lookup("aio-store-postgres-query"))
 	_ = viper.BindPFlag("dst.aio.subsystems.store.config.postgres.txTimeout", cmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("dst.aio.subsystems.networkDST.config.p", cmd.Flags().Lookup("aio-network-success-rate"))
 	_ = viper.BindPFlag("dst.aio.subsystems.queuingDST.config.p", cmd.Flags().Lookup("aio-queuing-success-rate"))
