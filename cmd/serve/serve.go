@@ -184,6 +184,10 @@ func ServeCmd() *cobra.Command {
 		},
 	}
 
+	// assert
+	cmd.Flags().Bool("strict", true, "strict mode")
+	_ = viper.BindPFlag("strict", cmd.Flags().Lookup("strict"))
+
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
 	cmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
