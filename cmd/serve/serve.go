@@ -185,8 +185,8 @@ func ServeCmd() *cobra.Command {
 	}
 
 	// assert
-	cmd.Flags().Bool("strict", true, "strict mode")
-	_ = viper.BindPFlag("strict", cmd.Flags().Lookup("strict"))
+	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
+	_ = viper.BindPFlag("ignore-asserts", cmd.Flags().Lookup("ignore-asserts"))
 
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")

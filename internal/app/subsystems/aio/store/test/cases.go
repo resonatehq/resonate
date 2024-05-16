@@ -14,7 +14,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/subscription"
 	"github.com/resonatehq/resonate/pkg/task"
-	"github.com/spf13/viper"
 
 	"github.com/resonatehq/resonate/pkg/timeout"
 	"github.com/stretchr/testify/assert"
@@ -31,8 +30,6 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 	t.Run(c.name, func(t *testing.T) {
 		// assert panic occurs
 		if c.panic {
-			// set strict to true on panic for assert to panic
-			viper.Set("strict", true)
 			defer func() {
 				if r := recover(); r == nil {
 					t.Errorf("The function did not panic as expected")

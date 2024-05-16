@@ -10,8 +10,8 @@ import (
 )
 
 func Assert(cond bool, msg string) {
-	strict := viper.GetBool("strict")
-	if strict && !cond {
+	strict := viper.GetBool("ignore-asserts")
+	if !strict && !cond {
 		panic(msg)
 	}
 }
