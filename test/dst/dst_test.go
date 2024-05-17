@@ -30,6 +30,13 @@ func TestDSTFaultInjection(t *testing.T) {
 	})
 }
 
+func TestDSTLazyTimeout(t *testing.T) {
+	test(t, &Scenario{
+		Kind:        LazyTimeout,
+		LazyTimeout: &LazyTimeoutScenario{},
+	})
+}
+
 func test(t *testing.T, scenario *Scenario) {
 	r := rand.New(rand.NewSource(0))
 
@@ -93,14 +100,12 @@ func test(t *testing.T, scenario *Scenario) {
 	system.AddOnTick(1000, coroutines.EnqueueTasks)
 	system.AddOnTick(1000, coroutines.TimeoutLocks)
 	system.AddOnTick(1000, coroutines.SchedulePromises)
-	system.AddOnTick(1000, coroutines.TimeoutPromises)
 	system.AddOnTick(1000, coroutines.NotifySubscriptions)
 
 	// specify reqs to enable
 	reqs := []t_api.Kind{
 		// PROMISE
 		t_api.ReadPromise,
-		t_api.SearchPromises,
 		t_api.CreatePromise,
 		t_api.CompletePromise,
 
@@ -123,6 +128,14 @@ func test(t *testing.T, scenario *Scenario) {
 		// TASK
 		t_api.ClaimTask,
 		t_api.CompleteTask,
+	}
+
+	// remove search promises and timeout promises if lazy timeout scenario
+	// this forces the "lazy" path to be taken for promises to transition
+	// to timedout state
+	if scenario.Kind != LazyTimeout {
+		reqs = append(reqs, t_api.SearchPromises)
+		system.AddOnTick(1000, coroutines.TimeoutPromises)
 	}
 
 	// start api/aio

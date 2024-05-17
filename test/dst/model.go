@@ -245,7 +245,7 @@ func (m *Model) ValidateCreatePromise(reqTime int64, resTime int64, req *t_api.R
 	switch res.CreatePromise.Status {
 	case t_api.StatusOK:
 		if pm.promise != nil {
-			if !pm.idempotencyKeyForCreateMatch(res.CreatePromise.Promise) {
+			if !pm.promise.IdempotencyKeyForCreate.Match(res.CreatePromise.Promise.IdempotencyKeyForCreate) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate)
 			} else if req.CreatePromise.Strict && pm.promise.State != promise.Pending {
 				return fmt.Errorf("unexpected state %s when strict true", pm.promise.State)
@@ -288,6 +288,9 @@ func (m *Model) ValidateCreatePromise(reqTime int64, resTime int64, req *t_api.R
 		pm.promise = res.CreatePromise.Promise
 		return nil
 	case t_api.StatusPromiseAlreadyExists:
+		if !req.CreatePromise.Strict && req.CreatePromise.IdempotencyKey.Match(res.CreatePromise.Promise.IdempotencyKeyForCreate) {
+			return fmt.Errorf("unexpected response code (%d) when strict=false and ikeys match", res.CreatePromise.Status)
+		}
 		return nil
 	case t_api.StatusPromiseNotFound:
 		return fmt.Errorf("invalid response '%d' for create promise request", res.CreatePromise.Status)
@@ -302,7 +305,7 @@ func (m *Model) ValidateCompletePromise(reqTime int64, resTime int64, req *t_api
 	switch res.CompletePromise.Status {
 	case t_api.StatusOK:
 		if pm.completed() {
-			if !pm.idempotencyKeyForCompleteMatch(res.CompletePromise.Promise) &&
+			if !pm.promise.IdempotencyKeyForComplete.Match(res.CompletePromise.Promise.IdempotencyKeyForComplete) &&
 				(req.CompletePromise.Strict || pm.promise.State != promise.Timedout) {
 				return fmt.Errorf("ikey mismatch (%s, %s)", pm.promise.IdempotencyKeyForComplete, res.CompletePromise.Promise.IdempotencyKeyForComplete)
 			} else if req.CompletePromise.Strict && pm.promise.State != req.CompletePromise.State {
@@ -340,7 +343,12 @@ func (m *Model) ValidateCompletePromise(reqTime int64, resTime int64, req *t_api
 		// update model state
 		pm.promise = res.CompletePromise.Promise
 		return nil
-	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedOut:
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled:
+		return nil
+	case t_api.StatusPromiseAlreadyTimedOut:
+		if !req.CompletePromise.Strict {
+			return fmt.Errorf("unexpected response code (%d) when state=timedout and strict=true", res.CompletePromise.Status)
+		}
 		return nil
 	case t_api.StatusPromiseNotFound:
 		if pm.promise != nil {
@@ -693,14 +701,6 @@ func (m *Model) ValidateCompleteTask(reqTime int64, resTime int64, req *t_api.Re
 }
 
 // UTILS
-
-func (m *PromiseModel) idempotencyKeyForCreateMatch(promise *promise.Promise) bool {
-	return m.promise.IdempotencyKeyForCreate != nil && promise.IdempotencyKeyForCreate != nil && *m.promise.IdempotencyKeyForCreate == *promise.IdempotencyKeyForCreate
-}
-
-func (m *PromiseModel) idempotencyKeyForCompleteMatch(promise *promise.Promise) bool {
-	return m.promise.IdempotencyKeyForComplete != nil && promise.IdempotencyKeyForComplete != nil && *m.promise.IdempotencyKeyForComplete == *promise.IdempotencyKeyForComplete
-}
 
 func (m *PromiseModel) completed() bool {
 	return m.promise != nil && m.promise.State != promise.Pending

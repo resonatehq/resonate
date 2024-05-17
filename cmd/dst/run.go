@@ -96,8 +96,11 @@ func RunDSTCmd() *cobra.Command {
 			case "fault":
 				p = r.Float64()
 				dstScenario = &dst.Scenario{Kind: dst.FaultInjection, FaultInjection: &dst.FaultInjectionScenario{P: p}}
+			case "lazy":
+				p = 0
+				dstScenario = &dst.Scenario{Kind: dst.LazyTimeout, LazyTimeout: &dst.LazyTimeoutScenario{}}
 			default:
-				return fmt.Errorf("invalid scenario: %s, permitted scenarios: {default, fault}", scenario)
+				return fmt.Errorf("invalid scenario: %s, permitted scenarios: {default, fault, lazy}", scenario)
 			}
 
 			// instatiate api/aio
@@ -149,13 +152,11 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnTick(1000, coroutines.EnqueueTasks)
 			system.AddOnTick(1000, coroutines.TimeoutLocks)
 			system.AddOnTick(1000, coroutines.SchedulePromises)
-			system.AddOnTick(1000, coroutines.TimeoutPromises)
 			system.AddOnTick(1000, coroutines.NotifySubscriptions)
 
 			reqs := []t_api.Kind{
 				// PROMISE
 				t_api.ReadPromise,
-				t_api.SearchPromises,
 				t_api.CreatePromise,
 				t_api.CompletePromise,
 
@@ -178,6 +179,14 @@ func RunDSTCmd() *cobra.Command {
 				// TASK
 				t_api.ClaimTask,
 				t_api.CompleteTask,
+			}
+
+			// remove search promises and timeout promises if lazy timeout scenario
+			// this forces the "lazy" path to be taken for promises to transition
+			// to timedout state
+			if dstScenario.Kind != dst.LazyTimeout {
+				reqs = append(reqs, t_api.SearchPromises)
+				system.AddOnTick(1000, coroutines.TimeoutPromises)
 			}
 
 			dst := dst.New(&dst.Config{
@@ -220,7 +229,7 @@ func RunDSTCmd() *cobra.Command {
 
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
-	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault}")
+	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy}")
 
 	// dst related values
 	cmd.Flags().Var(&reqsPerTick, "reqs-per-tick", "number of requests per tick")
