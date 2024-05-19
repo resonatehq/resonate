@@ -56,6 +56,12 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
+			// authorization for http endpoint
+			config.API.Subsystems.Http.Auth = http.Auth{
+				Username: viper.GetString("auth-username"),
+				Password: viper.GetString("auth-password"),
+			}
+
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
 			grpc := grpc.New(api, config.API.Subsystems.Grpc)
@@ -183,6 +189,13 @@ func ServeCmd() *cobra.Command {
 			return nil
 		},
 	}
+
+	// authentication
+	cmd.Flags().String("auth-username", "", "username for authorization")
+	cmd.Flags().String("auth-password", "", "password for authorization")
+
+	_ = viper.BindPFlag("auth-username", cmd.Flags().Lookup("auth-username"))
+	_ = viper.BindPFlag("auth-password", cmd.Flags().Lookup("auth-password"))
 
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
