@@ -74,10 +74,16 @@ func CompletePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*
 						completedState := promise.GetTimedoutState(p)
 						util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
 
+						// If not strict, status is OK
+						status := t_api.StatusPromiseAlreadyTimedOut
+						if !req.CompletePromise.Strict {
+							status = t_api.StatusOK
+						}
+
 						res(&t_api.Response{
 							Kind: req.Kind,
 							CompletePromise: &t_api.CompletePromiseResponse{
-								Status: t_api.StatusPromiseAlreadyTimedOut,
+								Status: status,
 								Promise: &promise.Promise{
 									Id:    p.Id,
 									State: completedState,

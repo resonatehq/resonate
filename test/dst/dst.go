@@ -36,6 +36,7 @@ type Scenario struct {
 	Kind           Kind
 	Default        *DefaultScenario
 	FaultInjection *FaultInjectionScenario
+	LazyTimeout    *LazyTimeoutScenario
 }
 
 type Kind string
@@ -43,6 +44,7 @@ type Kind string
 const (
 	Default        Kind = "default"
 	FaultInjection Kind = "fault"
+	LazyTimeout    Kind = "lazy"
 )
 
 type DefaultScenario struct{}
@@ -50,6 +52,8 @@ type DefaultScenario struct{}
 type FaultInjectionScenario struct {
 	P float64
 }
+
+type LazyTimeoutScenario struct{}
 
 func New(config *Config) *DST {
 	return &DST{
