@@ -56,12 +56,6 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
-			// authorization for http endpoint
-			config.API.Subsystems.Http.Auth = http.Auth{
-				Username: viper.GetString("auth-username"),
-				Password: viper.GetString("auth-password"),
-			}
-
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
 			grpc := grpc.New(api, config.API.Subsystems.Grpc)
@@ -190,14 +184,7 @@ func ServeCmd() *cobra.Command {
 		},
 	}
 
-	// authentication
-	cmd.Flags().String("auth-username", "", "username for authorization")
-	cmd.Flags().String("auth-password", "", "password for authorization")
-
-	_ = viper.BindPFlag("auth-username", cmd.Flags().Lookup("auth-username"))
-	_ = viper.BindPFlag("auth-password", cmd.Flags().Lookup("auth-password"))
-
-  // assert
+	// assert
 	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
 	_ = viper.BindPFlag("ignore-asserts", cmd.Flags().Lookup("ignore-asserts"))
 
@@ -207,12 +194,16 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
 	cmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
 	cmd.Flags().String("api-base-url", "http://localhost:8001", "base url to automatically generate absolute URLs for the server's resources")
+	cmd.Flags().String("api-http-auth-username", "", "username for basic auth")
+	cmd.Flags().String("api-http-auth-password", "", "password for basic auth")
 
 	_ = viper.BindPFlag("api.size", cmd.Flags().Lookup("api-size"))
 	_ = viper.BindPFlag("api.subsystems.http.addr", cmd.Flags().Lookup("api-http-addr"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", cmd.Flags().Lookup("api-http-timeout"))
 	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
 	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
+	_ = viper.BindPFlag("api.subsystems.http.auth.username", cmd.Flags().Lookup("api-http-auth-username"))
+	_ = viper.BindPFlag("api.subsystems.http.auth.password", cmd.Flags().Lookup("api-http-auth-password"))
 
 	// aio
 	// Store
@@ -285,6 +276,7 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
 	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+
 	// metrics
 	cmd.Flags().Int("metrics-port", 9090, "prometheus metrics server port")
 	_ = viper.BindPFlag("metrics.port", cmd.Flags().Lookup("metrics-port"))
