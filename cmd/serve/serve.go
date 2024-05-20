@@ -197,6 +197,10 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("auth-username", cmd.Flags().Lookup("auth-username"))
 	_ = viper.BindPFlag("auth-password", cmd.Flags().Lookup("auth-password"))
 
+  // assert
+	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
+	_ = viper.BindPFlag("ignore-asserts", cmd.Flags().Lookup("ignore-asserts"))
+
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
 	cmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")

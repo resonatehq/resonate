@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+	"github.com/spf13/viper"
 )
 
 func Assert(cond bool, msg string) {
-	if !cond {
+	ignoreAsserts := viper.GetBool("ignore-asserts")
+	if !ignoreAsserts && !cond {
 		panic(msg)
 	}
 }

@@ -131,7 +131,6 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 			} else {
 				c.Scheduler.Add(CreatePromise(metadata, req, res))
 			}
-			// todo: to here...
 		} else {
 			p, err := result.Records[0].Promise()
 			if err != nil {
@@ -140,12 +139,8 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 				return
 			}
 
+			// initial status
 			status := t_api.StatusPromiseAlreadyExists
-			strict := req.CreatePromise.Strict && p.State != promise.Pending
-
-			if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
-				status = t_api.StatusOK
-			}
 
 			if p.State == promise.Pending && c.Time() >= p.Timeout {
 				c.Scheduler.Add(TimeoutPromise(metadata, p, CreatePromise(metadata, req, res), func(err error) {
@@ -157,6 +152,11 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 
 					completedState := promise.GetTimedoutState(p)
 					util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
+
+					// switch status to ok if not strict and idempotency keys match
+					if !req.CreatePromise.Strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
+						status = t_api.StatusOK
+					}
 
 					res(&t_api.Response{
 						Kind: t_api.CreatePromise,
@@ -181,6 +181,12 @@ func CreatePromise(metadata *metadata.Metadata, req *t_api.Request, res func(*t_
 					}, nil)
 				}))
 			} else {
+				// switch status to ok if not strict and idempotency keys match
+				strict := req.CreatePromise.Strict && p.State != promise.Pending
+				if !strict && p.IdempotencyKeyForCreate.Match(req.CreatePromise.IdempotencyKey) {
+					status = t_api.StatusOK
+				}
+
 				res(&t_api.Response{
 					Kind: t_api.CreatePromise,
 					CreatePromise: &t_api.CreatePromiseResponse{
