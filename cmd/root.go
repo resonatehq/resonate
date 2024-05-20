@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"errors"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/promises"

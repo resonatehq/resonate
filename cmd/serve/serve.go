@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	cmd2 "github.com/resonatehq/resonate/cmd"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -55,6 +56,13 @@ func ServeCmd() *cobra.Command {
 			// instantiate api/aio
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
+
+			creds, err := cmd2.GetCrednetials()
+			if err != nil {
+				slog.Error("failed to get credentials.", "error", err)
+				return err
+			}
+			config.API.Subsystems.Http.Auth = creds
 
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)

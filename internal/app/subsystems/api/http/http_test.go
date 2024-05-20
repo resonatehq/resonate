@@ -26,12 +26,16 @@ type httpTest struct {
 	client    *http.Client
 }
 
-func setup() *httpTest {
+func setupAuthWrong() *httpTest {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem := New(api, &Config{
 		Addr:    "127.0.0.1:8888",
 		Timeout: 1 * time.Second,
+		Auth: CredentialsList{Users: []Credential{
+			{Username: "", Password: ""},
+			//{Username: "user1", Password: "password1"},
+		}},
 	})
 
 	// start http server
@@ -52,8 +56,8 @@ func (t *httpTest) teardown() error {
 	return t.subsystem.Stop()
 }
 
-func TestHttpServer(t *testing.T) {
-	httpTest := setup()
+func TestHttpServerWithAuthFailure(t *testing.T) {
+	httpTest := setupAuthWrong()
 
 	for _, tc := range []struct {
 		name    string
@@ -75,17 +79,8 @@ func TestHttpServer(t *testing.T) {
 					Id: "foo",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ReadPromise,
-				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.StatusOK,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Pending,
-					},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ReadPromiseWithSlash",
@@ -97,17 +92,8 @@ func TestHttpServer(t *testing.T) {
 					Id: "foo/bar",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ReadPromise,
-				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.StatusOK,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Pending,
-					},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ReadPromiseNotFound",
@@ -119,14 +105,8 @@ func TestHttpServer(t *testing.T) {
 					Id: "bar",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ReadPromise,
-				ReadPromise: &t_api.ReadPromiseResponse{
-					Status:  t_api.StatusPromiseNotFound,
-					Promise: nil,
-				},
-			},
-			status: 404,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromises",
@@ -147,15 +127,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil,
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesCursor",
@@ -173,15 +146,8 @@ func TestHttpServer(t *testing.T) {
 					SortId: util.ToPointer(int64(100)),
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil, // not checked
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesPending",
@@ -198,15 +164,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil,
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesResolved",
@@ -223,15 +182,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil,
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesRejected",
@@ -250,15 +202,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil,
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesTags",
@@ -281,15 +226,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchPromises,
-				SearchPromises: &t_api.SearchPromisesResponse{
-					Status:   t_api.StatusOK,
-					Cursor:   nil,
-					Promises: []*promise.Promise{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesInvalidQuery",
@@ -297,7 +235,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesInvalidLimit",
@@ -305,7 +243,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesInvalidState",
@@ -313,7 +251,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "SearchPromisesInvalidTags",
@@ -321,7 +259,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "CreatePromise",
@@ -352,17 +290,8 @@ func TestHttpServer(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CreatePromise,
-				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Pending,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "CreatePromiseMinimal",
@@ -385,17 +314,8 @@ func TestHttpServer(t *testing.T) {
 					Timeout: 1,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CreatePromise,
-				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Pending,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "CancelPromise",
@@ -425,17 +345,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Canceled,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "CancelPromiseMinimal",
@@ -457,17 +368,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Canceled,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ResolvePromise",
@@ -497,17 +399,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Resolved,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ResolvePromiseMinimal",
@@ -529,17 +422,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Resolved,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "RejectPromise",
@@ -569,17 +453,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Rejected,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "RejectPromiseMinimal",
@@ -601,17 +476,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Rejected,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ReadSchedule",
@@ -623,20 +489,8 @@ func TestHttpServer(t *testing.T) {
 					Id: "foo",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ReadSchedule,
-				ReadSchedule: &t_api.ReadScheduleResponse{
-					Status: t_api.StatusOK,
-					Schedule: &schedule.Schedule{
-						Id:             "foo",
-						Description:    "",
-						Cron:           "* * * * * *",
-						PromiseId:      "foo.{{.timestamp}}",
-						PromiseTimeout: 1000000,
-					},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchSchedules",
@@ -650,15 +504,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchSchedules,
-				SearchSchedules: &t_api.SearchSchedulesResponse{
-					Status:    t_api.StatusOK,
-					Cursor:    nil,
-					Schedules: []*schedule.Schedule{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchSchedulesTags",
@@ -674,15 +521,8 @@ func TestHttpServer(t *testing.T) {
 					Limit: 10,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.SearchSchedules,
-				SearchSchedules: &t_api.SearchSchedulesResponse{
-					Status:    t_api.StatusOK,
-					Cursor:    nil,
-					Schedules: []*schedule.Schedule{},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "SearchSchedulesInvalidQuery",
@@ -690,7 +530,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "SearchSchedulesInvalidLimit",
@@ -698,7 +538,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "SearchSchedulesInvalidTags",
@@ -706,7 +546,7 @@ func TestHttpServer(t *testing.T) {
 			method: "GET",
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "CreateSchedule",
@@ -732,20 +572,8 @@ func TestHttpServer(t *testing.T) {
 					PromiseTimeout: 1000000,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CreateSchedule,
-				CreateSchedule: &t_api.CreateScheduleResponse{
-					Status: t_api.StatusCreated,
-					Schedule: &schedule.Schedule{
-						Id:             "foo",
-						Description:    "",
-						Cron:           "* * * * * *",
-						PromiseId:      "foo.{{.timestamp}}",
-						PromiseTimeout: 1000000,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "DeleteSchedule",
@@ -757,13 +585,8 @@ func TestHttpServer(t *testing.T) {
 					Id: "foo",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.DeleteSchedule,
-				DeleteSchedule: &t_api.DeleteScheduleResponse{
-					Status: t_api.StatusNoContent,
-				},
-			},
-			status: 204,
+			res:    nil,
+			status: 401,
 		},
 
 		// Distributed Locks API
@@ -786,19 +609,8 @@ func TestHttpServer(t *testing.T) {
 					ExpiryInMilliseconds: 10_000,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.AcquireLock,
-				AcquireLock: &t_api.AcquireLockResponse{
-					Status: t_api.StatusCreated,
-					Lock: &lock.Lock{
-						ResourceId:           "foo",
-						ProcessId:            "bar",
-						ExecutionId:          "baz",
-						ExpiryInMilliseconds: 10_000,
-					},
-				},
-			},
-			status: 201,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "AcquireLock missing executionIdc",
@@ -812,7 +624,7 @@ func TestHttpServer(t *testing.T) {
 			}`),
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "HeartbeatLocks",
@@ -827,14 +639,8 @@ func TestHttpServer(t *testing.T) {
 					ProcessId: "bar",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.HeartbeatLocks,
-				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-					Status:        t_api.StatusOK,
-					LocksAffected: 0,
-				},
-			},
-			status: 200,
+			res:    &t_api.Response{},
+			status: 401,
 		},
 		{
 			name:   "HeartbeatLocks missing processId",
@@ -846,7 +652,7 @@ func TestHttpServer(t *testing.T) {
 			}`),
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 		{
 			name:   "ReleaseLock",
@@ -863,13 +669,8 @@ func TestHttpServer(t *testing.T) {
 					ExecutionId: "baz",
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ReleaseLock,
-				ReleaseLock: &t_api.ReleaseLockResponse{
-					Status: t_api.StatusNoContent,
-				},
-			},
-			status: 204,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "ReleaseLock missing resourceId",
@@ -881,7 +682,7 @@ func TestHttpServer(t *testing.T) {
 			}`),
 			req:    nil,
 			res:    nil,
-			status: 400,
+			status: 401,
 		},
 
 		// Tasks API
@@ -906,17 +707,8 @@ func TestHttpServer(t *testing.T) {
 					ExpiryInMilliseconds: 10_000,
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.ClaimTask,
-				ClaimTask: &t_api.ClaimTaskResponse{
-					Status: t_api.StatusOK,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Pending,
-					},
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 		{
 			name:   "CompleteTask",
@@ -945,13 +737,8 @@ func TestHttpServer(t *testing.T) {
 					},
 				},
 			},
-			res: &t_api.Response{
-				Kind: t_api.CompleteTask,
-				CompleteTask: &t_api.CompleteTaskResponse{
-					Status: t_api.StatusOK,
-				},
-			},
-			status: 200,
+			res:    nil,
+			status: 401,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -996,5 +783,6 @@ func TestHttpServer(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 
 // todo: Distributed Locks API
