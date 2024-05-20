@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/util"
 
 	"log/slog"
 
@@ -15,14 +16,32 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 )
 
+type Credential struct {
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
+type CredentialsList struct {
+	Users []Credential `yaml:"users"`
+}
+
 type Config struct {
 	Addr    string
 	Timeout time.Duration
+	Auth    CredentialsList
 }
 
 type Http struct {
 	config *Config
 	server *http.Server
+}
+
+func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
+	credentials := util.GetProcessedCreds(config.Auth)
+	if credentials != nil {
+		return gin.BasicAuth(credentials)
+	}
+	return nil
 }
 
 func New(api api.API, config *Config) api.Subsystem {
@@ -38,27 +57,31 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Middleware
 	r.Use(s.log)
+	authorized := r.Group("/")
+	authorized.Use(BasicAuthMiddleware(config))
 
 	// Promises API
-	r.POST("/promises", s.createPromise)
-	r.GET("/promises", s.searchPromises)
-	r.GET("/promises/*id", s.readPromise)
-	r.PATCH("/promises/*id", s.completePromise)
+	authorized.POST("/promises", s.createPromise)
+	authorized.GET("/promises", s.searchPromises)
+	authorized.GET("/promises/*id", s.readPromise)
+	authorized.PATCH("/promises/*id", s.completePromise)
 
 	// Schedules API
-	r.POST("/schedules", s.createSchedule)
-	r.GET("/schedules", s.searchSchedules)
-	r.GET("/schedules/*id", s.readSchedule)
-	r.DELETE("/schedules/*id", s.deleteSchedule)
+	authorized.POST("/schedules", s.createSchedule)
+	authorized.GET("/schedules", s.searchSchedules)
+	authorized.GET("/schedules/*id", s.readSchedule)
+	authorized.DELETE("/schedules/*id", s.deleteSchedule)
 
 	// Distributed Locks API
-	r.POST("/locks/acquire", s.acquireLock)
-	r.POST("/locks/heartbeat", s.heartbeatLocks)
-	r.POST("/locks/release", s.releaseLock)
+	authorized.POST("/locks/acquire", s.acquireLock)
+	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
+	authorized.POST("/locks/release", s.releaseLock)
 
 	// Task API
-	r.POST("/tasks/claim", s.claimTask)
-	r.POST("/tasks/complete", s.completeTask)
+	authorized.POST("/tasks/claim", s.claimTask)
+	authorized.POST("/tasks/complete", s.completeTask)
+
+
 
 	return &Http{
 		config: config,
