@@ -4,18 +4,10 @@ import (
 	"cmp"
 	"sort"
 	"time"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/robfig/cron/v3"
 )
 
 
-func GetProcessedCreds(credList http.CredentialsList) map[string]string {
-	credentials := make(map[string]string)
-	for _, item := range credList.Users {
-		credentials[item.Username] = item.Password
-	}
-	return credentials
-}
 
 
 func Assert(cond bool, msg string) {
