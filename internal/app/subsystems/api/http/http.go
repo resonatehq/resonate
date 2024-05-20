@@ -2,13 +2,12 @@ package http
 
 import (
 	"context"
+	"github.com/resonatehq/resonate/internal/creds"
 	"net/http"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
-
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -16,19 +15,10 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 )
 
-type Credential struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-}
-
-type CredentialsList struct {
-	Users []Credential `yaml:"users"`
-}
-
 type Config struct {
 	Addr    string
 	Timeout time.Duration
-	Auth    CredentialsList
+	Auth    creds.CredentialsList
 }
 
 type Http struct {
@@ -37,7 +27,7 @@ type Http struct {
 }
 
 func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
-	credentials := util.GetProcessedCreds(config.Auth)
+	credentials := creds.GetProcessedCreds(config.Auth)
 	if credentials != nil {
 		return gin.BasicAuth(credentials)
 	}
@@ -80,8 +70,6 @@ func New(api api.API, config *Config) api.Subsystem {
 	// Task API
 	authorized.POST("/tasks/claim", s.claimTask)
 	authorized.POST("/tasks/complete", s.completeTask)
-
-
 
 	return &Http{
 		config: config,

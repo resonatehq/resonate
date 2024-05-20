@@ -2,13 +2,13 @@ package serve
 
 import (
 	"fmt"
+	"github.com/resonatehq/resonate/internal/creds"
 	"log/slog"
 	netHttp "net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-	cmd2 "github.com/resonatehq/resonate/cmd"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -57,7 +57,7 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
-			creds, err := cmd2.GetCrednetials()
+			creds, err := creds.GetCredentials()
 			if err != nil {
 				slog.Error("failed to get credentials.", "error", err)
 				return err
