@@ -82,7 +82,7 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 			} else if resp.StatusCode() == 200 {
 				cmd.Printf("Created schedule: %s (deduplicated)\n", id)
 			} else {
-				cmd.PrintErrln(string(resp.Body))
+				cmd.PrintErrln(resp.Status(), string(resp.Body))
 			}
 		},
 	}

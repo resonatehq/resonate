@@ -84,7 +84,7 @@ func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 				} else if resp.StatusCode() == 200 {
 					cmd.Printf("%s promise: %s (deduplicated)\n", state.PastT, id)
 				} else {
-					cmd.PrintErrln(string(resp.Body))
+					cmd.PrintErrln(resp.Status(), string(resp.Body))
 				}
 			},
 		}

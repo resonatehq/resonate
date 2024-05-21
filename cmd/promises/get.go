@@ -36,7 +36,7 @@ func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(string(resp.Body))
+				cmd.PrintErrln(resp.Status(), string(resp.Body))
 				return
 			}
 

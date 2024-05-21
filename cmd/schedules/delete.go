@@ -34,7 +34,7 @@ func DeleteScheduleCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			if resp.StatusCode() != 204 {
-				cmd.PrintErrln(string(resp.Body))
+				cmd.PrintErrln(resp.Status(), string(resp.Body))
 				return
 			}
 

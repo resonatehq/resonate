@@ -69,7 +69,7 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			if resp.StatusCode() != 200 {
-				cmd.PrintErr(string(resp.Body))
+				cmd.PrintErrln(resp.Status(), string(resp.Body))
 				return
 			}
 

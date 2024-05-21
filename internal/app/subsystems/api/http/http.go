@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/util"
 
 	"log/slog"
 
@@ -22,8 +23,8 @@ type Auth struct {
 
 type Config struct {
 	Addr    string
+	Auth    *Auth
 	Timeout time.Duration
-	Auth    Auth
 }
 
 type Http struct {
@@ -47,7 +48,10 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Authentication
 	authorized := r.Group("/")
-	if config.Auth.Username != "" && config.Auth.Password != "" {
+	if config.Auth.Username != "" || config.Auth.Password != "" {
+		util.Assert(config.Auth.Username != "", "http basic auth username is required")
+		util.Assert(config.Auth.Password != "", "http basic auth password is required")
+
 		accounts := gin.Accounts{
 			config.Auth.Username: config.Auth.Password,
 		}
