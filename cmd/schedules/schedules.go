@@ -12,12 +12,23 @@ import (
 )
 
 func NewCmd(c client.ResonateClient) *cobra.Command {
+	var (
+		username string
+		password string
+	)
+
 	cmd := &cobra.Command{
 		Use:     "schedules",
 		Aliases: []string{"schedule"},
 		Short:   "Manage durable schedules",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
+		},
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Set basic auth if provided
+			if username != "" || password != "" {
+				c.SetBasicAuth(username, password)
+			}
 		},
 	}
 
@@ -26,6 +37,10 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	cmd.AddCommand(SearchSchedulesCmd(c))
 	cmd.AddCommand(CreateScheduleCmd(c))
 	cmd.AddCommand(DeleteScheduleCmd(c))
+
+	// Flags
+	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "Basic auth username")
+	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "Basic auth password")
 
 	return cmd
 }
