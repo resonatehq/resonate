@@ -3,6 +3,7 @@ import { Base64Encoder } from "../encoders/base64";
 import { ErrorCodes, ResonateError } from "../errors";
 import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
+import { StoreOptions } from "../options";
 import {
   DurablePromise,
   PendingPromise,
@@ -15,31 +16,106 @@ import {
 } from "../promises/types";
 import { Schedule, isSchedule } from "../schedules/types";
 import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
+import * as utils from "../utils";
 
 export class RemoteStore implements IStore {
-  public promises: RemotePromiseStore;
-  public schedules: RemoteScheduleStore;
-  public locks: RemoteLockStore;
+  private readonly headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+
+  public readonly promises: RemotePromiseStore;
+  public readonly schedules: RemoteScheduleStore;
+  public readonly locks: RemoteLockStore;
+
+  public readonly encoder: IEncoder<string, string>;
+  public readonly heartbeat: number;
+  public readonly logger: ILogger;
+  public readonly pid: string;
+  public readonly retries: number;
 
   constructor(
-    url: string,
-    pid: string,
-    logger: ILogger = new Logger(),
-    encoder: IEncoder<string, string> = new Base64Encoder(),
-    heartbeatFrequency?: number,
+    public readonly url: string,
+    opts: Partial<StoreOptions> = {},
   ) {
-    this.promises = new RemotePromiseStore(url, logger, encoder);
-    this.schedules = new RemoteScheduleStore(url, logger, encoder);
-    this.locks = new RemoteLockStore(url, pid, logger, heartbeatFrequency);
+    // store components
+    this.promises = new RemotePromiseStore(this);
+    this.schedules = new RemoteScheduleStore(this);
+    this.locks = new RemoteLockStore(this);
+
+    // store options
+    this.encoder = opts.encoder ?? new Base64Encoder();
+    this.logger = opts.logger ?? new Logger();
+    this.heartbeat = opts.heartbeat ?? 15000;
+    this.pid = opts.pid ?? utils.randomId();
+    this.retries = opts.retries ?? 2;
+
+    // auth
+    if (opts.auth?.basic) {
+      this.headers["Authorization"] = `Basic ${btoa(`${opts.auth.basic.username}:${opts.auth.basic.password}`)}`;
+    }
+  }
+
+  async call<T>(path: string, guard: (b: unknown) => b is T, options: RequestInit): Promise<T> {
+    let error: unknown;
+
+    // add auth headers
+    options.headers = { ...this.headers, ...options.headers };
+
+    for (let i = 0; i < this.retries + 1; i++) {
+      try {
+        this.logger.debug("store:req", {
+          url: this.url,
+          method: options.method,
+          headers: options.headers,
+          body: options.body,
+        });
+
+        const r = await fetch(`${this.url}/${path}`, options);
+        const body: unknown = r.status !== 204 ? await r.json() : undefined;
+
+        this.logger.debug("store:res", {
+          status: r.status,
+          body: body,
+        });
+
+        if (!r.ok) {
+          switch (r.status) {
+            case 400:
+              throw new ResonateError("Invalid request", ErrorCodes.STORE_PAYLOAD, body);
+            case 401:
+              throw new ResonateError("Unauthorized request", ErrorCodes.STORE_UNAUTHORIZED, body);
+            case 403:
+              throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN, body);
+            case 404:
+              throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND, body);
+            case 409:
+              throw new ResonateError("Already exists", ErrorCodes.STORE_ALREADY_EXISTS, body);
+            default:
+              throw new ResonateError("Server error", ErrorCodes.STORE, body, true);
+          }
+        }
+
+        if (!guard(body)) {
+          throw new ResonateError("Invalid response", ErrorCodes.STORE_PAYLOAD, body);
+        }
+
+        return body;
+      } catch (e: unknown) {
+        if (e instanceof ResonateError && !e.retriable) {
+          throw e;
+        } else {
+          error = e;
+        }
+      }
+    }
+
+    throw ResonateError.fromError(error);
   }
 }
 
 export class RemotePromiseStore implements IPromiseStore {
-  constructor(
-    private url: string,
-    private logger: ILogger = new Logger(),
-    private encoder: IEncoder<string, string> = new Base64Encoder(),
-  ) {}
+  constructor(private store: RemoteStore) {}
 
   async create(
     id: string,
@@ -51,8 +127,6 @@ export class RemotePromiseStore implements IPromiseStore {
     tags: Record<string, string> | undefined,
   ): Promise<PendingPromise | CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise> {
     const reqHeaders: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
       Strict: JSON.stringify(strict),
     };
 
@@ -60,26 +134,21 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await call(
-      `${this.url}/promises`,
-      isDurablePromise,
-      {
-        method: "POST",
-        headers: reqHeaders,
-        body: JSON.stringify({
-          id: id,
-          param: {
-            headers: headers,
-            data: data ? encode(data, this.encoder) : undefined,
-          },
-          timeout: timeout,
-          tags: tags,
-        }),
-      },
-      this.logger,
-    );
+    const promise = await this.store.call("promises", isDurablePromise, {
+      method: "POST",
+      headers: reqHeaders,
+      body: JSON.stringify({
+        id: id,
+        param: {
+          headers: headers,
+          data: data ? encode(data, this.store.encoder) : undefined,
+        },
+        timeout: timeout,
+        tags: tags,
+      }),
+    });
 
-    return decode(promise, this.encoder);
+    return decode(promise, this.store.encoder);
   }
 
   async cancel(
@@ -90,8 +159,6 @@ export class RemotePromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     const reqHeaders: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
       Strict: JSON.stringify(strict),
     };
 
@@ -99,24 +166,19 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await call(
-      `${this.url}/promises/${id}`,
-      isCompletedPromise,
-      {
-        method: "PATCH",
-        headers: reqHeaders,
-        body: JSON.stringify({
-          state: "REJECTED_CANCELED",
-          value: {
-            headers: headers,
-            data: data ? encode(data, this.encoder) : undefined,
-          },
-        }),
-      },
-      this.logger,
-    );
+    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
+      headers: reqHeaders,
+      body: JSON.stringify({
+        state: "REJECTED_CANCELED",
+        value: {
+          headers: headers,
+          data: data ? encode(data, this.store.encoder) : undefined,
+        },
+      }),
+    });
 
-    return decode(promise, this.encoder);
+    return decode(promise, this.store.encoder);
   }
 
   async resolve(
@@ -127,8 +189,6 @@ export class RemotePromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     const reqHeaders: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
       Strict: JSON.stringify(strict),
     };
 
@@ -136,24 +196,19 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await call(
-      `${this.url}/promises/${id}`,
-      isCompletedPromise,
-      {
-        method: "PATCH",
-        headers: reqHeaders,
-        body: JSON.stringify({
-          state: "RESOLVED",
-          value: {
-            headers: headers,
-            data: data ? encode(data, this.encoder) : undefined,
-          },
-        }),
-      },
-      this.logger,
-    );
+    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
+      headers: reqHeaders,
+      body: JSON.stringify({
+        state: "RESOLVED",
+        value: {
+          headers: headers,
+          data: data ? encode(data, this.store.encoder) : undefined,
+        },
+      }),
+    });
 
-    return decode(promise, this.encoder);
+    return decode(promise, this.store.encoder);
   }
 
   async reject(
@@ -164,8 +219,6 @@ export class RemotePromiseStore implements IPromiseStore {
     data: string | undefined,
   ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
     const reqHeaders: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
       Strict: JSON.stringify(strict),
     };
 
@@ -173,41 +226,27 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await call(
-      `${this.url}/promises/${id}`,
-      isCompletedPromise,
-      {
-        method: "PATCH",
-        headers: reqHeaders,
-        body: JSON.stringify({
-          state: "REJECTED",
-          value: {
-            headers: headers,
-            data: data ? encode(data, this.encoder) : undefined,
-          },
-        }),
-      },
-      this.logger,
-    );
+    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+      method: "PATCH",
+      headers: reqHeaders,
+      body: JSON.stringify({
+        state: "REJECTED",
+        value: {
+          headers: headers,
+          data: data ? encode(data, this.store.encoder) : undefined,
+        },
+      }),
+    });
 
-    return decode(promise, this.encoder);
+    return decode(promise, this.store.encoder);
   }
 
   async get(id: string): Promise<DurablePromise> {
-    const promise = await call(
-      `${this.url}/promises/${id}`,
-      isDurablePromise,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      },
-      this.logger,
-    );
+    const promise = await this.store.call(`promises/${id}`, isDurablePromise, {
+      method: "GET",
+    });
 
-    return decode(promise, this.encoder);
+    return decode(promise, this.store.encoder);
   }
 
   async *search(
@@ -237,34 +276,18 @@ export class RemotePromiseStore implements IPromiseStore {
         params.append("cursor", cursor);
       }
 
-      const url = new URL(`${this.url}/promises`);
-      url.search = params.toString();
-
-      const res = await call(
-        url.toString(),
-        isSearchPromiseResult,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-        },
-        this.logger,
-      );
+      const res = await this.store.call(`promises?${params.toString()}`, isSearchPromiseResult, {
+        method: "GET",
+      });
 
       cursor = res.cursor;
-      yield res.promises.map((p) => decode(p, this.encoder));
+      yield res.promises.map((p) => decode(p, this.store.encoder));
     }
   }
 }
 
 export class RemoteScheduleStore implements IScheduleStore {
-  constructor(
-    private url: string,
-    private logger: ILogger = new Logger(),
-    private encoder: IEncoder<string, string> = new Base64Encoder(),
-  ) {}
+  constructor(private store: RemoteStore) {}
 
   async create(
     id: string,
@@ -278,71 +301,45 @@ export class RemoteScheduleStore implements IScheduleStore {
     promiseData: string | undefined,
     promiseTags: Record<string, string> | undefined,
   ): Promise<Schedule> {
-    const reqHeaders: Record<string, string> = {
-      Accept: "application/json",
-      "Content-Type": "application/json",
-    };
+    const reqHeaders: Record<string, string> = {};
 
     if (ikey !== undefined) {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const schedule = call<Schedule>(
-      `${this.url}/schedules`,
-      isSchedule,
-      {
-        method: "POST",
-        headers: reqHeaders,
-        body: JSON.stringify({
-          id,
-          description,
-          cron,
-          tags,
-          promiseId,
-          promiseTimeout,
-          promiseParam: {
-            headers: promiseHeaders,
-            data: promiseData ? encode(promiseData, this.encoder) : undefined,
-          },
-          promiseTags,
-        }),
-      },
-      this.logger,
-    );
+    const schedule = this.store.call<Schedule>(`schedules`, isSchedule, {
+      method: "POST",
+      headers: reqHeaders,
+      body: JSON.stringify({
+        id,
+        description,
+        cron,
+        tags,
+        promiseId,
+        promiseTimeout,
+        promiseParam: {
+          headers: promiseHeaders,
+          data: promiseData ? encode(promiseData, this.store.encoder) : undefined,
+        },
+        promiseTags,
+      }),
+    });
 
     return schedule;
   }
 
   async get(id: string): Promise<Schedule> {
-    const schedule = call(
-      `${this.url}/schedules/${id}`,
-      isSchedule,
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      },
-      this.logger,
-    );
+    const schedule = this.store.call(`schedules/${id}`, isSchedule, {
+      method: "GET",
+    });
 
     return schedule;
   }
 
   async delete(id: string): Promise<void> {
-    await call(
-      `${this.url}/schedules/${id}`,
-      (b: unknown): b is any => true,
-      {
-        method: "DELETE",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-      },
-      this.logger,
-    );
+    await this.store.call(`schedules/${id}`, (b: unknown): b is any => true, {
+      method: "DELETE",
+    });
   }
 
   async *search(
@@ -367,21 +364,9 @@ export class RemoteScheduleStore implements IScheduleStore {
         params.append("cursor", cursor);
       }
 
-      const url = new URL(`${this.url}/schedules`);
-      url.search = params.toString();
-
-      const res = await call(
-        url.toString(),
-        isSearchSchedulesResult,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-        },
-        this.logger,
-      );
+      const res = await this.store.call(`schedules?${params.toString()}`, isSearchSchedulesResult, {
+        method: "GET",
+      });
 
       cursor = res.cursor;
       yield res.schedules;
@@ -393,35 +378,25 @@ export class RemoteLockStore implements ILockStore {
   private heartbeatInterval: number | null = null;
   private locksHeld: number = 0;
 
-  constructor(
-    private url: string,
-    private pid: string,
-    private logger: ILogger = new Logger(),
-    private heartbeatFrequency: number = 15000,
-  ) {}
+  constructor(private store: RemoteStore) {}
 
   async tryAcquire(
     resourceId: string,
     executionId: string,
-    expiry: number = this.heartbeatFrequency * 4,
+    expiry: number = this.store.heartbeat * 4,
   ): Promise<boolean> {
     // lock expiry cannot be less than heartbeat frequency
-    expiry = Math.max(expiry, this.heartbeatFrequency);
+    expiry = Math.max(expiry, this.store.heartbeat);
 
-    await call<boolean>(
-      `${this.url}/locks/acquire`,
-      (b: unknown): b is any => true,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          resourceId: resourceId,
-          processId: this.pid,
-          executionId: executionId,
-          expiryInMilliseconds: expiry,
-        }),
-      },
-      this.logger,
-    );
+    await this.store.call<boolean>(`locks/acquire`, (b: unknown): b is any => true, {
+      method: "POST",
+      body: JSON.stringify({
+        resourceId: resourceId,
+        processId: this.store.pid,
+        executionId: executionId,
+        expiryInMilliseconds: expiry,
+      }),
+    });
 
     // increment the number of locks held
     this.locksHeld++;
@@ -433,21 +408,13 @@ export class RemoteLockStore implements ILockStore {
   }
 
   async release(resourceId: string, executionId: string): Promise<boolean> {
-    await call<void>(
-      `${this.url}/locks/release`,
-      (b: unknown): b is void => b === undefined,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          resourceId,
-          executionId,
-        }),
-      },
-      this.logger,
-    );
+    await this.store.call<void>(`locks/release`, (b: unknown): b is void => b === undefined, {
+      method: "POST",
+      body: JSON.stringify({
+        resourceId,
+        executionId,
+      }),
+    });
 
     // decrement the number of locks held
     this.locksHeld = Math.max(this.locksHeld - 1, 0);
@@ -462,7 +429,7 @@ export class RemoteLockStore implements ILockStore {
   private startHeartbeat(): void {
     if (this.heartbeatInterval === null) {
       // the + converts to a number
-      this.heartbeatInterval = +setInterval(() => this.heartbeat(), this.heartbeatFrequency);
+      this.heartbeatInterval = +setInterval(() => this.heartbeat(), this.store.heartbeat);
     }
   }
 
@@ -474,20 +441,16 @@ export class RemoteLockStore implements ILockStore {
   }
 
   private async heartbeat() {
-    const res = await call<{ locksAffected: number }>(
-      `${this.url}/locks/heartbeat`,
+    const res = await this.store.call<{ locksAffected: number }>(
+      `locks/heartbeat`,
       (b: unknown): b is { locksAffected: number } =>
         typeof b === "object" && b !== null && "locksAffected" in b && typeof b.locksAffected === "number",
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
         body: JSON.stringify({
-          processId: this.pid,
+          processId: this.store.pid,
         }),
       },
-      this.logger,
     );
 
     // set the number of locks held
@@ -500,64 +463,6 @@ export class RemoteLockStore implements ILockStore {
 }
 
 // Utils
-
-async function call<T>(
-  url: string,
-  guard: (b: unknown) => b is T,
-  options: RequestInit,
-  logger: ILogger,
-  retries: number = 3,
-): Promise<T> {
-  let error: unknown;
-
-  for (let i = 0; i < retries; i++) {
-    try {
-      logger.debug("store:req", {
-        method: options.method,
-        url: url,
-        headers: options.headers,
-        body: options.body,
-      });
-
-      const r = await fetch(url, options);
-      const body: unknown = r.status !== 204 ? await r.json() : undefined;
-
-      logger.debug("store:res", {
-        status: r.status,
-        body: body,
-      });
-
-      if (!r.ok) {
-        switch (r.status) {
-          case 400:
-            throw new ResonateError("Invalid request", ErrorCodes.STORE_PAYLOAD, body);
-          case 403:
-            throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN, body);
-          case 404:
-            throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND, body);
-          case 409:
-            throw new ResonateError("Already exists", ErrorCodes.STORE_ALREADY_EXISTS, body);
-          default:
-            throw new ResonateError("Server error", ErrorCodes.STORE, body, true);
-        }
-      }
-
-      if (!guard(body)) {
-        throw new ResonateError("Invalid response", ErrorCodes.STORE_PAYLOAD, body);
-      }
-
-      return body;
-    } catch (e: unknown) {
-      if (e instanceof ResonateError && !e.retriable) {
-        throw e;
-      } else {
-        error = e;
-      }
-    }
-  }
-
-  throw ResonateError.fromError(error);
-}
 
 function encode(value: string, encoder: IEncoder<string, string>): string {
   try {

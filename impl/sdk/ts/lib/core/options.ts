@@ -8,11 +8,21 @@ import { IStore } from "./store";
  */
 export type ResonateOptions = {
   /**
+   * Store authentication options.
+   */
+  auth: AuthOptions;
+
+  /**
    * An encoder instance used for encoding and decoding values
    * returned (or thrown) by registered functions. If not provided,
    * a default JSON encoder will be used.
    */
   encoder: IEncoder<unknown, string | undefined>;
+
+  /**
+   * The frequency in ms to heartbeat locks.
+   */
+  heartbeat: number;
 
   /**
    * A process id that can be used to uniquely identify this Resonate
@@ -43,8 +53,8 @@ export type ResonateOptions = {
   tags: Record<string, string>;
 
   /**
-   * A store instance, if provided this will take precedence over a
-   * remote store.
+   * A store instance, if provided will take predence over the
+   * default store.
    */
   store: IStore;
 
@@ -124,3 +134,48 @@ export type PartialOptions = Partial<Options> & { __resonate: true };
 export function isOptions(o: unknown): o is PartialOptions {
   return typeof o === "object" && o !== null && (o as PartialOptions).__resonate === true;
 }
+
+export type StoreOptions = {
+  /**
+   * The store authentication options.
+   */
+  auth: AuthOptions;
+
+  /**
+   * The store encoder, defaults to a base64 encoder.
+   */
+  encoder: IEncoder<string, string>;
+
+  /**
+   * The frequency in ms to heartbeat locks.
+   */
+  heartbeat: number;
+
+  /**
+   * A logger instance, if not provided a default logger will be
+   * used.
+   */
+  logger: ILogger;
+
+  /**
+   * A process id that can be used to uniquely identify this Resonate
+   * instance. If not provided a default value will be generated.
+   */
+  pid: string;
+
+  /**
+   * Number of retries to attempt before throwing an error. If not
+   * provided, a default value will be used.
+   */
+  retries: number;
+};
+
+export type AuthOptions = {
+  /**
+   * Basic auth credentials.
+   */
+  basic: {
+    password: string;
+    username: string;
+  };
+};

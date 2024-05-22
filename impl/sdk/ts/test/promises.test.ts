@@ -1,20 +1,19 @@
 import { jest, describe, test, expect } from "@jest/globals";
 
-import { WithTimeout } from "../lib/core/storages/withTimeout";
-import { IPromiseStore } from "../lib/core/store";
-import { LocalPromiseStore } from "../lib/core/stores/local";
-import { RemotePromiseStore } from "../lib/core/stores/remote";
+import { IStore } from "../lib/core/store";
+import { LocalStore } from "../lib/core/stores/local";
+import { RemoteStore } from "../lib/core/stores/remote";
 
 jest.setTimeout(10000);
 
 describe("Store: Promise", () => {
-  const stores: IPromiseStore[] = [new LocalPromiseStore(new WithTimeout())];
+  const stores: IStore[] = [new LocalStore()];
 
   if (process.env.RESONATE_STORE_URL) {
-    stores.push(new RemotePromiseStore(process.env.RESONATE_STORE_URL));
+    stores.push(new RemoteStore(process.env.RESONATE_STORE_URL));
   }
 
-  for (const store of stores) {
+  for (const store of stores.map((s) => s.promises)) {
     describe(store.constructor.name, () => {
       test("Promise Store: Get promise that exists", async () => {
         const promiseId = "existing-promise";

@@ -1,19 +1,19 @@
 import { describe, test, expect, jest } from "@jest/globals";
 import { Schedule } from "../lib/core/schedules/types";
-import { IScheduleStore } from "../lib/core/store";
-import { LocalScheduleStore } from "../lib/core/stores/local";
-import { RemoteScheduleStore } from "../lib/core/stores/remote";
+import { IStore } from "../lib/core/store";
+import { LocalStore } from "../lib/core/stores/local";
+import { RemoteStore } from "../lib/core/stores/remote";
 
 jest.setTimeout(10000);
 
 describe("Store: Schedules", () => {
-  const stores: IScheduleStore[] = [new LocalScheduleStore()];
+  const stores: IStore[] = [new LocalStore()];
 
   if (process.env.RESONATE_STORE_URL) {
-    stores.push(new RemoteScheduleStore(process.env.RESONATE_STORE_URL));
+    stores.push(new RemoteStore(process.env.RESONATE_STORE_URL));
   }
 
-  for (const store of stores) {
+  for (const store of stores.map((s) => s.schedules)) {
     describe(store.constructor.name, () => {
       test("Schedule Store: Create schedule", async () => {
         const scheduleId = "new-schedule";
