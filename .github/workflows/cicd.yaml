@@ -64,12 +64,14 @@ jobs:
           
   check-postgres: 
     runs-on: ubuntu-22.04
+    
     env:
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
+      
     services:
       postgres:
         image: postgres:15
@@ -84,6 +86,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
+          
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -94,7 +97,7 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Not using nix here as a workout around to the postgres dependency. 
+      # Intentionally not using nix here as a workout around to the postgres dependency. 
       - name: Run go test and generate coverage report
         run: |
           go test -v -coverprofile=coverage.out -coverpkg=./... ./...
