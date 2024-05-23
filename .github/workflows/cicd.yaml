@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  checks:
+  check-default:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -61,8 +61,49 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
+          
+  check-postgres: 
+    runs-on: ubuntu-22.04
+    env:
+      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
+      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
+      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
+      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
+      TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ env.TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE }}
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
 
-  test:
+      - name: Check Nixpkgs input
+        uses: DeterminateSystems/flake-checker-action@v7
+  
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v11
+  
+      - name: Run go test and generate coverage report
+        run: |
+          nix develop --command \
+            go test \
+              -v \
+              -coverprofile=coverage.out \
+              -coverpkg=./... \
+              ./...
+
+  check-linearizability:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -99,7 +140,7 @@ jobs:
   scan:
     name: semgrep
     runs-on: ubuntu-20.04
-    needs: [test]
+    needs: [check-default, check-postgres, check-linearizability]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
     if: (github.actor != 'dependabot[bot]')
