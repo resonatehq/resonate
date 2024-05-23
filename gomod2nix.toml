@@ -104,8 +104,8 @@ schema = 3
     version = "v1.0.1-0.20181226105442-5d4384ee4fb2"
     hash = "sha256-XA4Oj1gdmdV/F/+8kMI+DBxKPthZ768hbKsO3d9Gx90="
   [mod."github.com/prometheus/client_golang"]
-    version = "v1.19.0"
-    hash = "sha256-YV8sxMPR+xorTUCriTfcFsaV2b7PZfPJDQmOgUYOZJo="
+    version = "v1.19.1"
+    hash = "sha256-MSLsMDi89uQc7Pa2fhqeamyfPJpenGj3r+eB/UotK7w="
   [mod."github.com/prometheus/client_model"]
     version = "v0.5.0"
     hash = "sha256-/sXlngf8AoEIeLIiaLg6Y7uYPVq7tI0qnLt0mUyKid4="
