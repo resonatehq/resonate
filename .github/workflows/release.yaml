@@ -12,12 +12,17 @@ permissions:
   packages: write
 
 jobs:
+  check-version:
+    uses: ./.github/workflows/release_check_version.yaml
+
   publish-github-image:
+    needs: [check-version]
     uses: ./.github/workflows/release_publish_github_image.yaml
     with:
       tag: ${{ github.ref_name }}
 
   publish-github-artifacts:
+    needs: [check-version]
     uses: ./.github/workflows/release_publish_github_artifacts.yaml
     with:
       tag: ${{ github.ref_name }}
