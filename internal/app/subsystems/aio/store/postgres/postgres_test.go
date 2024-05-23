@@ -26,6 +26,7 @@ func TestPostgresStore(t *testing.T) {
 			Username:  username,
 			Password:  password,
 			Database:  database,
+			Query:     map[string]string{"sslmode": "disable"},
 			TxTimeout: 250 * time.Millisecond,
 		}, 1)
 		if err != nil {
