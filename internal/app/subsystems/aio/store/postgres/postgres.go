@@ -188,7 +188,8 @@ const (
 		state = CASE
 					WHEN tags ->> 'resonate:timeout' IS NOT NULL AND tags ->> 'resonate:timeout' = 'true' THEN 2 
 					ELSE 16
-				END
+				END,
+		completed_on = timeout
 	WHERE
 		state = 1 AND timeout <= $1`
 
