@@ -6,7 +6,7 @@ name: Update gomod2nix.toml upon Dependabot changes to Go dependencies
 on:
   push:
     branches:
-      - "dependabot/go_modules/*"
+      - "dependabot/go_modules/**"
 
 jobs:
   update_gomod2nix_toml_file:
@@ -18,22 +18,22 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v11
-      
+
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v6
-      
+
       - name: Update gomod2nix.toml (if go.mod has changed)
         run: |
           nix develop --command gomod2nix
-      
+
       - name: Set up Git config
         run: |
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-      
+
       - name: Commit changes
         run: |
           git add .
