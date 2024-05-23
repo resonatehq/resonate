@@ -93,7 +93,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: false
-  
+
+      # Not using nix here as a workout around to the postgres dependency. 
       - name: Run go test and generate coverage report
         run: |
           go test -v -coverprofile=coverage.out -coverpkg=./... ./...
