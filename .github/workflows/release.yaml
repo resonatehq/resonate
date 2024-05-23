@@ -13,40 +13,7 @@ permissions:
 
 jobs:
   check-version:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v11
-
-      - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v6
-
-      - name: Build Resonate binary
-        run: |
-          # Build resonate binary
-          nix build ".#resonate"
-
-          # Copy into root
-          cp ./result/bin/resonate resonate
-
-      - name: Check version
-        env:
-          GITHUB_REF_VERSION: ${{ github.ref_name }}
-        run: |
-          # Extract resonate version
-          RESONATE_VERSION=$(./resonate -v | awk '{print $3}')
-          RESONATE_VERSION="v${RESONATE_VERSION}"
-
-          # Compare versions
-          if [ "$RESONATE_VERSION" != "$GITHUB_REF_VERSION" ]; then
-            echo "Version mismatch: resonate version ($RESONATE_VERSION) does not match GitHub ref ($GITHUB_REF_VERSION)"
-            exit 1
-          else
-            echo "Version match: resonate version ($RESONATE_VERSION) matches GitHub ref ($GITHUB_REF_VERSION)"
-          fi
+    uses: ./.github/workflows/release_check_version.yaml
 
   publish-github-image:
     needs: [check-version]
