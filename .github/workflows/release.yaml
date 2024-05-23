@@ -34,7 +34,7 @@ jobs:
 
       - name: Check version
         env:
-          GITHUB_REF: ${{ github.ref_name }}
+          GITHUB_REF_VERSION: ${{ github.ref_name }}
         run: |
           # Extract resonate version
           RESONATE_VERSION=$(./resonate -v | awk '{print $3}')
