@@ -82,27 +82,21 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-          --network host  # Add this line to use the host's network
         ports:
           - 5432:5432
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check Nixpkgs input
-        uses: DeterminateSystems/flake-checker-action@v7
-  
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v11
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
   
       - name: Run go test and generate coverage report
         run: |
-          nix develop --command \
-            go test \
-              -v \
-              -coverprofile=coverage.out \
-              -coverpkg=./... \
-              ./...
+          go test -v -coverprofile=coverage.out -coverpkg=./... ./...
 
   check-linearizability:
     runs-on: ubuntu-22.04
