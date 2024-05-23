@@ -2,12 +2,12 @@ package dst
 
 import (
 	"fmt"
-	"log/slog"
 	"math/rand" // nosemgrep
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -20,6 +20,7 @@ type DST struct {
 
 type Config struct {
 	Scenario           *Scenario
+	TaskQueue          chan *queuing.ConnectionSubmissionDST
 	Ticks              int64
 	TimeElapsedPerTick int64
 	Reqs               func() int
@@ -66,7 +67,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 	generator := NewGenerator(r, d.config)
 
 	// model
-	model := NewModel(d.config.Scenario)
+	model := NewModel(d.config.Scenario, d.config.TaskQueue)
 
 	// add req/res
 	for _, req := range reqs {
@@ -155,7 +156,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					// slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 

@@ -29,7 +29,7 @@ import (
 func RunDSTCmd() *cobra.Command {
 	var (
 		seed            int64
-		ticks           int64
+		ticks           int64 // make hire...
 		scenario        string
 		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 1000}
 		ids             = util.RangeIntFlag{Min: 1, Max: 1000}
@@ -113,6 +113,9 @@ func RunDSTCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			reqsPerTickSize := reqsPerTick.Resolve(r)
+			config.AIO.Subsystems.QueuingDST.Config.Queue = make(chan *queuing.ConnectionSubmissionDST, reqsPerTickSize)
 			queuing, err := queuing.NewDST(config.AIO.Subsystems.QueuingDST.Config, rand.New(rand.NewSource(r.Int63())))
 			if err != nil {
 				return err
@@ -191,10 +194,11 @@ func RunDSTCmd() *cobra.Command {
 
 			dst := dst.New(&dst.Config{
 				Scenario:           dstScenario,
+				TaskQueue:          config.AIO.Subsystems.QueuingDST.Config.Queue,
 				Ticks:              ticks,
 				TimeElapsedPerTick: 50_000, // milliseconds
 				Reqs: func() int {
-					return reqsPerTick.Resolve(r)
+					return reqsPerTickSize
 				},
 				Ids:             ids.Resolve(r),
 				IdempotencyKeys: idempotencyKeys.Resolve(r),
