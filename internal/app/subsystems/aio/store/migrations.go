@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type migration struct {
@@ -16,20 +18,70 @@ type migration struct {
 	Content []byte
 }
 
-func ReadVersion(db *sql.DB) (int, error) {
+func Start(db *sql.DB, txTimeout time.Duration, migrationsFS embed.FS) error {
+	currentVersion, err := readVersion(db)
+	if err != nil {
+		return err
+	}
+
+	migrationsToApply, err := readMigrations(migrationsFS, currentVersion)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), txTimeout)
+	defer cancel()
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			if rbErr := tx.Rollback(); rbErr != nil {
+				err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
+			}
+		}
+	}()
+
+	for _, m := range migrationsToApply {
+		_, err = tx.Exec(string(m.Content))
+		if err != nil {
+			return fmt.Errorf("failed to execute migration version %d: %w", m.Version, err)
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func readVersion(db *sql.DB) (int, error) {
 	var version int
 	err := db.QueryRow("SELECT id FROM migrations").Scan(&version)
 	if err != nil {
-		if strings.Contains(err.Error(), "no such table") {
+		if isTableNotFoundError(err) {
 			return -1, nil
 		}
 		return 0, err
 	}
-
 	return version, nil
 }
 
-func ReadMigrations(migrationsFS embed.FS, currentVersion int) ([]migration, error) {
+// db.QueryRow does not return a specific error type when the table does
+// not exist so we need to check the error message.
+func isTableNotFoundError(err error) bool {
+	errStr := err.Error()
+	if strings.Contains(errStr, "no such table") || strings.Contains(errStr, "does not exist") {
+		return true
+	}
+	return false
+}
+
+func readMigrations(migrationsFS embed.FS, currentVersion int) ([]migration, error) {
 	migrations := []migration{}
 
 	entries, err := migrationsFS.ReadDir("migrations")

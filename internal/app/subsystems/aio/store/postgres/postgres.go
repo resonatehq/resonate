@@ -369,44 +369,7 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
-	currentVersion, err := store.ReadVersion(s.db)
-	if err != nil {
-		return err
-	}
-
-	migrationsToApply, err := store.ReadMigrations(migrationsFS, currentVersion)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.config.TxTimeout)
-	defer cancel()
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		if err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
-			}
-		}
-	}()
-
-	for _, m := range migrationsToApply {
-		_, err = tx.Exec(string(m.Content))
-		if err != nil {
-			return fmt.Errorf("failed to execute migration version %d: %w", m.Version, err)
-		}
-	}
-
-	if err = tx.Commit(); err != nil {
-		return err
-	}
-
-	return nil
+	return store.Start(s.db, s.config.TxTimeout, migrationsFS)
 }
 
 func (s *PostgresStore) Stop() error {
