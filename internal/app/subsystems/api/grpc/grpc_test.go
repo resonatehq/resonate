@@ -45,7 +45,7 @@ func setup() (*grpcTest, error) {
 	go subsystem.Start(errors)
 	time.Sleep(100 * time.Millisecond)
 
-	conn, err := grpc.Dial("127.0.0.1:5555", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("127.0.0.1:5555", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
