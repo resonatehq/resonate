@@ -43,6 +43,8 @@ func Start(db *sql.DB, txTimeout time.Duration, migrationsFS embed.FS) error {
 				err = fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 			}
 		}
+
+		err = fmt.Errorf("tx failed, performed a rollback: %v", err)
 	}()
 
 	for _, m := range migrationsToApply {
