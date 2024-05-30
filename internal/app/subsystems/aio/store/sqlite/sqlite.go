@@ -311,6 +311,7 @@ type Config struct {
 	Path      string
 	TxTimeout time.Duration
 	Reset     bool
+	Plan      store.Plan
 }
 
 type SqliteStore struct {
@@ -339,7 +340,7 @@ func (s *SqliteStore) String() string {
 }
 
 func (s *SqliteStore) Start() error {
-	return store.Start(s.db, s.config.TxTimeout, migrationsFS)
+	return store.Start(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *SqliteStore) Stop() error {

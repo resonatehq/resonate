@@ -28,6 +28,7 @@ func TestPostgresStore(t *testing.T) {
 			Database:  database,
 			Query:     map[string]string{"sslmode": "disable"},
 			TxTimeout: 250 * time.Millisecond,
+			//... here + the 2x dst run.go and dst_test.go
 		}, 1)
 		if err != nil {
 			t.Fatal(err)

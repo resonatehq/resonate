@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
@@ -133,6 +134,7 @@ const (
 
 type StoreConfig struct {
 	Kind     StoreKind
+	Plan     store.Plan
 	Sqlite   *sqlite.Config
 	Postgres *postgres.Config
 }

@@ -323,6 +323,7 @@ type Config struct {
 	Query     map[string]string
 	TxTimeout time.Duration
 	Reset     bool
+	Plan      store.Plan
 }
 
 type PostgresStore struct {
@@ -369,7 +370,7 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
-	return store.Start(s.db, s.config.TxTimeout, migrationsFS)
+	return store.Start(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *PostgresStore) Stop() error {
