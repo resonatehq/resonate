@@ -23,19 +23,19 @@ func TestDST(t *testing.T) {
 	test(t, &Scenario{Kind: Default})
 }
 
-// func TestDSTFaultInjection(t *testing.T) {
-// 	test(t, &Scenario{
-// 		Kind:           FaultInjection,
-// 		FaultInjection: &FaultInjectionScenario{P: 0.5},
-// 	})
-// }
+func TestDSTFaultInjection(t *testing.T) {
+	test(t, &Scenario{
+		Kind:           FaultInjection,
+		FaultInjection: &FaultInjectionScenario{P: 0.5},
+	})
+}
 
-// func TestDSTLazyTimeout(t *testing.T) {
-// 	test(t, &Scenario{
-// 		Kind:        LazyTimeout,
-// 		LazyTimeout: &LazyTimeoutScenario{},
-// 	})
-// }
+func TestDSTLazyTimeout(t *testing.T) {
+	test(t, &Scenario{
+		Kind:        LazyTimeout,
+		LazyTimeout: &LazyTimeoutScenario{},
+	})
+}
 
 func test(t *testing.T, scenario *Scenario) {
 	r := rand.New(rand.NewSource(0))

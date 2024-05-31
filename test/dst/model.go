@@ -182,7 +182,9 @@ func (m *Model) Step(reqTime int64, resTime int64, req *t_api.Request, res *t_ap
 		return fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind)
 	}
 
-	m.dequeue()
+	if err := m.dequeue(); err != nil {
+		return err
+	}
 
 	if f, ok := m.responses[req.Kind]; ok {
 		return f(reqTime, resTime, req, res)
@@ -191,14 +193,13 @@ func (m *Model) Step(reqTime int64, resTime int64, req *t_api.Request, res *t_ap
 	return nil
 }
 
-// 1) validate number of tasks enqueued are somewhat correct?
-func (m *Model) dequeue() {
+func (m *Model) dequeue() error {
 	for {
 		select {
 		case task, ok := <-m.taskQueue:
 			if !ok {
 				// queue closed
-				return
+				return nil
 			}
 
 			slog.Info("dequeue", "task", task)
@@ -206,7 +207,7 @@ func (m *Model) dequeue() {
 			submission := m.taskQueueSubmissions.Get(task.TaskId)
 			if submission.taskQueueSubmission == nil {
 				if task.Counter != 1 {
-					panic("unexpected counter-1")
+					return fmt.Errorf("unexpected counter %d, expected 1", task.Counter)
 				}
 				m.taskQueueSubmissions[task.TaskId] = &TaskQueueSubmissionModel{
 					id:                  task.TaskId,
@@ -215,10 +216,10 @@ func (m *Model) dequeue() {
 				continue
 			}
 			if submission.taskQueueSubmission.Counter >= task.Counter {
-				panic("unexpected counter-2")
+				return fmt.Errorf("unexpected counter %d, expected %d", submission.taskQueueSubmission.Counter, task.Counter)
 			}
 		default: // no more requests
-			return
+			return nil
 		}
 	}
 }

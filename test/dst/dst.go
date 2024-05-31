@@ -2,6 +2,7 @@ package dst
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand" // nosemgrep
 	"strconv"
 
@@ -156,7 +157,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 					if modelErr != nil {
 						errs = append(errs, modelErr)
 					}
-					// slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
 				},
 			})
 

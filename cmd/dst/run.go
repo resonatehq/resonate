@@ -29,7 +29,7 @@ import (
 func RunDSTCmd() *cobra.Command {
 	var (
 		seed            int64
-		ticks           int64 // make hire...
+		ticks           int64
 		scenario        string
 		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 1000}
 		ids             = util.RangeIntFlag{Min: 1, Max: 1000}
