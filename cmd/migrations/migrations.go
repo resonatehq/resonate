@@ -5,7 +5,7 @@ import (
 
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/spf13/cobra"
@@ -38,7 +38,7 @@ func NewCmd() *cobra.Command {
 				},
 				Config: &util.StoreConfig{
 					Kind: util.StoreKind(aioStore),
-					Plan: store.Apply,
+					Plan: migrations.Apply,
 					Sqlite: &sqlite.Config{
 						Path:      aioStoreSqlitePath,
 						TxTimeout: aioStoreSqliteTxTimeout,
@@ -56,7 +56,7 @@ func NewCmd() *cobra.Command {
 			}
 
 			if plan {
-				cfg.Config.Plan = store.DryRun
+				cfg.Config.Plan = migrations.DryRun
 			}
 
 			store, err := util.NewStore(cfg)

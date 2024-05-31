@@ -13,6 +13,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
@@ -28,8 +29,10 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-//go:embed migrations/*
-var migrationsFS embed.FS
+var (
+	//go:embed migrations/*
+	migrationsFS embed.FS
+)
 
 const (
 	PROMISE_SELECT_STATEMENT = `
@@ -311,7 +314,7 @@ type Config struct {
 	Path      string
 	TxTimeout time.Duration
 	Reset     bool
-	Plan      store.Plan
+	Plan      migrations.Plan
 }
 
 type SqliteStore struct {
@@ -340,7 +343,7 @@ func (s *SqliteStore) String() string {
 }
 
 func (s *SqliteStore) Start() error {
-	return store.Start(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	return migrations.Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *SqliteStore) Stop() error {

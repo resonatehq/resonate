@@ -13,6 +13,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
@@ -28,8 +29,10 @@ import (
 	_ "github.com/lib/pq"
 )
 
-//go:embed migrations/*
-var migrationsFS embed.FS
+var (
+	//go:embed migrations/*
+	migrationsFS embed.FS
+)
 
 const (
 	DROP_TABLE_STATEMENT = `
@@ -323,7 +326,7 @@ type Config struct {
 	Query     map[string]string
 	TxTimeout time.Duration
 	Reset     bool
-	Plan      store.Plan
+	Plan      migrations.Plan
 }
 
 type PostgresStore struct {
@@ -370,7 +373,8 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
-	return store.Start(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	// If needed, apply migrations
+	return migrations.Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *PostgresStore) Stop() error {

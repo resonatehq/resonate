@@ -1,4 +1,4 @@
-package store
+package migrations
 
 import (
 	"context"
@@ -38,7 +38,7 @@ func (m MigrationPlan) String() string {
 	return sb.String()
 }
 
-func Start(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embed.FS, plan Plan) error {
+func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embed.FS, plan Plan) error {
 	dbVersion, err := readVersion(db)
 	if err != nil {
 		return err

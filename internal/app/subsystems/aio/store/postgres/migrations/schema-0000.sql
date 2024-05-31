@@ -117,12 +117,3 @@ CREATE TABLE IF NOT EXISTS notifications (
     attempt      INTEGER,
     PRIMARY KEY(id, promise_id)
 );
-
--- CreateTable
-CREATE TABLE IF NOT EXISTS migrations (
-    id    INTEGER,
-    PRIMARY KEY(id) 
-);
-
---- CreateSchemaVersion 
-INSERT INTO migrations (id) VALUES (0) ON CONFLICT(id) DO NOTHING;
