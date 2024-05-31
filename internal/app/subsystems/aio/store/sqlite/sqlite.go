@@ -343,7 +343,7 @@ func (s *SqliteStore) String() string {
 }
 
 func (s *SqliteStore) Start() error {
-	return migrations.Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	return Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *SqliteStore) Stop() error {

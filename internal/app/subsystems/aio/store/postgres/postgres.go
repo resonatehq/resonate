@@ -374,7 +374,7 @@ func (s *PostgresStore) String() string {
 
 func (s *PostgresStore) Start() error {
 	// If needed, apply migrations
-	return migrations.Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	return Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *PostgresStore) Stop() error {
