@@ -35,6 +35,13 @@ var (
 )
 
 const (
+	CREATE_MIGRATIONS_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS migrations (
+		id    INTEGER,
+		PRIMARY KEY(id) 
+	);
+	`
+
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
 		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
@@ -343,7 +350,11 @@ func (s *SqliteStore) String() string {
 }
 
 func (s *SqliteStore) Start() error {
-	return Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	if _, err := s.db.Exec(CREATE_MIGRATIONS_TABLE_STATEMENT); err != nil {
+		return err
+	}
+
+	return Run(Version, s.db, 90*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *SqliteStore) Stop() error {

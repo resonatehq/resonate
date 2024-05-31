@@ -22,10 +22,13 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
 	// Check the database version again while holding the lock
-	dbVersion, err := migrations.ReadVersion(db)
+	var dbVersion int
+	dbVersion, err = migrations.ReadVersion(tx)
 	if err != nil {
 		return err
 	}
@@ -35,7 +38,10 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 
 	}
 	if currVersion == dbVersion {
-		return tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	// If the database version is -1, it means the migrations table does not exist.
@@ -47,18 +53,25 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 	case migrations.Default:
 		return fmt.Errorf("database version %d does not match current version %d please run `resonate migrate --plan` to see migrations needed", dbVersion, currVersion)
 	case migrations.DryRun:
-		plan, err := migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
+		var plan migrations.MigrationPlan
+		plan, err = migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Migrations to apply:")
 		fmt.Printf("Migrations to apply: %v", plan)
 	case migrations.Apply:
-		plan, err := migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
+		var plan migrations.MigrationPlan
+		plan, err = migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
 		if err != nil {
 			return err
 		}
-		return migrations.ApplyMigrationPlan(tx, plan, txTimeout)
+		if err = migrations.ApplyMigrationPlan(tx, plan); err != nil {
+			return err
+		}
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("invalid plan: %v", plan)
 	}

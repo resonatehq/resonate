@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type Plan int
@@ -39,11 +38,11 @@ func (m MigrationPlan) String() string {
 }
 
 // readVersion reads the current schema version from the database.
-func ReadVersion(db *sql.DB) (int, error) {
+func ReadVersion(tx *sql.Tx) (int, error) {
 	var version int
-	err := db.QueryRow("SELECT id FROM migrations").Scan(&version)
+	err := tx.QueryRow("SELECT id FROM migrations").Scan(&version)
 	if err != nil {
-		if isTableNotFoundError(err) {
+		if err == sql.ErrNoRows {
 			return -1, nil
 		}
 		return 0, err
@@ -87,18 +86,13 @@ func GenerateMigrationPlan(migrationsFS embed.FS, currentVersion int) (Migration
 }
 
 // applyMigrationPlan applies the migrations to the database as a single transaction.
-func ApplyMigrationPlan(tx *sql.Tx, plan MigrationPlan, txTimeout time.Duration) error {
+func ApplyMigrationPlan(tx *sql.Tx, plan MigrationPlan) error {
 	for _, m := range plan {
 		_, err := tx.Exec(string(m.Content))
 		if err != nil {
 			return fmt.Errorf("failed to execute migration version %d: %w", m.Version, err)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
 	return nil
 }
 

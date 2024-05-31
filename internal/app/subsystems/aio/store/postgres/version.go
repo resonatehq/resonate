@@ -18,29 +18,44 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 	defer cancel()
 
 	// Acquire a lock to check the database version.
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		_ = tx.Rollback()
+	}()
 
-	_, err = tx.ExecContext(ctx, "SELECT pg_advisory_lock(1)")
+	var lockAcquired bool
+	err = tx.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(1)").Scan(&lockAcquired)
 	if err != nil {
 		return err
 	}
-	defer tx.ExecContext(ctx, "SELECT pg_advisory_unlock(1)")
+	if !lockAcquired {
+		err = fmt.Errorf("could not acquire advisory lock")
+		return err
+	}
+	defer func() {
+		if _, unlockErr := tx.ExecContext(ctx, "SELECT pg_advisory_unlock(1)"); unlockErr != nil {
+			err = fmt.Errorf("%v; %v", err, unlockErr)
+		}
+	}()
 
 	// Check the database version again while holding the lock
-	dbVersion, err := migrations.ReadVersion(db)
+	var dbVersion int
+	dbVersion, err = migrations.ReadVersion(tx)
 	if err != nil {
 		return err
 	}
 
 	if currVersion < dbVersion {
-		return fmt.Errorf("current version %d is less than database version %d please updated to latest resonate release", currVersion, dbVersion)
-
+		err = fmt.Errorf("current version %d is less than database version %d please updated to latest resonate release", currVersion, dbVersion)
+		return err
 	}
 	if currVersion == dbVersion {
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 		return nil
 	}
 
@@ -53,18 +68,26 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 	case migrations.Default:
 		return fmt.Errorf("database version %d does not match current version %d please run `resonate migrate --plan` to see migrations needed", dbVersion, currVersion)
 	case migrations.DryRun:
-		plan, err := migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
+		var plan migrations.MigrationPlan
+		plan, err = migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
 		if err != nil {
 			return err
 		}
 		fmt.Println("Migrations to apply:")
 		fmt.Printf("Migrations to apply: %v", plan)
 	case migrations.Apply:
-		plan, err := migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
+		var plan migrations.MigrationPlan
+		plan, err = migrations.GenerateMigrationPlan(migrationsFS, dbVersion)
 		if err != nil {
 			return err
 		}
-		return migrations.ApplyMigrationPlan(tx, plan, txTimeout)
+		if err = migrations.ApplyMigrationPlan(tx, plan); err != nil {
+			return err
+		}
+
+		if err = tx.Commit(); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("invalid plan: %v", plan)
 	}

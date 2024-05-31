@@ -35,6 +35,11 @@ var (
 )
 
 const (
+	CREATE_MIGRATIONS_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS migrations (
+		id    INTEGER PRIMARY KEY
+	);
+	`
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE notifications;
 	DROP TABLE subscriptions;
@@ -373,8 +378,12 @@ func (s *PostgresStore) String() string {
 }
 
 func (s *PostgresStore) Start() error {
+	if _, err := s.db.Exec(CREATE_MIGRATIONS_TABLE_STATEMENT); err != nil {
+		return err
+	}
+
 	// If needed, apply migrations
-	return Run(Version, s.db, 10*time.Second, migrationsFS, s.config.Plan)
+	return Run(Version, s.db, 90*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *PostgresStore) Stop() error {
