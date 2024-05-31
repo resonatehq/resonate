@@ -11,7 +11,8 @@ import (
 
 type (
 	ConfigDST struct {
-		P float32
+		P     float32
+		Queue chan *ConnectionSubmissionDST
 	}
 
 	QueuingSubsystemDST struct {
@@ -22,6 +23,12 @@ type (
 	QueuingWorkerDST struct {
 		config *ConfigDST
 		r      *rand.Rand
+	}
+
+	ConnectionSubmissionDST struct {
+		Queue   string `json:"queue"`
+		TaskId  string `json:"taskid"`
+		Counter int    `json:"counter"`
 	}
 )
 
@@ -49,6 +56,7 @@ func (q *QueuingSubsystemDST) Start() error {
 }
 
 func (q *QueuingSubsystemDST) Stop() error {
+	close(q.config.Queue)
 	return nil
 }
 
@@ -68,6 +76,12 @@ func (w *QueuingWorkerDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 
 	for i, sqe := range sqes {
 		util.Assert(sqe.Submission.Queuing != nil, "submission must not be nil")
+
+		w.config.Queue <- &ConnectionSubmissionDST{
+			Queue:   "analytics",
+			TaskId:  sqe.Submission.Queuing.TaskId,
+			Counter: sqe.Submission.Queuing.Counter,
+		}
 
 		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
 			Metadata: sqe.Metadata,

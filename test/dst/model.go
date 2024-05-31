@@ -5,6 +5,7 @@ package dst
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 
@@ -21,13 +22,15 @@ import (
 // Model
 
 type Model struct {
-	scenario  *Scenario
-	promises  Promises
-	schedules Schedules
-	locks     Locks
-	tasks     Tasks
-	cursors   []*t_api.Request
-	responses map[t_api.Kind]ResponseValidator
+	scenario             *Scenario
+	promises             Promises
+	schedules            Schedules
+	locks                Locks
+	tasks                Tasks
+	taskQueueSubmissions TaskQueueSubmissions
+	cursors              []*t_api.Request
+	responses            map[t_api.Kind]ResponseValidator
+	taskQueue            chan *queuing.ConnectionSubmissionDST
 }
 
 type PromiseModel struct {
@@ -56,11 +59,17 @@ type TaskModel struct {
 	task *task.Task
 }
 
+type TaskQueueSubmissionModel struct {
+	id                  string
+	taskQueueSubmission *queuing.ConnectionSubmissionDST
+}
+
 type Promises map[string]*PromiseModel
 type Schedules map[string]*ScheduleModel
 type Subscriptions map[string]*SubscriptionModel
 type Locks map[string]*LockModel
 type Tasks map[string]*TaskModel
+type TaskQueueSubmissions map[string]*TaskQueueSubmissionModel
 type ResponseValidator func(int64, int64, *t_api.Request, *t_api.Response) error
 
 func (p Promises) Get(id string) *PromiseModel {
@@ -114,14 +123,26 @@ func (t Tasks) Get(id string) *TaskModel {
 	return t[id]
 }
 
-func NewModel(scenario *Scenario) *Model {
+func (t TaskQueueSubmissions) Get(id string) *TaskQueueSubmissionModel {
+	if _, ok := t[id]; !ok {
+		t[id] = &TaskQueueSubmissionModel{
+			id: id,
+		}
+	}
+
+	return t[id]
+}
+
+func NewModel(scenario *Scenario, queue chan *queuing.ConnectionSubmissionDST) *Model {
 	return &Model{
-		scenario:  scenario,
-		promises:  map[string]*PromiseModel{},
-		schedules: map[string]*ScheduleModel{},
-		locks:     map[string]*LockModel{},
-		tasks:     map[string]*TaskModel{},
-		responses: map[t_api.Kind]ResponseValidator{},
+		scenario:             scenario,
+		promises:             map[string]*PromiseModel{},
+		schedules:            map[string]*ScheduleModel{},
+		locks:                map[string]*LockModel{},
+		tasks:                map[string]*TaskModel{},
+		taskQueueSubmissions: map[string]*TaskQueueSubmissionModel{},
+		responses:            map[t_api.Kind]ResponseValidator{},
+		taskQueue:            queue,
 	}
 }
 
@@ -161,11 +182,46 @@ func (m *Model) Step(reqTime int64, resTime int64, req *t_api.Request, res *t_ap
 		return fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind)
 	}
 
+	if err := m.dequeue(); err != nil {
+		return err
+	}
+
 	if f, ok := m.responses[req.Kind]; ok {
 		return f(reqTime, resTime, req, res)
 	}
 
 	return nil
+}
+
+func (m *Model) dequeue() error {
+	for {
+		select {
+		case task, ok := <-m.taskQueue:
+			if !ok {
+				// queue closed
+				return nil
+			}
+
+			slog.Info("dequeue", "task", task)
+
+			submission := m.taskQueueSubmissions.Get(task.TaskId)
+			if submission.taskQueueSubmission == nil {
+				if task.Counter != 1 {
+					return fmt.Errorf("unexpected counter %d, expected 1", task.Counter)
+				}
+				m.taskQueueSubmissions[task.TaskId] = &TaskQueueSubmissionModel{
+					id:                  task.TaskId,
+					taskQueueSubmission: task,
+				}
+				continue
+			}
+			if submission.taskQueueSubmission.Counter >= task.Counter {
+				return fmt.Errorf("unexpected counter %d, expected %d", submission.taskQueueSubmission.Counter, task.Counter)
+			}
+		default: // no more requests
+			return nil
+		}
+	}
 }
 
 // PROMISES

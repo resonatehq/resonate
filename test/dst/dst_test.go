@@ -69,7 +69,10 @@ func test(t *testing.T, scenario *Scenario) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	queuing, err := queuing.NewDST(&queuing.ConfigDST{P: 0.5}, r)
+
+	reqsPerTickSize := 100
+	taskQueue := make(chan *queuing.ConnectionSubmissionDST, reqsPerTickSize)
+	queuing, err := queuing.NewDST(&queuing.ConfigDST{P: 0.5, Queue: taskQueue}, r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,9 +150,9 @@ func test(t *testing.T, scenario *Scenario) {
 	}
 
 	dst := New(&Config{
-		Ticks:              1000,
+		Ticks:              3_000,
 		TimeElapsedPerTick: 50_000, // milliseconds
-		Reqs:               func() int { return 100 },
+		Reqs:               func() int { return reqsPerTickSize },
 		Ids:                100,
 		IdempotencyKeys:    100,
 		Headers:            100,
@@ -158,6 +161,7 @@ func test(t *testing.T, scenario *Scenario) {
 		Urls:               100,
 		Retries:            100,
 		Scenario:           scenario,
+		TaskQueue:          taskQueue,
 	})
 
 	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
