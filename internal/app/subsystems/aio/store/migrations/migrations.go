@@ -96,17 +96,6 @@ func ApplyMigrationPlan(tx *sql.Tx, plan MigrationPlan) error {
 	return nil
 }
 
-// private
-
-// db.QueryRow does not return a specific error type when the table does not exist so we need to check the error message.
-func isTableNotFoundError(err error) bool {
-	errStr := err.Error()
-	if strings.Contains(errStr, "no such table") || strings.Contains(errStr, "does not exist") {
-		return true
-	}
-	return false
-}
-
 // filenameVersion extracts the version number from a migration filename.
 func migrationVersion(filename string) (int, error) {
 	re := regexp.MustCompile(`\d+`)
