@@ -30,6 +30,11 @@ func NewCmd() *cobra.Command {
 		Use:   "migrate",
 		Short: "Synchronizes the database state with the current set of models and migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			desiredPlan := migrations.Apply
+			if plan {
+				desiredPlan = migrations.DryRun
+			}
+
 			cfg := &util.AIOSubsystemConfig[util.StoreConfig]{
 				Subsystem: &aio.SubsystemConfig{
 					Size:      1,
@@ -38,10 +43,10 @@ func NewCmd() *cobra.Command {
 				},
 				Config: &util.StoreConfig{
 					Kind: util.StoreKind(aioStore),
-					Plan: migrations.Apply,
 					Sqlite: &sqlite.Config{
 						Path:      aioStoreSqlitePath,
 						TxTimeout: aioStoreSqliteTxTimeout,
+						Plan:      desiredPlan,
 					},
 					Postgres: &postgres.Config{
 						Host:      aioStorePostgresHost,
@@ -51,12 +56,9 @@ func NewCmd() *cobra.Command {
 						Database:  aioStorePostgresDatabase,
 						Query:     aioStorePostgresQuery,
 						TxTimeout: aioStorePostgresTxTimeout,
+						Plan:      desiredPlan,
 					},
 				},
-			}
-
-			if plan {
-				cfg.Config.Plan = migrations.DryRun
 			}
 
 			store, err := util.NewStore(cfg)
@@ -83,7 +85,7 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&aioStorePostgresDatabase, "aio-store-postgres-database", "resonate", "postgres database name")
 	cmd.Flags().StringToStringVar(&aioStorePostgresQuery, "aio-store-postgres-query", make(map[string]string, 0), "postgres query options")
 	cmd.Flags().DurationVar(&aioStorePostgresTxTimeout, "aio-store-postgres-tx-timeout", 10_000*time.Millisecond, "postgres transaction timeout")
-	cmd.Flags().BoolVarP(&plan, "plan", "p", true, "Dry run to check which migrations will be applied")
+	cmd.Flags().BoolVarP(&plan, "plan", "p", false, "Dry run to check which migrations will be applied")
 
 	return cmd
 }

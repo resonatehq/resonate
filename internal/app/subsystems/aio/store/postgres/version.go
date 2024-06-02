@@ -60,7 +60,7 @@ func Run(currVersion int, db *sql.DB, txTimeout time.Duration, migrationsFS embe
 	}
 
 	// If the database version is -1, it means the migrations table does not exist.
-	if dbVersion == -1 {
+	if dbVersion == -1 && plan != migrations.DryRun {
 		plan = migrations.Apply
 	}
 

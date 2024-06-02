@@ -29,10 +29,9 @@ type MigrationPlan []Migration
 
 func (m MigrationPlan) String() string {
 	var sb strings.Builder
-	sb.WriteString("Operations to perform:\n")
-	sb.WriteString("Apply all migrations:")
 	for _, migration := range m {
-		sb.WriteString(fmt.Sprintf(" %d", migration.Version))
+		sb.WriteString(fmt.Sprintf("migration-%d...\n", migration.Version))
+		sb.WriteString(string(migration.Content))
 	}
 	return sb.String()
 }
