@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import inspect
-from typing import Callable, Any, Tuple, Generator, NamedTuple, List, Union
+from collections.abc import Generator
+from typing import Any, Callable, NamedTuple, Union
 
 #####################################################################
 ## Classes
@@ -7,32 +10,32 @@ from typing import Callable, Any, Tuple, Generator, NamedTuple, List, Union
 
 
 class Promise:
-    def __init__(self):
+    def __init__(self) -> None:
         self.state = "pending"
         self.value = None
         self.error = None
 
-    def resolve(self, value: Any):
+    def resolve(self, value: Any) -> None:
         if self.state == "pending":
             self.state = "resolved"
             self.value = value
 
-    def reject(self, error: Exception):
+    def reject(self, error: Exception) -> None:
         if self.state == "pending":
             self.state = "rejected"
             self.error = error
 
-    def is_pending(self):
+    def is_pending(self) -> bool:
         return self.state == "pending"
 
-    def is_completed(self):
+    def is_completed(self) -> bool:
         return not self.is_pending()
 
 
 class Invocation:
     """Encapsulates a function call, potentially asynchronous, with its arguments."""
 
-    def __init__(self, func: Callable, *args: Any, **kwargs: Any):
+    def __init__(self, func: Callable, *args: Any, **kwargs: Any) -> None:
         self.func = func
         self.args = args
         self.kwargs = kwargs
@@ -75,24 +78,23 @@ class Awaiting(NamedTuple):
 
 
 class Scheduler:
-    def __init__(self):
-        self.runnable: List[Runnable] = []
-        self.awaiting: List[Awaiting] = []
+    def __init__(self) -> None:
+        self.runnable: list[Runnable] = []
+        self.awaiting: list[Awaiting] = []
 
-    def add(self, func: Callable, *args: Any, **kwargs: Any):
+    def add(self, func: Callable, *args: Any, **kwargs: Any) -> None:
         coro = func(*args, **kwargs)
         prom = Promise()
         next = Next(init=True)
         self.runnable = [Runnable(coro, next, prom)]
 
-    def dump(self):
-        print("runnable", self.runnable)
-        print("awaiting", self.awaiting)
+    def dump(self) -> None:
+        pass
 
     def run(self):
         while len(self.runnable) > 0:
             self.dump()
-            input("Press enter to continue")
+            # input("Press enter to continue")
 
             (coro, next, resv) = self.runnable.pop()
             (more, retv) = advance(coro, next)
@@ -141,7 +143,8 @@ class Scheduler:
                         prom.reject(e)
                         self.runnable.append(Runnable(coro, Next(value=e), resv))
                 else:
-                    assert False, "Coroutine must return Promise, Invocation, or Call."
+                    msg = "Coroutine must return Promise, Invocation, or Call."
+                    raise AssertionError(msg)
 
             else:
                 resv.resolve(retv)
@@ -160,7 +163,7 @@ class Scheduler:
 
 
 class Resonate:
-    def __init__(self, scheduler: Scheduler):
+    def __init__(self, scheduler: Scheduler) -> None:
         self.scheduler = scheduler
 
     def run(self, func: Callable, *args: Any, **kwargs: Any):
@@ -168,7 +171,7 @@ class Resonate:
         return self.scheduler.run()
 
 
-def advance(coro: Coro, resv: Next) -> Tuple[bool, Yielded]:
+def advance(coro: Coro, resv: Next) -> tuple[bool, Yielded]:
     try:
         if resv.init:
             return (True, next(coro))

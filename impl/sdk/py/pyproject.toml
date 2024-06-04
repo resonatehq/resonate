@@ -5,7 +5,9 @@ description = "Add your description here"
 authors = [
     { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
 ]
-dependencies = []
+dependencies = [
+    "result>=0.17.0",
+]
 readme = "README.md"
 requires-python = ">= 3.9"
 license = { text = "Apache-2.0" }
@@ -19,6 +21,7 @@ managed = true
 dev-dependencies = [
     "mypy>=1.10.0",
     "pytest>=8.2.0",
+    "ruff>=0.4.7",
 ]
 
 [tool.rye.scripts]
@@ -29,3 +32,23 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/resonate_sdk_py"]
+
+
+[tool.ruff]
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D",
+    "ANN101",
+    "COM812",
+    "ISC001"
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["INP001", "S101", "D"]

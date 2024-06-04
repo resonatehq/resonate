@@ -20,8 +20,12 @@ packaging==24.0
 pluggy==1.5.0
     # via pytest
 pytest==8.2.0
+result==0.17.0
+    # via resonate-sdk-py
+ruff==0.4.7
 tomli==2.0.1
     # via mypy
     # via pytest
 typing-extensions==4.11.0
     # via mypy
+    # via result
