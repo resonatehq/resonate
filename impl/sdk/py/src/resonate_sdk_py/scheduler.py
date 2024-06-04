@@ -1,25 +1,22 @@
 from __future__ import annotations
 
-import inspect
+from collections.abc import Generator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union
 
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, assert_never
 
-if TYPE_CHECKING:
-    from collections.abc import Generator
-
-T = TypeVar("T")
-K = TypeVar("K")
+ReturnType = TypeVar("ReturnType")
+SendType = TypeVar("SendType")
 P = ParamSpec("P")
 
 
-class Promise(Generic[T]):
+class Promise(Generic[ReturnType]):
     def __init__(self) -> None:
-        self.result: Result[T, Exception] | None = None
+        self.result: Result[ReturnType, Exception] | None = None
 
-    def resolve(self, value: T) -> None:
+    def resolve(self, value: ReturnType) -> None:
         if self.is_pending():
             self.result = Ok(value)
         else:
@@ -47,14 +44,24 @@ class Promise(Generic[T]):
 
 
 class Invocation:
-    def __init__(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> None:
+    def __init__(
+        self,
+        func: Callable[P, ReturnType | Generator[Yieldable, SendType, ReturnType]],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
         self.func = func
         self.args = args
         self.kwargs = kwargs
 
 
 class Call:
-    def __init__(self, func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> None:
+    def __init__(
+        self,
+        func: Callable[P, ReturnType | Generator[Yieldable, SendType, ReturnType]],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
         self.func = func
         self.args = args
         self.kwargs = kwargs
@@ -64,151 +71,44 @@ Yieldable: TypeAlias = Union[Invocation, Promise, Call]
 
 
 @dataclass(frozen=True)
-class Next(Generic[T]):
-    """Next is what gets yield back to the generator."""
-
-    result: Result[T, Exception] | None = None
+class FinalValue:
+    value: Any
 
 
 @dataclass(frozen=True)
-class Runnable(Generic[K, T]):
-    coro: Generator[Yieldable, K, T]
-    yield_back_value: Next[K]
-    resv: Promise[T]
+class CoroutineAndAssociatedPromise(Generic[SendType, ReturnType]):
+    coro: Generator[Yieldable, SendType, ReturnType]
+    promise: Promise[ReturnType]
 
 
 @dataclass(frozen=True)
-class Awaiting(Generic[K, T]):
-    coro: Generator[Yieldable, K, T]
-    prom: Promise[K]
-    resv: Promise[T]
+class Next(Generic[ReturnType]):
+    """
+    Next represents the value to be yielded back to coroutine.
+
+    If value is None, it means is not yet computed and will be yielded
+    back in the future.
+
+    """
+
+    result: Result[ReturnType, Exception] | None = None
 
 
-class Scheduler(Generic[K, T]):
-    def __init__(self) -> None:
-        self.runnables: list[Runnable[K, T]] = []
-        self.awaitings: list[Awaiting[K, T]] = []
-
-    def add(
-        self,
-        func: Callable[P, Generator[Yieldable, K, T]],
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.runnables.append(
-            Runnable[K, T](
-                coro=func(*args, **kwargs),
-                resv=Promise[T](),
-                yield_back_value=Next[K](),
-            )
-        )
-
-    def _dump(self) -> None:
-        print(self.runnables)  # noqa: T201
-
-    def run(self) -> Any:
-        while len(self.runnables) > 0:
-            self._dump()
-            runnable = self.runnables.pop()
-            try:
-                next_yieldable = advance(
-                    coro=runnable.coro, resv=runnable.yield_back_value
-                )
-            except StopIteration as e:
-                generator_final_value = e.value
-                runnable.resv.resolve(e.value)
-                for idx, awaiting in enumerate(self.awaitings):
-                    if awaiting.prom == runnable.resv:
-                        awaiting_to_move = self.awaitings.pop(idx)
-                        self.runnables.append(
-                            Runnable(
-                                coro=awaiting_to_move.coro,
-                                yield_back_value=Next(Ok(e.value)),
-                                resv=awaiting_to_move.resv,
-                            )
-                        )
-                continue
-
-            if isinstance(next_yieldable, Promise):
-                if next_yieldable.is_completed():
-                    next_value = Next(result=next_yieldable.result)
-                    self.runnables.append(
-                        Runnable(
-                            runnable.coro,
-                            yield_back_value=next_value,
-                            resv=runnable.resv,
-                        )
-                    )
-
-                else:
-                    self.awaitings.append(
-                        Awaiting(
-                            coro=runnable.coro, prom=next_yieldable, resv=runnable.resv
-                        )
-                    )
-            elif isinstance(next_yieldable, Invocation):
-                next_promise = Promise()
-
-                value = next_yieldable.func(
-                    *next_yieldable.args, **next_yieldable.kwargs
-                )
-                if inspect.isgenerator(value):
-                    self.runnables.append(
-                        Runnable(
-                            coro=value,
-                            yield_back_value=Next(result=None),
-                            resv=next_promise,
-                        )
-                    )
-                    self.runnables.append(
-                        Runnable(
-                            coro=runnable.coro,
-                            yield_back_value=Next(result=Ok(next_promise)),
-                            resv=runnable.resv,
-                        )
-                    )
-                else:
-                    next_promise.resolve(value)
-                    self.runnables.append(
-                        Runnable(
-                            coro=runnable.coro,
-                            yield_back_value=Next(Ok(next_promise)),
-                            resv=runnable.resv,
-                        )
-                    )
-            elif isinstance(next_yieldable, Call):
-                print(next_yieldable)  # noqa: T201
-            else:
-                assert_never(next_yieldable)
-
-        return generator_final_value
+@dataclass(frozen=True)
+class Runnable(Generic[SendType, ReturnType]):
+    coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType]
+    yield_back_value: Next[SendType]
 
 
-def bar(name: str) -> str:
-    return f"Hi {name}"
+@dataclass(frozen=True)
+class Awaiting(Generic[SendType, ReturnType]):
+    coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType]
+    prom: Promise[SendType]
 
 
-def buzz(a: int, b: int) -> int:
-    return a // b
-
-
-def gen_buzz() -> Generator[Yieldable, Any, int]:
-    p: Promise[int] = yield Invocation(buzz, a=15, b=1)
-    v: int = yield p
-    return v
-
-
-def foo() -> Generator[Yieldable, Any, str]:
-    p1: Promise[str] = yield Invocation(bar, name="tomas")
-    p2: Promise[int] = yield Invocation(buzz, a=10, b=1)
-    v1: str = yield p1
-    v2: int = yield p2
-    p3: Promise[int] = yield Invocation(gen_buzz)
-    v3: int = yield p3
-    return f"{v1} {v2} {v3}"
-
-
-def advance(coro: Generator[Yieldable, K, T], resv: Next[K]) -> Yieldable:
+def _advance_span(
+    coro: Generator[Yieldable, SendType, ReturnType], resv: Next[SendType]
+) -> Yieldable:
     advance_value: Yieldable
 
     if resv.result is None:
@@ -221,3 +121,127 @@ def advance(coro: Generator[Yieldable, K, T], resv: Next[K]) -> Yieldable:
         assert_never(resv.result)
 
     return advance_value
+
+
+class Scheduler:
+    def __init__(self) -> None:
+        self.runnables: list[Runnable] = []
+        self.awaitings: list[Awaiting] = []
+
+    def add(
+        self,
+        func: Callable[P, Generator[Yieldable, SendType, ReturnType]],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.runnables.append(
+            Runnable(
+                coro_with_promise=CoroutineAndAssociatedPromise[SendType, ReturnType](
+                    coro=func(*args, **kwargs), promise=Promise()
+                ),
+                yield_back_value=Next[SendType](),
+            )
+        )
+
+    def _add_to_runnables(
+        self,
+        coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType],
+        value: Result[ReturnType, Exception] | None,
+    ) -> None:
+        self.runnables.append(
+            Runnable(coro_with_promise=coro_with_promise, yield_back_value=Next(value))
+        )
+
+    def _add_to_awaitables(
+        self,
+        coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType],
+        prom: Promise[SendType],
+    ) -> None:
+        self.awaitings.append(Awaiting(coro_with_promise=coro_with_promise, prom=prom))
+
+    def _process_invocation(self, invocation: Invocation, runnable: Runnable) -> None:
+        next_promise = Promise()
+        value = invocation.func(*invocation.args, **invocation.kwargs)
+        if isinstance(value, Generator):
+            self._add_to_runnables(
+                coro_with_promise=CoroutineAndAssociatedPromise(
+                    coro=value, promise=next_promise
+                ),
+                value=None,
+            )
+
+        else:
+            next_promise.resolve(value)
+
+        self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
+
+    def _process_call(self, call: Call, runnable: Runnable) -> None:
+        next_promise = Promise()
+        try:
+            value = call.func(*call.args, **call.kwargs)
+        except Exception as e:  # noqa: BLE001
+            next_promise.reject(e)
+            self._add_to_runnables(runnable.coro_with_promise, next_promise.result)
+
+        if isinstance(value, Generator):
+            self._add_to_runnables(
+                coro_with_promise=CoroutineAndAssociatedPromise(
+                    coro=value, promise=next_promise
+                ),
+                value=None,
+            )
+            self._add_to_awaitables(
+                coro_with_promise=runnable.coro_with_promise, prom=next_promise
+            )
+        else:
+            next_promise.resolve(value)
+            self._add_to_runnables(runnable.coro_with_promise, next_promise.result)
+
+    def _process_promise(self, promise: Promise, runnable: Runnable) -> None:
+        if promise.is_completed():
+            self._add_to_runnables(
+                coro_with_promise=runnable.coro_with_promise,
+                value=promise.result,
+            )
+
+        else:
+            self._add_to_awaitables(
+                coro_with_promise=runnable.coro_with_promise,
+                prom=promise,
+            )
+
+    def run(self) -> Any:  # noqa: ANN401
+        generator_final_value: FinalValue | None = None
+        while len(self.runnables) > 0:
+            runnable = self.runnables.pop()
+            try:
+                next_yieldable = _advance_span(
+                    coro=runnable.coro_with_promise.coro, resv=runnable.yield_back_value
+                )
+            except StopIteration as e:
+                generator_final_value = FinalValue(value=e.value)
+                runnable.coro_with_promise.promise.resolve(e.value)
+                for idx, awaiting in enumerate(self.awaitings):
+                    if awaiting.prom == runnable.coro_with_promise.promise:
+                        awaiting_to_move = self.awaitings.pop(idx)
+                        self._add_to_runnables(
+                            awaiting_to_move.coro_with_promise, value=Ok(e.value)
+                        )
+
+                continue
+
+            if isinstance(next_yieldable, Promise):
+                self._process_promise(promise=next_yieldable, runnable=runnable)
+
+            elif isinstance(next_yieldable, Invocation):
+                self._process_invocation(invocation=next_yieldable, runnable=runnable)
+
+            elif isinstance(next_yieldable, Call):
+                self._process_call(call=next_yieldable, runnable=runnable)
+            else:
+                assert_never(next_yieldable)
+
+        if generator_final_value is None:
+            msg = "No coroutine was added before running."
+            raise RuntimeError(msg)
+        return generator_final_value.value
