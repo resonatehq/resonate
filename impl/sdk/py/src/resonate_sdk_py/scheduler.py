@@ -181,14 +181,16 @@ class Scheduler:
                 value=None,
             )
             self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
-            return None
 
-        try:
-            value = invocation.func(*invocation.args, **invocation.kwargs)
-            next_promise.resolve(value)
-            self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
-        except Exception as e:  # noqa: BLE001
-            return self._handle_error(error=e, promise=next_promise, runnable=runnable)
+        else:
+            try:
+                value = invocation.func(*invocation.args, **invocation.kwargs)
+                next_promise.resolve(value)
+                self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
+            except Exception as e:  # noqa: BLE001
+                return self._handle_error(
+                    error=e, promise=next_promise, runnable=runnable
+                )
 
         return None
 
@@ -210,14 +212,16 @@ class Scheduler:
             self._add_to_awaitables(
                 coro_with_promise=runnable.coro_with_promise, prom=next_promise
             )
-            return None
-
-        try:
-            value = call.func(*call.args, **call.kwargs)
-            next_promise.resolve(value)
-            self._add_to_runnables(runnable.coro_with_promise, next_promise.result)
-        except Exception as e:  # noqa: BLE001
-            return self._handle_error(error=e, promise=next_promise, runnable=runnable)
+        else:
+            try:
+                value = call.func(*call.args, **call.kwargs)
+                next_promise.resolve(value)
+                self._add_to_runnables(runnable.coro_with_promise, next_promise.result)
+            except Exception as e:  # noqa: BLE001
+                return self._handle_error(
+                    error=e, promise=next_promise, runnable=runnable
+                )
+        return None
 
     def _process_promise(
         self, promise: Promise[ReturnType], runnable: Runnable
