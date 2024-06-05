@@ -16,11 +16,6 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-def assert_invariant(*, condition: bool, msg: str) -> None:
-    if not condition:
-        raise RuntimeError(msg)
-
-
 @dataclass
 class Promise(Generic[T]):
     result: Result[T, Exception] | None = None
@@ -282,7 +277,7 @@ class Scheduler:
                 )
             except StopIteration as e:
                 if isinstance(e.value, Promise):
-                    assert isinstance(  # noqa: PT017
+                    assert isinstance(
                         e.value.result, Ok
                     ), "Final promise should be resolved."
 
