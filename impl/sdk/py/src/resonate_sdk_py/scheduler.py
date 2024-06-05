@@ -16,6 +16,11 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
+def assert_invariant(*, condition: bool, msg: str) -> None:
+    if not condition:
+        raise RuntimeError(msg)
+
+
 @dataclass
 class Promise(Generic[T]):
     result: Result[T, Exception] | None = None
@@ -140,7 +145,7 @@ class Scheduler:
     ) -> None:
         self.runnables.append(
             Runnable(
-                coro_with_promise=CoroutineAndAssociatedPromise[SendType, ReturnType](
+                coro_with_promise=CoroutineAndAssociatedPromise(
                     coro=func(*args, **kwargs),
                     promise=Promise[ReturnType](),
                 ),
@@ -189,7 +194,11 @@ class Scheduler:
 
         else:
             try:
-                value = retry(invocation.func, *invocation.args, **invocation.kwargs)
+                value = retry(
+                    invocation.func,
+                    *invocation.args,
+                    **invocation.kwargs,
+                )
                 next_promise.resolve(value)
                 self._add_to_runnables(
                     runnable.coro_with_promise,
@@ -229,7 +238,11 @@ class Scheduler:
             )
         else:
             try:
-                value = retry(call.func, *call.args, **call.kwargs)
+                value = retry(
+                    call.func,
+                    *call.args,
+                    **call.kwargs,
+                )
                 next_promise.resolve(value)
                 self._add_to_runnables(
                     runnable.coro_with_promise,
@@ -268,6 +281,13 @@ class Scheduler:
                     resv=runnable.yield_back_value,
                 )
             except StopIteration as e:
+                if isinstance(e.value, Promise):
+                    assert isinstance(  # noqa: PT017
+                        e.value.result, Ok
+                    ), "Final promise should be resolved."
+
+                    e.value = e.value.result.unwrap()
+
                 generator_final_value = FinalValue(value=e.value)
                 runnable.coro_with_promise.promise.resolve(e.value)
                 for idx, awaiting in enumerate(self.awaitings):
