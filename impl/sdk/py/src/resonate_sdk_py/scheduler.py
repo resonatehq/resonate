@@ -277,6 +277,7 @@ class Scheduler:
                 )
             except StopIteration as e:
                 if isinstance(e.value, Promise):
+                    assert e.value is not None, "Promise shouldn't be pending."  # noqa: PT017
                     assert isinstance(  # noqa: PT017
                         e.value.result, Ok
                     ), "Final promise should be resolved."

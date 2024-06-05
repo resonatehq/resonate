@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_sdk_py.resonate import Call, Invocation, Promise, Scheduler, Yieldable
+from resonate_sdk_py.scheduler import Call, Invocation, Promise, Scheduler, Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
