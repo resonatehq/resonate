@@ -16,9 +16,9 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
+@dataclass
 class Promise(Generic[T]):
-    def __init__(self) -> None:
-        self.result: Result[T, Exception] | None = None
+    result: Result[T, Exception] | None = None
 
     def resolve(self, value: T) -> None:
         if self.is_pending():
@@ -141,7 +141,8 @@ class Scheduler:
         self.runnables.append(
             Runnable(
                 coro_with_promise=CoroutineAndAssociatedPromise[SendType, ReturnType](
-                    coro=func(*args, **kwargs), promise=Promise[ReturnType]()
+                    coro=func(*args, **kwargs),
+                    promise=Promise[ReturnType](),
                 ),
                 yield_back_value=Next[SendType](),
             )
@@ -166,7 +167,8 @@ class Scheduler:
     ) -> None:
         self.awaitings.append(
             Awaiting[SendType, ReturnType](
-                coro_with_promise=coro_with_promise, prom=prom
+                coro_with_promise=coro_with_promise,
+                prom=prom,
             )
         )
 
@@ -180,16 +182,24 @@ class Scheduler:
                 ),
                 value=None,
             )
-            self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
+            self._add_to_runnables(
+                runnable.coro_with_promise,
+                Ok(next_promise),
+            )
 
         else:
             try:
-                value = invocation.func(*invocation.args, **invocation.kwargs)
+                value = retry(invocation.func, *invocation.args, **invocation.kwargs)
                 next_promise.resolve(value)
-                self._add_to_runnables(runnable.coro_with_promise, Ok(next_promise))
+                self._add_to_runnables(
+                    runnable.coro_with_promise,
+                    Ok(next_promise),
+                )
             except Exception as e:  # noqa: BLE001
                 return self._handle_error(
-                    error=e, promise=next_promise, runnable=runnable
+                    error=e,
+                    promise=next_promise,
+                    runnable=runnable,
                 )
 
         return None
@@ -198,28 +208,38 @@ class Scheduler:
         self, error: Exception, promise: Promise[T], runnable: Runnable
     ) -> None:
         promise.reject(error)
-        self._add_to_runnables(runnable.coro_with_promise, promise.result)
+        self._add_to_runnables(
+            runnable.coro_with_promise,
+            promise.result,
+        )
 
     def _process_call(self, call: Call, runnable: Runnable) -> None:
         next_promise = Promise()
         if inspect.isgeneratorfunction(call.func):
             self._add_to_runnables(
                 coro_with_promise=CoroutineAndAssociatedPromise(
-                    call.func(*call.args, **call.kwargs), next_promise
+                    call.func(*call.args, **call.kwargs),
+                    next_promise,
                 ),
                 value=None,
             )
             self._add_to_awaitables(
-                coro_with_promise=runnable.coro_with_promise, prom=next_promise
+                coro_with_promise=runnable.coro_with_promise,
+                prom=next_promise,
             )
         else:
             try:
-                value = call.func(*call.args, **call.kwargs)
+                value = retry(call.func, *call.args, **call.kwargs)
                 next_promise.resolve(value)
-                self._add_to_runnables(runnable.coro_with_promise, next_promise.result)
+                self._add_to_runnables(
+                    runnable.coro_with_promise,
+                    next_promise.result,
+                )
             except Exception as e:  # noqa: BLE001
                 return self._handle_error(
-                    error=e, promise=next_promise, runnable=runnable
+                    error=e,
+                    promise=next_promise,
+                    runnable=runnable,
                 )
         return None
 
@@ -244,7 +264,8 @@ class Scheduler:
             runnable = self.runnables.pop()
             try:
                 next_yieldable = _advance_span(
-                    coro=runnable.coro_with_promise.coro, resv=runnable.yield_back_value
+                    coro=runnable.coro_with_promise.coro,
+                    resv=runnable.yield_back_value,
                 )
             except StopIteration as e:
                 generator_final_value = FinalValue(value=e.value)
@@ -253,7 +274,8 @@ class Scheduler:
                     if awaiting.prom == runnable.coro_with_promise.promise:
                         awaiting_to_move = self.awaitings.pop(idx)
                         self._add_to_runnables(
-                            awaiting_to_move.coro_with_promise, value=Ok(e.value)
+                            awaiting_to_move.coro_with_promise,
+                            value=Ok(e.value),
                         )
 
                 continue
@@ -273,3 +295,15 @@ class Scheduler:
             msg = "No coroutine was added before running."
             raise RuntimeError(msg)
         return generator_final_value.value
+
+
+def retry(func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    i = 0
+    max_tries = 3
+    while True:
+        try:
+            return func(*args, **kwargs)
+        except Exception:  # noqa: PERF203
+            if i == max_tries:
+                raise
+            i += 1

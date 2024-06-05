@@ -56,6 +56,12 @@ def test_exploration() -> None:
     assert scheduler.run() == "Hi tomas 10 15 10 15"
 
 
+def test_func_that_return_promise() -> None:
+    scheduler = Scheduler()
+    scheduler.add(foo_promise)
+    assert scheduler.run() == "Hi tomas"
+
+
 def test_function_with_errors() -> None:
     scheduler1 = Scheduler()
     scheduler1.add(invocation_that_errors)
