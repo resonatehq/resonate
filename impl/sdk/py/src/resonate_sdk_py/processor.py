@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from time import perf_counter
@@ -45,16 +46,24 @@ class Processor:
         for sqe in sqes:
             await self.submission_queue.put(sqe)
 
-    async def dequeue(self, batch_size: int) -> list[CQE]:
+    async def dequeue(self, batch_size: int, timeout: float) -> list[CQE]:
         items: list[CQE] = []
-
-        for _ in range(batch_size):
-            cqe = await self.completion_queue.get()
-            self.completion_queue.task_done()
-            items.append(cqe)
+        with contextlib.suppress(asyncio.TimeoutError):
+            for _ in range(batch_size):
+                cqe = await asyncio.wait_for(
+                    self.completion_queue.get(), timeout=timeout
+                )
+                self.completion_queue.task_done()
+                items.append(cqe)
         return items
 
     async def close(self) -> None:
+        assert (
+            self.completion_queue.empty()
+        ), "Completion queue must be empty before closing the processor"
+        assert (
+            self.completion_queue.empty()
+        ), "Submission queue must be empty before closing the processor"
         await self.submission_queue.join()
         await self.completion_queue.join()
         for task in self._tasks:
@@ -92,7 +101,7 @@ async def produce_work(
     producer_completed.set()
 
 
-async def _controller(
+async def _controller(  # noqa: PLR0913
     cmds: list[ICommand],
     num_workers: int,
     num_result_handlers: int,

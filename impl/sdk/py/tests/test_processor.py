@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TypeVar
 
-from resonate_sdk_py.processor import SQE, ICommand, Processor
+from resonate_sdk_py.processor import CQE, SQE, ICommand, Processor
 
 T = TypeVar("T")
 
@@ -26,7 +26,7 @@ def _callback_that_asserts(expected: str, actual: str) -> None:
 
 
 async def test_processor() -> None:
-    processor = Processor(workers=5)
+    processor = Processor(workers=3)
 
     cmds = [
         GreetingCommand(name="A", sleep_time=2),
@@ -42,10 +42,21 @@ async def test_processor() -> None:
             for cmd in cmds
         ]
     )
+    batch_size: int = 3
+    all_cqes: list[CQE] = []
     cqes = await processor.dequeue(
-        batch_size=3,
+        batch_size=batch_size,
+        timeout=1,
     )
-    for cqe in cqes:
-        cqe.callback(cqe.cmd_result)
+    expected_items: int = 1
+    assert len(cqes) == expected_items
+    all_cqes.extend(cqes)
 
+    cqes = await processor.dequeue(batch_size=batch_size, timeout=10)
+
+    assert len(cqes) == 2  # noqa: PLR2004
+
+    all_cqes.extend(cqes)
+    for cqe in all_cqes:
+        cqe.callback(cqe.cmd_result)
     await processor.close()
