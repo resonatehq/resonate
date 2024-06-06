@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Generator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union
 
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, assert_never
-
-if TYPE_CHECKING:
-    from collections.abc import Generator
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -192,6 +190,9 @@ class Scheduler:
                     *invocation.args,
                     **invocation.kwargs,
                 )
+                assert not isinstance(
+                    value, Generator
+                ), "Value should never be a generator at this point."
                 next_promise.resolve(value)
                 self._add_to_runnables(
                     runnable.coro_with_promise,
@@ -239,6 +240,9 @@ class Scheduler:
                     *call.args,
                     **call.kwargs,
                 )
+                assert not isinstance(
+                    value, Generator
+                ), "Value should never be a generator at this point."
                 next_promise.resolve(value)
                 self._add_to_runnables(
                     runnable.coro_with_promise,
