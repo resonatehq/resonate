@@ -62,3 +62,20 @@ addopts = [
     "--import-mode=importlib"
 ]
 asyncio_mode = "auto"
+
+[tool.mypy]
+mypy_path = "src"
+plugins = []
+follow_imports = "normal"
+strict_optional = false
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_generics = true
+check_untyped_defs = true
+warn_unused_configs = true
+disallow_subclassing_any = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+explicit_package_bases = true

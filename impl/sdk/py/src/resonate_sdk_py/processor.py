@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 T = TypeVar("T")
 
 
 class ICommand(ABC, Generic[T]):
     @abstractmethod
-    def run(self) -> T: ...
+    async def run(self) -> T: ...
 
 
 @dataclass(frozen=True)
@@ -30,8 +29,8 @@ class CQE(Generic[T]):
 
 class Processor:
     def __init__(self, workers: int) -> None:
-        self.submission_queue = asyncio.Queue[SQE]()
-        self.completion_queue = asyncio.Queue[CQE]()
+        self.submission_queue = asyncio.Queue[SQE[Any]]()
+        self.completion_queue = asyncio.Queue[CQE[Any]]()
         self._tasks = [asyncio.create_task(self._do_work()) for _ in range(workers)]
 
     async def _do_work(self) -> None:
@@ -49,20 +48,13 @@ class Processor:
             )
             self.submission_queue.task_done()
 
-    async def enqueue(self, sqes: list[SQE]) -> None:
-        for sqe in sqes:
-            await self.submission_queue.put(sqe)
+    def enqueue(self, sqe: SQE[Any]) -> None:
+        self.submission_queue.put_nowait(sqe)
 
-    async def dequeue(self, batch_size: int, timeout: float) -> list[CQE]:
-        items: list[CQE] = []
-        with contextlib.suppress(asyncio.TimeoutError):
-            for _ in range(batch_size):
-                cqe = await asyncio.wait_for(
-                    self.completion_queue.get(), timeout=timeout
-                )
-                self.completion_queue.task_done()
-                items.append(cqe)
-        return items
+    async def dequeue(self) -> CQE[Any]:
+        cqe = await self.completion_queue.get()
+        self.completion_queue.task_done()
+        return cqe
 
     async def close(self) -> None:
         assert (

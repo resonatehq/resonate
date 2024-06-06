@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TypeVar
 
-from resonate_sdk_py.processor import CQE, SQE, ICommand, Processor
+from resonate_sdk_py.processor import SQE, ICommand, Processor
 
 T = TypeVar("T")
 
@@ -26,6 +26,7 @@ def _callback_that_asserts(expected: str, actual: str) -> None:
 
 
 async def test_processor() -> None:
+    # Pass event-loop as param
     processor = Processor(workers=1)
 
     cmds = [
@@ -33,30 +34,16 @@ async def test_processor() -> None:
         GreetingCommand(name="C", sleep_time=5),
         GreetingCommand(name="B", sleep_time=0.2),
     ]
-    await processor.enqueue(
-        sqes=[
-            SQE(
-                cmd,
-                partial(_callback_that_asserts, actual=f"Hi {cmd.name}"),
+    for cmd in cmds:
+        processor.enqueue(
+            sqe=SQE(
+                cmd=cmd,
+                callback=partial(_callback_that_asserts, actual=f"Hi {cmd.name}"),
             )
-            for cmd in cmds
-        ]
-    )
-    batch_size: int = 3
-    all_cqes: list[CQE] = []
-    cqes = await processor.dequeue(
-        batch_size=batch_size,
-        timeout=2.5,
-    )
-    expected_items: int = 1
-    assert len(cqes) == expected_items
-    all_cqes.extend(cqes)
+        )
 
-    cqes = await processor.dequeue(batch_size=batch_size, timeout=10)
-
-    assert len(cqes) == 2  # noqa: PLR2004
-
-    all_cqes.extend(cqes)
-    for cqe in all_cqes:
+    for _ in range(len(cmds)):
+        cqe = await processor.dequeue()
         cqe.callback(cqe.cmd_result)
+
     await processor.close()

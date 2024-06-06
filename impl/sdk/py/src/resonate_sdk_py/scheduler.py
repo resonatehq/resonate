@@ -10,8 +10,6 @@ from typing_extensions import ParamSpec, TypeAlias, assert_never
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-ReturnType = TypeVar("ReturnType")
-SendType = TypeVar("SendType")
 T = TypeVar("T")
 P = ParamSpec("P")
 
@@ -50,7 +48,7 @@ class Promise(Generic[T]):
 class Invocation:
     def __init__(
         self,
-        func: Callable[P, ReturnType | Generator[Yieldable, SendType, ReturnType]],
+        func: Callable[P, Any | Generator[Yieldable, Any, Any]],
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
@@ -62,7 +60,7 @@ class Invocation:
 class Call:
     def __init__(
         self,
-        func: Callable[P, ReturnType | Generator[Yieldable, SendType, ReturnType]],
+        func: Callable[P, Any | Generator[Yieldable, Any, Any]],
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
@@ -71,7 +69,7 @@ class Call:
         self.kwargs = kwargs
 
 
-Yieldable: TypeAlias = Union[Invocation, Promise, Call]
+Yieldable: TypeAlias = Union[Invocation, Promise[Any], Call]
 
 
 @dataclass(frozen=True)
@@ -80,13 +78,13 @@ class FinalValue(Generic[T]):
 
 
 @dataclass(frozen=True)
-class CoroutineAndAssociatedPromise(Generic[SendType, ReturnType]):
-    coro: Generator[Yieldable, SendType, ReturnType]
-    promise: Promise[ReturnType]
+class CoroutineAndAssociatedPromise(Generic[T]):
+    coro: Generator[Yieldable, Any, T]
+    promise: Promise[T]
 
 
 @dataclass(frozen=True)
-class Next(Generic[ReturnType]):
+class Next:
     """
     Next represents the value to be yielded back to coroutine.
 
@@ -95,24 +93,22 @@ class Next(Generic[ReturnType]):
 
     """
 
-    result: Result[ReturnType, Exception] | None = None
+    result: Result[Any, Exception] | None = None
 
 
 @dataclass(frozen=True)
-class Runnable(Generic[SendType, ReturnType]):
-    coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType]
-    yield_back_value: Next[SendType]
+class Runnable(Generic[T]):
+    coro_with_promise: CoroutineAndAssociatedPromise[T]
+    yield_back_value: Next
 
 
 @dataclass(frozen=True)
-class Awaiting(Generic[SendType, ReturnType]):
-    coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType]
-    prom: Promise[SendType]
+class Awaiting(Generic[T]):
+    coro_with_promise: CoroutineAndAssociatedPromise[T]
+    prom: Promise[Any]
 
 
-def _advance_span(
-    coro: Generator[Yieldable, SendType, ReturnType], resv: Next[SendType]
-) -> Yieldable:
+def _advance_span(coro: Generator[Yieldable, Any, Any], resv: Next) -> Yieldable:
     advance_value: Yieldable
 
     if resv.result is None:
@@ -129,51 +125,53 @@ def _advance_span(
 
 class Scheduler:
     def __init__(self) -> None:
-        self.runnables: list[Runnable] = []
-        self.awaitings: list[Awaiting] = []
+        self.runnables: list[Runnable[Any]] = []
+        self.awaitings: list[Awaiting[Any]] = []
 
     def add(
         self,
-        func: Callable[P, Generator[Yieldable, SendType, ReturnType]],
+        func: Callable[P, Generator[Yieldable, Any, T]],
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.runnables.append(
             Runnable(
-                coro_with_promise=CoroutineAndAssociatedPromise(
+                coro_with_promise=CoroutineAndAssociatedPromise[T](
                     coro=func(*args, **kwargs),
-                    promise=Promise[ReturnType](),
+                    promise=Promise(),
                 ),
-                yield_back_value=Next[SendType](),
+                yield_back_value=Next(),
             )
         )
 
     def _add_to_runnables(
         self,
-        coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType],
-        value: Result[SendType, Exception] | None,
+        coro_with_promise: CoroutineAndAssociatedPromise[T],
+        value: Result[Any, Exception] | None,
     ) -> None:
         self.runnables.append(
-            Runnable[SendType, ReturnType](
+            Runnable[T](
                 coro_with_promise=coro_with_promise,
-                yield_back_value=Next[SendType](value),
+                yield_back_value=Next(value),
             )
         )
 
     def _add_to_awaitables(
         self,
-        coro_with_promise: CoroutineAndAssociatedPromise[SendType, ReturnType],
-        prom: Promise[SendType],
+        coro_with_promise: CoroutineAndAssociatedPromise[T],
+        prom: Promise[Any],
     ) -> None:
         self.awaitings.append(
-            Awaiting[SendType, ReturnType](
+            Awaiting[T](
                 coro_with_promise=coro_with_promise,
                 prom=prom,
             )
         )
 
-    def _process_invocation(self, invocation: Invocation, runnable: Runnable) -> None:
-        next_promise = Promise()
+    def _process_invocation(
+        self, invocation: Invocation, runnable: Runnable[T]
+    ) -> None:
+        next_promise = Promise[Any]()
         if inspect.isgeneratorfunction(invocation.func):
             self._add_to_runnables(
                 coro_with_promise=CoroutineAndAssociatedPromise(
@@ -209,7 +207,10 @@ class Scheduler:
         return None
 
     def _handle_error(
-        self, error: Exception, promise: Promise[T], runnable: Runnable
+        self,
+        error: Exception,
+        promise: Promise[T],
+        runnable: Runnable[T],
     ) -> None:
         promise.reject(error)
         self._add_to_runnables(
@@ -217,8 +218,8 @@ class Scheduler:
             promise.result,
         )
 
-    def _process_call(self, call: Call, runnable: Runnable) -> None:
-        next_promise = Promise()
+    def _process_call(self, call: Call, runnable: Runnable[T]) -> None:
+        next_promise = Promise[Any]()
         if inspect.isgeneratorfunction(call.func):
             self._add_to_runnables(
                 coro_with_promise=CoroutineAndAssociatedPromise(
@@ -251,9 +252,7 @@ class Scheduler:
                 )
         return None
 
-    def _process_promise(
-        self, promise: Promise[ReturnType], runnable: Runnable
-    ) -> None:
+    def _process_promise(self, promise: Promise[T], runnable: Runnable[T]) -> None:
         if promise.is_completed():
             self._add_to_runnables(
                 coro_with_promise=runnable.coro_with_promise,
@@ -319,7 +318,7 @@ def retry(func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
     while True:
         try:
             return func(*args, **kwargs)
-        except Exception:  # noqa: BLE001, PERF203
+        except Exception:  # noqa: BLE001, PERF203, RUF100
             if i == max_tries:
                 raise
             i += 1
