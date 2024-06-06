@@ -27,7 +27,7 @@ def _callback_that_asserts(expected: str, actual: str) -> None:
 
 async def test_processor() -> None:
     # Pass event-loop as param
-    processor = Processor(workers=1)
+    processor = Processor(workers=3, event_loop=asyncio.get_running_loop())
 
     cmds = [
         GreetingCommand(name="A", sleep_time=2),
@@ -42,7 +42,8 @@ async def test_processor() -> None:
             )
         )
 
-    for _ in range(len(cmds)):
+    number_of_cmds = len(cmds)
+    for _ in range(number_of_cmds):
         cqe = await processor.dequeue()
         cqe.callback(cqe.cmd_result)
 

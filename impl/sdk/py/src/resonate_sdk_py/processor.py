@@ -28,7 +28,8 @@ class CQE(Generic[T]):
 
 
 class Processor:
-    def __init__(self, workers: int) -> None:
+    def __init__(self, workers: int, event_loop: asyncio.AbstractEventLoop) -> None:
+        self.event_loop = event_loop
         self.submission_queue = asyncio.Queue[SQE[Any]]()
         self.completion_queue = asyncio.Queue[CQE[Any]]()
         self._tasks = [asyncio.create_task(self._do_work()) for _ in range(workers)]

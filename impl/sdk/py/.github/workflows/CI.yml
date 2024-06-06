@@ -39,7 +39,7 @@ jobs:
           rye run check-types
         
       - name: Check types
-        run: rye run mypy .
+        run: rye run check-types
 
       - name: Test code
         run: rye test
