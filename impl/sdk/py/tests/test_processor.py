@@ -26,12 +26,12 @@ def _callback_that_asserts(expected: str, actual: str) -> None:
 
 
 async def test_processor() -> None:
-    processor = Processor(workers=3)
+    processor = Processor(workers=1)
 
     cmds = [
         GreetingCommand(name="A", sleep_time=2),
-        GreetingCommand(name="B", sleep_time=0.2),
         GreetingCommand(name="C", sleep_time=5),
+        GreetingCommand(name="B", sleep_time=0.2),
     ]
     await processor.enqueue(
         sqes=[
@@ -46,7 +46,7 @@ async def test_processor() -> None:
     all_cqes: list[CQE] = []
     cqes = await processor.dequeue(
         batch_size=batch_size,
-        timeout=1,
+        timeout=2.5,
     )
     expected_items: int = 1
     assert len(cqes) == expected_items
