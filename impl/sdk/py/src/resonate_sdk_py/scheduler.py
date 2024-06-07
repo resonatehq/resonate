@@ -3,15 +3,10 @@ from __future__ import annotations
 import inspect
 from collections.abc import Generator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, Union
+from typing import Any, Callable, Generic, TypeVar, Union
 
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, assert_never
-
-from resonate_sdk_py.processor import Processor
-
-if TYPE_CHECKING:
-    import asyncio
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -127,13 +122,9 @@ def _advance_span(coro: Generator[Yieldable, Any, Any], resv: Next) -> Yieldable
 
 
 class Scheduler:
-    def __init__(self, event_loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(self) -> None:
         self.runnables: list[Runnable[Any]] = []
         self.awaitings: list[Awaiting[Any]] = []
-        self.processor = Processor(workers=1, event_loop=event_loop)
-
-    async def close(self) -> None:
-        await self.processor.close()
 
     def add(
         self,

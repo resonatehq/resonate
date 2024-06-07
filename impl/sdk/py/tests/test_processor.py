@@ -3,11 +3,22 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from functools import partial
+from time import perf_counter, sleep
 from typing import TypeVar
 
-from resonate_sdk_py.processor import SQE, ICommand, Processor
+from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True)
+class AsyncGreetingCommand(IAsyncCommand[str]):
+    name: str
+    sleep_time: float
+
+    async def run(self) -> str:
+        await asyncio.sleep(self.sleep_time)
+        return f"Hi {self.name}"
 
 
 @dataclass(frozen=True)
@@ -15,36 +26,53 @@ class GreetingCommand(ICommand[str]):
     name: str
     sleep_time: float
 
-    async def run(self) -> str:
-        greeting_msg = f"Hi {self.name}"
-        await asyncio.sleep(self.sleep_time)
-        return greeting_msg
+    def run(self) -> str:
+        sleep(self.sleep_time)
+        return f"Hi {self.name}"
 
 
-def _callback_that_asserts(expected: str, actual: str) -> None:
+def _callback_that_asserts(actual: str, expected: str) -> None:
     assert expected == actual
 
 
-async def test_processor() -> None:
-    # Pass event-loop as param
-    processor = Processor(workers=3, event_loop=asyncio.get_running_loop())
+def test_processor() -> None:
+    processor = Processor(max_workers=3)
 
-    cmds = [
-        GreetingCommand(name="A", sleep_time=2),
-        GreetingCommand(name="C", sleep_time=5),
-        GreetingCommand(name="B", sleep_time=0.2),
-    ]
-    for cmd in cmds:
-        processor.enqueue(
-            sqe=SQE(
-                cmd=cmd,
-                callback=partial(_callback_that_asserts, actual=f"Hi {cmd.name}"),
-            )
+    start = perf_counter()
+    processor.enqueue(
+        SQE(
+            GreetingCommand(name="A", sleep_time=2),
+            partial(_callback_that_asserts, "Hi A"),
         )
+    )
+    processor.enqueue(
+        SQE(
+            AsyncGreetingCommand(name="B", sleep_time=0.4),
+            partial(_callback_that_asserts, "Hi B"),
+        )
+    )
+    processor.enqueue(
+        SQE(
+            GreetingCommand(name="C", sleep_time=5),
+            partial(_callback_that_asserts, "Hi C"),
+        )
+    )
+    cqe = processor.dequeue()
+    cqe.callback(cqe.cmd_result)
+    cqe = processor.dequeue()
+    cqe.callback(cqe.cmd_result)
+    cqe = processor.dequeue()
+    cqe.callback(cqe.cmd_result)
 
-    number_of_cmds = len(cmds)
-    for _ in range(number_of_cmds):
-        cqe = await processor.dequeue()
-        cqe.callback(cqe.cmd_result)
+    processor.enqueue(
+        SQE(
+            GreetingCommand(name="D", sleep_time=0.1),
+            partial(_callback_that_asserts, "Hi D"),
+        )
+    )
+    cqe = processor.dequeue()
+    cqe.callback(cqe.cmd_result)
 
-    await processor.close()
+    end = perf_counter()
+
+    print(end - start)  # noqa: T201

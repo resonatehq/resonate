@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -51,30 +50,25 @@ def invocation_that_errors() -> Generator[Yieldable, Any, None]:
     return
 
 
-async def test_exploration() -> None:
-    scheduler = Scheduler(event_loop=asyncio.get_running_loop())
+def test_exploration() -> None:
+    scheduler = Scheduler()
     scheduler.add(foo)
     assert scheduler.run() == "Hi tomas 10 15 10 15"
-    await scheduler.close()
 
 
-async def test_func_that_return_promise() -> None:
-    scheduler = Scheduler(event_loop=asyncio.get_running_loop())
+def test_func_that_return_promise() -> None:
+    scheduler = Scheduler()
     scheduler.add(foo_promise)
     assert scheduler.run() == "Hi tomas"
-    await scheduler.close()
 
 
-async def test_function_with_errors() -> None:
-    scheduler1 = Scheduler(event_loop=asyncio.get_running_loop())
+def test_function_with_errors() -> None:
+    scheduler1 = Scheduler()
     scheduler1.add(invocation_that_errors)
     with pytest.raises(ZeroDivisionError):
         scheduler1.run()
 
-    scheduler2 = Scheduler(event_loop=asyncio.get_running_loop())
+    scheduler2 = Scheduler()
     scheduler2.add(call_that_errors)
     with pytest.raises(ZeroDivisionError):
         scheduler2.run()
-
-    await scheduler1.close()
-    await scheduler2.close()

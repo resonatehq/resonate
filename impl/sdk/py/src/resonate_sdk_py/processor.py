@@ -1,22 +1,31 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import queue
 from abc import ABC, abstractmethod
+from asyncio import iscoroutinefunction
 from dataclasses import dataclass
+from threading import Thread
 from time import perf_counter
 from typing import Any, Callable, Generic, TypeVar
 
 T = TypeVar("T")
 
 
-class ICommand(ABC, Generic[T]):
+class IAsyncCommand(ABC, Generic[T]):
     @abstractmethod
     async def run(self) -> T: ...
 
 
+class ICommand(ABC, Generic[T]):
+    @abstractmethod
+    def run(self) -> T: ...
+
+
 @dataclass(frozen=True)
 class SQE(Generic[T]):
-    cmd: ICommand[T]
+    cmd: ICommand[T] | IAsyncCommand[T]
     callback: Callable[[T], None]
 
 
@@ -27,44 +36,57 @@ class CQE(Generic[T]):
     processing_time: float
 
 
-class Processor:
-    def __init__(self, workers: int, event_loop: asyncio.AbstractEventLoop) -> None:
-        self.event_loop = event_loop
-        self.submission_queue = asyncio.Queue[SQE[Any]]()
-        self.completion_queue = asyncio.Queue[CQE[Any]]()
-        self._tasks = [asyncio.create_task(self._do_work()) for _ in range(workers)]
-
-    async def _do_work(self) -> None:
-        while True:
-            sqe = await self.submission_queue.get()
-            start = perf_counter()
-            cmd_result = await sqe.cmd.run()
-            end = perf_counter()
-            await self.completion_queue.put(
-                CQE(
-                    cmd_result=cmd_result,
-                    callback=sqe.callback,
-                    processing_time=end - start,
-                )
+def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
+    loop = asyncio.new_event_loop()
+    while True:
+        sqe = sq.get()
+        start = perf_counter()
+        if iscoroutinefunction(sqe.cmd.run):
+            cmd_result = loop.run_until_complete(sqe.cmd.run())
+        else:
+            cmd_result = sqe.cmd.run()
+        end = perf_counter()
+        cq.put(
+            CQE(
+                cmd_result=cmd_result,
+                callback=sqe.callback,
+                processing_time=end - start,
             )
-            self.submission_queue.task_done()
+        )
+
+
+class Processor:
+    def __init__(self, max_workers: int | None) -> None:
+        if max_workers is None:
+            max_workers = min(32, (os.cpu_count() or 1) + 4)
+        assert max_workers > 0, "max_workers must be greater than 0"
+
+        self._max_workers = max_workers
+        self._submission_queue = queue.Queue[SQE[Any]]()
+        self._completion_queue = queue.Queue[CQE[Any]]()
+        self._threads = set[Thread]()
 
     def enqueue(self, sqe: SQE[Any]) -> None:
-        self.submission_queue.put_nowait(sqe)
+        self._submission_queue.put(sqe)
+        self._adjust_thread_count()
 
-    async def dequeue(self) -> CQE[Any]:
-        cqe = await self.completion_queue.get()
-        self.completion_queue.task_done()
-        return cqe
+    def _adjust_thread_count(self) -> None:
+        num_threads = len(self._threads)
+        if num_threads < self._max_workers:
+            t = Thread(
+                target=_worker,
+                args=(
+                    self._submission_queue,
+                    self._completion_queue,
+                ),
+                daemon=True,
+            )
+            t.start()
+            self._threads.add(t)
 
-    async def close(self) -> None:
-        assert (
-            self.completion_queue.empty()
-        ), "Completion queue must be empty before closing the processor"
-        assert (
-            self.completion_queue.empty()
-        ), "Submission queue must be empty before closing the processor"
-        await self.submission_queue.join()
-        await self.completion_queue.join()
-        for task in self._tasks:
-            task.cancel()
+    def dequeue(self) -> CQE[Any]:
+        return self._completion_queue.get()
+
+    def close(self) -> None:
+        for t in self._threads:
+            t.join()
