@@ -60,7 +60,6 @@ xfail_strict = true
 addopts = [
     "--import-mode=importlib"
 ]
-asyncio_mode = "auto"
 
 [tool.mypy]
 mypy_path = "src"

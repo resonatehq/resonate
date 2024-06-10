@@ -5,6 +5,7 @@ import os
 import queue
 from abc import ABC, abstractmethod
 from asyncio import iscoroutinefunction
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from threading import Thread
 from time import perf_counter
@@ -45,6 +46,9 @@ def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
             cmd_result = loop.run_until_complete(sqe.cmd.run())
         else:
             cmd_result = sqe.cmd.run()
+            assert not isinstance(
+                cmd_result, Coroutine
+            ), "cmd result cannot be a Coroutine at this point."
         end = perf_counter()
         cq.put(
             CQE(
