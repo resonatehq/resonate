@@ -8,3 +8,7 @@
 #   with-sources: false
 
 -e file:.
+result==0.17.0
+    # via resonate-sdk-py
+typing-extensions==4.12.1
+    # via result

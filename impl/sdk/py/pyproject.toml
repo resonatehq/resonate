@@ -5,7 +5,9 @@ description = "Add your description here"
 authors = [
     { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
 ]
-dependencies = []
+dependencies = [
+    "result>=0.17.0",
+]
 readme = "README.md"
 requires-python = ">= 3.9"
 license = { text = "Apache-2.0" }
@@ -19,6 +21,7 @@ managed = true
 dev-dependencies = [
     "mypy>=1.10.0",
     "pytest>=8.2.0",
+    "ruff>=0.4.7",
 ]
 
 [tool.rye.scripts]
@@ -29,3 +32,49 @@ allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/resonate_sdk_py"]
+
+
+[tool.ruff]
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D",
+    "ANN101",
+    "COM812",
+    "ISC001",
+    "S101"
+]
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["INP001", "S101", "D"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+xfail_strict = true
+addopts = [
+    "--import-mode=importlib"
+]
+asyncio_mode = "auto"
+
+[tool.mypy]
+mypy_path = "src"
+plugins = []
+follow_imports = "normal"
+strict_optional = false
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_any_generics = true
+check_untyped_defs = true
+warn_unused_configs = true
+disallow_subclassing_any = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+explicit_package_bases = true

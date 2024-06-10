@@ -37,6 +37,9 @@ jobs:
         run: |
           rye lint
           rye run check-types
+        
+      - name: Check types
+        run: rye run check-types
 
       - name: Test code
         run: rye test
