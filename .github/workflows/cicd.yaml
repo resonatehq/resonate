@@ -22,7 +22,7 @@ jobs:
         uses: DeterminateSystems/flake-checker-action@v7
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v11
+        uses: DeterminateSystems/nix-installer-action@v12
 
       # basic check to verify that all Nix flake outputs are soundly typed
       - name: Check flake
@@ -109,7 +109,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v11
+        uses: DeterminateSystems/nix-installer-action@v12
 
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v6
@@ -148,7 +148,7 @@ jobs:
         uses: actions/checkout@v4
       
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v11
+        uses: DeterminateSystems/nix-installer-action@v12
 
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v6
