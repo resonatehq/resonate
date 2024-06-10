@@ -8,7 +8,6 @@ from asyncio import iscoroutinefunction
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from threading import Thread
-from time import perf_counter
 from typing import Any, Callable, Generic, TypeVar
 
 T = TypeVar("T")
@@ -34,14 +33,12 @@ class SQE(Generic[T]):
 class CQE(Generic[T]):
     cmd_result: T
     callback: Callable[[T], None]
-    processing_time: float
 
 
 def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
     loop = asyncio.new_event_loop()
     while True:
         sqe = sq.get()
-        start = perf_counter()
         if iscoroutinefunction(sqe.cmd.run):
             cmd_result = loop.run_until_complete(sqe.cmd.run())
         else:
@@ -49,12 +46,11 @@ def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
             assert not isinstance(
                 cmd_result, Coroutine
             ), "cmd result cannot be a Coroutine at this point."
-        end = perf_counter()
+
         cq.put(
             CQE(
                 cmd_result=cmd_result,
                 callback=sqe.callback,
-                processing_time=end - start,
             )
         )
 
