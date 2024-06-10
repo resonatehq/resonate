@@ -185,11 +185,7 @@ class Scheduler:
 
         else:
             try:
-                value = _retry(
-                    invocation.func,
-                    *invocation.args,
-                    **invocation.kwargs,
-                )
+                value = invocation.func(*invocation.args, **invocation.kwargs)
                 assert not isinstance(
                     value, Generator
                 ), "Value should never be a generator at this point."
@@ -235,11 +231,7 @@ class Scheduler:
             )
         else:
             try:
-                value = _retry(
-                    call.func,
-                    *call.args,
-                    **call.kwargs,
-                )
+                value = call.func(*call.args, **call.kwargs)
                 assert not isinstance(
                     value, Generator
                 ), "Value should never be a generator at this point."
@@ -314,15 +306,3 @@ class Scheduler:
             msg = "No coroutine was added before running."
             raise RuntimeError(msg)
         return generator_final_value.value
-
-
-def _retry(func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    i = 0
-    max_tries = 3
-    while True:
-        try:
-            return func(*args, **kwargs)
-        except Exception:  # noqa: BLE001, PERF203, RUF100
-            if i == max_tries:
-                raise
-            i += 1
