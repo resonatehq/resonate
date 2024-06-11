@@ -8,19 +8,24 @@ from asyncio import iscoroutinefunction
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from threading import Thread
-from typing import Any, Callable, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
+
+from result import Err, Ok
+
+if TYPE_CHECKING:
+    from result import Result
 
 T = TypeVar("T")
 
 
 class IAsyncCommand(ABC, Generic[T]):
     @abstractmethod
-    async def run(self) -> T: ...
+    async def run(self) -> Result[T, Exception]: ...
 
 
 class ICommand(ABC, Generic[T]):
     @abstractmethod
-    def run(self) -> T: ...
+    def run(self) -> Result[T, Exception]: ...
 
 
 @dataclass(frozen=True)
@@ -31,7 +36,7 @@ class SQE(Generic[T]):
 
 @dataclass(frozen=True)
 class CQE(Generic[T]):
-    cmd_result: T
+    cmd_result: Result[T, Exception]
     callback: Callable[[T], None]
 
 
@@ -47,6 +52,9 @@ def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
                 cmd_result, Coroutine
             ), "cmd result cannot be a Coroutine at this point."
 
+        assert isinstance(
+            cmd_result, (Ok, Err)
+        ), "Command result must be a Result variant."
         cq.put(
             CQE(
                 cmd_result=cmd_result,
@@ -87,6 +95,5 @@ class Processor:
     def dequeue(self) -> CQE[Any]:
         return self._completion_queue.get()
 
-    def close(self) -> None:
-        for t in self._threads:
-            t.join()
+    def cq_qsize(self) -> int:
+        return self._completion_queue.qsize()

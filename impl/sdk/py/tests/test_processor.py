@@ -7,6 +7,7 @@ from time import sleep
 from typing import TypeVar
 
 from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
+from result import Ok, Result
 
 T = TypeVar("T")
 
@@ -16,9 +17,9 @@ class AsyncGreetingCommand(IAsyncCommand[str]):
     name: str
     sleep_time: float
 
-    async def run(self) -> str:
+    async def run(self) -> Result[str, Exception]:
         await asyncio.sleep(self.sleep_time)
-        return f"Hi {self.name}"
+        return Ok(f"Hi {self.name}")
 
 
 @dataclass(frozen=True)
@@ -26,13 +27,13 @@ class GreetingCommand(ICommand[str]):
     name: str
     sleep_time: float
 
-    def run(self) -> str:
+    def run(self) -> Result[str, Exception]:
         sleep(self.sleep_time)
-        return f"Hi {self.name}"
+        return Ok(f"Hi {self.name}")
 
 
-def _callback_that_asserts(actual: str, expected: str) -> None:
-    assert expected == actual
+def _callback_that_asserts(expected: str, actual: Result[str, Exception]) -> None:
+    assert expected == actual.unwrap()
 
 
 def test_processor() -> None:

@@ -8,6 +8,7 @@
 #   with-sources: false
 
 -e file:.
+debugpy==1.8.1
 exceptiongroup==1.2.1
     # via pytest
 iniconfig==2.0.0
