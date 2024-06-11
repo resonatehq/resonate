@@ -1,5 +1,5 @@
 import { describe, test, expect, jest } from "@jest/globals";
-import { Retry } from "../lib/core/retries/retry";
+import * as retry from "../lib/core/retry";
 import * as utils from "../lib/core/utils";
 import { Resonate, Context } from "../lib/generator";
 
@@ -53,7 +53,7 @@ describe("Functions: generator", () => {
   test("success", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: Retry.linear(0, 3),
+      retry: retry.linear(0, 3),
     });
 
     resonate.register("run", run);
@@ -91,7 +91,7 @@ describe("Functions: generator", () => {
   test("failure", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: Retry.linear(0, 3),
+      retry: retry.linear(0, 3),
     });
 
     resonate.register("run", run);

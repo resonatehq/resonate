@@ -1,6 +1,6 @@
 import { IEncoder } from "./encoder";
 import { ILogger } from "./logger";
-import { IRetry } from "./retry";
+import { RetryPolicy } from "./retry";
 import { IStore } from "./store";
 
 /**
@@ -43,9 +43,9 @@ export type ResonateOptions = {
   logger: ILogger;
 
   /**
-   * A retry instance, defaults to exponential backoff.
+   * A retry policy, defaults to exponential backoff.
    */
-  retry: IRetry;
+  retry: RetryPolicy;
 
   /**
    * Tags to add to all durable promises.
@@ -110,7 +110,7 @@ export type Options = {
   /**
    * Overrides the default retry policy.
    */
-  retry: IRetry;
+  retry: RetryPolicy;
 
   /**
    * Additional tags to add to the durable promise.

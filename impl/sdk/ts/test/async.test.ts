@@ -1,6 +1,6 @@
 import { describe, test, expect, jest } from "@jest/globals";
 import { Resonate, Context } from "../lib/async";
-import { Retry } from "../lib/core/retries/retry";
+import * as retry from "../lib/core/retry";
 import * as utils from "../lib/core/utils";
 
 jest.setTimeout(10000);
@@ -37,7 +37,7 @@ describe("Functions: async", () => {
   test("success", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: Retry.exponential(
+      retry: retry.exponential(
         100, // initial delay (in ms)
         2, // backoff factor
         Infinity, // max attempts
@@ -71,7 +71,7 @@ describe("Functions: async", () => {
   test("failure", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: Retry.linear(0, 3),
+      retry: retry.linear(0, 3),
     });
 
     resonate.register("run", run);

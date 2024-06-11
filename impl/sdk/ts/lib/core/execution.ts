@@ -3,6 +3,7 @@ import { ErrorCodes, ResonateError } from "./errors";
 import { Future, ResonatePromise } from "./future";
 import { Invocation } from "./invocation";
 import { DurablePromise } from "./promises/promises";
+import { retryIterator } from "./retry";
 
 /////////////////////////////////////////////////////////////////////
 // Execution
@@ -186,7 +187,7 @@ export class OrdinaryExecution<T> extends Execution<T> {
     let error;
 
     // invoke the function according to the retry policy
-    for (const delay of this.invocation.opts.retry.iterator(this.invocation)) {
+    for (const delay of retryIterator(this.invocation)) {
       await new Promise((resolve) => setTimeout(resolve, delay));
 
       try {

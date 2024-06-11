@@ -3,7 +3,7 @@ import { ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import { DurablePromise } from "./core/promises/promises";
-import { Retry } from "./core/retries/retry";
+import * as retryPolicy from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
 import { ResonateBase } from "./resonate";
 
@@ -269,7 +269,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.all(values), this.options({
-      retry: Retry.never(),
+      retry: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -294,7 +294,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.any(values), this.options({
-      retry: Retry.never(),
+      retry: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -319,7 +319,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.race(values), this.options({
-      retry: Retry.never(),
+      retry: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -347,7 +347,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.allSettled(values), this.options({
-      retry: Retry.never(),
+      retry: retryPolicy.never(),
       ...opts,
     }));
   }

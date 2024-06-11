@@ -1,5 +1,6 @@
 import { Future } from "./future";
 import { Options, PartialOptions, isOptions } from "./options";
+import { RetryPolicy, exponential } from "./retry";
 
 /////////////////////////////////////////////////////////////////////
 // Invocation
@@ -19,6 +20,7 @@ export class Invocation<T> {
   createdOn: number = Date.now();
   counter: number = 0;
   attempt: number = 0;
+  retryPolicy: RetryPolicy = exponential();
 
   awaited: Future<any>[] = [];
   blocked: Future<any> | null = null;
@@ -69,6 +71,8 @@ export class Invocation<T> {
     // - the current time plus the user provided relative time
     // - the parent timeout
     this.timeout = Math.min(this.createdOn + this.opts.timeout, this.parent?.timeout ?? Infinity);
+
+    this.retryPolicy = this.opts.retry;
   }
 
   addChild(child: Invocation<any>) {

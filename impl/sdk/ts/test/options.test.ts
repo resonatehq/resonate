@@ -3,7 +3,7 @@ import * as a from "../lib/async";
 import { Base64Encoder } from "../lib/core/encoders/base64";
 import { JSONEncoder } from "../lib/core/encoders/json";
 import { Options } from "../lib/core/options";
-import { Retry } from "../lib/core/retries/retry";
+import * as retry from "../lib/core/retry";
 import * as utils from "../lib/core/utils";
 import * as g from "../lib/generator";
 
@@ -36,7 +36,7 @@ describe("Options", () => {
   const resonateOpts = {
     encoder: new JSONEncoder(),
     poll: 1000,
-    retry: Retry.exponential(),
+    retry: retry.exponential(),
     tags: { a: "a", b: "b", c: "c" },
     timeout: 1000,
   };
@@ -48,7 +48,7 @@ describe("Options", () => {
     idempotencyKey: "idempotencyKey",
     lock: false,
     poll: 2000,
-    retry: Retry.linear(),
+    retry: retry.linear(),
     tags: { c: "x", d: "d", e: "e" },
     timeout: 2000,
     version: 2,

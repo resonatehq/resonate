@@ -1,6 +1,6 @@
 import { describe, test, expect, jest } from "@jest/globals";
 import { Resonate, Context } from "../lib/async";
-import { Retry } from "../lib/core/retries/retry";
+import * as retry from "../lib/core/retry";
 
 jest.setTimeout(10000);
 
@@ -14,7 +14,7 @@ async function throwOrReturn(v: any) {
 
 describe("Combinators", () => {
   const resonate = new Resonate({
-    retry: Retry.never(),
+    retry: retry.never(),
   });
 
   describe("all", () => {

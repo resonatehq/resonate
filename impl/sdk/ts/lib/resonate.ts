@@ -5,8 +5,7 @@ import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { ResonateOptions, Options, PartialOptions, isOptions } from "./core/options";
 import * as promises from "./core/promises/promises";
-import { Retry } from "./core/retries/retry";
-import { IRetry } from "./core/retry";
+import * as retryPolicy from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
 import { IStore } from "./core/store";
 import { LocalStore } from "./core/stores/local";
@@ -36,7 +35,7 @@ export abstract class ResonateBase {
 
   public readonly encoder: IEncoder<unknown, string | undefined>;
   public readonly logger: ILogger;
-  public readonly retry: IRetry;
+  public readonly retry: retryPolicy.RetryPolicy;
   public readonly store: IStore;
 
   private interval: NodeJS.Timeout | undefined;
@@ -48,7 +47,7 @@ export abstract class ResonateBase {
     logger = new Logger(),
     pid = utils.randomId(),
     poll = 5000, // 5s
-    retry = Retry.exponential(),
+    retry = retryPolicy.exponential(),
     store = undefined,
     tags = {},
     timeout = 10000, // 10s
