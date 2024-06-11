@@ -6,7 +6,7 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from functools import partial
 from threading import Thread
-from typing import TYPE_CHECKING, Any, Callable, Generic, cast
+from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
 
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
@@ -15,7 +15,6 @@ from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
-
 
 
 T = TypeVar("T")
@@ -35,13 +34,26 @@ class Call:
         self.kwargs = kwargs
 
 
-Yieldable: TypeAlias = Call
+class Invoke:
+    def __init__(
+        self,
+        fn: Callable[P, Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+
+Yieldable: TypeAlias = Union[Call, Invoke, Future[Any]]
 
 
 @dataclass(frozen=True)
 class CoroutineFuturePair(Generic[T]):
     coro: Generator[Yieldable, Any, T]
-    future: Future[T]
+    future: Future[Result[T, Exception]]
 
 
 @dataclass(frozen=True)
@@ -53,7 +65,7 @@ class Runnable(Generic[T]):
 @dataclass(frozen=True)
 class Awaiting(Generic[T]):
     root_coroutine_future_pair: CoroutineFuturePair[T]
-    value_promise: Future[Any]
+    value_promise: Future[Result[T, Exception]]
 
 
 def advance_generator_state(
@@ -111,8 +123,14 @@ class Scheduler:
 def _run(staging_queue: queue.Queue[CoroutineFuturePair[Any]]) -> None:
     processor = Processor(max_workers=None)
     runnables: list[Runnable[Any]] = []
+    awaitables: list[Awaiting[Any]] = []
 
     while True:
+        while processor.cq_qsize() > 0:
+            cqe = processor.dequeue()
+            cqe.callback(cqe.cmd_result)
+            continue
+
         while staging_queue.qsize() > 0:
             coro_with_future = staging_queue.get()
             runnables.append(
@@ -122,18 +140,24 @@ def _run(staging_queue: queue.Queue[CoroutineFuturePair[Any]]) -> None:
                 )
             )
             continue
-        while processor.cq_qsize() > 0:
-            cqe = processor.dequeue()
-            cqe.callback(cqe.cmd_result)
-            continue
 
         if len(runnables) == 0:
             continue
 
         runnable = runnables.pop()
 
-        new_yieldable_or_result = advance_generator_state(runnable=runnable)
+        try:
+            new_yieldable_or_result = advance_generator_state(runnable=runnable)
+        except Exception as e:  # noqa: BLE001
+            runnable.root_coroutine_future_pair.future.set_result(Err(e))
+            continue
+
         if isinstance(new_yieldable_or_result, Call):
+            new_awaitable = Awaiting(
+                root_coroutine_future_pair=runnable.root_coroutine_future_pair,
+                value_promise=Future[Any](),
+            )
+
             processor.enqueue(
                 SQE(
                     cmd=_wrap_fn_into_cmd(
@@ -142,17 +166,36 @@ def _run(staging_queue: queue.Queue[CoroutineFuturePair[Any]]) -> None:
                         **new_yieldable_or_result.kwargs,
                     ),
                     callback=partial(
-                        call_callback,
-                        runnables,
-                        runnable.root_coroutine_future_pair,
+                        call_callback, new_awaitable, awaitables, runnables
                     ),
                 )
             )
 
+            awaitables.append(new_awaitable)
+        elif isinstance(new_yieldable_or_result, Invoke):  # noqa: SIM114
+            raise NotImplementedError
+        elif isinstance(new_yieldable_or_result, Future):
+            raise NotImplementedError
         else:
             runnable.root_coroutine_future_pair.future.set_result(
-                new_yieldable_or_result
+                Ok(new_yieldable_or_result)
             )
+
+
+def call_callback(
+    awaitable: Awaiting[Any],
+    awaitables: list[Awaiting[Any]],
+    runnables: list[Runnable[Any]],
+    value: Result[Any, Exception],
+) -> None:
+    awaitables.remove(awaitable)
+    awaitable.value_promise.set_result(value)
+    runnables.append(
+        Runnable(
+            root_coroutine_future_pair=awaitable.root_coroutine_future_pair,
+            value_to_yield_back=awaitable.value_promise.result(),
+        )
+    )
 
 
 class FnCmd(ICommand[T]):
@@ -191,19 +234,6 @@ class AsyncFnCmd(IAsyncCommand[T]):
         except Exception as e:  # noqa: BLE001
             result = Err(e)
         return result
-
-
-def call_callback(
-    runnables: list[Runnable[Any]],
-    root_coroutine_future_pair: CoroutineFuturePair[Any],
-    value: Result[Any, Exception],
-) -> None:
-    runnables.append(
-        Runnable(
-            root_coroutine_future_pair=root_coroutine_future_pair,
-            value_to_yield_back=value,
-        )
-    )
 
 
 def _wrap_fn_into_cmd(
