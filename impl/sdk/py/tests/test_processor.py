@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from functools import partial
-from time import perf_counter, sleep
+from time import sleep
 from typing import TypeVar
 
 from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
@@ -38,7 +38,6 @@ def _callback_that_asserts(actual: str, expected: str) -> None:
 def test_processor() -> None:
     processor = Processor(max_workers=3)
 
-    start = perf_counter()
     processor.enqueue(
         SQE(
             GreetingCommand(name="A", sleep_time=2),
@@ -72,7 +71,3 @@ def test_processor() -> None:
     )
     cqe = processor.dequeue()
     cqe.callback(cqe.cmd_result)
-
-    end = perf_counter()
-
-    print(end - start)  # noqa: T201
