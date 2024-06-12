@@ -239,7 +239,7 @@ export abstract class ResonateBase {
     }
 
     const {
-      opts: { version, timeout, tags: promiseTags },
+      opts: { retry, version, timeout, tags: promiseTags },
     } = this.functions[funcName][opts.version];
 
     const idempotencyKey =
@@ -248,6 +248,7 @@ export abstract class ResonateBase {
     const promiseParam = {
       func: funcName,
       version,
+      retryPolicy: retry,
       args,
     };
 
@@ -269,12 +270,14 @@ export abstract class ResonateBase {
   }
 
   /**
-   * Start the resonate service.
+   * Start the resonate service which continually checks for pending promises
+   * every `delay` ms.
    *
    * @param delay Frequency in ms to check for pending promises.
    */
   start(delay: number = 5000) {
     clearInterval(this.interval);
+    this._start();
     this.interval = setInterval(() => this._start(), delay);
   }
 
@@ -328,9 +331,12 @@ export abstract class ResonateBase {
             "version" in param &&
             typeof param.version === "number" &&
             "args" in param &&
-            Array.isArray(param.args)
+            Array.isArray(param.args) &&
+            "retryPolicy" in param &&
+            retryPolicy.isRetryPolicy(param.retryPolicy)
           ) {
             const { func, opts } = this.functions[param.func][param.version];
+            opts.retry = param.retryPolicy;
             this.execute(param.func, promise.id, func, param.args, opts, opts, promise);
           }
         }

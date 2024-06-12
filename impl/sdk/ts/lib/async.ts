@@ -448,6 +448,7 @@ class Scheduler {
     const param = {
       func: name,
       version: opts.version,
+      retryPolicy: opts.retry,
       args,
     };
 

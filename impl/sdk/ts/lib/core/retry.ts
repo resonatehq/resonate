@@ -18,6 +18,44 @@ export type Never = {
   kind: "never";
 };
 
+export function isRetryPolicy(value: unknown): value is RetryPolicy {
+  // Check if the value is an object
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  // Check if the object has a 'kind' property and if its value is a valid kind string
+  const kindValue = (value as RetryPolicy).kind;
+  if (kindValue !== "exponential" && kindValue !== "linear" && kindValue !== "never") {
+    return false;
+  }
+
+  // Check if the object matches the corresponding type based on the 'kind' value
+  switch (kindValue) {
+    case "exponential":
+      return (
+        "initialDelayMs" in value &&
+        "backoffFactor" in value &&
+        "maxAttempts" in value &&
+        "maxDelayMs" in value &&
+        typeof (value as Exponential).initialDelayMs === "number" &&
+        typeof (value as Exponential).backoffFactor === "number" &&
+        typeof (value as Exponential).maxAttempts === "number" &&
+        typeof (value as Exponential).maxDelayMs === "number"
+      );
+    case "linear":
+      return (
+        "delayMs" in value &&
+        "maxAttempts" in value &&
+        typeof (value as Linear).delayMs === "number" &&
+        typeof (value as Linear).maxAttempts === "number"
+      );
+    case "never":
+      return true; // No additional properties to check for 'never' type
+    default:
+      return false; // unreachable
+  }
+}
 export function exponential(
   initialDelayMs: number = 100,
   backoffFactor: number = 2,
@@ -45,6 +83,16 @@ export function never(): Never {
   return { kind: "never" };
 }
 
+/**
+ * Returns an iterable iterator that yields delay values for each retry attempt,
+ * based on the specified retry policy.
+ * The iterator stops yielding delay values when either the timeout is reached or the maximum
+ * number of attempts is exceeded.
+ *
+ * @param ctx - The context object containing the retry policy, attempt number, and timeout.
+ * @returns An iterable iterator that yields delay values for each retry attempt.
+ *
+ */
 export function retryIterator<T extends { retryPolicy: RetryPolicy; attempt: number; timeout: number }>(
   ctx: T,
 ): IterableIterator<number> {

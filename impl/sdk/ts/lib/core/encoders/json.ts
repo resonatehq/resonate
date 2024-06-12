@@ -10,6 +10,14 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
     }
 
     return JSON.stringify(data, (_, value) => {
+      if (value === Infinity) {
+        return "Infinity";
+      }
+
+      if (value === -Infinity) {
+        return "-Infinity";
+      }
+
       if (value instanceof AggregateError) {
         return {
           __type: "aggregate_error",
@@ -53,6 +61,14 @@ export class JSONEncoder implements IEncoder<unknown, string | undefined> {
     }
 
     return JSON.parse(data, (_, value) => {
+      if (value === "Infinity") {
+        return Infinity;
+      }
+
+      if (value === "-Infinity") {
+        return Infinity;
+      }
+
       if (value?.__type === "aggregate_error") {
         return Object.assign(new AggregateError(value.errors, value.message), value);
       }

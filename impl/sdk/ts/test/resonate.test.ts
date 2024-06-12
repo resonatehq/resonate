@@ -183,8 +183,8 @@ describe("Resonate", () => {
         expect(() => schedule(resonate, "baz", "", () => {})).toThrow("Function baz version 1 already registered");
 
         register(resonate, "qux", () => {});
-        expect(() => resonate.schedule("qux", "x", "qux")).rejects.toThrow();
-        expect(() => resonate.schedule("qux", "* * * * * * *", "qux")).rejects.toThrow();
+        expect(resonate.schedule("qux", "x", "qux")).rejects.toThrow();
+        expect(resonate.schedule("qux", "* * * * * * *", "qux")).rejects.toThrow();
 
         // delete the schedules in order to stop the local
         // store interval that creates promises
