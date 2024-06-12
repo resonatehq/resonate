@@ -37,40 +37,38 @@ def _callback_that_asserts(expected: str, actual: Result[str, Exception]) -> Non
 
 
 def test_processor() -> None:
-    processor = Processor(max_workers=3)
-
-    processor.enqueue(
+    p = Processor(max_workers=3)
+    p.enqueue(
         SQE(
-            GreetingCommand(name="A", sleep_time=2),
+            GreetingCommand(name="A", sleep_time=0.2),
             partial(_callback_that_asserts, "Hi A"),
         )
     )
-    processor.enqueue(
+    p.enqueue(
         SQE(
             AsyncGreetingCommand(name="B", sleep_time=0.4),
             partial(_callback_that_asserts, "Hi B"),
         )
     )
-    processor.enqueue(
+    p.enqueue(
         SQE(
-            GreetingCommand(name="C", sleep_time=5),
+            GreetingCommand(name="C", sleep_time=0.5),
             partial(_callback_that_asserts, "Hi C"),
         )
     )
-    cqe = processor.dequeue()
+    cqe = p.dequeue()
     cqe.callback(cqe.cmd_result)
-    cqe = processor.dequeue()
+    cqe = p.dequeue()
     cqe.callback(cqe.cmd_result)
-    cqe = processor.dequeue()
+    cqe = p.dequeue()
     cqe.callback(cqe.cmd_result)
 
-    processor.enqueue(
+    p.enqueue(
         SQE(
             GreetingCommand(name="D", sleep_time=0.1),
             partial(_callback_that_asserts, "Hi D"),
         )
     )
-    cqe = processor.dequeue()
+    cqe = p.dequeue()
     cqe.callback(cqe.cmd_result)
-
-    processor.close()
+    p.close()

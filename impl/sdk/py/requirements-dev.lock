@@ -8,7 +8,6 @@
 #   with-sources: false
 
 -e file:.
-debugpy==1.8.1
 exceptiongroup==1.2.1
     # via pytest
 iniconfig==2.0.0
@@ -16,17 +15,17 @@ iniconfig==2.0.0
 mypy==1.10.0
 mypy-extensions==1.0.0
     # via mypy
-packaging==24.0
+packaging==24.1
     # via pytest
 pluggy==1.5.0
     # via pytest
-pytest==8.2.0
+pytest==8.2.2
 result==0.17.0
     # via resonate-sdk-py
-ruff==0.4.7
+ruff==0.4.8
 tomli==2.0.1
     # via mypy
     # via pytest
-typing-extensions==4.11.0
+typing-extensions==4.12.2
     # via mypy
     # via result
