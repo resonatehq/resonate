@@ -72,3 +72,5 @@ def test_processor() -> None:
     )
     cqe = processor.dequeue()
     cqe.callback(cqe.cmd_result)
+
+    processor.close()

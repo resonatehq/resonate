@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from asyncio import iscoroutinefunction
 from collections.abc import Coroutine
 from dataclasses import dataclass
-from threading import Thread
+from threading import Event, Thread
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
 from result import Err, Ok
@@ -40,10 +40,17 @@ class CQE(Generic[T]):
     callback: Callable[[T], None]
 
 
-def _worker(sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]) -> CQE[Any]:
+def _worker(
+    kill_threads: Event, sq: queue.Queue[SQE[Any]], cq: queue.Queue[CQE[Any]]
+) -> None:
     loop = asyncio.new_event_loop()
     while True:
-        sqe = sq.get()
+        if kill_threads.is_set():
+            return
+        try:
+            sqe = sq.get(timeout=0.1)
+        except queue.Empty:
+            continue
         if iscoroutinefunction(sqe.cmd.run):
             cmd_result = loop.run_until_complete(sqe.cmd.run())
         else:
@@ -73,6 +80,7 @@ class Processor:
         self._submission_queue = queue.Queue[SQE[Any]]()
         self._completion_queue = queue.Queue[CQE[Any]]()
         self._threads = set[Thread]()
+        self._kill_threads = Event()
 
     def enqueue(self, sqe: SQE[Any]) -> None:
         self._submission_queue.put(sqe)
@@ -84,10 +92,10 @@ class Processor:
             t = Thread(
                 target=_worker,
                 args=(
+                    self._kill_threads,
                     self._submission_queue,
                     self._completion_queue,
                 ),
-                daemon=True,
             )
             t.start()
             self._threads.add(t)
@@ -97,3 +105,8 @@ class Processor:
 
     def cq_qsize(self) -> int:
         return self._completion_queue.qsize()
+
+    def close(self) -> None:
+        self._kill_threads.set()
+        for t in self._threads:
+            t.join()
