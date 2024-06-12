@@ -140,7 +140,7 @@ class Blocker(Generic[T]):
     prom_blocking: Promise[Any]
 
 
-def iterate_coro(runnable: Runnable[T]) -> Yieldable | T:
+def iterate_coro(runnable: Runnable[T]) -> tuple[Yieldable | T, bool]:
     yieldable: Yieldable
     try:
         if runnable.next_value is None:
@@ -164,8 +164,12 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | T:
     except StopIteration as e:
         # if stop iteraton is raised it means we finished the coro execution
         logger.debug("Coro final value reached `%s`", e.value)
-        return e.value
-    return yieldable
+        return e.value, True
+    return yieldable, False
+
+
+def _invocation_callback(pending_prom: Promise[T], v: Result[T, Exception]) -> None:
+    pending_prom.set_result(v)
 
 
 def _callback(
@@ -207,7 +211,7 @@ def _worker(
 
         r = runnables.pop()
         try:
-            yieldable_or_final_value = iterate_coro(r)
+            yieldable_or_final_value, end_reached = iterate_coro(r)
         except Exception as e:  # noqa: BLE001
             logger.debug("Processing final error")
             r.coro_and_promise.prom.set_result(Err(e))
@@ -227,11 +231,33 @@ def _worker(
             )
 
         elif isinstance(yieldable_or_final_value, Invoke):
+            invoke = yieldable_or_final_value
             logger.debug("Processing invocation")
-            raise NotImplementedError
+            p = Promise[Any]()
+            runnables.append(
+                Runnable(coro_and_promise=r.coro_and_promise, next_value=Ok(p))
+            )
+            processor.enqueue(
+                SQE(
+                    cmd=_wrap_fn_into_cmd(invoke.fn, *invoke.args, **invoke.kwargs),
+                    callback=partial(_invocation_callback, p),
+                )
+            )
+
         elif isinstance(yieldable_or_final_value, Promise):
+            prom = yieldable_or_final_value
             logger.debug("Processing promise")
-            raise NotImplementedError
+            if end_reached:
+                r.coro_and_promise.prom.set_result(Ok(prom))
+            elif prom.done():
+                try:
+                    res = Ok(prom.result())
+                except Exception as e:
+                    res = Err(e)
+                runnables.append(Runnable(r.coro_and_promise, next_value=res))
+
+            else:
+                blockers.append(Blocker(r.coro_and_promise, prom_blocking=prom))
         else:
             logger.debug("Processing final value")
             r.coro_and_promise.prom.set_result(Ok(yieldable_or_final_value))

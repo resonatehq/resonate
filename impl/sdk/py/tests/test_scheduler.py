@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from resonate_sdk_py.scheduler import Call, Scheduler, Yieldable
+from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -10,6 +10,18 @@ if TYPE_CHECKING:
 
 def _divide(a: int, b: int) -> int:
     return a // b
+
+
+def invocation_that_fails() -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(_divide, a=3, b=0)
+    x: int = yield xp
+    return x
+
+
+def one_invocation() -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    x: int = yield xp
+    return x
 
 
 def only_call() -> Generator[Yieldable, Any, int]:
