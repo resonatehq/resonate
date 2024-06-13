@@ -62,8 +62,8 @@ def test_invocation() -> None:
     s = Scheduler()
     p = s.add(only_invocation)
     assert p.result(timeout=30) == 3
-
     s.close()
+
 
 
 def test_invocation_with_error() -> None:

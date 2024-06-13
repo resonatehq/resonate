@@ -288,6 +288,21 @@ def _handle_return_promise(
         waiting_for_prom[prom].extend(waiting_for_expired_prom)
 
 
+def _handle_promise(
+    r: Runnable[T],
+    prom: Promise[Any],
+    waiting_for_prom: WaitingForPromiseResolution,
+    pending_to_run: list[Runnable[Any]],
+) -> None:
+    waiting_for_prom[prom] = [r.coro_and_promise]
+    if prom.done():
+        _unblock_depands_coros(
+            p=prom,
+            waiting=waiting_for_prom,
+            runnables=pending_to_run,
+        )
+
+
 def _worker(
     kill_event: Event,
     stg_q: Queue[CoroAndPromise[T]],
@@ -296,9 +311,7 @@ def _worker(
     pending_to_run: PedingToRun = []
     waiting_for_prom_resolution: WaitingForPromiseResolution = {}
     while not kill_event.is_set():
-        new_r = _runnables_from_stg_q(stg_q=stg_q)
-        if new_r is not None:
-            pending_to_run.extend(new_r)
+        _run_cqe_callbacks(processor=processor)
 
         for p in waiting_for_prom_resolution:
             if p.done():
@@ -306,7 +319,9 @@ def _worker(
                     p=p, waiting=waiting_for_prom_resolution, runnables=pending_to_run
                 )
 
-        _run_cqe_callbacks(processor=processor)
+        new_r = _runnables_from_stg_q(stg_q=stg_q)
+        if new_r is not None:
+            pending_to_run.extend(new_r)
 
         if len(pending_to_run) == 0:
             continue
@@ -348,14 +363,12 @@ def _worker(
                     pending_to_run=pending_to_run,
                 )
             else:
-                prom = yieldable_or_final_value
-                waiting_for_prom_resolution[prom] = [r.coro_and_promise]
-                if prom.done():
-                    _unblock_depands_coros(
-                        p=prom,
-                        waiting=waiting_for_prom_resolution,
-                        runnables=pending_to_run,
-                    )
+                _handle_promise(
+                    r=r,
+                    prom=yieldable_or_final_value,
+                    waiting_for_prom=waiting_for_prom_resolution,
+                    pending_to_run=pending_to_run,
+                )
 
         else:
             logger.debug("Processing final value %s", yieldable_or_final_value)
