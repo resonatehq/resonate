@@ -342,6 +342,51 @@ def _handle_final_value(
     )
 
 
+def _process_each_runnable(
+    pending_to_run: PedingToRun,
+    waiting_for_promise: WaitingForPromiseResolution,
+    processor: Processor,
+) -> None:
+    r: Runnable[Any] = pending_to_run.pop()
+    yieldable_or_final_value = iterate_coro(r)
+    if isinstance(yieldable_or_final_value, _FinalValue):
+        _handle_final_value(
+            value=yieldable_or_final_value.v,
+            running=r,
+            waiting_for_prom=waiting_for_promise,
+            pending_to_run=pending_to_run,
+        )
+
+    elif isinstance(yieldable_or_final_value, Call):
+        _handle_call(
+            call=yieldable_or_final_value,
+            r=r,
+            processor=processor,
+            pending_to_run=pending_to_run,
+            waiting_for_promise=waiting_for_promise,
+        )
+
+    elif isinstance(yieldable_or_final_value, Invoke):
+        _handle_invocation(
+            invocation=yieldable_or_final_value,
+            r=r,
+            processor=processor,
+            pending_to_run=pending_to_run,
+            waiting_for_promise=waiting_for_promise,
+        )
+
+    elif isinstance(yieldable_or_final_value, Promise):
+        _handle_promise(
+            r=r,
+            prom=yieldable_or_final_value,
+            waiting_for_prom=waiting_for_promise,
+            pending_to_run=pending_to_run,
+        )
+
+    else:
+        assert_never(yieldable_or_final_value)
+
+
 def _worker(
     kill_event: Event,
     stg_q: Queue[CoroAndPromise[T]],
@@ -362,48 +407,16 @@ def _worker(
         if new_r is not None:
             pending_to_run.extend(new_r)
 
-        if len(pending_to_run) == 0:
+        n_pending_to_run = len(pending_to_run)
+        if n_pending_to_run == 0:
             continue
 
-        r: Runnable[Any] = pending_to_run.pop()
-        yieldable_or_final_value = iterate_coro(r)
-
-        if isinstance(yieldable_or_final_value, _FinalValue):
-            _handle_final_value(
-                value=yieldable_or_final_value.v,
-                running=r,
-                waiting_for_prom=waiting_for_prom_resolution,
-                pending_to_run=pending_to_run,
-            )
-
-        elif isinstance(yieldable_or_final_value, Call):
-            _handle_call(
-                call=yieldable_or_final_value,
-                r=r,
-                processor=processor,
+        for _ in range(n_pending_to_run):
+            _process_each_runnable(
                 pending_to_run=pending_to_run,
                 waiting_for_promise=waiting_for_prom_resolution,
-            )
-
-        elif isinstance(yieldable_or_final_value, Invoke):
-            _handle_invocation(
-                invocation=yieldable_or_final_value,
-                r=r,
                 processor=processor,
-                pending_to_run=pending_to_run,
-                waiting_for_promise=waiting_for_prom_resolution,
             )
-
-        elif isinstance(yieldable_or_final_value, Promise):
-            _handle_promise(
-                r=r,
-                prom=yieldable_or_final_value,
-                waiting_for_prom=waiting_for_prom_resolution,
-                pending_to_run=pending_to_run,
-            )
-
-        else:
-            assert_never(yieldable_or_final_value)
 
     logger.debug("Scheduler killed")
 
