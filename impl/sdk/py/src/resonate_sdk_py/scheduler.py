@@ -134,10 +134,8 @@ class Runnable(Generic[T]):
     next_value: Result[Any, Exception] | None
 
 
-@dataclass(frozen=True)
-class Blocker(Generic[T]):
-    coro_and_promise: CoroAndPromise[T]
-    prom_blocking: Promise[Any]
+WaitingForPromiseResolution: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
+PedingToRun: TypeAlias = list[Runnable[Any]]
 
 
 def iterate_coro(runnable: Runnable[T]) -> tuple[Yieldable | T, bool]:
@@ -163,29 +161,128 @@ def iterate_coro(runnable: Runnable[T]) -> tuple[Yieldable | T, bool]:
             assert_never(runnable.next_value)
     except StopIteration as e:
         # if stop iteraton is raised it means we finished the coro execution
-        logger.debug("Coro final value reached `%s`", e.value)
         return e.value, True
     return yieldable, False
 
 
-def _invocation_callback(pending_prom: Promise[T], v: Result[T, Exception]) -> None:
-    pending_prom.set_result(v)
+def _resolve_promise(p: Promise[T], value: Result[T, Exception]) -> Promise[T]:
+    logger.debug("Solving promise.")
+    p.set_result(value)
+    return p
+
+
+def _unblock_depands_coros(
+    p: Promise[T],
+    waiting: WaitingForPromiseResolution,
+    runnables: PedingToRun,
+) -> None:
+    assert p.done(), "Promise must be done to unblock dependant coros"
+
+    if waiting.get(p) is None:
+        return
+
+    res: Result[T, Exception]
+    try:
+        res = Ok(p.result())
+    except Exception as e:  # noqa: BLE001
+        res = Err(e)
+
+    dependant_coros = waiting.pop(p)
+    logger.debug("Unblocking `%s` pending promises", len(dependant_coros))
+
+    new_runnables = (Runnable(c_and_p, next_value=res) for c_and_p in dependant_coros)
+    runnables.extend(new_runnables)
 
 
 def _callback(
-    blockers: list[Blocker[Any]],
-    blocker: Blocker[T],
-    runnables: list[Runnable[Any]],
+    p: Promise[T],
+    waiting_for_promise: WaitingForPromiseResolution,
+    pending_to_run: PedingToRun,
     v: Result[T, Exception],
 ) -> None:
-    for b in blockers:
-        if b.coro_and_promise.prom == blocker.prom_blocking:
-            blockers.remove(b)
-            b.coro_and_promise.prom.set_result(v)
-            runnables.append(Runnable(b.coro_and_promise, v))
-    blockers.remove(blocker)
-    blocker.prom_blocking.set_result(v)
-    runnables.append(Runnable(blocker.coro_and_promise, v))
+    p = _resolve_promise(p=p, value=v)
+    _unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
+
+
+def _run_cqe_callbacks(processor: Processor) -> None:
+    if processor.cq_qsize() > 0:
+        logger.debug("Popping from the completion queue.")
+        cqe = processor.dequeue()
+        cqe.callback(cqe.cmd_result)
+
+
+def _ingest_from_stg_q_into_runnables(
+    stg_q: Queue[CoroAndPromise[T]],
+    pending_to_run: PedingToRun,
+) -> None:
+    if stg_q.qsize() > 0:
+        logger.debug("Popping from the staging queue")
+        coro_and_prom = stg_q.get()
+        pending_to_run.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
+
+
+def _handle_call(
+    call: Call,
+    r: Runnable[T],
+    processor: Processor,
+    waiting_for_promise: WaitingForPromiseResolution,
+    pending_to_run: PedingToRun,
+) -> None:
+    logger.debug("Processing call")
+    p = Promise[Any]()
+    waiting_for_promise[p] = [r.coro_and_promise]
+
+    processor.enqueue(
+        SQE(
+            cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+            callback=partial(
+                _callback,
+                p,
+                waiting_for_promise,
+                pending_to_run,
+            ),
+        )
+    )
+
+
+def _handle_invocation(
+    invocation: Invoke,
+    r: Runnable[T],
+    processor: Processor,
+    pending_to_run: PedingToRun,
+    waiting_for_promise: WaitingForPromiseResolution,
+) -> None:
+    logger.debug("Processing invocation")
+    p = Promise[Any]()
+    pending_to_run.append(Runnable(r.coro_and_promise, Ok(p)))
+    processor.enqueue(
+        SQE(
+            cmd=_wrap_fn_into_cmd(invocation.fn, *invocation.args, **invocation.kwargs),
+            callback=partial(
+                _callback,
+                p,
+                waiting_for_promise,
+                pending_to_run,
+            ),
+        )
+    )
+
+
+def _handle_return_promise(
+    running: Runnable[T],
+    prom: Promise[T],
+    waiting_for_prom: WaitingForPromiseResolution,
+    pending_to_run: list[Runnable[Any]],
+) -> None:
+    if prom.done():
+        _unblock_depands_coros(
+            p=prom,
+            waiting=waiting_for_prom,
+            runnables=pending_to_run,
+        )
+    else:
+        waiting_for_expired_prom = waiting_for_prom.pop(running.coro_and_promise.prom)
+        waiting_for_prom[prom].extend(waiting_for_expired_prom)
 
 
 def _worker(
@@ -193,74 +290,72 @@ def _worker(
     stg_q: Queue[CoroAndPromise[T]],
     processor: Processor,
 ) -> None:
-    runnables: list[Runnable[Any]] = []
-    blockers: list[Blocker[Any]] = []
+    pending_to_run: PedingToRun = []
+    waiting_for_prom_resolution: WaitingForPromiseResolution = {}
     while not kill_event.is_set():
-        while processor.cq_qsize() > 0:
-            logger.debug("Popping from the completion queue.")
-            cqe = processor.dequeue()
-            cqe.callback(cqe.cmd_result)
+        _run_cqe_callbacks(processor=processor)
+        _ingest_from_stg_q_into_runnables(stg_q=stg_q, pending_to_run=pending_to_run)
 
-        while stg_q.qsize() > 0:
-            logger.debug("Popping from the staging queue")
-            coro_and_prom = stg_q.get()
-            runnables.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
-
-        if len(runnables) == 0:
+        if len(pending_to_run) == 0:
             continue
 
-        r = runnables.pop()
+        r: Runnable[Any] = pending_to_run.pop()
         try:
-            yieldable_or_final_value, end_reached = iterate_coro(r)
+            yieldable_or_final_value, is_return_v = iterate_coro(r)
         except Exception as e:  # noqa: BLE001
             logger.debug("Processing final error")
             r.coro_and_promise.prom.set_result(Err(e))
             continue
 
         if isinstance(yieldable_or_final_value, Call):
-            call = yieldable_or_final_value
-            logger.debug("Processing call")
-            p = Promise[Any]()
-            b = Blocker(coro_and_promise=r.coro_and_promise, prom_blocking=p)
-            blockers.append(b)
-            processor.enqueue(
-                SQE(
-                    cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
-                    callback=partial(_callback, blockers, b, runnables),
-                )
+            assert not is_return_v, "Call cannot be the return value of the coro"
+            _handle_call(
+                call=yieldable_or_final_value,
+                r=r,
+                processor=processor,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_prom_resolution,
             )
 
         elif isinstance(yieldable_or_final_value, Invoke):
-            invoke = yieldable_or_final_value
-            logger.debug("Processing invocation")
-            p = Promise[Any]()
-            runnables.append(
-                Runnable(coro_and_promise=r.coro_and_promise, next_value=Ok(p))
-            )
-            processor.enqueue(
-                SQE(
-                    cmd=_wrap_fn_into_cmd(invoke.fn, *invoke.args, **invoke.kwargs),
-                    callback=partial(_invocation_callback, p),
-                )
+            assert not is_return_v, "Invoke cannot be the return value of the coro"
+            _handle_invocation(
+                invocation=yieldable_or_final_value,
+                r=r,
+                processor=processor,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_prom_resolution,
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
-            prom = yieldable_or_final_value
-            logger.debug("Processing promise")
-            if end_reached:
-                r.coro_and_promise.prom.set_result(Ok(prom))
-            elif prom.done():
-                try:
-                    res = Ok(prom.result())
-                except Exception as e:
-                    res = Err(e)
-                runnables.append(Runnable(r.coro_and_promise, next_value=res))
-
+            if is_return_v:
+                _handle_return_promise(
+                    running=r,
+                    prom=yieldable_or_final_value,
+                    waiting_for_prom=waiting_for_prom_resolution,
+                    pending_to_run=pending_to_run,
+                )
             else:
-                blockers.append(Blocker(r.coro_and_promise, prom_blocking=prom))
+                prom = yieldable_or_final_value
+                if prom.done():
+                    _unblock_depands_coros(
+                        p=prom,
+                        waiting=waiting_for_prom_resolution,
+                        runnables=pending_to_run,
+                    )
+                else:
+                    waiting_for_prom_resolution[prom] = [r.coro_and_promise]
+
         else:
-            logger.debug("Processing final value")
-            r.coro_and_promise.prom.set_result(Ok(yieldable_or_final_value))
+            logger.debug("Processing final value %s", yieldable_or_final_value)
+            _callback(
+                p=r.coro_and_promise.prom,
+                waiting_for_promise=waiting_for_prom_resolution,
+                pending_to_run=pending_to_run,
+                v=Ok(yieldable_or_final_value),
+            )
+
+    logger.debug("Scheduler killed")
 
 
 class Scheduler:
