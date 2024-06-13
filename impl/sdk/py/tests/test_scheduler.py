@@ -68,10 +68,30 @@ def whatever() -> Generator[Yieldable, Any, int]:
     return x + y
 
 
+def whatever_with_error() -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(_divide, a=3, b=0)
+    xf: Promise[int] = yield Invoke(_abc, value=af)
+    yf: Promise[int] = yield Invoke(_abc, value=af)
+    try:
+        x: int = yield xf
+    except Exception:  # noqa: BLE001
+        x = 3
+    y: int = yield yf
+    return x + y
+
+
 def test_whatever() -> None:
     s = Scheduler()
     p = s.add(whatever)
     assert p.result(timeout=4) == 6
+    s.close()
+
+
+def test_whatever_with_error() -> None:
+    s = Scheduler()
+    p = s.add(whatever_with_error)
+    with pytest.raises(ZeroDivisionError):
+        p.result(timeout=4)
     s.close()
 
 
