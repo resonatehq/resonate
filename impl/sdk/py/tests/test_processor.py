@@ -71,4 +71,3 @@ def test_processor() -> None:
     )
     cqe = p.dequeue()
     cqe.callback(cqe.cmd_result)
-    p.close()

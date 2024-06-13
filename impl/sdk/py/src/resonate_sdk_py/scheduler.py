@@ -445,7 +445,6 @@ class Scheduler:
             self._w_thread = t
 
     def close(self) -> None:
-        self._processor.close()
         self._w_kill.set()
         assert self._w_thread is not None, "Worker thread was never initialized"
         self._w_thread.join()
