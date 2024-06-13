@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pytest
 from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+
+def _nested_gen(a: Promise[int]) -> Generator[Yieldable, Any, int]:
+    x = yield a
+    return x
 
 
 def _divide(a: int, b: int) -> int:
@@ -26,10 +32,47 @@ def call_with_errors() -> Generator[Yieldable, Any, int]:
     return x
 
 
+def gen_call() -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    y: int = yield Call(_nested_gen, x)
+    return y
+
+
+def gen_invoke() -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    y: Promise[int] = yield Invoke(_nested_gen, x)
+    z: int = yield y
+    return z
+
+
 def double_call() -> Generator[Yieldable, Any, int]:
     x: int = yield Call(_divide, a=3, b=1)
     y: int = yield Call(_divide, a=5, b=1)
     return x + y
+
+
+def _abc(value: Promise[int]) -> Generator[Yieldable, int, int]:
+    x = yield value
+    return x
+
+
+def whatever() -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    xf: Promise[int] = yield Invoke(_abc, value=af)
+    yf: Promise[int] = yield Invoke(_abc, value=af)
+    try:
+        x: int = yield xf
+    except Exception:  # noqa: BLE001
+        x = 3
+    y: int = yield yf
+    return x + y
+
+
+def test_whatever() -> None:
+    s = Scheduler()
+    p = s.add(whatever)
+    assert p.result(timeout=4) == 6
+    s.close()
 
 
 def test_calls() -> None:
@@ -40,6 +83,22 @@ def test_calls() -> None:
     assert p.result(timeout=30) == 3  # noqa: PLR2004
     p = s.add(double_call)
     assert p.result(timeout=30) == 8  # noqa: PLR2004
+    s.close()
+
+
+@pytest.mark.dev()
+def test_call_gen() -> None:
+    s = Scheduler()
+    p = s.add(gen_call)
+    assert p.result() == 3
+    s.close()
+
+
+@pytest.mark.dev()
+def test_invoke_gen() -> None:
+    s = Scheduler()
+    p = s.add(gen_invoke)
+    assert p.result() == 3
     s.close()
 
 
@@ -63,7 +122,6 @@ def test_invocation() -> None:
     p = s.add(only_invocation)
     assert p.result(timeout=30) == 3
     s.close()
-
 
 
 def test_invocation_with_error() -> None:

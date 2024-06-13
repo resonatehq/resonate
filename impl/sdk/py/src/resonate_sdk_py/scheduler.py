@@ -4,6 +4,7 @@ from asyncio import iscoroutinefunction
 from concurrent.futures import Future
 from dataclasses import dataclass
 from functools import partial
+from inspect import isgeneratorfunction
 from logging import getLogger
 from queue import Queue
 from threading import Event, Thread
@@ -234,18 +235,21 @@ def _handle_call(
     logger.debug("Processing call")
     p = Promise[Any]()
     waiting_for_promise[p] = [r.coro_and_promise]
-
-    processor.enqueue(
-        SQE(
-            cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
-            callback=partial(
-                _callback,
-                p,
-                waiting_for_promise,
-                pending_to_run,
-            ),
+    if not isgeneratorfunction(call.fn):
+        processor.enqueue(
+            SQE(
+                cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+                callback=partial(
+                    _callback,
+                    p,
+                    waiting_for_promise,
+                    pending_to_run,
+                ),
+            )
         )
-    )
+    else:
+        coro = call.fn(*call.args, **call.kwargs)
+        pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
 
 def _handle_invocation(
@@ -258,17 +262,23 @@ def _handle_invocation(
     logger.debug("Processing invocation")
     p = Promise[Any]()
     pending_to_run.append(Runnable(r.coro_and_promise, Ok(p)))
-    processor.enqueue(
-        SQE(
-            cmd=_wrap_fn_into_cmd(invocation.fn, *invocation.args, **invocation.kwargs),
-            callback=partial(
-                _callback,
-                p,
-                waiting_for_promise,
-                pending_to_run,
-            ),
+    if not isgeneratorfunction(invocation.fn):
+        processor.enqueue(
+            SQE(
+                cmd=_wrap_fn_into_cmd(
+                    invocation.fn, *invocation.args, **invocation.kwargs
+                ),
+                callback=partial(
+                    _callback,
+                    p,
+                    waiting_for_promise,
+                    pending_to_run,
+                ),
+            )
         )
-    )
+    else:
+        coro = invocation.fn(*invocation.args, **invocation.kwargs)
+        pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
 
 def _handle_return_promise(
@@ -294,7 +304,10 @@ def _handle_promise(
     waiting_for_prom: WaitingForPromiseResolution,
     pending_to_run: list[Runnable[Any]],
 ) -> None:
-    waiting_for_prom[prom] = [r.coro_and_promise]
+    if prom in waiting_for_prom:
+        waiting_for_prom[prom].append(r.coro_and_promise)
+    else:
+        waiting_for_prom[prom] = [r.coro_and_promise]
     if prom.done():
         _unblock_depands_coros(
             p=prom,
