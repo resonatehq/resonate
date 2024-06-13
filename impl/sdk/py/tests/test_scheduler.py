@@ -83,7 +83,7 @@ def whatever_with_error() -> Generator[Yieldable, Any, int]:
 def test_whatever() -> None:
     s = Scheduler()
     p = s.add(whatever)
-    assert p.result(timeout=4) == 6
+    assert p.result(timeout=4) == 6  # noqa: PLR2004
     s.close()
 
 
@@ -110,7 +110,7 @@ def test_calls() -> None:
 def test_call_gen() -> None:
     s = Scheduler()
     p = s.add(gen_call)
-    assert p.result() == 3
+    assert p.result() == 3  # noqa: PLR2004
     s.close()
 
 
@@ -118,7 +118,7 @@ def test_call_gen() -> None:
 def test_invoke_gen() -> None:
     s = Scheduler()
     p = s.add(gen_invoke)
-    assert p.result() == 3
+    assert p.result() == 3  # noqa: PLR2004
     s.close()
 
 
@@ -140,12 +140,12 @@ def invocation_with_error() -> Generator[Yieldable, Any, int]:
 def test_invocation() -> None:
     s = Scheduler()
     p = s.add(only_invocation)
-    assert p.result(timeout=30) == 3
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
     s.close()
 
 
 def test_invocation_with_error() -> None:
     s = Scheduler()
     p = s.add(invocation_with_error)
-    assert p.result(timeout=30) == 4
+    assert p.result(timeout=30) == 4  # noqa: PLR2004
     s.close()

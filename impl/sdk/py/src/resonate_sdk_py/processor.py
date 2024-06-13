@@ -47,6 +47,7 @@ def _worker(
     while not kill_threads.is_set():
         try:
             sqe = sq.get(timeout=0.1)
+            sq.task_done()
         except queue.Empty:
             continue
 
@@ -102,7 +103,9 @@ class Processor:
             self._threads.add(t)
 
     def dequeue(self) -> CQE[Any]:
-        return self._completion_queue.get()
+        cqe = self._completion_queue.get()
+        self._completion_queue.task_done()
+        return cqe
 
     def cq_qsize(self) -> int:
         return self._completion_queue.qsize()
