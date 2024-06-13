@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
 from result import Err, Ok
 
+from resonate_sdk_py import utils
+
 if TYPE_CHECKING:
     from result import Result
 
@@ -46,8 +48,7 @@ def _worker(
     loop = asyncio.new_event_loop()
     while not kill_threads.is_set():
         try:
-            sqe = sq.get(timeout=0.1)
-            sq.task_done()
+            sqe = utils.dequeue(q=sq, timeout=0.1)
         except queue.Empty:
             continue
 
@@ -103,9 +104,7 @@ class Processor:
             self._threads.add(t)
 
     def dequeue(self) -> CQE[Any]:
-        cqe = self._completion_queue.get()
-        self._completion_queue.task_done()
-        return cqe
+        return utils.dequeue(q=self._completion_queue)
 
     def cq_qsize(self) -> int:
         return self._completion_queue.qsize()

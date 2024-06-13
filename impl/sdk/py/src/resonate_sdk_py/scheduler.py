@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
+from resonate_sdk_py import utils
 from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
 
 if TYPE_CHECKING:
@@ -226,9 +227,8 @@ def _runnables_from_stg_q(
 
     if stg_q.qsize() > 0:
         logger.debug("Popping from the staging queue")
-        coro_and_prom = stg_q.get()
+        coro_and_prom = utils.dequeue(q=stg_q)
         new_runnables.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
-        stg_q.task_done()
 
     if len(new_runnables) == 0:
         return None
