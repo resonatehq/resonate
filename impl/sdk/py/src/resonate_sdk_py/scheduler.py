@@ -206,19 +206,22 @@ def _callback(
 
 def _run_cqe_callbacks(processor: Processor) -> None:
     if processor.cq_qsize() > 0:
-        logger.debug("Popping from the completion queue.")
+        logger.debug("Popping from the completion queue")
         cqe = processor.dequeue()
         cqe.callback(cqe.cmd_result)
 
 
-def _ingest_from_stg_q_into_runnables(
+def _runnables_from_stg_q(
     stg_q: Queue[CoroAndPromise[T]],
-    pending_to_run: PedingToRun,
-) -> None:
+) -> PedingToRun | None:
+    new_runnables: PedingToRun = []
     if stg_q.qsize() > 0:
         logger.debug("Popping from the staging queue")
         coro_and_prom = stg_q.get()
-        pending_to_run.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
+        new_runnables.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
+    if len(new_runnables) == 0:
+        return None
+    return new_runnables
 
 
 def _handle_call(
@@ -293,8 +296,17 @@ def _worker(
     pending_to_run: PedingToRun = []
     waiting_for_prom_resolution: WaitingForPromiseResolution = {}
     while not kill_event.is_set():
+        new_r = _runnables_from_stg_q(stg_q=stg_q)
+        if new_r is not None:
+            pending_to_run.extend(new_r)
+
+        for p in waiting_for_prom_resolution:
+            if p.done():
+                _unblock_depands_coros(
+                    p=p, waiting=waiting_for_prom_resolution, runnables=pending_to_run
+                )
+
         _run_cqe_callbacks(processor=processor)
-        _ingest_from_stg_q_into_runnables(stg_q=stg_q, pending_to_run=pending_to_run)
 
         if len(pending_to_run) == 0:
             continue
@@ -303,7 +315,7 @@ def _worker(
         try:
             yieldable_or_final_value, is_return_v = iterate_coro(r)
         except Exception as e:  # noqa: BLE001
-            logger.debug("Processing final error")
+            logger.debug("Processing final error `%s`", e)
             r.coro_and_promise.prom.set_result(Err(e))
             continue
 
@@ -337,14 +349,13 @@ def _worker(
                 )
             else:
                 prom = yieldable_or_final_value
+                waiting_for_prom_resolution[prom] = [r.coro_and_promise]
                 if prom.done():
                     _unblock_depands_coros(
                         p=prom,
                         waiting=waiting_for_prom_resolution,
                         runnables=pending_to_run,
                     )
-                else:
-                    waiting_for_prom_resolution[prom] = [r.coro_and_promise]
 
         else:
             logger.debug("Processing final value %s", yieldable_or_final_value)

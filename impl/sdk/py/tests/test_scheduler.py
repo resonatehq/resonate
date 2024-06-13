@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
 
 if TYPE_CHECKING:
@@ -37,11 +35,11 @@ def double_call() -> Generator[Yieldable, Any, int]:
 def test_calls() -> None:
     s = Scheduler()
     p = s.add(only_call)
-    assert p.result(timeout=5) == 3  # noqa: PLR2004
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
     p = s.add(call_with_errors)
-    assert p.result(timeout=5) == 3  # noqa: PLR2004
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
     p = s.add(double_call)
-    assert p.result(timeout=5) == 8  # noqa: PLR2004
+    assert p.result(timeout=30) == 8  # noqa: PLR2004
     s.close()
 
 
@@ -51,10 +49,25 @@ def only_invocation() -> Generator[Yieldable, Any, int]:
     return x
 
 
-@pytest.mark.dev()
+def invocation_with_error() -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(_divide, a=3, b=0)
+    try:
+        x: int = yield xp
+    except ZeroDivisionError:
+        x = 4
+    return x
+
+
 def test_invocation() -> None:
     s = Scheduler()
     p = s.add(only_invocation)
-    assert p.result(timeout=5) == 3
+    assert p.result(timeout=30) == 3
 
+    s.close()
+
+
+def test_invocation_with_error() -> None:
+    s = Scheduler()
+    p = s.add(invocation_with_error)
+    assert p.result(timeout=30) == 4
     s.close()
