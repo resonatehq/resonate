@@ -322,14 +322,9 @@ class Scheduler:
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
-            if yieldable_or_final_value in waiting_for_promise:
-                waiting_for_promise[yieldable_or_final_value].append(
-                    runnable.coro_and_promise
-                )
-            else:
-                waiting_for_promise[yieldable_or_final_value] = [
-                    runnable.coro_and_promise
-                ]
+            waiting_for_promise.setdefault(yieldable_or_final_value, []).append(
+                runnable.coro_and_promise,
+            )
             if yieldable_or_final_value.done():
                 _unblock_depands_coros(
                     p=yieldable_or_final_value,
