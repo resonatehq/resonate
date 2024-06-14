@@ -174,7 +174,7 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | _FinalValue[T]:
     return yieldable
 
 
-def _resolve_promise(p: Promise[T], value: Result[Any, Exception]) -> Promise[T]:
+def _set_promise_result(p: Promise[T], value: Result[Any, Exception]) -> Promise[T]:
     logger.debug("Solving promise.")
     p.set_result(value)
     return p
@@ -209,7 +209,7 @@ def _callback(
     pending_to_run: PedingToRun,
     v: Result[T, Exception],
 ) -> None:
-    p = _resolve_promise(p=p, value=v)
+    p = _set_promise_result(p=p, value=v)
     _unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
 
 
@@ -336,8 +336,7 @@ def _handle_final_value(
     pending_to_run: PedingToRun,
 ) -> None:
     logger.debug("Processing final value `%s`", value)
-
-    _resolve_promise(p=running.coro_and_promise.prom, value=value)
+    _set_promise_result(p=running.coro_and_promise.prom, value=value)
     _unblock_depands_coros(
         p=running.coro_and_promise.prom,
         waiting=waiting_for_prom,
@@ -397,16 +396,12 @@ def _worker(
 ) -> None:
     pending_to_run: PedingToRun = []
     waiting_for_prom_resolution: WaitingForPromiseResolution = {}
+    batch_size = 5
     while not kill_event.is_set():
-        _run_cqe_callbacks(processor=processor, batch_size=3)
+        _run_cqe_callbacks(processor=processor, batch_size=batch_size)
 
-        for p in waiting_for_prom_resolution:
-            if p.done():
-                _unblock_depands_coros(
-                    p=p, waiting=waiting_for_prom_resolution, runnables=pending_to_run
-                )
+        new_r = _runnables_from_stg_q(stg_q=stg_q, batch_size=batch_size)
 
-        new_r = _runnables_from_stg_q(stg_q=stg_q, batch_size=3)
         if new_r is not None:
             pending_to_run.extend(new_r)
 
