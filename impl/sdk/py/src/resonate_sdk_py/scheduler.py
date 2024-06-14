@@ -5,7 +5,6 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from functools import partial
 from inspect import isgeneratorfunction
-from logging import getLogger
 from queue import Queue
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
@@ -14,12 +13,12 @@ from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
 from resonate_sdk_py import utils
+from resonate_sdk_py.logging import logger
 from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
 
-logger = getLogger(__name__)
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -137,7 +136,7 @@ class Runnable(Generic[T]):
 
 
 WaitingForPromiseResolution: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
-PedingToRun: TypeAlias = list[Runnable[Any]]
+PendingToRun: TypeAlias = list[Runnable[Any]]
 
 
 @dataclass(frozen=True)
@@ -183,7 +182,7 @@ def _set_promise_result(p: Promise[T], value: Result[Any, Exception]) -> Promise
 def _unblock_depands_coros(
     p: Promise[T],
     waiting: WaitingForPromiseResolution,
-    runnables: PedingToRun,
+    runnables: PendingToRun,
 ) -> None:
     assert p.done(), "Promise must be done to unblock dependant coros"
 
@@ -206,7 +205,7 @@ def _unblock_depands_coros(
 def _callback(
     p: Promise[T],
     waiting_for_promise: WaitingForPromiseResolution,
-    pending_to_run: PedingToRun,
+    pending_to_run: PendingToRun,
     v: Result[T, Exception],
 ) -> None:
     p = _set_promise_result(p=p, value=v)
@@ -225,8 +224,8 @@ def _run_cqe_callbacks(processor: Processor, batch_size: int) -> None:
 def _runnables_from_stg_q(
     stg_q: Queue[CoroAndPromise[T]],
     batch_size: int,
-) -> PedingToRun | None:
-    new_runnables: PedingToRun = []
+) -> PendingToRun | None:
+    new_runnables: PendingToRun = []
     stg_qes = utils.dequeue_batch(q=stg_q, batch_size=batch_size)
     if stg_qes is None:
         return None
@@ -240,14 +239,14 @@ def _runnables_from_stg_q(
 
 def _handle_call(
     call: Call,
-    r: Runnable[T],
+    runnable: Runnable[T],
     processor: Processor,
     waiting_for_promise: WaitingForPromiseResolution,
-    pending_to_run: PedingToRun,
+    pending_to_run: PendingToRun,
 ) -> None:
     logger.debug("Processing call")
     p = Promise[Any]()
-    waiting_for_promise[p] = [r.coro_and_promise]
+    waiting_for_promise[p] = [runnable.coro_and_promise]
     if not isgeneratorfunction(call.fn):
         processor.enqueue(
             SQE(
@@ -267,14 +266,14 @@ def _handle_call(
 
 def _handle_invocation(
     invocation: Invoke,
-    r: Runnable[T],
+    runnable: Runnable[T],
     processor: Processor,
-    pending_to_run: PedingToRun,
+    pending_to_run: PendingToRun,
     waiting_for_promise: WaitingForPromiseResolution,
 ) -> None:
     logger.debug("Processing invocation")
     p = Promise[Any]()
-    pending_to_run.append(Runnable(r.coro_and_promise, Ok(p)))
+    pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
     if not isgeneratorfunction(invocation.fn):
         processor.enqueue(
             SQE(
@@ -312,15 +311,15 @@ def _handle_return_promise(
 
 
 def _handle_promise(
-    r: Runnable[T],
+    runnable: Runnable[T],
     prom: Promise[Any],
     waiting_for_prom: WaitingForPromiseResolution,
     pending_to_run: list[Runnable[Any]],
 ) -> None:
     if prom in waiting_for_prom:
-        waiting_for_prom[prom].append(r.coro_and_promise)
+        waiting_for_prom[prom].append(runnable.coro_and_promise)
     else:
-        waiting_for_prom[prom] = [r.coro_and_promise]
+        waiting_for_prom[prom] = [runnable.coro_and_promise]
     if prom.done():
         _unblock_depands_coros(
             p=prom,
@@ -333,7 +332,7 @@ def _handle_final_value(
     value: Result[Any, Exception],
     running: Runnable[T],
     waiting_for_prom: WaitingForPromiseResolution,
-    pending_to_run: PedingToRun,
+    pending_to_run: PendingToRun,
 ) -> None:
     logger.debug("Processing final value `%s`", value)
     _set_promise_result(p=running.coro_and_promise.prom, value=value)
@@ -344,87 +343,13 @@ def _handle_final_value(
     )
 
 
-def _process_each_runnable(
-    pending_to_run: PedingToRun,
-    waiting_for_promise: WaitingForPromiseResolution,
-    processor: Processor,
-) -> None:
-    r: Runnable[Any] = pending_to_run.pop()
-    yieldable_or_final_value = iterate_coro(r)
-    if isinstance(yieldable_or_final_value, _FinalValue):
-        _handle_final_value(
-            value=yieldable_or_final_value.v,
-            running=r,
-            waiting_for_prom=waiting_for_promise,
-            pending_to_run=pending_to_run,
-        )
-
-    elif isinstance(yieldable_or_final_value, Call):
-        _handle_call(
-            call=yieldable_or_final_value,
-            r=r,
-            processor=processor,
-            pending_to_run=pending_to_run,
-            waiting_for_promise=waiting_for_promise,
-        )
-
-    elif isinstance(yieldable_or_final_value, Invoke):
-        _handle_invocation(
-            invocation=yieldable_or_final_value,
-            r=r,
-            processor=processor,
-            pending_to_run=pending_to_run,
-            waiting_for_promise=waiting_for_promise,
-        )
-
-    elif isinstance(yieldable_or_final_value, Promise):
-        _handle_promise(
-            r=r,
-            prom=yieldable_or_final_value,
-            waiting_for_prom=waiting_for_promise,
-            pending_to_run=pending_to_run,
-        )
-
-    else:
-        assert_never(yieldable_or_final_value)
-
-
-def _worker(
-    kill_event: Event,
-    stg_q: Queue[CoroAndPromise[T]],
-    processor: Processor,
-) -> None:
-    pending_to_run: PedingToRun = []
-    waiting_for_prom_resolution: WaitingForPromiseResolution = {}
-    batch_size = 5
-    while not kill_event.is_set():
-        _run_cqe_callbacks(processor=processor, batch_size=batch_size)
-
-        new_r = _runnables_from_stg_q(stg_q=stg_q, batch_size=batch_size)
-
-        if new_r is not None:
-            pending_to_run.extend(new_r)
-
-        n_pending_to_run = len(pending_to_run)
-        if n_pending_to_run == 0:
-            continue
-
-        for _ in range(n_pending_to_run):
-            _process_each_runnable(
-                pending_to_run=pending_to_run,
-                waiting_for_promise=waiting_for_prom_resolution,
-                processor=processor,
-            )
-
-    logger.debug("Scheduler killed")
-
-
 class Scheduler:
-    def __init__(self, max_wokers: int | None = None) -> None:
+    def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
         self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None
         self._w_kill = Event()
         self._processor = Processor(max_workers=max_wokers)
+        self._batch_size = batch_size
 
     def add(
         self,
@@ -443,12 +368,7 @@ class Scheduler:
         assert self._w_thread is None, "Worker thread already exists"
         if self._w_thread is None:
             t = Thread(
-                target=_worker,
-                args=(
-                    self._w_kill,
-                    self._stg_q,
-                    self._processor,
-                ),
+                target=self._run,
                 daemon=True,
             )
             t.start()
@@ -460,3 +380,74 @@ class Scheduler:
         assert self._w_thread is not None, "Worker thread was never initialized"
         self._w_thread.join()
         assert not self._w_thread.is_alive()
+
+    def _run(self) -> None:
+        pending_to_run: PendingToRun = []
+        waiting_for_prom_resolution: WaitingForPromiseResolution = {}
+        while not self._w_kill.is_set():
+            _run_cqe_callbacks(processor=self._processor, batch_size=self._batch_size)
+
+            new_r = _runnables_from_stg_q(
+                stg_q=self._stg_q, batch_size=self._batch_size
+            )
+
+            if new_r is not None:
+                pending_to_run.extend(new_r)
+
+            n_pending_to_run = len(pending_to_run)
+            if n_pending_to_run == 0:
+                continue
+
+            for _ in range(n_pending_to_run):
+                runnable = pending_to_run.pop()
+                self._process_each_runnable(
+                    runnable=runnable,
+                    waiting_for_promise=waiting_for_prom_resolution,
+                    pending_to_run=pending_to_run,
+                )
+
+        logger.debug("Scheduler killed")
+
+    def _process_each_runnable(
+        self,
+        runnable: Runnable[Any],
+        pending_to_run: PendingToRun,
+        waiting_for_promise: WaitingForPromiseResolution,
+    ) -> None:
+        yieldable_or_final_value = iterate_coro(runnable)
+        if isinstance(yieldable_or_final_value, _FinalValue):
+            _handle_final_value(
+                value=yieldable_or_final_value.v,
+                running=runnable,
+                waiting_for_prom=waiting_for_promise,
+                pending_to_run=pending_to_run,
+            )
+
+        elif isinstance(yieldable_or_final_value, Call):
+            _handle_call(
+                call=yieldable_or_final_value,
+                runnable=runnable,
+                processor=self._processor,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_promise,
+            )
+
+        elif isinstance(yieldable_or_final_value, Invoke):
+            _handle_invocation(
+                invocation=yieldable_or_final_value,
+                runnable=runnable,
+                processor=self._processor,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_promise,
+            )
+
+        elif isinstance(yieldable_or_final_value, Promise):
+            _handle_promise(
+                runnable=runnable,
+                prom=yieldable_or_final_value,
+                waiting_for_prom=waiting_for_promise,
+                pending_to_run=pending_to_run,
+            )
+
+        else:
+            assert_never(yieldable_or_final_value)
