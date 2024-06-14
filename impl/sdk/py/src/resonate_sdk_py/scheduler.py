@@ -173,12 +173,6 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | _FinalValue[T]:
     return yieldable
 
 
-def _set_promise_result(p: Promise[T], value: Result[Any, Exception]) -> Promise[T]:
-    logger.debug("Solving promise.")
-    p.set_result(value)
-    return p
-
-
 def _unblock_depands_coros(
     p: Promise[T],
     waiting: WaitingForPromiseResolution,
@@ -208,89 +202,8 @@ def _callback(
     pending_to_run: PendingToRun,
     v: Result[T, Exception],
 ) -> None:
-    p = _set_promise_result(p=p, value=v)
+    p.set_result(v)
     _unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
-
-
-def _run_cqe_callbacks(processor: Processor, batch_size: int) -> None:
-    cqes = processor.dequeue_batch(batch_size=batch_size)
-    if cqes is None:
-        return
-    logger.debug("%s elements popped from the completion queue", len(cqes))
-    for cqe in cqes:
-        cqe.callback(cqe.cmd_result)
-
-
-def _runnables_from_stg_q(
-    stg_q: Queue[CoroAndPromise[T]],
-    batch_size: int,
-) -> PendingToRun | None:
-    new_runnables: PendingToRun = []
-    stg_qes = utils.dequeue_batch(q=stg_q, batch_size=batch_size)
-    if stg_qes is None:
-        return None
-
-    logger.debug("%s elements popped from the staging queue", len(stg_qes))
-    for coro_and_prom in stg_qes:
-        new_runnables.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
-
-    return new_runnables
-
-
-def _handle_call(
-    call: Call,
-    runnable: Runnable[T],
-    processor: Processor,
-    waiting_for_promise: WaitingForPromiseResolution,
-    pending_to_run: PendingToRun,
-) -> None:
-    logger.debug("Processing call")
-    p = Promise[Any]()
-    waiting_for_promise[p] = [runnable.coro_and_promise]
-    if not isgeneratorfunction(call.fn):
-        processor.enqueue(
-            SQE(
-                cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
-                callback=partial(
-                    _callback,
-                    p,
-                    waiting_for_promise,
-                    pending_to_run,
-                ),
-            )
-        )
-    else:
-        coro = call.fn(*call.args, **call.kwargs)
-        pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
-
-
-def _handle_invocation(
-    invocation: Invoke,
-    runnable: Runnable[T],
-    processor: Processor,
-    pending_to_run: PendingToRun,
-    waiting_for_promise: WaitingForPromiseResolution,
-) -> None:
-    logger.debug("Processing invocation")
-    p = Promise[Any]()
-    pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
-    if not isgeneratorfunction(invocation.fn):
-        processor.enqueue(
-            SQE(
-                cmd=_wrap_fn_into_cmd(
-                    invocation.fn, *invocation.args, **invocation.kwargs
-                ),
-                callback=partial(
-                    _callback,
-                    p,
-                    waiting_for_promise,
-                    pending_to_run,
-                ),
-            )
-        )
-    else:
-        coro = invocation.fn(*invocation.args, **invocation.kwargs)
-        pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
 
 def _handle_return_promise(
@@ -308,39 +221,6 @@ def _handle_return_promise(
     else:
         waiting_for_expired_prom = waiting_for_prom.pop(running.coro_and_promise.prom)
         waiting_for_prom[prom].extend(waiting_for_expired_prom)
-
-
-def _handle_promise(
-    runnable: Runnable[T],
-    prom: Promise[Any],
-    waiting_for_prom: WaitingForPromiseResolution,
-    pending_to_run: list[Runnable[Any]],
-) -> None:
-    if prom in waiting_for_prom:
-        waiting_for_prom[prom].append(runnable.coro_and_promise)
-    else:
-        waiting_for_prom[prom] = [runnable.coro_and_promise]
-    if prom.done():
-        _unblock_depands_coros(
-            p=prom,
-            waiting=waiting_for_prom,
-            runnables=pending_to_run,
-        )
-
-
-def _handle_final_value(
-    value: Result[Any, Exception],
-    running: Runnable[T],
-    waiting_for_prom: WaitingForPromiseResolution,
-    pending_to_run: PendingToRun,
-) -> None:
-    logger.debug("Processing final value `%s`", value)
-    _set_promise_result(p=running.coro_and_promise.prom, value=value)
-    _unblock_depands_coros(
-        p=running.coro_and_promise.prom,
-        waiting=waiting_for_prom,
-        runnables=pending_to_run,
-    )
 
 
 class Scheduler:
@@ -384,12 +264,11 @@ class Scheduler:
     def _run(self) -> None:
         pending_to_run: PendingToRun = []
         waiting_for_prom_resolution: WaitingForPromiseResolution = {}
-        while not self._w_kill.is_set():
-            _run_cqe_callbacks(processor=self._processor, batch_size=self._batch_size)
 
-            new_r = _runnables_from_stg_q(
-                stg_q=self._stg_q, batch_size=self._batch_size
-            )
+        while not self._w_kill.is_set():
+            self._run_cqe_callbacks()
+
+            new_r = self._runnables_from_stg_q()
 
             if new_r is not None:
                 pending_to_run.extend(new_r)
@@ -415,39 +294,124 @@ class Scheduler:
         waiting_for_promise: WaitingForPromiseResolution,
     ) -> None:
         yieldable_or_final_value = iterate_coro(runnable)
+
         if isinstance(yieldable_or_final_value, _FinalValue):
-            _handle_final_value(
-                value=yieldable_or_final_value.v,
-                running=runnable,
-                waiting_for_prom=waiting_for_promise,
-                pending_to_run=pending_to_run,
+            value = yieldable_or_final_value.v
+            logger.debug("Processing final value `%s`", value)
+            runnable.coro_and_promise.prom.set_result(value)
+            _unblock_depands_coros(
+                p=runnable.coro_and_promise.prom,
+                waiting=waiting_for_promise,
+                runnables=pending_to_run,
             )
 
         elif isinstance(yieldable_or_final_value, Call):
-            _handle_call(
+            self._handle_call(
                 call=yieldable_or_final_value,
                 runnable=runnable,
-                processor=self._processor,
                 pending_to_run=pending_to_run,
                 waiting_for_promise=waiting_for_promise,
             )
 
         elif isinstance(yieldable_or_final_value, Invoke):
-            _handle_invocation(
+            self._handle_invocation(
                 invocation=yieldable_or_final_value,
                 runnable=runnable,
-                processor=self._processor,
                 pending_to_run=pending_to_run,
                 waiting_for_promise=waiting_for_promise,
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
-            _handle_promise(
-                runnable=runnable,
-                prom=yieldable_or_final_value,
-                waiting_for_prom=waiting_for_promise,
-                pending_to_run=pending_to_run,
-            )
+            if yieldable_or_final_value in waiting_for_promise:
+                waiting_for_promise[yieldable_or_final_value].append(
+                    runnable.coro_and_promise
+                )
+            else:
+                waiting_for_promise[yieldable_or_final_value] = [
+                    runnable.coro_and_promise
+                ]
+            if yieldable_or_final_value.done():
+                _unblock_depands_coros(
+                    p=yieldable_or_final_value,
+                    waiting=waiting_for_promise,
+                    runnables=pending_to_run,
+                )
 
         else:
             assert_never(yieldable_or_final_value)
+
+    def _handle_call(
+        self,
+        call: Call,
+        runnable: Runnable[T],
+        waiting_for_promise: WaitingForPromiseResolution,
+        pending_to_run: PendingToRun,
+    ) -> None:
+        logger.debug("Processing call")
+        p = Promise[Any]()
+        waiting_for_promise[p] = [runnable.coro_and_promise]
+        if not isgeneratorfunction(call.fn):
+            self._processor.enqueue(
+                SQE(
+                    cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+                    callback=partial(
+                        _callback,
+                        p,
+                        waiting_for_promise,
+                        pending_to_run,
+                    ),
+                )
+            )
+        else:
+            coro = call.fn(*call.args, **call.kwargs)
+            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+
+    def _handle_invocation(
+        self,
+        invocation: Invoke,
+        runnable: Runnable[T],
+        pending_to_run: PendingToRun,
+        waiting_for_promise: WaitingForPromiseResolution,
+    ) -> None:
+        logger.debug("Processing invocation")
+        p = Promise[Any]()
+        pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
+        if not isgeneratorfunction(invocation.fn):
+            self._processor.enqueue(
+                SQE(
+                    cmd=_wrap_fn_into_cmd(
+                        invocation.fn, *invocation.args, **invocation.kwargs
+                    ),
+                    callback=partial(
+                        _callback,
+                        p,
+                        waiting_for_promise,
+                        pending_to_run,
+                    ),
+                )
+            )
+        else:
+            coro = invocation.fn(*invocation.args, **invocation.kwargs)
+            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+
+    def _runnables_from_stg_q(self) -> PendingToRun | None:
+        new_runnables: PendingToRun = []
+        stg_qes = utils.dequeue_batch(q=self._stg_q, batch_size=self._batch_size)
+        if stg_qes is None:
+            return None
+
+        logger.debug("%s elements popped from the staging queue", len(stg_qes))
+        for coro_and_prom in stg_qes:
+            new_runnables.append(
+                Runnable(coro_and_promise=coro_and_prom, next_value=None)
+            )
+
+        return new_runnables
+
+    def _run_cqe_callbacks(self) -> None:
+        cqes = self._processor.dequeue_batch(batch_size=self._batch_size)
+        if cqes is None:
+            return
+        logger.debug("%s elements popped from the completion queue", len(cqes))
+        for cqe in cqes:
+            cqe.callback(cqe.cmd_result)
