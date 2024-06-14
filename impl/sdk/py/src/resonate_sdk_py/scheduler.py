@@ -1,328 +1,412 @@
 from __future__ import annotations
 
-import inspect
-from collections.abc import Generator
+from asyncio import iscoroutinefunction
+from concurrent.futures import Future
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, TypeVar, Union
+from functools import partial
+from inspect import isgeneratorfunction
+from queue import Queue
+from threading import Event, Thread
+from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
 
 from result import Err, Ok, Result
-from typing_extensions import ParamSpec, TypeAlias, assert_never
+from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
+
+from resonate_sdk_py import utils
+from resonate_sdk_py.logging import logger
+from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine, Generator
+
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
 
-@dataclass
-class Promise(Generic[T]):
-    result: Result[T, Exception] | None = None
+class FnCmd(ICommand[T]):
+    def __init__(
+        self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
 
-    def resolve(self, value: T) -> None:
-        if self.is_pending():
-            self.result = Ok(value)
-        else:
-            msg = "Not possible to resolve a non pending promise"
-            raise RuntimeError(msg)
-
-    def reject(self, error: Exception) -> None:
-        if self.is_pending():
-            self.result = Err(error)
-        else:
-            msg = "Not possible to reject a non pending promise"
-            raise RuntimeError(msg)
-
-    def is_pending(self) -> bool:
-        return self.result is None
-
-    def is_completed(self) -> bool:
-        return not self.is_pending()
-
-    def is_resolved(self) -> bool:
-        return isinstance(self.result, Ok)
-
-    def is_rejected(self) -> bool:
-        return isinstance(self.result, Err)
+    def run(self) -> Result[T, Exception]:
+        result: Result[T, Exception]
+        try:
+            result = Ok(self.fn(*self.args, **self.kwargs))
+        except Exception as e:  # noqa: BLE001
+            result = Err(e)
+        return result
 
 
-class Invocation:
+class AsyncFnCmd(IAsyncCommand[T]):
     def __init__(
         self,
-        func: Callable[P, Any | Generator[Yieldable, Any, Any]],
+        fn: Callable[P, Coroutine[Any, Any, Any]],
+        /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        self.func = func
+        self.fn = fn
         self.args = args
         self.kwargs = kwargs
+
+    async def run(self) -> Result[T, Exception]:
+        result: Result[T, Exception]
+        try:
+            result = Ok(await self.fn(*self.args, **self.kwargs))
+        except Exception as e:  # noqa: BLE001
+            result = Err(e)
+        return result
+
+
+def _wrap_fn_into_cmd(
+    fn: Callable[P, T | Coroutine[Any, Any, T]],
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> FnCmd[T] | AsyncFnCmd[T]:
+    cmd: AsyncFnCmd[T] | FnCmd[T]
+    if iscoroutinefunction(func=fn):
+        cmd = AsyncFnCmd(fn, *args, **kwargs)
+    else:
+        cmd = FnCmd(cast(Callable[P, T], fn), *args, **kwargs)
+    return cmd
 
 
 class Call:
     def __init__(
         self,
-        func: Callable[P, Any | Generator[Yieldable, Any, Any]],
+        fn: Callable[P, Any | Coroutine[Any, Any, Any]],
+        /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        self.func = func
+        self.fn = fn
         self.args = args
         self.kwargs = kwargs
 
 
-Yieldable: TypeAlias = Union[Invocation, Promise[Any], Call]
+class Invoke:
+    def __init__(
+        self,
+        fn: Callable[P, Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+
+class Promise(Generic[T]):
+    def __init__(self) -> None:
+        self.f = Future[T]()
+
+    def result(self, timeout: float | None = None) -> T:
+        return self.f.result(timeout=timeout)
+
+    def set_result(self, result: Result[T, Exception]) -> None:
+        if isinstance(result, Ok):
+            self.f.set_result(result.unwrap())
+        elif isinstance(result, Err):
+            self.f.set_exception(result.err())
+        else:
+            assert_never(result)
+
+    def done(self) -> bool:
+        return self.f.done()
+
+
+Yieldable: TypeAlias = Union[Call, Invoke, Promise[Any]]
 
 
 @dataclass(frozen=True)
-class FinalValue(Generic[T]):
-    value: T
-
-
-@dataclass(frozen=True)
-class CoroutineAndAssociatedPromise(Generic[T]):
+class CoroAndPromise(Generic[T]):
     coro: Generator[Yieldable, Any, T]
-    promise: Promise[T]
-
-
-@dataclass(frozen=True)
-class Next:
-    """
-    Next represents the value to be yielded back to coroutine.
-
-    If value is None, it means is not yet computed and will be yielded
-    back in the future.
-
-    """
-
-    result: Result[Any, Exception] | None = None
+    prom: Promise[T]
 
 
 @dataclass(frozen=True)
 class Runnable(Generic[T]):
-    coro_with_promise: CoroutineAndAssociatedPromise[T]
-    yield_back_value: Next
+    coro_and_promise: CoroAndPromise[T]
+    next_value: Result[Any, Exception] | None
+
+
+WaitingForPromiseResolution: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
+PendingToRun: TypeAlias = list[Runnable[Any]]
 
 
 @dataclass(frozen=True)
-class Awaiting(Generic[T]):
-    coro_with_promise: CoroutineAndAssociatedPromise[T]
-    prom: Promise[Any]
+class _FinalValue(Generic[T]):
+    v: Result[T, Exception]
 
 
-def _advance_span(coro: Generator[Yieldable, Any, Any], resv: Next) -> Yieldable:
-    advance_value: Yieldable
+def iterate_coro(runnable: Runnable[T]) -> Yieldable | _FinalValue[T]:
+    yieldable: Yieldable
+    try:
+        if runnable.next_value is None:
+            # next_value is None means we need to initialize the coro
+            logger.debug("Initializing coro")
+            yieldable = next(runnable.coro_and_promise.coro)
+        elif isinstance(runnable.next_value, Ok):
+            # next_value is Ok mean we can pass a value to the coro
+            logger.debug(
+                "Sending successfull value to coro `%s`", runnable.next_value.unwrap()
+            )
+            yieldable = runnable.coro_and_promise.coro.send(
+                runnable.next_value.unwrap()
+            )
+        elif isinstance(runnable.next_value, Err):
+            # next_value is Err mean we can throw an error into the coro
+            logger.debug("Sending error to coro `%s`", runnable.next_value.err())
+            yieldable = runnable.coro_and_promise.coro.throw(runnable.next_value.err())
+        else:
+            assert_never(runnable.next_value)
+    except StopIteration as e:
+        # if stop iteraton is raised it means we finished the coro execution
+        return _FinalValue(Ok(e.value))
+    except Exception as e:  # noqa: BLE001
+        return _FinalValue(Err(e))
+    return yieldable
 
-    if resv.result is None:
-        advance_value = next(coro)
-    elif isinstance(resv.result, Ok):
-        advance_value = coro.send(resv.result.unwrap())
-    elif isinstance(resv.result, Err):
-        advance_value = coro.throw(resv.result.err())
+
+def _unblock_depands_coros(
+    p: Promise[T],
+    waiting: WaitingForPromiseResolution,
+    runnables: PendingToRun,
+) -> None:
+    assert p.done(), "Promise must be done to unblock dependant coros"
+
+    if waiting.get(p) is None:
+        return
+
+    res: Result[T, Exception]
+    try:
+        res = Ok(p.result())
+    except Exception as e:  # noqa: BLE001
+        res = Err(e)
+
+    dependant_coros = waiting.pop(p)
+    logger.debug("Unblocking `%s` pending promises", len(dependant_coros))
+
+    new_runnables = (Runnable(c_and_p, next_value=res) for c_and_p in dependant_coros)
+    runnables.extend(new_runnables)
+
+
+def _callback(
+    p: Promise[T],
+    waiting_for_promise: WaitingForPromiseResolution,
+    pending_to_run: PendingToRun,
+    v: Result[T, Exception],
+) -> None:
+    p.set_result(v)
+    _unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
+
+
+def _handle_return_promise(
+    running: Runnable[T],
+    prom: Promise[T],
+    waiting_for_prom: WaitingForPromiseResolution,
+    pending_to_run: list[Runnable[Any]],
+) -> None:
+    if prom.done():
+        _unblock_depands_coros(
+            p=prom,
+            waiting=waiting_for_prom,
+            runnables=pending_to_run,
+        )
     else:
-        assert_never(resv.result)
-
-    return advance_value
+        waiting_for_expired_prom = waiting_for_prom.pop(running.coro_and_promise.prom)
+        waiting_for_prom[prom].extend(waiting_for_expired_prom)
 
 
 class Scheduler:
-    def __init__(self) -> None:
-        self.runnables: list[Runnable[Any]] = []
-        self.awaitings: list[Awaiting[Any]] = []
+    def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
+        self._stg_q = Queue[CoroAndPromise[Any]]()
+        self._w_thread: Thread | None = None
+        self._w_kill = Event()
+        self._processor = Processor(max_workers=max_wokers)
+        self._batch_size = batch_size
 
     def add(
         self,
-        func: Callable[P, Generator[Yieldable, Any, T]],
+        fn: Callable[P, Generator[Yieldable, Any, T]],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> None:
-        self.runnables.append(
-            Runnable(
-                coro_with_promise=CoroutineAndAssociatedPromise[T](
-                    coro=func(*args, **kwargs),
-                    promise=Promise(),
-                ),
-                yield_back_value=Next(),
+    ) -> Promise[T]:
+        p = Promise[T]()
+        coro = fn(*args, **kwargs)
+        self._stg_q.put(item=CoroAndPromise(coro, p))
+        if self._w_thread is None:
+            self._run_worker()
+        return p
+
+    def _run_worker(self) -> None:
+        assert self._w_thread is None, "Worker thread already exists"
+        if self._w_thread is None:
+            t = Thread(
+                target=self._run,
+                daemon=True,
             )
-        )
+            t.start()
 
-    def _add_to_runnables(
-        self,
-        coro_with_promise: CoroutineAndAssociatedPromise[T],
-        value: Result[Any, Exception] | None,
-    ) -> None:
-        self.runnables.append(
-            Runnable[T](
-                coro_with_promise=coro_with_promise,
-                yield_back_value=Next(value),
-            )
-        )
+            self._w_thread = t
 
-    def _add_to_awaitables(
-        self,
-        coro_with_promise: CoroutineAndAssociatedPromise[T],
-        prom: Promise[Any],
-    ) -> None:
-        self.awaitings.append(
-            Awaiting[T](
-                coro_with_promise=coro_with_promise,
-                prom=prom,
-            )
-        )
+    def close(self) -> None:
+        self._w_kill.set()
+        assert self._w_thread is not None, "Worker thread was never initialized"
+        self._w_thread.join()
+        assert not self._w_thread.is_alive()
 
-    def _process_invocation(
-        self, invocation: Invocation, runnable: Runnable[T]
-    ) -> None:
-        next_promise = Promise[Any]()
-        if inspect.isgeneratorfunction(invocation.func):
-            self._add_to_runnables(
-                coro_with_promise=CoroutineAndAssociatedPromise(
-                    coro=invocation.func(*invocation.args, **invocation.kwargs),
-                    promise=next_promise,
-                ),
-                value=None,
-            )
-            self._add_to_runnables(
-                runnable.coro_with_promise,
-                Ok(next_promise),
-            )
+    def _run(self) -> None:
+        pending_to_run: PendingToRun = []
+        waiting_for_prom_resolution: WaitingForPromiseResolution = {}
 
-        else:
-            try:
-                value = _retry(
-                    invocation.func,
-                    *invocation.args,
-                    **invocation.kwargs,
-                )
-                assert not isinstance(
-                    value, Generator
-                ), "Value should never be a generator at this point."
-                next_promise.resolve(value)
-                self._add_to_runnables(
-                    runnable.coro_with_promise,
-                    Ok(next_promise),
-                )
-            except Exception as e:  # noqa: BLE001
-                return self._handle_error(
-                    error=e,
-                    promise=next_promise,
-                    runnable=runnable,
-                )
+        while not self._w_kill.is_set():
+            self._run_cqe_callbacks()
 
-        return None
+            new_r = self._runnables_from_stg_q()
 
-    def _handle_error(
-        self,
-        error: Exception,
-        promise: Promise[T],
-        runnable: Runnable[T],
-    ) -> None:
-        promise.reject(error)
-        self._add_to_runnables(
-            runnable.coro_with_promise,
-            promise.result,
-        )
+            if new_r is not None:
+                pending_to_run.extend(new_r)
 
-    def _process_call(self, call: Call, runnable: Runnable[T]) -> None:
-        next_promise = Promise[Any]()
-        if inspect.isgeneratorfunction(call.func):
-            self._add_to_runnables(
-                coro_with_promise=CoroutineAndAssociatedPromise(
-                    call.func(*call.args, **call.kwargs),
-                    next_promise,
-                ),
-                value=None,
-            )
-            self._add_to_awaitables(
-                coro_with_promise=runnable.coro_with_promise,
-                prom=next_promise,
-            )
-        else:
-            try:
-                value = _retry(
-                    call.func,
-                    *call.args,
-                    **call.kwargs,
-                )
-                assert not isinstance(
-                    value, Generator
-                ), "Value should never be a generator at this point."
-                next_promise.resolve(value)
-                self._add_to_runnables(
-                    runnable.coro_with_promise,
-                    next_promise.result,
-                )
-            except Exception as e:  # noqa: BLE001
-                return self._handle_error(
-                    error=e,
-                    promise=next_promise,
-                    runnable=runnable,
-                )
-        return None
-
-    def _process_promise(self, promise: Promise[T], runnable: Runnable[T]) -> None:
-        if promise.is_completed():
-            self._add_to_runnables(
-                coro_with_promise=runnable.coro_with_promise,
-                value=promise.result,
-            )
-
-        else:
-            self._add_to_awaitables(
-                coro_with_promise=runnable.coro_with_promise,
-                prom=promise,
-            )
-
-    def run(self) -> Any:  # noqa: ANN401
-        generator_final_value: FinalValue[Any] | None = None
-        while len(self.runnables) > 0:
-            runnable = self.runnables.pop()
-            try:
-                next_yieldable = _advance_span(
-                    coro=runnable.coro_with_promise.coro,
-                    resv=runnable.yield_back_value,
-                )
-            except StopIteration as e:
-                if isinstance(e.value, Promise):
-                    assert e.value is not None, "Promise shouldn't be pending."  # noqa: PT017
-                    assert isinstance(  # noqa: PT017
-                        e.value.result, Ok
-                    ), "Final promise should be resolved."
-
-                    e.value = e.value.result.unwrap()
-
-                generator_final_value = FinalValue(value=e.value)
-                runnable.coro_with_promise.promise.resolve(e.value)
-                for idx, awaiting in enumerate(self.awaitings):
-                    if awaiting.prom == runnable.coro_with_promise.promise:
-                        awaiting_to_move = self.awaitings.pop(idx)
-                        self._add_to_runnables(
-                            awaiting_to_move.coro_with_promise,
-                            value=Ok(e.value),
-                        )
-
+            n_pending_to_run = len(pending_to_run)
+            if n_pending_to_run == 0:
                 continue
 
-            if isinstance(next_yieldable, Promise):
-                self._process_promise(promise=next_yieldable, runnable=runnable)
+            for _ in range(n_pending_to_run):
+                runnable = pending_to_run.pop()
+                self._process_each_runnable(
+                    runnable=runnable,
+                    waiting_for_promise=waiting_for_prom_resolution,
+                    pending_to_run=pending_to_run,
+                )
 
-            elif isinstance(next_yieldable, Invocation):
-                self._process_invocation(invocation=next_yieldable, runnable=runnable)
+        logger.debug("Scheduler killed")
 
-            elif isinstance(next_yieldable, Call):
-                self._process_call(call=next_yieldable, runnable=runnable)
-            else:
-                assert_never(next_yieldable)
+    def _process_each_runnable(
+        self,
+        runnable: Runnable[Any],
+        pending_to_run: PendingToRun,
+        waiting_for_promise: WaitingForPromiseResolution,
+    ) -> None:
+        yieldable_or_final_value = iterate_coro(runnable)
 
-        if generator_final_value is None:
-            msg = "No coroutine was added before running."
-            raise RuntimeError(msg)
-        return generator_final_value.value
+        if isinstance(yieldable_or_final_value, _FinalValue):
+            value = yieldable_or_final_value.v
+            logger.debug("Processing final value `%s`", value)
+            runnable.coro_and_promise.prom.set_result(value)
+            _unblock_depands_coros(
+                p=runnable.coro_and_promise.prom,
+                waiting=waiting_for_promise,
+                runnables=pending_to_run,
+            )
 
+        elif isinstance(yieldable_or_final_value, Call):
+            self._handle_call(
+                call=yieldable_or_final_value,
+                runnable=runnable,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_promise,
+            )
 
-def _retry(func: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
-    i = 0
-    max_tries = 3
-    while True:
-        try:
-            return func(*args, **kwargs)
-        except Exception:  # noqa: BLE001, PERF203, RUF100
-            if i == max_tries:
-                raise
-            i += 1
+        elif isinstance(yieldable_or_final_value, Invoke):
+            self._handle_invocation(
+                invocation=yieldable_or_final_value,
+                runnable=runnable,
+                pending_to_run=pending_to_run,
+                waiting_for_promise=waiting_for_promise,
+            )
+
+        elif isinstance(yieldable_or_final_value, Promise):
+            waiting_for_promise.setdefault(yieldable_or_final_value, []).append(
+                runnable.coro_and_promise,
+            )
+            if yieldable_or_final_value.done():
+                _unblock_depands_coros(
+                    p=yieldable_or_final_value,
+                    waiting=waiting_for_promise,
+                    runnables=pending_to_run,
+                )
+
+        else:
+            assert_never(yieldable_or_final_value)
+
+    def _handle_call(
+        self,
+        call: Call,
+        runnable: Runnable[T],
+        waiting_for_promise: WaitingForPromiseResolution,
+        pending_to_run: PendingToRun,
+    ) -> None:
+        logger.debug("Processing call")
+        p = Promise[Any]()
+        waiting_for_promise[p] = [runnable.coro_and_promise]
+        if not isgeneratorfunction(call.fn):
+            self._processor.enqueue(
+                SQE(
+                    cmd=_wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+                    callback=partial(
+                        _callback,
+                        p,
+                        waiting_for_promise,
+                        pending_to_run,
+                    ),
+                )
+            )
+        else:
+            coro = call.fn(*call.args, **call.kwargs)
+            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+
+    def _handle_invocation(
+        self,
+        invocation: Invoke,
+        runnable: Runnable[T],
+        pending_to_run: PendingToRun,
+        waiting_for_promise: WaitingForPromiseResolution,
+    ) -> None:
+        logger.debug("Processing invocation")
+        p = Promise[Any]()
+        pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
+        if not isgeneratorfunction(invocation.fn):
+            self._processor.enqueue(
+                SQE(
+                    cmd=_wrap_fn_into_cmd(
+                        invocation.fn, *invocation.args, **invocation.kwargs
+                    ),
+                    callback=partial(
+                        _callback,
+                        p,
+                        waiting_for_promise,
+                        pending_to_run,
+                    ),
+                )
+            )
+        else:
+            coro = invocation.fn(*invocation.args, **invocation.kwargs)
+            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+
+    def _runnables_from_stg_q(self) -> PendingToRun | None:
+        new_runnables: PendingToRun = []
+        stg_qes = utils.dequeue_batch(q=self._stg_q, batch_size=self._batch_size)
+        if stg_qes is None:
+            return None
+
+        logger.debug("%s elements popped from the staging queue", len(stg_qes))
+        for coro_and_prom in stg_qes:
+            new_runnables.append(
+                Runnable(coro_and_promise=coro_and_prom, next_value=None)
+            )
+
+        return new_runnables
+
+    def _run_cqe_callbacks(self) -> None:
+        cqes = self._processor.dequeue_batch(batch_size=self._batch_size)
+        if cqes is None:
+            return
+        logger.debug("%s elements popped from the completion queue", len(cqes))
+        for cqe in cqes:
+            cqe.callback(cqe.cmd_result)

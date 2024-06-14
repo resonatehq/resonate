@@ -58,9 +58,15 @@ required-imports = ["from __future__ import annotations"]
 testpaths = ["tests"]
 xfail_strict = true
 addopts = [
-    "--import-mode=importlib"
+    "--import-mode=importlib",
+    "--strict-markers",
+    "--log-cli-level=DEBUG"
 ]
-asyncio_mode = "auto"
+markers = [
+    "integration: mark integration tests.",
+    "unit: mark unittest.",
+    "dev: mark tests on development.",
+]
 
 [tool.mypy]
 mypy_path = "src"

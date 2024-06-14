@@ -3,72 +3,149 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_sdk_py.scheduler import Call, Invocation, Promise, Scheduler, Yieldable
+from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-def bar(name: str) -> str:
-    return f"Hi {name}"
+def _nested_gen(a: Promise[int]) -> Generator[Yieldable, Any, int]:
+    x = yield a
+    return x
 
 
-def buzz(a: int, b: int) -> int:
+def _divide(a: int, b: int) -> int:
     return a // b
 
 
-def gen_buzz() -> Generator[Yieldable, Any, int]:
-    p: Promise[int] = yield Invocation(buzz, a=15, b=1)
-    v: int = yield p
-    return v
+def only_call() -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(_divide, a=3, b=1)
+    return x
 
 
-def foo() -> Generator[Yieldable, Any, str]:
-    p1: Promise[str] = yield Invocation(bar, name="tomas")
-    p2: Promise[int] = yield Invocation(buzz, a=10, b=1)
-    v1: str = yield p1
-    v2: int = yield p2
-    p3: Promise[int] = yield Invocation(gen_buzz)
-    v3: int = yield p3
-    v4: int = yield Call(buzz, a=10, b=1)
-    v5: int = yield Call(gen_buzz)
-    return f"{v1} {v2} {v3} {v4} {v5}"
+def call_with_errors() -> Generator[Yieldable, Any, int]:
+    x: int
+    try:
+        x = yield Call(_divide, a=100, b=0)
+    except ZeroDivisionError:
+        x = 3
+    return x
 
 
-def foo_promise() -> Generator[Yieldable, Any, Promise[str]]:
-    p1: Promise[str] = yield Invocation(bar, name="tomas")
-    return p1
+def gen_call() -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    y: int = yield Call(_nested_gen, x)
+    return y
 
 
-def call_that_errors() -> Generator[Yieldable, Any, None]:
-    yield Call(buzz, a=10, b=0)
-    return
+def gen_invoke() -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    y: Promise[int] = yield Invoke(_nested_gen, x)
+    z: int = yield y
+    return z
 
 
-def invocation_that_errors() -> Generator[Yieldable, Any, None]:
-    yield Call(buzz, a=10, b=0)
-    return
+def double_call() -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(_divide, a=3, b=1)
+    y: int = yield Call(_divide, a=5, b=1)
+    return x + y
 
 
-def test_exploration() -> None:
-    scheduler = Scheduler()
-    scheduler.add(foo)
-    assert scheduler.run() == "Hi tomas 10 15 10 15"
+def _abc(value: Promise[int]) -> Generator[Yieldable, int, int]:
+    x = yield value
+    return x
 
 
-def test_func_that_return_promise() -> None:
-    scheduler = Scheduler()
-    scheduler.add(foo_promise)
-    assert scheduler.run() == "Hi tomas"
+def whatever() -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    xf: Promise[int] = yield Invoke(_abc, value=af)
+    yf: Promise[int] = yield Invoke(_abc, value=af)
+    try:
+        x: int = yield xf
+    except Exception:  # noqa: BLE001
+        x = 3
+    y: int = yield yf
+    return x + y
 
 
-def test_function_with_errors() -> None:
-    scheduler1 = Scheduler()
-    scheduler1.add(invocation_that_errors)
+def whatever_with_error() -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(_divide, a=3, b=0)
+    xf: Promise[int] = yield Invoke(_abc, value=af)
+    yf: Promise[int] = yield Invoke(_abc, value=af)
+    try:
+        x: int = yield xf
+    except Exception:  # noqa: BLE001
+        x = 3
+    y: int = yield yf
+    return x + y
+
+
+def test_whatever() -> None:
+    s = Scheduler()
+    p = s.add(whatever)
+    assert p.result(timeout=4) == 6  # noqa: PLR2004
+    s.close()
+
+
+def test_whatever_with_error() -> None:
+    s = Scheduler()
+    p = s.add(whatever_with_error)
     with pytest.raises(ZeroDivisionError):
-        scheduler1.run()
+        p.result(timeout=4)
+    s.close()
 
-    scheduler2 = Scheduler()
-    scheduler2.add(call_that_errors)
-    with pytest.raises(ZeroDivisionError):
-        scheduler2.run()
+
+def test_calls() -> None:
+    s = Scheduler()
+    p = s.add(only_call)
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
+    p = s.add(call_with_errors)
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
+    p = s.add(double_call)
+    assert p.result(timeout=30) == 8  # noqa: PLR2004
+    s.close()
+
+
+@pytest.mark.dev()
+def test_call_gen() -> None:
+    s = Scheduler()
+    p = s.add(gen_call)
+    assert p.result() == 3  # noqa: PLR2004
+    s.close()
+
+
+@pytest.mark.dev()
+def test_invoke_gen() -> None:
+    s = Scheduler()
+    p = s.add(gen_invoke)
+    assert p.result() == 3  # noqa: PLR2004
+    s.close()
+
+
+def only_invocation() -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(_divide, a=3, b=1)
+    x: int = yield xp
+    return x
+
+
+def invocation_with_error() -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(_divide, a=3, b=0)
+    try:
+        x: int = yield xp
+    except ZeroDivisionError:
+        x = 4
+    return x
+
+
+def test_invocation() -> None:
+    s = Scheduler()
+    p = s.add(only_invocation)
+    assert p.result(timeout=30) == 3  # noqa: PLR2004
+    s.close()
+
+
+def test_invocation_with_error() -> None:
+    s = Scheduler()
+    p = s.add(invocation_with_error)
+    assert p.result(timeout=30) == 4  # noqa: PLR2004
+    s.close()
