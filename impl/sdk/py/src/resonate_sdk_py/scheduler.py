@@ -213,25 +213,28 @@ def _callback(
     _unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
 
 
-def _run_cqe_callbacks(processor: Processor) -> None:
-    if processor.cq_qsize() > 0:
-        logger.debug("Popping from the completion queue")
-        cqe = processor.dequeue()
+def _run_cqe_callbacks(processor: Processor, batch_size: int) -> None:
+    cqes = processor.dequeue_batch(batch_size=batch_size)
+    if cqes is None:
+        return
+    logger.debug("%s elements popped from the completion queue", len(cqes))
+    for cqe in cqes:
         cqe.callback(cqe.cmd_result)
 
 
 def _runnables_from_stg_q(
     stg_q: Queue[CoroAndPromise[T]],
+    batch_size: int,
 ) -> PedingToRun | None:
     new_runnables: PedingToRun = []
+    stg_qes = utils.dequeue_batch(q=stg_q, batch_size=batch_size)
+    if stg_qes is None:
+        return None
 
-    if stg_q.qsize() > 0:
-        logger.debug("Popping from the staging queue")
-        coro_and_prom = utils.dequeue(q=stg_q)
+    logger.debug("%s elements popped from the staging queue", len(stg_qes))
+    for coro_and_prom in stg_qes:
         new_runnables.append(Runnable(coro_and_promise=coro_and_prom, next_value=None))
 
-    if len(new_runnables) == 0:
-        return None
     return new_runnables
 
 
@@ -395,7 +398,7 @@ def _worker(
     pending_to_run: PedingToRun = []
     waiting_for_prom_resolution: WaitingForPromiseResolution = {}
     while not kill_event.is_set():
-        _run_cqe_callbacks(processor=processor)
+        _run_cqe_callbacks(processor=processor, batch_size=3)
 
         for p in waiting_for_prom_resolution:
             if p.done():
@@ -403,7 +406,7 @@ def _worker(
                     p=p, waiting=waiting_for_prom_resolution, runnables=pending_to_run
                 )
 
-        new_r = _runnables_from_stg_q(stg_q=stg_q)
+        new_r = _runnables_from_stg_q(stg_q=stg_q, batch_size=3)
         if new_r is not None:
             pending_to_run.extend(new_r)
 

@@ -102,5 +102,8 @@ class Processor:
     def dequeue(self) -> CQE[Any]:
         return utils.dequeue(q=self._completion_queue)
 
+    def dequeue_batch(self, batch_size: int) -> list[CQE[Any]] | None:
+        return utils.dequeue_batch(q=self._completion_queue, batch_size=batch_size)
+
     def cq_qsize(self) -> int:
         return self._completion_queue.qsize()
