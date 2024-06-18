@@ -234,14 +234,18 @@ class Scheduler:
         )
         self._batch_size = batch_size
 
-    def add(
+    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
+        promises: list[Promise[T]] = []
+        for coro in coros:
+            p = self._add(coro=coro)
+            promises.append(p)
+        return promises
+
+    def _add(
         self,
-        fn: Callable[P, Generator[Yieldable, Any, T]],
-        *args: P.args,
-        **kwargs: P.kwargs,
+        coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
         p = Promise[T]()
-        coro = fn(*args, **kwargs)
         self._stg_q.put(item=CoroAndPromise(coro, p))
         self._w_continue.set()
         if self._w_thread is None:
