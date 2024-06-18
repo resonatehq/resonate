@@ -234,14 +234,16 @@ class Scheduler:
         )
         self._batch_size = batch_size
 
-    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
+    def add_multiple(
+        self, coros: list[Generator[Yieldable, Any, T]]
+    ) -> list[Promise[T]]:
         promises: list[Promise[T]] = []
         for coro in coros:
-            p = self._add(coro=coro)
+            p = self.add(coro=coro)
             promises.append(p)
         return promises
 
-    def _add(
+    def add(
         self,
         coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
