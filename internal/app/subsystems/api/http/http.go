@@ -17,19 +17,31 @@ import (
 )
 
 type Auth struct {
-	Username string
-	Password string
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+}
+
+type CredentialsList struct {
+	Users []Auth `yaml:"users"`
 }
 
 type Config struct {
 	Addr    string
-	Auth    *Auth
+	Auth    CredentialsList
 	Timeout time.Duration
 }
 
 type Http struct {
 	config *Config
 	server *http.Server
+}
+
+func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
+	credentials := util.GetProcessedCreds(config.Auth)
+	if credentials != nil {
+		return gin.BasicAuth(credentials)
+	}
+	return nil
 }
 
 func New(api api.API, config *Config) api.Subsystem {
@@ -48,16 +60,17 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Authentication
 	authorized := r.Group("/")
-	if config.Auth.Username != "" || config.Auth.Password != "" {
-		util.Assert(config.Auth.Username != "", "http basic auth username is required")
-		util.Assert(config.Auth.Password != "", "http basic auth password is required")
-
-		accounts := gin.Accounts{
-			config.Auth.Username: config.Auth.Password,
-		}
-		basicAuthMiddleware := gin.BasicAuth(accounts)
-		authorized.Use(basicAuthMiddleware)
-	}
+	authorized.Use(BasicAuthMiddleware(config))
+	//if config.Auth.Username != "" || config.Auth.Password != "" {
+	//	util.Assert(config.Auth.Username != "", "http basic auth username is required")
+	//	util.Assert(config.Auth.Password != "", "http basic auth password is required")
+	//
+	//	accounts := gin.Accounts{
+	//		config.Auth.Username: config.Auth.Password,
+	//	}
+	//	basicAuthMiddleware := gin.BasicAuth(accounts)
+	//	authorized.Use(basicAuthMiddleware)
+	//}
 
 	// Promises API
 	authorized.POST("/promises", s.createPromise)
