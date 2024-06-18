@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	server, cfgFile string
+	server, cfgFile, credFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -49,7 +49,42 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 }
 
+var CredsFromFile http.CredentialsList
+
+func GetCrednetials() (http.CredentialsList, error) {
+	if len(CredsFromFile.Users) == 0 {
+		slog.Error("CredentialsList is empty", "error", errors.New("Credentials are empty."))
+		return http.CredentialsList{}, errors.New("Credentials are empty.")
+	} else {
+		return CredsFromFile, nil
+	}
+}
+
+func initCreds() {
+	if credFile != "" {
+		viper.SetConfigFile(credFile)
+	} else {
+		viper.SetConfigName("sample-creds")
+		viper.AddConfigPath(".")
+		viper.AddConfigPath("$HOME")
+	}
+
+	err := viper.ReadInConfig()
+	if err != nil {
+		slog.Error("Error reading creds file", "error", err)
+		return
+	}
+
+	err = viper.Unmarshal(&CredsFromFile)
+	if err != nil {
+		slog.Error("Unable to decode creds from file into struct", "error", err)
+		return
+	}
+}
+
 func initConfig() {
+	initCreds()
+	viper.Reset()
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
