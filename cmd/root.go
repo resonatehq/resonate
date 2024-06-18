@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/resonatehq/resonate/internal/creds"
 	"log/slog"
 	"os"
 	"strings"
@@ -49,16 +50,16 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 }
 
-var CredsFromFile http.CredentialsList
-
-func GetCrednetials() (http.CredentialsList, error) {
-	if len(CredsFromFile.Users) == 0 {
-		slog.Error("CredentialsList is empty", "error", errors.New("Credentials are empty."))
-		return http.CredentialsList{}, errors.New("Credentials are empty.")
-	} else {
-		return CredsFromFile, nil
-	}
-}
+//var CredsFromFile http.CredentialsList
+//
+//func GetCrednetials() (http.CredentialsList, error) {
+//	if len(CredsFromFile.Users) == 0 {
+//		slog.Error("CredentialsList is empty", "error", errors.New("Credentials are empty."))
+//		return http.CredentialsList{}, errors.New("Credentials are empty.")
+//	} else {
+//		return CredsFromFile, nil
+//	}
+//}
 
 func initCreds() {
 	if credFile != "" {
@@ -75,7 +76,7 @@ func initCreds() {
 		return
 	}
 
-	err = viper.Unmarshal(&CredsFromFile)
+	err = viper.Unmarshal(&creds.CredsFromFile)
 	if err != nil {
 		slog.Error("Unable to decode creds from file into struct", "error", err)
 		return

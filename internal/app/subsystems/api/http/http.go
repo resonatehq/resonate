@@ -2,13 +2,12 @@ package http
 
 import (
 	"context"
+	"github.com/resonatehq/resonate/internal/creds"
 	"net/http"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
-
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -16,18 +15,18 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 )
 
-type Auth struct {
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-}
-
-type CredentialsList struct {
-	Users []Auth `yaml:"users"`
-}
+//type Auth struct {
+//	Username string `yaml:"username"`
+//	Password string `yaml:"password"`
+//}
+//
+//type CredentialsList struct {
+//	Users []Auth `yaml:"users"`
+//}
 
 type Config struct {
 	Addr    string
-	Auth    CredentialsList
+	Auth    creds.CredentialsList
 	Timeout time.Duration
 }
 
@@ -37,7 +36,7 @@ type Http struct {
 }
 
 func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
-	credentials := util.GetProcessedCreds(config.Auth)
+	credentials := creds.GetProcessedCreds(config.Auth)
 	if credentials != nil {
 		return gin.BasicAuth(credentials)
 	}
