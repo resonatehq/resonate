@@ -2,7 +2,7 @@ package serve
 
 import (
 	"fmt"
-	creds2 "github.com/resonatehq/resonate/internal/creds"
+	"github.com/resonatehq/resonate/internal/creds"
 	"log/slog"
 	netHttp "net/http"
 	"os"
@@ -57,12 +57,12 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
-			creds, err := creds2.GetCredentials()
+			credentials, err := creds.GetCredentials()
 			if err != nil {
 				slog.Error("failed to get credentials.", "error", err)
 				return err
 			}
-			config.API.Subsystems.Http.Auth = creds
+			config.API.Subsystems.Http.Auth = &credentials
 
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
