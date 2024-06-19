@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"github.com/resonatehq/resonate/internal/creds"
+	"gopkg.in/yaml.v3"
+	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -50,42 +52,21 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 }
 
-//var CredsFromFile http.CredentialsList
-//
-//func GetCrednetials() (http.CredentialsList, error) {
-//	if len(CredsFromFile.Users) == 0 {
-//		slog.Error("CredentialsList is empty", "error", errors.New("Credentials are empty."))
-//		return http.CredentialsList{}, errors.New("Credentials are empty.")
-//	} else {
-//		return CredsFromFile, nil
-//	}
-//}
-
 func initCreds() {
-	if credFile != "" {
-		viper.SetConfigFile(credFile)
-	} else {
-		viper.SetConfigName("sample-creds")
-		viper.AddConfigPath(".")
-		viper.AddConfigPath("$HOME")
+	yamlFile, err := os.ReadFile("sample-creds.yml")
+	if err != nil {
+		log.Fatalf("Failed to read YAML file: %v", err)
 	}
 
-	err := viper.ReadInConfig()
+	err = yaml.Unmarshal(yamlFile, &creds.CredsFromFile)
 	if err != nil {
-		slog.Error("Error reading creds file", "error", err)
-		return
+		log.Fatalf("Failed to unmarshal YAML: %v", err)
 	}
 
-	err = viper.Unmarshal(&creds.CredsFromFile)
-	if err != nil {
-		slog.Error("Unable to decode creds from file into struct", "error", err)
-		return
-	}
 }
 
 func initConfig() {
 	initCreds()
-	viper.Reset()
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
