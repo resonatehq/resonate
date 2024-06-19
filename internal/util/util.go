@@ -2,7 +2,6 @@ package util
 
 import (
 	"cmp"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"sort"
 	"time"
 
@@ -91,12 +90,4 @@ func Next(curr int64, cronExp string) (int64, error) {
 
 func ParseCron(cronExp string) (cron.Schedule, error) {
 	return cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
-}
-
-func GetProcessedCreds(credList http.CredentialsList) map[string]string {
-	credentials := make(map[string]string)
-	for _, item := range credList.Users {
-		credentials[item.Username] = item.Password
-	}
-	return credentials
 }

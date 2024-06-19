@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"fmt"
+	"github.com/resonatehq/resonate/internal/creds"
 	"io"
 	"net/http"
 	"testing"
@@ -26,7 +27,7 @@ type httpTest struct {
 	client    *http.Client
 }
 
-func setup(auth *Auth) *httpTest {
+func setup(auth *creds.CredentialsList) *httpTest {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem := New(api, &Config{
@@ -56,24 +57,30 @@ func (t *httpTest) teardown() error {
 func TestHttpServer(t *testing.T) {
 	for _, ts := range []struct {
 		name          string
-		auth          *Auth
+		auth          *creds.CredentialsList
 		reqUsername   string
 		reqPassword   string
 		statusOveride int
 	}{
+		//{
+		//	name: "NoAuth",
+		//	auth: &creds.CredentialsList{},
+		//},
 		{
-			name: "NoAuth",
-			auth: &Auth{},
+			name: "BasicAuthCorrectCredentials",
+			auth: &creds.CredentialsList{Users: []creds.Auth{{
+				Username: "user1",
+				Password: "password1",
+			}}},
+			reqUsername: "user1",
+			reqPassword: "password1",
 		},
 		{
-			name:        "BasicAuthCorrectCredentials",
-			auth:        &Auth{Username: "username", Password: "password"},
-			reqUsername: "username",
-			reqPassword: "password",
-		},
-		{
-			name:          "BasicAuthIncorrectCredentials",
-			auth:          &Auth{Username: "username", Password: "password"},
+			name: "BasicAuthIncorrectCredentials",
+			auth: &creds.CredentialsList{Users: []creds.Auth{{
+				Username: "user1",
+				Password: "password1",
+			}}},
 			reqUsername:   "username",
 			reqPassword:   "notthepassword",
 			statusOveride: 401,

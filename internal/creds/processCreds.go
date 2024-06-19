@@ -25,7 +25,7 @@ func GetCredentials() (CredentialsList, error) {
 	}
 }
 
-func GetProcessedCreds(credList CredentialsList) map[string]string {
+func GetProcessedCreds(credList *CredentialsList) map[string]string {
 	credentials := make(map[string]string)
 	for _, item := range credList.Users {
 		credentials[item.Username] = item.Password
