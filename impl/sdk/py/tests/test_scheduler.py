@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
+from resonate_sdk_py.scheduler import (
+    Call,
+    Invoke,
+    Promise,
+    Scheduler,
+    Yieldable,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -103,14 +109,12 @@ def test_calls() -> None:
     assert p.result(timeout=30) == 8  # noqa: PLR2004
 
 
-@pytest.mark.dev()
 def test_call_gen() -> None:
     s = Scheduler()
     p = s.add(gen_call())
     assert p.result() == 3  # noqa: PLR2004
 
 
-@pytest.mark.dev()
 def test_invoke_gen() -> None:
     s = Scheduler()
     p = s.add(gen_invoke())
