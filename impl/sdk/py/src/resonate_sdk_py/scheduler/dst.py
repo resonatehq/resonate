@@ -10,19 +10,22 @@ from typing_extensions import ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py.logging import logger
 
-from .shared import (
-    Call,
-    CoroAndPromise,
+from .itertools import (
     FinalValue,
-    Invoke,
     PendingToRun,
-    Promise,
-    Runnable,
     WaitingForPromiseResolution,
-    Yieldable,
     callback,
     iterate_coro,
     unblock_depands_coros,
+)
+from .shared import (
+    Call,
+    CoroAndPromise,
+    CoroScheduler,
+    Invoke,
+    Promise,
+    Runnable,
+    Yieldable,
     wrap_fn_into_cmd,
 )
 
@@ -34,7 +37,7 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-class DSTScheduler:
+class DSTScheduler(CoroScheduler):
     def __init__(self, seed: int | None = None) -> None:
         self._pending_to_run: PendingToRun = []
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}

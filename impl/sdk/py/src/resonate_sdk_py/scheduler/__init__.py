@@ -14,19 +14,22 @@ from resonate_sdk_py import utils
 from resonate_sdk_py.logging import logger
 from resonate_sdk_py.processor import SQE, Processor
 
-from .shared import (
-    Call,
-    CoroAndPromise,
+from .itertools import (
     FinalValue,
-    Invoke,
     PendingToRun,
-    Promise,
-    Runnable,
     WaitingForPromiseResolution,
-    Yieldable,
     callback,
     iterate_coro,
     unblock_depands_coros,
+)
+from .shared import (
+    Call,
+    CoroAndPromise,
+    CoroScheduler,
+    Invoke,
+    Promise,
+    Runnable,
+    Yieldable,
     wrap_fn_into_cmd,
 )
 
@@ -38,7 +41,7 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-class Scheduler:
+class Scheduler(CoroScheduler):
     def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
         self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None
@@ -49,16 +52,14 @@ class Scheduler:
         )
         self._batch_size = batch_size
 
-    def add_multiple(
-        self, coros: list[Generator[Yieldable, Any, T]]
-    ) -> list[Promise[T]]:
+    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
         promises: list[Promise[T]] = []
         for coro in coros:
-            p = self.add(coro=coro)
+            p = self._add(coro=coro)
             promises.append(p)
         return promises
 
-    def add(
+    def _add(
         self,
         coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
