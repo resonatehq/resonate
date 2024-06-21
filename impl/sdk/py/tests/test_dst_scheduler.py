@@ -66,3 +66,61 @@ def test_dst_scheduler() -> None:
             1,
             3,
         ], f"Test fails when seed it {seed}"
+
+
+@pytest.mark.dst()
+def test_dst_determinitic() -> None:
+    seed = random.randint(1, 100)  # noqa: S311
+    s = DSTScheduler(seed=seed)
+    s.add(
+        coros=[
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_invocation(),
+        ]
+    )
+    expected_events = s.get_events()
+
+    s = DSTScheduler(seed=seed)
+    s.add(
+        coros=[
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_invocation(),
+        ]
+    )
+    reproduced_events = s.get_events()
+
+    assert expected_events == reproduced_events
+
+    s = DSTScheduler(seed=seed + 10)
+    s.add(
+        coros=[
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_call(),
+            only_invocation(),
+        ]
+    )
+    other_events = s.get_events()
+    assert expected_events != other_events

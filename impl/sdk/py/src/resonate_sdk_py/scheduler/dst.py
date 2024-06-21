@@ -38,12 +38,13 @@ P = ParamSpec("P")
 
 
 class DSTScheduler(CoroScheduler):
-    def __init__(self, seed: int | None = None) -> None:
+    def __init__(self, seed: int) -> None:
         self._pending_to_run: PendingToRun = []
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
+        self._execution_events: list[str] = []
         self._callbacks_to_run: list[Callable[..., None]] = []
-        if seed is not None:
-            random.seed(seed)
+        self._r = random.Random()
+        self._r.seed(seed)
 
     def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
         promises: list[Promise[T]] = []
@@ -67,11 +68,11 @@ class DSTScheduler(CoroScheduler):
     def _run(self) -> None:
         while True:
             while self._callbacks_to_run:
-                random.shuffle(self._callbacks_to_run)
+                self._r.shuffle(self._callbacks_to_run)
                 self._callbacks_to_run.pop()()
 
             while self._pending_to_run:
-                random.shuffle(self._pending_to_run)
+                self._r.shuffle(self._pending_to_run)
                 runnable = self._pending_to_run.pop()
                 self._process_each_runnable(runnable=runnable)
 
@@ -94,16 +95,24 @@ class DSTScheduler(CoroScheduler):
                 runnables=self._pending_to_run,
             )
 
+            self._execution_events.append(f"Promise resolved with value {value}")
+
         elif isinstance(yieldable_or_final_value, Call):
             self._handle_call(
                 call=yieldable_or_final_value,
                 runnable=runnable,
+            )
+            self._execution_events.append(
+                f"Call {yieldable_or_final_value.fn.__name__} with params args={yieldable_or_final_value.args} kwargs={yieldable_or_final_value.kwargs} handled"  # noqa: E501
             )
 
         elif isinstance(yieldable_or_final_value, Invoke):
             self._handle_invocation(
                 invocation=yieldable_or_final_value,
                 runnable=runnable,
+            )
+            self._execution_events.append(
+                f"Invocation {yieldable_or_final_value.fn.__name__} with params args={yieldable_or_final_value.args} kwargs={yieldable_or_final_value.kwargs} handled"  # noqa: E501
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
@@ -179,3 +188,6 @@ class DSTScheduler(CoroScheduler):
             self._pending_to_run.append(
                 Runnable(CoroAndPromise(coro, p), next_value=None)
             )
+
+    def get_events(self) -> list[str]:
+        return self._execution_events
