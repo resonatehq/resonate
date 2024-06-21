@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import random
 from collections.abc import Generator
-from functools import partial
 from inspect import isgeneratorfunction
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from result import Ok, Result
 from typing_extensions import ParamSpec, TypeVar, assert_never
@@ -38,6 +37,8 @@ P = ParamSpec("P")
 class DSTScheduler:
     def __init__(self, seed: int | None = None) -> None:
         self._pending_to_run: PendingToRun = []
+        self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
+        self._callbacks_to_run: list[Callable[..., None]] = []
         if seed is not None:
             random.seed(seed)
 
@@ -61,25 +62,17 @@ class DSTScheduler:
         return p
 
     def _run(self) -> None:
-        waiting_for_prom_resolution: WaitingForPromiseResolution = {}
-        n_pending_to_run = len(self._pending_to_run)
-
-        while n_pending_to_run > 0:
+        while self._pending_to_run:
             random.shuffle(self._pending_to_run)
-            for _ in range(n_pending_to_run):
+            for _ in range(len(self._pending_to_run)):
                 runnable = self._pending_to_run.pop()
                 self._process_each_runnable(
                     runnable=runnable,
-                    waiting_for_promise=waiting_for_prom_resolution,
-                    pending_to_run=self._pending_to_run,
                 )
-            n_pending_to_run = len(self._pending_to_run)
 
     def _process_each_runnable(
         self,
         runnable: Runnable[Any],
-        pending_to_run: PendingToRun,
-        waiting_for_promise: WaitingForPromiseResolution,
     ) -> None:
         yieldable_or_final_value = iterate_coro(runnable)
 
@@ -89,35 +82,33 @@ class DSTScheduler:
             runnable.coro_and_promise.prom.set_result(value)
             unblock_depands_coros(
                 p=runnable.coro_and_promise.prom,
-                waiting=waiting_for_promise,
-                runnables=pending_to_run,
+                waiting=self._waiting_for_prom_resolution,
+                runnables=self._pending_to_run,
             )
 
         elif isinstance(yieldable_or_final_value, Call):
             self._handle_call(
                 call=yieldable_or_final_value,
                 runnable=runnable,
-                pending_to_run=pending_to_run,
-                waiting_for_promise=waiting_for_promise,
             )
 
         elif isinstance(yieldable_or_final_value, Invoke):
             self._handle_invocation(
                 invocation=yieldable_or_final_value,
                 runnable=runnable,
-                pending_to_run=pending_to_run,
-                waiting_for_promise=waiting_for_promise,
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
-            waiting_for_promise.setdefault(yieldable_or_final_value, []).append(
+            self._waiting_for_prom_resolution.setdefault(
+                yieldable_or_final_value, []
+            ).append(
                 runnable.coro_and_promise,
             )
             if yieldable_or_final_value.done():
                 unblock_depands_coros(
                     p=yieldable_or_final_value,
-                    waiting=waiting_for_promise,
-                    runnables=pending_to_run,
+                    waiting=self._waiting_for_prom_resolution,
+                    runnables=self._pending_to_run,
                 )
 
         else:
@@ -127,39 +118,36 @@ class DSTScheduler:
         self,
         call: Call,
         runnable: Runnable[T],
-        waiting_for_promise: WaitingForPromiseResolution,
-        pending_to_run: PendingToRun,
     ) -> None:
         logger.debug("Processing call")
         p = Promise[Any]()
-        waiting_for_promise[p] = [runnable.coro_and_promise]
+        self._waiting_for_prom_resolution[p] = [runnable.coro_and_promise]
         if not isgeneratorfunction(call.fn):
             v = cast(
                 Result[Any, Exception],
                 wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs).run(),
             )
-            partial(callback, p, waiting_for_promise, pending_to_run)
 
             callback(
                 p=p,
-                waiting_for_promise=waiting_for_promise,
-                pending_to_run=pending_to_run,
+                waiting_for_promise=self._waiting_for_prom_resolution,
+                pending_to_run=self._pending_to_run,
                 v=v,
             )
         else:
             coro = call.fn(*call.args, **call.kwargs)
-            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+            self._pending_to_run.append(
+                Runnable(CoroAndPromise(coro, p), next_value=None)
+            )
 
     def _handle_invocation(
         self,
         invocation: Invoke,
         runnable: Runnable[T],
-        pending_to_run: PendingToRun,
-        waiting_for_promise: WaitingForPromiseResolution,
     ) -> None:
         logger.debug("Processing invocation")
         p = Promise[Any]()
-        pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
+        self._pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
         if not isgeneratorfunction(invocation.fn):
             v = cast(
                 Result[Any, Exception],
@@ -169,10 +157,12 @@ class DSTScheduler:
             )
             callback(
                 p=p,
-                waiting_for_promise=waiting_for_promise,
-                pending_to_run=pending_to_run,
+                waiting_for_promise=self._waiting_for_prom_resolution,
+                pending_to_run=self._pending_to_run,
                 v=v,
             )
         else:
             coro = invocation.fn(*invocation.args, **invocation.kwargs)
-            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+            self._pending_to_run.append(
+                Runnable(CoroAndPromise(coro, p), next_value=None)
+            )
