@@ -62,13 +62,18 @@ class DSTScheduler:
         return p
 
     def _run(self) -> None:
-        while self._pending_to_run:
-            random.shuffle(self._pending_to_run)
-            for _ in range(len(self._pending_to_run)):
+        while True:
+            while self._callbacks_to_run:
+                random.shuffle(self._callbacks_to_run)
+                self._callbacks_to_run.pop()()
+
+            while self._pending_to_run:
+                random.shuffle(self._pending_to_run)
                 runnable = self._pending_to_run.pop()
-                self._process_each_runnable(
-                    runnable=runnable,
-                )
+                self._process_each_runnable(runnable=runnable)
+
+            if not self._callbacks_to_run and not self._pending_to_run:
+                break
 
     def _process_each_runnable(
         self,
@@ -128,11 +133,13 @@ class DSTScheduler:
                 wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs).run(),
             )
 
-            callback(
-                p=p,
-                waiting_for_promise=self._waiting_for_prom_resolution,
-                pending_to_run=self._pending_to_run,
-                v=v,
+            self._callbacks_to_run.append(
+                lambda: callback(
+                    p=p,
+                    waiting_for_promise=self._waiting_for_prom_resolution,
+                    pending_to_run=self._pending_to_run,
+                    v=v,
+                )
             )
         else:
             coro = call.fn(*call.args, **call.kwargs)
@@ -155,12 +162,15 @@ class DSTScheduler:
                     invocation.fn, *invocation.args, **invocation.kwargs
                 ).run(),
             )
-            callback(
-                p=p,
-                waiting_for_promise=self._waiting_for_prom_resolution,
-                pending_to_run=self._pending_to_run,
-                v=v,
+            self._callbacks_to_run.append(
+                lambda: callback(
+                    p=p,
+                    waiting_for_promise=self._waiting_for_prom_resolution,
+                    pending_to_run=self._pending_to_run,
+                    v=v,
+                )
             )
+
         else:
             coro = invocation.fn(*invocation.args, **invocation.kwargs)
             self._pending_to_run.append(

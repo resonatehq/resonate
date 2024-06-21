@@ -19,12 +19,12 @@ def _number(n: int) -> int:
 
 
 def only_call() -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(_number, n=3)
+    x: int = yield Call(_number, n=1)
     return x
 
 
 def only_invocation() -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(_number, n=4)
+    xp: Promise[int] = yield Invoke(_number, n=3)
     x: int = yield xp
     return x
 
@@ -55,14 +55,14 @@ def test_dst_scheduler() -> None:
         )
         values = _promise_result(promises=promises)
         assert values == [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
             3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            3,
-            4,
         ], f"Test fails when seed it {seed}"
