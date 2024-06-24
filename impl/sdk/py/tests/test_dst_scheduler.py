@@ -14,6 +14,21 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+def _add_many(s: DSTScheduler) -> list[Promise[Any]]:
+    promises: list[Promise[Any]] = []
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_call()))
+    promises.append(s.add(only_invocation()))
+    return promises
+
+
 def _number(n: int) -> int:
     return n
 
@@ -39,20 +54,8 @@ def test_dst_scheduler() -> None:
         seed = random.randint(0, 1000000)  # noqa: S311
         s = DSTScheduler(seed=seed)
 
-        promises = s.add(
-            coros=[
-                only_call(),  # 3
-                only_call(),  # 3
-                only_call(),
-                only_call(),
-                only_call(),
-                only_call(),
-                only_call(),
-                only_call(),
-                only_call(),
-                only_invocation(),  # 4
-            ]
-        )
+        promises = _add_many(s)
+        s.run()
         values = _promise_result(promises=promises)
         assert values == [
             1,
@@ -72,55 +75,19 @@ def test_dst_scheduler() -> None:
 def test_dst_determinitic() -> None:
     seed = random.randint(1, 100)  # noqa: S311
     s = DSTScheduler(seed=seed)
-    s.add(
-        coros=[
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_invocation(),
-        ]
-    )
+    _add_many(s)
+    s.run()
     expected_events = s.get_events()
 
     s = DSTScheduler(seed=seed)
-    s.add(
-        coros=[
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_invocation(),
-        ]
-    )
+    _add_many(s)
+    s.run()
     reproduced_events = s.get_events()
 
     assert expected_events == reproduced_events
 
     s = DSTScheduler(seed=seed + 10)
-    s.add(
-        coros=[
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_call(),
-            only_invocation(),
-        ]
-    )
+    _add_many(s)
+    s.run()
     other_events = s.get_events()
     assert expected_events != other_events

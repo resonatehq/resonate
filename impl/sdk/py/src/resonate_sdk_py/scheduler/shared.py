@@ -22,7 +22,10 @@ P = ParamSpec("P")
 
 class CoroScheduler(ABC):
     @abstractmethod
-    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]: ...
+    def add(self, coros: Generator[Yieldable, Any, T]) -> Promise[T]: ...
+
+    @abstractmethod
+    def run(self) -> None: ...
 
 
 class FnCmd(ICommand[T]):

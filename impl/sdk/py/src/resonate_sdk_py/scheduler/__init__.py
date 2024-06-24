@@ -52,23 +52,19 @@ class Scheduler(CoroScheduler):
         )
         self._batch_size = batch_size
 
-    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
-        promises: list[Promise[T]] = []
-        for coro in coros:
-            p = self._add(coro=coro)
-            promises.append(p)
-        return promises
-
-    def _add(
+    def add(
         self,
         coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
         p = Promise[T]()
         self._stg_q.put(item=CoroAndPromise(coro, p))
         self._w_continue.set()
+
+        return p
+
+    def run(self) -> None:
         if self._w_thread is None:
             self._run_worker()
-        return p
 
     def _run_worker(self) -> None:
         assert self._w_thread is None, "Worker thread already exists"

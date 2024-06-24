@@ -43,19 +43,10 @@ class DSTScheduler(CoroScheduler):
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
         self._execution_events: list[str] = []
         self._callbacks_to_run: list[Callable[..., None]] = []
-        self._r = random.Random()
+        self._r = random.Random()  # noqa: RUF100, S311
         self._r.seed(seed)
 
-    def add(self, coros: list[Generator[Yieldable, Any, T]]) -> list[Promise[T]]:
-        promises: list[Promise[T]] = []
-        for coro in coros:
-            p = self._add(coro=coro)
-            promises.append(p)
-
-        self._run()
-        return promises
-
-    def _add(
+    def add(
         self,
         coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
@@ -65,7 +56,7 @@ class DSTScheduler(CoroScheduler):
         )
         return p
 
-    def _run(self) -> None:
+    def run(self) -> None:
         while True:
             while self._callbacks_to_run:
                 self._r.shuffle(self._callbacks_to_run)
