@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from asyncio import iscoroutinefunction
 from collections.abc import Coroutine
 from dataclasses import dataclass
-from threading import Event, Thread
+from threading import Thread
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
 from result import Err, Ok
@@ -17,6 +17,8 @@ from resonate_sdk_py.logging import logger
 
 if TYPE_CHECKING:
     from result import Result
+
+    from resonate_sdk_py.scheduler import Scheduler
 
 T = TypeVar("T")
 
@@ -45,7 +47,7 @@ class CQE(Generic[T]):
 
 class Processor:
     def __init__(
-        self, max_workers: int | None, scheduler_continue: Event | None = None
+        self, max_workers: int | None, scheduler: Scheduler | None = None
     ) -> None:
         if max_workers is None:
             max_workers = min(32, (os.cpu_count() or 1) + 4)
@@ -55,7 +57,7 @@ class Processor:
         self._submission_queue = queue.Queue[SQE[Any]]()
         self._completion_queue = queue.Queue[CQE[Any]]()
         self._threads = set[Thread]()
-        self._scheduler_continue = scheduler_continue
+        self._scheduler = scheduler
 
     def enqueue(self, sqe: SQE[Any]) -> None:
         self._submission_queue.put(sqe)
@@ -86,8 +88,8 @@ class Processor:
                     callback=sqe.callback,
                 )
             )
-            if self._scheduler_continue is not None:
-                self._scheduler_continue.set()
+            if self._scheduler is not None:
+                self._scheduler.signal()
 
     def _adjust_thread_count(self) -> None:
         num_threads = len(self._threads)

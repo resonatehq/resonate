@@ -4,7 +4,7 @@ from collections.abc import Generator
 from functools import partial
 from inspect import isgeneratorfunction
 from queue import Queue
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING, Any
 
 from result import Ok
@@ -46,11 +46,16 @@ class Scheduler(CoroScheduler):
         self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None
         self._w_continue = Event()
+        self._lock = Lock()
         self._processor = Processor(
             max_workers=max_wokers,
-            scheduler_continue=self._w_continue,
+            scheduler=self,
         )
         self._batch_size = batch_size
+
+    def signal(self) -> None:
+        with self._lock:
+            self._w_continue.set()
 
     def add(
         self,
@@ -85,7 +90,8 @@ class Scheduler(CoroScheduler):
             n_pending_to_run = len(pending_to_run)
             if n_pending_to_run == 0:
                 self._w_continue.wait()
-                self._w_continue.clear()
+                with self._lock:
+                    self._w_continue.clear()
 
             self._run_cqe_callbacks()
 
