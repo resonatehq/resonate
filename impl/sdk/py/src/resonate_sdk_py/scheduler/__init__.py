@@ -54,7 +54,8 @@ class Scheduler(CoroScheduler):
         self._batch_size = batch_size
 
     def signal(self) -> None:
-        self._w_continue.set()
+        with self._lock:
+            self._w_continue.set()
 
     def add(
         self,
@@ -62,7 +63,8 @@ class Scheduler(CoroScheduler):
     ) -> Promise[T]:
         p = Promise[T]()
         self._stg_q.put(item=CoroAndPromise(coro, p))
-        self._w_continue.set()
+        with self._lock:
+            self._w_continue.set()
 
         return p
 
@@ -88,8 +90,8 @@ class Scheduler(CoroScheduler):
         while True:
             n_pending_to_run = len(pending_to_run)
             if n_pending_to_run == 0:
+                self._w_continue.wait()
                 with self._lock:
-                    self._w_continue.wait()
                     self._w_continue.clear()
 
             self._run_cqe_callbacks()
