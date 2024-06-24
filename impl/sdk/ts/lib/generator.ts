@@ -4,6 +4,7 @@ import { Invocation } from "./core/invocation";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import { DurablePromise } from "./core/promises/promises";
 import * as schedules from "./core/schedules/schedules";
+import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
 
 /////////////////////////////////////////////////////////////////////
@@ -78,10 +79,9 @@ export class Resonate extends ResonateBase {
     func: F,
     args: Params<F>,
     opts: Options,
-    defaults: Options,
     durablePromise?: DurablePromise<any>,
   ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, id, func, args, opts, defaults, durablePromise);
+    return this.scheduler.add(name, id, func, args, opts, durablePromise);
   }
 
   /**
@@ -195,7 +195,10 @@ export class Info {
 }
 
 export class Context {
-  constructor(private invocation: Invocation<any>) {}
+  constructor(
+    private resonate: Resonate,
+    private invocation: Invocation<any>,
+  ) {}
 
   /**
    * The running count of child function invocations.
@@ -313,7 +316,9 @@ export class Context {
   }
 
   private _call(func: string | ((...args: any[]) => any), argsWithOpts: any[], yieldFuture: boolean): Call {
-    const { args, opts } = this.invocation.split(argsWithOpts);
+    const { args, opts: givenOpts } = utils.split(argsWithOpts);
+
+    const opts = this.resonate.defaults(givenOpts);
 
     if (typeof func === "string") {
       return { kind: "call", value: { kind: "deferred", func, args, opts }, yieldFuture };
@@ -366,7 +371,6 @@ class Scheduler {
     func: F,
     args: Params<F>,
     opts: Options,
-    defaults: Options,
     durablePromise?: DurablePromise<any>,
   ): ResonatePromise<Return<F>> {
     // if the execution is already running, and not killed,
@@ -383,10 +387,10 @@ class Scheduler {
     };
 
     // create a new invocation
-    const invocation = new Invocation(name, id, undefined, param, opts, defaults);
+    const invocation = new Invocation(name, id, undefined, param, opts);
 
     // create a new execution
-    const generator = func(new Context(invocation), ...args);
+    const generator = func(new Context(this.resonate, invocation), ...args);
     const execution = new GeneratorExecution(this.resonate, invocation, generator, durablePromise);
 
     // once the durable promise has been created,
@@ -504,14 +508,11 @@ class Scheduler {
     // human readable name of the function
     const name = value.kind === "deferred" ? value.func : value.func.name;
 
-    // default opts never change
-    const defaults = parent.defaults;
-
     // param is only required for deferred executions
     const param = value.kind === "deferred" ? value.args[0] : undefined;
 
     // create a new invocation
-    const invocation = new Invocation(name, id, undefined, param, value.opts, defaults, parent);
+    const invocation = new Invocation(name, id, undefined, param, value.opts, parent);
 
     // add child and increment counter
     parent.addChild(invocation);
@@ -521,7 +522,7 @@ class Scheduler {
 
     if (value.kind === "resonate") {
       // create a generator execution
-      const ctx = new Context(invocation);
+      const ctx = new Context(this.resonate, invocation);
       execution = new GeneratorExecution(this.resonate, invocation, value.func(ctx, ...value.args));
 
       await execution.create();

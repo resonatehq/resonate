@@ -91,23 +91,21 @@ export class OrdinaryExecution<T> extends Execution<T> {
   }
 
   protected async fork() {
-    if (this.invocation.opts.durable) {
+    if (this.invocation.opts.durable && !this.durablePromise) {
       // if durable, create a durable promise
       try {
-        this.durablePromise =
-          this.durablePromise ??
-          (await DurablePromise.create<T>(
-            this.resonate.store.promises,
-            this.invocation.opts.encoder,
-            this.invocation.id,
-            this.invocation.timeout,
-            {
-              idempotencyKey: this.invocation.idempotencyKey,
-              headers: this.invocation.headers,
-              param: this.invocation.param,
-              tags: this.invocation.opts.tags,
-            },
-          ));
+        this.durablePromise = await DurablePromise.create<T>(
+          this.resonate.store.promises,
+          this.invocation.opts.encoder,
+          this.invocation.id,
+          this.invocation.timeout,
+          {
+            idempotencyKey: this.invocation.idempotencyKey,
+            headers: this.invocation.headers,
+            param: this.invocation.param,
+            tags: this.invocation.opts.tags,
+          },
+        );
       } catch (e) {
         // if an error occurs, kill the execution
         this.kill(e);
@@ -265,22 +263,20 @@ export class GeneratorExecution<T> extends Execution<T> {
 
   async create() {
     try {
-      if (this.invocation.opts.durable) {
+      if (this.invocation.opts.durable && !this.durablePromise) {
         // create a durable promise
-        this.durablePromise =
-          this.durablePromise ??
-          (await DurablePromise.create<T>(
-            this.resonate.store.promises,
-            this.invocation.opts.encoder,
-            this.invocation.id,
-            this.invocation.timeout,
-            {
-              idempotencyKey: this.invocation.idempotencyKey,
-              headers: this.invocation.headers,
-              param: this.invocation.param,
-              tags: this.invocation.opts.tags,
-            },
-          ));
+        this.durablePromise = await DurablePromise.create<T>(
+          this.resonate.store.promises,
+          this.invocation.opts.encoder,
+          this.invocation.id,
+          this.invocation.timeout,
+          {
+            idempotencyKey: this.invocation.idempotencyKey,
+            headers: this.invocation.headers,
+            param: this.invocation.param,
+            tags: this.invocation.opts.tags,
+          },
+        );
 
         // resolve/reject the invocation if already completed
         if (this.durablePromise.resolved) {

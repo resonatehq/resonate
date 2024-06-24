@@ -1,5 +1,5 @@
 import { Future } from "./future";
-import { Options, PartialOptions, isOptions } from "./options";
+import { Options } from "./options";
 import { RetryPolicy, exponential } from "./retry";
 
 /////////////////////////////////////////////////////////////////////
@@ -44,7 +44,6 @@ export class Invocation<T> {
     public readonly headers: Record<string, string> | undefined,
     public readonly param: unknown,
     public readonly opts: Options,
-    public readonly defaults: Options,
     parent?: Invocation<any>,
   ) {
     // create a future and hold on to its resolvers
@@ -59,13 +58,12 @@ export class Invocation<T> {
     // get the execution id from either:
     // - a hard coded string
     // - a function that returns a string given the invocation id
-    this.eid = typeof this.opts.eid === "function" ? this.opts.eid(this.id) : this.opts.eid;
+    this.eid = this.opts.eidFn(this.id);
 
     // get the idempotency key from either:
     // - a hard coded string
     // - a function that returns a string given the invocation id
-    this.idempotencyKey =
-      typeof this.opts.idempotencyKey === "function" ? this.opts.idempotencyKey(this.id) : this.opts.idempotencyKey;
+    this.idempotencyKey = this.opts.idempotencyKeyFn(this.id);
 
     // the timeout is the minimum of:
     // - the current time plus the user provided relative time
@@ -88,30 +86,5 @@ export class Invocation<T> {
 
   unblock() {
     this.blocked = null;
-  }
-
-  split(args: [...any, PartialOptions?]): { args: any[]; opts: Options } {
-    let opts = args[args.length - 1];
-
-    // merge opts
-    if (isOptions(opts)) {
-      args = args.slice(0, -1);
-      opts = {
-        ...this.defaults,
-        ...opts,
-        tags: { ...this.defaults.tags, ...opts.tags }, // tags are merged
-      };
-    } else {
-      // copy defaults
-      opts = { ...this.defaults };
-    }
-
-    // lock is false by default
-    opts.lock = opts.lock ?? false;
-
-    // version cannot be overridden
-    opts.version = this.defaults.version;
-
-    return { args, opts };
   }
 }

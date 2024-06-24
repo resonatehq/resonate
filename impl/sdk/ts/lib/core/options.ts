@@ -83,9 +83,10 @@ export type Options = {
   durable: boolean;
 
   /**
-   * A unique id for this execution, defaults to a random id.
+   * A function that calculates the id for this execution
+   * defaults to a random funciton.
    */
-  eid: string | ((id: string) => string);
+  eidFn: (id: string) => string;
 
   /**
    * Overrides the default encoder.
@@ -93,9 +94,10 @@ export type Options = {
   encoder: IEncoder<unknown, string | undefined>;
 
   /**
-   * Overrides the default idempotency key.
+   * Overrides the default funciton to calculate the idempotency key.
+   * defaults to a variation fnv-1a the hash funciton.
    */
-  idempotencyKey: string | ((id: string) => string);
+  idempotencyKeyFn: (id: string) => string;
 
   /**
    * Acquire a lock for the execution.

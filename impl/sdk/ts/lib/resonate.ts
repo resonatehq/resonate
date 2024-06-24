@@ -3,7 +3,7 @@ import { JSONEncoder } from "./core/encoders/json";
 import { ResonatePromise } from "./core/future";
 import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
-import { ResonateOptions, Options, PartialOptions, isOptions } from "./core/options";
+import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import * as promises from "./core/promises/promises";
 import * as retryPolicy from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
@@ -121,7 +121,6 @@ export abstract class ResonateBase {
     func: Func,
     args: any[],
     opts: Options,
-    defaults: Options,
     durablePromise?: promises.DurablePromise<any>,
   ): ResonatePromise<any>;
 
@@ -170,18 +169,15 @@ export abstract class ResonateBase {
    * @returns A promise that resolve to the function return value.
    */
   run<T>(name: string, id: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T> {
-    const {
-      args,
-      opts: { version },
-      part: { durable, idempotencyKey, tags, timeout },
-    } = this.split(argsWithOpts);
+    const { args, opts: givenOpts } = utils.split(argsWithOpts);
+    const { version, durable, idempotencyKeyFn, eidFn, tags, timeout } = givenOpts;
 
-    if (!this.functions[name] || !this.functions[name][version]) {
+    if (!this.functions[name] || !this.functions[name][version || 0]) {
       throw new Error(`Function ${name} version ${version} not registered`);
     }
 
     // the options registered with the function are the defaults
-    const { func, opts: defaults } = this.functions[name][version];
+    const { func, opts: registeredOpts } = this.functions[name][version || 0];
 
     // only the following options can be overridden, this information is persisted
     // in the durable promise and therefore not required on the recovery path
@@ -191,14 +187,18 @@ export abstract class ResonateBase {
       override.durable = durable;
     }
 
-    if (idempotencyKey !== undefined) {
-      override.idempotencyKey = idempotencyKey;
+    if (idempotencyKeyFn !== undefined) {
+      override.idempotencyKeyFn = idempotencyKeyFn;
+    }
+
+    if (eidFn !== undefined) {
+      override.eidFn = eidFn;
     }
 
     if (tags !== undefined) {
-      override.tags = { ...defaults.tags, ...tags, "resonate:invocation": "true" };
+      override.tags = { ...registeredOpts.tags, ...tags, "resonate:invocation": "true" };
     } else {
-      override.tags = { ...defaults.tags, "resonate:invocation": "true" };
+      override.tags = { ...registeredOpts.tags, "resonate:invocation": "true" };
     }
 
     if (timeout !== undefined) {
@@ -207,14 +207,25 @@ export abstract class ResonateBase {
 
     // merge defaults with override to get opts
     const opts = {
-      ...defaults,
+      ...registeredOpts,
       ...override,
     };
 
     // lock on top level is true by default
     opts.lock = opts.lock ?? true;
 
-    return this.execute(name, id, func, args, opts, defaults);
+    return this.execute(name, id, func, args, opts);
+  }
+
+  // Gets the registered options for a specific function and version
+  // that has been previously registered.
+  registeredOptions(name: string, version: number): Options {
+    if (!this.functions[name] || !this.functions[name][version]) {
+      throw new Error(`Function ${name} version ${version} not registered`);
+    }
+
+    const { opts } = this.functions[name][version];
+    return opts;
   }
 
   schedule(
@@ -223,7 +234,9 @@ export abstract class ResonateBase {
     func: Func | string,
     ...argsWithOpts: [...any, PartialOptions?]
   ): Promise<schedules.Schedule> {
-    const { args, opts } = this.split(argsWithOpts);
+    const { args, opts: givenOpts } = utils.split(argsWithOpts);
+
+    const opts = this.defaults(givenOpts);
 
     if (typeof func === "function") {
       // if function is provided, the default version is 1
@@ -242,8 +255,7 @@ export abstract class ResonateBase {
       opts: { retry, version, timeout, tags: promiseTags },
     } = this.functions[funcName][opts.version];
 
-    const idempotencyKey =
-      typeof opts.idempotencyKey === "function" ? opts.idempotencyKey(funcName) : opts.idempotencyKey;
+    const idempotencyKey = opts.idempotencyKeyFn(funcName);
 
     const promiseParam = {
       func: funcName,
@@ -288,11 +300,11 @@ export abstract class ResonateBase {
     clearInterval(this.interval);
   }
 
-  private defaults({
+  public defaults({
     durable = true,
-    eid = utils.randomId,
+    eidFn = utils.randomId,
     encoder = this.encoder,
-    idempotencyKey = utils.hash,
+    idempotencyKeyFn = utils.hash,
     lock = undefined,
     poll = this.poll,
     retry = this.retry,
@@ -305,10 +317,10 @@ export abstract class ResonateBase {
 
     return {
       __resonate: true,
-      eid,
+      eidFn,
       durable,
       encoder,
-      idempotencyKey,
+      idempotencyKeyFn,
       lock,
       poll,
       retry,
@@ -337,7 +349,7 @@ export abstract class ResonateBase {
           ) {
             const { func, opts } = this.functions[param.func][param.version];
             opts.retry = param.retryPolicy;
-            this.execute(param.func, promise.id, func, param.args, opts, opts, promise);
+            this.execute(param.func, promise.id, func, param.args, opts, promise);
           }
         }
       }
@@ -346,13 +358,6 @@ export abstract class ResonateBase {
       // transient errors will be ironed out in the next interval
       this.logger.error(e);
     }
-  }
-
-  private split(args: [...any, PartialOptions?]): { args: any[]; opts: Options; part: Partial<Options> } {
-    const part = args[args.length - 1];
-    return isOptions(part)
-      ? { args: args.slice(0, -1), opts: this.defaults(part), part }
-      : { args, opts: this.defaults(), part: {} };
   }
 }
 

@@ -202,19 +202,16 @@ export class DurablePromise<T> {
     timeout: number,
     opts: Partial<CreateOptions> = {},
   ) {
-    return new DurablePromise<T>(
-      store,
-      encoder,
-      await store.create(
-        id,
-        opts.idempotencyKey,
-        opts.strict ?? false,
-        opts.headers,
-        encoder.encode(opts.param),
-        timeout,
-        opts.tags,
-      ),
+    const storedPromise = await store.create(
+      id,
+      opts.idempotencyKey,
+      opts.strict ?? false,
+      opts.headers,
+      encoder.encode(opts.param),
+      timeout,
+      opts.tags,
     );
+    return new DurablePromise<T>(store, encoder, storedPromise);
   }
 
   /**

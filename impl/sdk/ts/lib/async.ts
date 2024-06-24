@@ -5,6 +5,7 @@ import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import { DurablePromise } from "./core/promises/promises";
 import * as retryPolicy from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
+import * as utils from "./core/utils";
 import { ResonateBase } from "./resonate";
 
 /////////////////////////////////////////////////////////////////////
@@ -41,10 +42,9 @@ export class Resonate extends ResonateBase {
     func: F,
     args: Params<F>,
     opts: Options,
-    defaults: Options,
     durablePromise?: DurablePromise<any>,
   ): ResonatePromise<Return<F>> {
-    return this.scheduler.add(name, id, func, args, opts, defaults, durablePromise);
+    return this.scheduler.add(name, id, func, args, opts, durablePromise);
   }
 
   /**
@@ -210,22 +210,36 @@ export class Context {
     // the id is either:
     // 1. a provided string in the case of a deferred execution
     // 2. a generated string in the case of an ordinary execution
-    const id = typeof func === "string" ? func : `${parent.id}.${parent.counter}`;
+    const id = typeof func === "string" ? func : `${parent.id}.${parent.counter}.${func.name}`;
 
     // human readable name of the function
     const name = typeof func === "string" ? func : func.name;
 
     // opts are optional and can be provided as the last arg
-    const { args, opts } = this.invocation.split(argsWithOpts);
+    const { args, opts: givenOpts } = utils.split(argsWithOpts);
+    const registeredOptions = this.resonate.registeredOptions(
+      this.invocation.root.name,
+      this.invocation.root.opts.version,
+    );
+    const resonateOptions = this.resonate.defaults();
 
-    // default opts never change
-    const defaults = this.invocation.defaults;
+    const opts = {
+      ...resonateOptions,
+      ...registeredOptions,
+      ...givenOpts,
+    };
+
+    // Merge the tags
+    opts.tags = { ...resonateOptions.tags, ...registeredOptions.tags, ...givenOpts.tags };
+
+    // Default lock is false for children execution
+    opts.lock = opts.lock ?? false;
 
     // param is only required for deferred executions
     const param = typeof func === "string" ? args[0] : undefined;
 
     // create a new invocation
-    const invocation = new Invocation(name, id, undefined, param, opts, defaults, parent);
+    const invocation = new Invocation(name, id, undefined, param, opts, parent);
 
     let execution: Execution<any>;
     if (typeof func === "string") {
@@ -434,7 +448,6 @@ class Scheduler {
     func: F,
     args: Params<F>,
     opts: Options,
-    defaults: Options,
     durablePromise?: DurablePromise<any>,
   ): ResonatePromise<Return<F>> {
     // if the execution is already running, and not killed,
@@ -453,7 +466,7 @@ class Scheduler {
     };
 
     // create a new invocation
-    const invocation = new Invocation<Return<F>>(name, id, undefined, param, opts, defaults);
+    const invocation = new Invocation<Return<F>>(name, id, undefined, param, opts);
 
     // create a new execution
     const ctx = new Context(this.resonate, invocation);

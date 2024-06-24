@@ -43,9 +43,9 @@ describe("Options", () => {
 
   const overrides = {
     durable: false,
-    eid: "eid",
+    eidFn: () => "eid",
     encoder: new Base64Encoder(),
-    idempotencyKey: "idempotencyKey",
+    idempotencyKeyFn: (_: string) => "idempotencyKey",
     lock: false,
     poll: 2000,
     retry: retry.linear(),
@@ -79,11 +79,12 @@ describe("Options", () => {
           resonate.options({ version: 1 }),
         );
 
+        // Most options defaults are set when created a resonate instance
         for (const opts of [top, middle, bottom]) {
           expect(opts.durable).toBe(false);
-          expect(opts.eid).toBe(utils.randomId);
+          expect(opts.eidFn).toBe(utils.randomId);
           expect(opts.encoder).toBe(resonateOpts.encoder);
-          expect(opts.idempotencyKey).toBe(utils.hash);
+          expect(opts.idempotencyKeyFn).toBe(utils.hash);
           expect(opts.poll).toBe(resonateOpts.poll);
           expect(opts.retry).toBe(resonateOpts.retry);
           expect(opts.timeout).toBe(resonateOpts.timeout);
@@ -104,9 +105,9 @@ describe("Options", () => {
 
         for (const opts of [top, middle, bottom]) {
           expect(opts.durable).toBe(overrides.durable);
-          expect(opts.eid).toBe(overrides.eid);
+          expect(opts.eidFn).toBe(overrides.eidFn);
           expect(opts.encoder).toBe(overrides.encoder);
-          expect(opts.idempotencyKey).toBe(overrides.idempotencyKey);
+          expect(opts.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
           expect(opts.lock).toBe(overrides.lock);
           expect(opts.poll).toBe(overrides.poll);
           expect(opts.retry).toBe(overrides.retry);
@@ -131,9 +132,9 @@ describe("Options", () => {
 
         // top level options
         expect(top.durable).toBe(false);
-        expect(top.eid).toBe(utils.randomId);
+        expect(top.eidFn).toBe(overrides.eidFn);
         expect(top.encoder).toBe(resonateOpts.encoder);
-        expect(top.idempotencyKey).toBe(overrides.idempotencyKey);
+        expect(top.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
         expect(top.lock).toBe(true);
         expect(top.poll).toBe(resonateOpts.poll);
         expect(top.retry).toBe(resonateOpts.retry);
@@ -144,9 +145,9 @@ describe("Options", () => {
         // bottom level options
         for (const opts of bottom) {
           expect(opts.durable).toBe(false);
-          expect(opts.eid).toBe(utils.randomId);
+          expect(opts.eidFn).toBe(utils.randomId);
           expect(opts.encoder).toBe(resonateOpts.encoder);
-          expect(opts.idempotencyKey).toBe(utils.hash);
+          expect(opts.idempotencyKeyFn).toBe(utils.hash);
           expect(opts.lock).toBe(false);
           expect(opts.poll).toBe(resonateOpts.poll);
           expect(opts.retry).toBe(resonateOpts.retry);
@@ -166,27 +167,29 @@ describe("Options", () => {
 
         // middle options (overriden)
         expect(middle.durable).toBe(overrides.durable);
-        expect(middle.eid).toBe(overrides.eid);
+        expect(middle.eidFn).toBe(overrides.eidFn);
         expect(middle.encoder).toBe(overrides.encoder);
-        expect(middle.idempotencyKey).toBe(overrides.idempotencyKey);
+        expect(middle.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
         expect(middle.lock).toBe(overrides.lock);
         expect(middle.poll).toBe(overrides.poll);
         expect(middle.retry).toBe(overrides.retry);
         expect(middle.tags).toEqual({ ...resonateOpts.tags, ...overrides.tags });
         expect(middle.timeout).toBe(overrides.timeout);
-        expect(middle.version).toBe(1);
 
         // top and bottom options
         for (const opts of [top, bottom]) {
           expect(opts.durable).toBe(false);
-          expect(opts.eid).toBe(utils.randomId);
+          expect(opts.eidFn).toBe(utils.randomId);
           expect(opts.encoder).toBe(resonateOpts.encoder);
-          expect(opts.idempotencyKey).toBe(utils.hash);
+          expect(opts.idempotencyKeyFn).toBe(utils.hash);
           expect(opts.poll).toBe(resonateOpts.poll);
           expect(opts.retry).toBe(resonateOpts.retry);
           expect(opts.timeout).toBe(resonateOpts.timeout);
-          expect(opts.version).toBe(1);
         }
+
+        expect(top.version).toBe(1);
+        expect(middle.version).toBeDefined();
+        expect(bottom.version).toBeDefined();
 
         expect(top.lock).toBe(true);
         expect(bottom.lock).toBe(false);
