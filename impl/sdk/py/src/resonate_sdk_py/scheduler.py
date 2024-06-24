@@ -227,19 +227,29 @@ class Scheduler:
     def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
         self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None
-        self._w_kill = Event()
-        self._processor = Processor(max_workers=max_wokers)
+        self._w_continue = Event()
+        self._processor = Processor(
+            max_workers=max_wokers,
+            scheduler_continue=self._w_continue,
+        )
         self._batch_size = batch_size
+
+    def add_multiple(
+        self, coros: list[Generator[Yieldable, Any, T]]
+    ) -> list[Promise[T]]:
+        promises: list[Promise[T]] = []
+        for coro in coros:
+            p = self.add(coro=coro)
+            promises.append(p)
+        return promises
 
     def add(
         self,
-        fn: Callable[P, Generator[Yieldable, Any, T]],
-        *args: P.args,
-        **kwargs: P.kwargs,
+        coro: Generator[Yieldable, Any, T],
     ) -> Promise[T]:
         p = Promise[T]()
-        coro = fn(*args, **kwargs)
         self._stg_q.put(item=CoroAndPromise(coro, p))
+        self._w_continue.set()
         if self._w_thread is None:
             self._run_worker()
         return p
@@ -255,27 +265,22 @@ class Scheduler:
 
             self._w_thread = t
 
-    def close(self) -> None:
-        self._w_kill.set()
-        assert self._w_thread is not None, "Worker thread was never initialized"
-        self._w_thread.join()
-        assert not self._w_thread.is_alive()
-
     def _run(self) -> None:
         pending_to_run: PendingToRun = []
         waiting_for_prom_resolution: WaitingForPromiseResolution = {}
 
-        while not self._w_kill.is_set():
+        while True:
+            n_pending_to_run = len(pending_to_run)
+            if n_pending_to_run == 0:
+                self._w_continue.wait()
+                self._w_continue.clear()
+
             self._run_cqe_callbacks()
 
             new_r = self._runnables_from_stg_q()
 
             if new_r is not None:
                 pending_to_run.extend(new_r)
-
-            n_pending_to_run = len(pending_to_run)
-            if n_pending_to_run == 0:
-                continue
 
             for _ in range(n_pending_to_run):
                 runnable = pending_to_run.pop()
@@ -284,8 +289,6 @@ class Scheduler:
                     waiting_for_promise=waiting_for_prom_resolution,
                     pending_to_run=pending_to_run,
                 )
-
-        logger.debug("Scheduler killed")
 
     def _process_each_runnable(
         self,

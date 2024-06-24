@@ -82,44 +82,39 @@ def whatever_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_whatever() -> None:
     s = Scheduler()
-    p = s.add(whatever)
+    p = s.add(whatever())
     assert p.result(timeout=4) == 6  # noqa: PLR2004
-    s.close()
 
 
 def test_whatever_with_error() -> None:
     s = Scheduler()
-    p = s.add(whatever_with_error)
+    p = s.add(whatever_with_error())
     with pytest.raises(ZeroDivisionError):
         p.result(timeout=4)
-    s.close()
 
 
 def test_calls() -> None:
     s = Scheduler()
-    p = s.add(only_call)
+    p = s.add(only_call())
     assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(call_with_errors)
+    p = s.add(call_with_errors())
     assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(double_call)
+    p = s.add(double_call())
     assert p.result(timeout=30) == 8  # noqa: PLR2004
-    s.close()
 
 
 @pytest.mark.dev()
 def test_call_gen() -> None:
     s = Scheduler()
-    p = s.add(gen_call)
+    p = s.add(gen_call())
     assert p.result() == 3  # noqa: PLR2004
-    s.close()
 
 
 @pytest.mark.dev()
 def test_invoke_gen() -> None:
     s = Scheduler()
-    p = s.add(gen_invoke)
+    p = s.add(gen_invoke())
     assert p.result() == 3  # noqa: PLR2004
-    s.close()
 
 
 def only_invocation() -> Generator[Yieldable, Any, int]:
@@ -139,13 +134,18 @@ def invocation_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_invocation() -> None:
     s = Scheduler()
-    p = s.add(only_invocation)
+    p = s.add(only_invocation())
     assert p.result(timeout=30) == 3  # noqa: PLR2004
-    s.close()
 
 
 def test_invocation_with_error() -> None:
     s = Scheduler()
-    p = s.add(invocation_with_error)
+    p = s.add(invocation_with_error())
     assert p.result(timeout=30) == 4  # noqa: PLR2004
-    s.close()
+
+
+def test_add_multiple() -> None:
+    s = Scheduler()
+    promises = s.add_multiple([invocation_with_error(), only_invocation()])
+    assert promises[0].result(timeout=3) == 4  # noqa: PLR2004
+    assert promises[1].result(timeout=3) == 3  # noqa: PLR2004
