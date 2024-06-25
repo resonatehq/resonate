@@ -43,21 +43,21 @@ P = ParamSpec("P")
 
 class Scheduler(CoroScheduler):
     def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
+        self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None
-
+        self._w_continue = Event()
+        self._lock = Lock()
+        self._prevent_clear: bool = False
         self._processor = Processor(
             max_workers=max_wokers,
             scheduler=self,
         )
         self._batch_size = batch_size
 
-        self._w_continue = Event()
-        self._lock = Lock()
-        self._stg_q = Queue[CoroAndPromise[Any]]()
-
     def signal(self) -> None:
         with self._lock:
             self._w_continue.set()
+            self._prevent_clear= True
 
     def add(
         self,
@@ -93,7 +93,9 @@ class Scheduler(CoroScheduler):
             if n_pending_to_run == 0:
                 self._w_continue.wait()
                 with self._lock:
-                    self._w_continue.clear()
+                    if not self._prevent_clear:
+                        self._w_continue.clear()
+                    self._prevent_clear= False
 
             self._run_cqe_callbacks()
 
