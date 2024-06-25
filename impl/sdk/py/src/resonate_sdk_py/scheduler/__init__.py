@@ -47,6 +47,7 @@ class Scheduler(CoroScheduler):
         self._w_thread: Thread | None = None
         self._w_continue = Event()
         self._lock = Lock()
+        self._prevent_clear: bool = False
         self._processor = Processor(
             max_workers=max_wokers,
             scheduler=self,
@@ -56,6 +57,7 @@ class Scheduler(CoroScheduler):
     def signal(self) -> None:
         with self._lock:
             self._w_continue.set()
+            self._prevent_clear = True
 
     def add(
         self,
@@ -91,8 +93,9 @@ class Scheduler(CoroScheduler):
             if n_pending_to_run == 0:
                 self._w_continue.wait()
                 with self._lock:
-                    self._w_continue.clear()
-                    self._has_been_set = False
+                    if not self._prevent_clear:
+                        self._w_continue.clear()
+                    self._prevent_clear = False
 
             self._run_cqe_callbacks()
 
