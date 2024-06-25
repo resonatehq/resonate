@@ -63,8 +63,7 @@ class Scheduler(CoroScheduler):
     ) -> Promise[T]:
         p = Promise[T]()
         self._stg_q.put(item=CoroAndPromise(coro, p))
-        with self._lock:
-            self._w_continue.set()
+        self.signal()
 
         return p
 
@@ -93,6 +92,7 @@ class Scheduler(CoroScheduler):
                 self._w_continue.wait()
                 with self._lock:
                     self._w_continue.clear()
+                    self._has_been_set = False
 
             self._run_cqe_callbacks()
 
