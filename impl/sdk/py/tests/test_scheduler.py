@@ -3,7 +3,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_sdk_py.scheduler import Call, Invoke, Promise, Scheduler, Yieldable
+from resonate_sdk_py.scheduler import (
+    Call,
+    Invoke,
+    Promise,
+    Scheduler,
+    Yieldable,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -82,12 +88,14 @@ def whatever_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_whatever() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(whatever())
     assert p.result(timeout=4) == 6  # noqa: PLR2004
 
 
 def test_whatever_with_error() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(whatever_with_error())
     with pytest.raises(ZeroDivisionError):
         p.result(timeout=4)
@@ -95,6 +103,7 @@ def test_whatever_with_error() -> None:
 
 def test_calls() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(only_call())
     assert p.result(timeout=30) == 3  # noqa: PLR2004
     p = s.add(call_with_errors())
@@ -103,16 +112,16 @@ def test_calls() -> None:
     assert p.result(timeout=30) == 8  # noqa: PLR2004
 
 
-@pytest.mark.dev()
 def test_call_gen() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(gen_call())
     assert p.result() == 3  # noqa: PLR2004
 
 
-@pytest.mark.dev()
 def test_invoke_gen() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(gen_invoke())
     assert p.result() == 3  # noqa: PLR2004
 
@@ -134,18 +143,23 @@ def invocation_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_invocation() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(only_invocation())
     assert p.result(timeout=30) == 3  # noqa: PLR2004
 
 
 def test_invocation_with_error() -> None:
     s = Scheduler()
+    s.run()
     p = s.add(invocation_with_error())
     assert p.result(timeout=30) == 4  # noqa: PLR2004
 
 
 def test_add_multiple() -> None:
     s = Scheduler()
-    promises = s.add_multiple([invocation_with_error(), only_invocation()])
-    assert promises[0].result(timeout=3) == 4  # noqa: PLR2004
-    assert promises[1].result(timeout=3) == 3  # noqa: PLR2004
+    s.run()
+    p1 = s.add(invocation_with_error())
+    p2 = s.add(only_invocation())
+
+    assert p1.result(timeout=3) == 4  # noqa: PLR2004
+    assert p2.result(timeout=3) == 3  # noqa: PLR2004

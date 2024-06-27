@@ -66,6 +66,7 @@ markers = [
     "integration: mark integration tests.",
     "unit: mark unittest.",
     "dev: mark tests on development.",
+    "dst: mark dst tests.",
 ]
 
 [tool.mypy]
