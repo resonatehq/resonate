@@ -4,16 +4,7 @@ import { ErrorCodes, ResonateError } from "../errors";
 import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
 import { StoreOptions } from "../options";
-import {
-  DurablePromise,
-  PendingPromise,
-  ResolvedPromise,
-  RejectedPromise,
-  CanceledPromise,
-  TimedoutPromise,
-  isDurablePromise,
-  isCompletedPromise,
-} from "../promises/types";
+import { DurablePromiseRecord, isDurablePromiseRecord, isCompletedPromise } from "../promises/types";
 import { Schedule, isSchedule } from "../schedules/types";
 import { IStore, IPromiseStore, IScheduleStore, ILockStore } from "../store";
 import * as utils from "../utils";
@@ -125,7 +116,7 @@ export class RemotePromiseStore implements IPromiseStore {
     data: string | undefined,
     timeout: number,
     tags: Record<string, string> | undefined,
-  ): Promise<PendingPromise | CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     const reqHeaders: Record<string, string> = {
       Strict: JSON.stringify(strict),
     };
@@ -134,7 +125,7 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.store.call("promises", isDurablePromise, {
+    const promise = await this.store.call("promises", isDurablePromiseRecord, {
       method: "POST",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -157,7 +148,7 @@ export class RemotePromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     const reqHeaders: Record<string, string> = {
       Strict: JSON.stringify(strict),
     };
@@ -166,7 +157,7 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+    const promise = await this.store.call(`promises/${id}`, isDurablePromiseRecord, {
       method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -178,6 +169,10 @@ export class RemotePromiseStore implements IPromiseStore {
       }),
     });
 
+    if (!isCompletedPromise(promise)) {
+      throw new ResonateError("Invalid response", ErrorCodes.STORE_PAYLOAD, promise);
+    }
+
     return decode(promise, this.store.encoder);
   }
 
@@ -187,7 +182,7 @@ export class RemotePromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     const reqHeaders: Record<string, string> = {
       Strict: JSON.stringify(strict),
     };
@@ -196,7 +191,7 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+    const promise = await this.store.call(`promises/${id}`, isDurablePromiseRecord, {
       method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -208,6 +203,10 @@ export class RemotePromiseStore implements IPromiseStore {
       }),
     });
 
+    if (!isCompletedPromise(promise)) {
+      throw new ResonateError("Invalid response", ErrorCodes.STORE_PAYLOAD, promise);
+    }
+
     return decode(promise, this.store.encoder);
   }
 
@@ -217,7 +216,7 @@ export class RemotePromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     const reqHeaders: Record<string, string> = {
       Strict: JSON.stringify(strict),
     };
@@ -226,7 +225,7 @@ export class RemotePromiseStore implements IPromiseStore {
       reqHeaders["Idempotency-Key"] = ikey;
     }
 
-    const promise = await this.store.call(`promises/${id}`, isCompletedPromise, {
+    const promise = await this.store.call(`promises/${id}`, isDurablePromiseRecord, {
       method: "PATCH",
       headers: reqHeaders,
       body: JSON.stringify({
@@ -238,11 +237,15 @@ export class RemotePromiseStore implements IPromiseStore {
       }),
     });
 
+    if (!isCompletedPromise(promise)) {
+      throw new ResonateError("Invalid response", ErrorCodes.STORE_PAYLOAD, promise);
+    }
+
     return decode(promise, this.store.encoder);
   }
 
-  async get(id: string): Promise<DurablePromise> {
-    const promise = await this.store.call(`promises/${id}`, isDurablePromise, {
+  async get(id: string): Promise<DurablePromiseRecord> {
+    const promise = await this.store.call(`promises/${id}`, isDurablePromiseRecord, {
       method: "GET",
     });
 
@@ -254,7 +257,7 @@ export class RemotePromiseStore implements IPromiseStore {
     state: string | undefined,
     tags: Record<string, string> | undefined,
     limit: number | undefined,
-  ): AsyncGenerator<DurablePromise[], void> {
+  ): AsyncGenerator<DurablePromiseRecord[], void> {
     let cursor: string | null | undefined = undefined;
 
     while (cursor !== null) {
@@ -472,7 +475,7 @@ function encode(value: string, encoder: IEncoder<string, string>): string {
   }
 }
 
-function decode<P extends DurablePromise>(promise: P, encoder: IEncoder<string, string>): P {
+function decode<P extends DurablePromiseRecord>(promise: P, encoder: IEncoder<string, string>): P {
   try {
     if (promise.param?.data) {
       promise.param.data = encoder.decode(promise.param.data);
@@ -490,7 +493,7 @@ function decode<P extends DurablePromise>(promise: P, encoder: IEncoder<string, 
 
 // Type guards
 
-function isSearchPromiseResult(obj: unknown): obj is { cursor: string; promises: DurablePromise[] } {
+function isSearchPromiseResult(obj: unknown): obj is { cursor: string; promises: DurablePromiseRecord[] } {
   return (
     typeof obj === "object" &&
     obj !== null &&
@@ -500,7 +503,7 @@ function isSearchPromiseResult(obj: unknown): obj is { cursor: string; promises:
     "promises" in obj &&
     obj.promises !== undefined &&
     Array.isArray(obj.promises) &&
-    obj.promises.every(isDurablePromise)
+    obj.promises.every(isDurablePromiseRecord)
   );
 }
 

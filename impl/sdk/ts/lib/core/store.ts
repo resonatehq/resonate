@@ -1,11 +1,4 @@
-import {
-  DurablePromise,
-  PendingPromise,
-  ResolvedPromise,
-  RejectedPromise,
-  CanceledPromise,
-  TimedoutPromise,
-} from "./promises/types";
+import { DurablePromiseRecord } from "./promises/types";
 
 import { Schedule } from "./schedules/types";
 
@@ -42,7 +35,7 @@ export interface IPromiseStore {
     data: string | undefined,
     timeout: number,
     tags: Record<string, string> | undefined,
-  ): Promise<PendingPromise | CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise>;
+  ): Promise<DurablePromiseRecord>;
 
   /**
    * Cancels a new promise.
@@ -60,7 +53,7 @@ export interface IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise>;
+  ): Promise<DurablePromiseRecord>;
 
   /**
    * Resolves a promise.
@@ -78,7 +71,7 @@ export interface IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise>;
+  ): Promise<DurablePromiseRecord>;
 
   /**
    * Rejects a promise
@@ -96,7 +89,7 @@ export interface IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<CanceledPromise | ResolvedPromise | RejectedPromise | TimedoutPromise>;
+  ): Promise<DurablePromiseRecord>;
 
   /**
    * Retrieves a promise based on its id.
@@ -104,7 +97,7 @@ export interface IPromiseStore {
    * @param id Unique identifier for the promise to be retrieved.
    * @returns A durable promise that is pending, canceled, resolved, or rejected.
    */
-  get(id: string): Promise<DurablePromise>;
+  get(id: string): Promise<DurablePromiseRecord>;
 
   /**
    * Search for promises.
@@ -120,7 +113,7 @@ export interface IPromiseStore {
     state: string | undefined,
     tags: Record<string, string> | undefined,
     limit?: number,
-  ): AsyncGenerator<DurablePromise[], void>;
+  ): AsyncGenerator<DurablePromiseRecord[], void>;
 }
 
 /**

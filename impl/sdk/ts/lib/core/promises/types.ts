@@ -1,26 +1,5 @@
-export type DurablePromise = PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise;
-
-export type PendingPromise = {
-  state: "PENDING";
-  id: string;
-  timeout: number;
-  param: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  value: {
-    headers: undefined;
-    data: undefined;
-  };
-  createdOn: number;
-  completedOn: undefined;
-  idempotencyKeyForCreate: string | undefined;
-  idempotencyKeyForComplete: undefined;
-  tags: Record<string, string> | undefined;
-};
-
-export type ResolvedPromise = {
-  state: "RESOLVED";
+export type DurablePromiseRecord = {
+  state: "PENDING" | "RESOLVED" | "REJECTED" | "REJECTED_CANCELED" | "REJECTED_TIMEDOUT";
   id: string;
   timeout: number;
   param: {
@@ -32,72 +11,14 @@ export type ResolvedPromise = {
     data: string | undefined;
   };
   createdOn: number;
-  completedOn: number;
+  completedOn: number | undefined;
   idempotencyKeyForCreate: string | undefined;
   idempotencyKeyForComplete: string | undefined;
   tags: Record<string, string> | undefined;
 };
 
-export type RejectedPromise = {
-  state: "REJECTED";
-  id: string;
-  timeout: number;
-  param: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  value: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  createdOn: number;
-  completedOn: number;
-  idempotencyKeyForCreate: string | undefined;
-  idempotencyKeyForComplete: string | undefined;
-  tags: Record<string, string> | undefined;
-};
-
-export type CanceledPromise = {
-  state: "REJECTED_CANCELED";
-  id: string;
-  timeout: number;
-  param: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  value: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  createdOn: number;
-  completedOn: number;
-  idempotencyKeyForCreate: string | undefined;
-  idempotencyKeyForComplete: string | undefined;
-  tags: Record<string, string> | undefined;
-};
-
-export type TimedoutPromise = {
-  state: "REJECTED_TIMEDOUT";
-  id: string;
-  timeout: number;
-  param: {
-    headers: Record<string, string> | undefined;
-    data: string | undefined;
-  };
-  value: {
-    headers: undefined;
-    data: undefined;
-  };
-  createdOn: number;
-  completedOn: number;
-  idempotencyKeyForCreate: string | undefined;
-  idempotencyKeyForComplete: undefined;
-  tags: Record<string, string> | undefined;
-};
-
-// Type guards
-
-export function isDurablePromise(p: unknown): p is DurablePromise {
+// This is an unsound type guard, we should be more strict in what we call a DurablePromise
+export function isDurablePromiseRecord(p: unknown): p is DurablePromiseRecord {
   return (
     p !== null &&
     typeof p === "object" &&
@@ -107,28 +28,26 @@ export function isDurablePromise(p: unknown): p is DurablePromise {
   );
 }
 
-export function isPendingPromise(p: unknown): p is PendingPromise {
-  return isDurablePromise(p) && p.state === "PENDING";
+export function isPendingPromise(p: DurablePromiseRecord): boolean {
+  return p.state === "PENDING";
 }
 
-export function isResolvedPromise(p: unknown): p is ResolvedPromise {
-  return isDurablePromise(p) && p.state === "RESOLVED";
+export function isResolvedPromise(p: DurablePromiseRecord): boolean {
+  return p.state === "RESOLVED";
 }
 
-export function isRejectedPromise(p: unknown): p is RejectedPromise {
-  return isDurablePromise(p) && p.state === "REJECTED";
+export function isRejectedPromise(p: DurablePromiseRecord): boolean {
+  return p.state === "REJECTED";
 }
 
-export function isCanceledPromise(p: unknown): p is CanceledPromise {
-  return isDurablePromise(p) && p.state === "REJECTED_CANCELED";
+export function isCanceledPromise(p: DurablePromiseRecord): boolean {
+  return p.state === "REJECTED_CANCELED";
 }
 
-export function isTimedoutPromise(p: unknown): p is TimedoutPromise {
-  return isDurablePromise(p) && p.state === "REJECTED_TIMEDOUT";
+export function isTimedoutPromise(p: DurablePromiseRecord): boolean {
+  return p.state === "REJECTED_TIMEDOUT";
 }
 
-export function isCompletedPromise(
-  p: unknown,
-): p is ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise {
-  return isDurablePromise(p) && ["RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes(p.state);
+export function isCompletedPromise(p: DurablePromiseRecord): boolean {
+  return ["RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"].includes(p.state);
 }

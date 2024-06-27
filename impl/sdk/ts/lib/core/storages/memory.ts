@@ -3,6 +3,7 @@ import { IStorage } from "../storage";
 export class MemoryStorage<T> implements IStorage<T> {
   private items: Record<string, T> = {};
 
+  // read-modify-write
   async rmw<X extends T | undefined>(id: string, func: (item: T | undefined) => X): Promise<X> {
     const item = func(this.items[id]);
     if (item) {
@@ -12,6 +13,7 @@ export class MemoryStorage<T> implements IStorage<T> {
     return item;
   }
 
+  // read-modify-delete
   async rmd(id: string, func: (item: T) => boolean): Promise<boolean> {
     const item = this.items[id];
     let result = false;

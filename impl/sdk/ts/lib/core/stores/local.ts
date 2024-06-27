@@ -4,12 +4,7 @@ import { ILogger } from "../logger";
 import { Logger } from "../loggers/logger";
 import { StoreOptions } from "../options";
 import {
-  DurablePromise,
-  PendingPromise,
-  ResolvedPromise,
-  RejectedPromise,
-  CanceledPromise,
-  TimedoutPromise,
+  DurablePromiseRecord,
   isPendingPromise,
   isResolvedPromise,
   isRejectedPromise,
@@ -34,7 +29,7 @@ export class LocalStore implements IStore {
 
   constructor(
     opts: Partial<StoreOptions> = {},
-    promiseStorage: IStorage<DurablePromise> = new WithTimeout(new MemoryStorage<DurablePromise>()),
+    promiseStorage: IStorage<DurablePromiseRecord> = new WithTimeout(new MemoryStorage<DurablePromiseRecord>()),
     scheduleStorage: IStorage<Schedule> = new MemoryStorage<Schedule>(),
     lockStorage: IStorage<{ id: string; eid: string }> = new MemoryStorage<{ id: string; eid: string }>(),
   ) {
@@ -122,7 +117,7 @@ export class LocalStore implements IStore {
 export class LocalPromiseStore implements IPromiseStore {
   constructor(
     private store: LocalStore,
-    private storage: IStorage<DurablePromise>,
+    private storage: IStorage<DurablePromiseRecord>,
   ) {}
 
   async create(
@@ -133,7 +128,7 @@ export class LocalPromiseStore implements IPromiseStore {
     data: string | undefined,
     timeout: number,
     tags: Record<string, string> | undefined,
-  ): Promise<PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
         return {
@@ -174,7 +169,7 @@ export class LocalPromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
         throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
@@ -219,7 +214,7 @@ export class LocalPromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
         throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
@@ -264,7 +259,7 @@ export class LocalPromiseStore implements IPromiseStore {
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: string | undefined,
-  ): Promise<ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise> {
+  ): Promise<DurablePromiseRecord> {
     return this.storage.rmw(id, (promise) => {
       if (!promise) {
         throw new ResonateError("Not found", ErrorCodes.STORE_NOT_FOUND);
@@ -303,7 +298,7 @@ export class LocalPromiseStore implements IPromiseStore {
     });
   }
 
-  async get(id: string): Promise<DurablePromise> {
+  async get(id: string): Promise<DurablePromiseRecord> {
     const promise = await this.storage.rmw(id, (p) => p);
 
     if (!promise) {
@@ -318,7 +313,7 @@ export class LocalPromiseStore implements IPromiseStore {
     state?: string,
     tags?: Record<string, string>,
     limit?: number,
-  ): AsyncGenerator<DurablePromise[], void> {
+  ): AsyncGenerator<DurablePromiseRecord[], void> {
     //  filter the promises returned from all storage
     const regex = new RegExp(id.replaceAll("*", ".*"));
     const states = searchStates(state);

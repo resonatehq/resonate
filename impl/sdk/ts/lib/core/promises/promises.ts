@@ -1,7 +1,7 @@
 import { IEncoder } from "../encoder";
 import { ErrorCodes, ResonateError } from "../errors";
 import { IPromiseStore } from "../store";
-import { PendingPromise, ResolvedPromise, RejectedPromise, CanceledPromise, TimedoutPromise } from "./types";
+import { DurablePromiseRecord } from "./types";
 
 /**
  * Durable Promise create options.
@@ -69,7 +69,7 @@ export class DurablePromise<T> {
   constructor(
     private store: IPromiseStore,
     private encoder: IEncoder<unknown, string | undefined>,
-    private promise: PendingPromise | ResolvedPromise | RejectedPromise | CanceledPromise | TimedoutPromise,
+    private promise: DurablePromiseRecord,
   ) {
     this.completed = new Promise((resolve) => {
       this.complete = resolve;
