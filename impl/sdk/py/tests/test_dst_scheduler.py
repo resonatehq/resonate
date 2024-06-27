@@ -30,7 +30,7 @@ def _add_many(s: DSTScheduler, ctx: Context) -> list[Promise[Any]]:
     return promises
 
 
-def _number(ctx: Context, n: int) -> int:
+def _number(ctx: Context, n: int) -> int:  # noqa: ARG001
     return n
 
 
