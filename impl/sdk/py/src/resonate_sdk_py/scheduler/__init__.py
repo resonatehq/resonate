@@ -170,7 +170,7 @@ class Scheduler(CoroScheduler):
         if not isgeneratorfunction(call.fn):
             self._processor.enqueue(
                 SQE(
-                    cmd=wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+                    cmd=wrap_fn_into_cmd(call.ctx, call.fn, *call.args, **call.kwargs),
                     callback=partial(
                         callback,
                         p,
@@ -180,7 +180,7 @@ class Scheduler(CoroScheduler):
                 )
             )
         else:
-            coro = call.fn(*call.args, **call.kwargs)
+            coro = call.fn(call.ctx, *call.args, **call.kwargs)
             pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
     def _handle_invocation(
@@ -197,7 +197,10 @@ class Scheduler(CoroScheduler):
             self._processor.enqueue(
                 SQE(
                     cmd=wrap_fn_into_cmd(
-                        invocation.fn, *invocation.args, **invocation.kwargs
+                        invocation.ctx,
+                        invocation.fn,
+                        *invocation.args,
+                        **invocation.kwargs,
                     ),
                     callback=partial(
                         callback,
@@ -208,7 +211,7 @@ class Scheduler(CoroScheduler):
                 )
             )
         else:
-            coro = invocation.fn(*invocation.args, **invocation.kwargs)
+            coro = invocation.fn(invocation.ctx, *invocation.args, **invocation.kwargs)
             pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
     def _runnables_from_stg_q(self) -> PendingToRun | None:

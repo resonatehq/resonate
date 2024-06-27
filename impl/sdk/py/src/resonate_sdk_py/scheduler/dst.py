@@ -133,7 +133,7 @@ class DSTScheduler(CoroScheduler):
         if not isgeneratorfunction(call.fn):
             v = cast(
                 Result[Any, Exception],
-                wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs).run(),
+                wrap_fn_into_cmd(call.ctx, call.fn, *call.args, **call.kwargs).run(),
             )
 
             self._callbacks_to_run.append(
@@ -145,7 +145,7 @@ class DSTScheduler(CoroScheduler):
                 )
             )
         else:
-            coro = call.fn(*call.args, **call.kwargs)
+            coro = call.fn(call.ctx, *call.args, **call.kwargs)
             self._pending_to_run.append(
                 Runnable(CoroAndPromise(coro, p), next_value=None)
             )
@@ -162,7 +162,7 @@ class DSTScheduler(CoroScheduler):
             v = cast(
                 Result[Any, Exception],
                 wrap_fn_into_cmd(
-                    invocation.fn, *invocation.args, **invocation.kwargs
+                    invocation.ctx, invocation.fn, *invocation.args, **invocation.kwargs
                 ).run(),
             )
             self._callbacks_to_run.append(
@@ -175,7 +175,7 @@ class DSTScheduler(CoroScheduler):
             )
 
         else:
-            coro = invocation.fn(*invocation.args, **invocation.kwargs)
+            coro = invocation.fn(invocation.ctx, *invocation.args, **invocation.kwargs)
             self._pending_to_run.append(
                 Runnable(CoroAndPromise(coro, p), next_value=None)
             )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from resonate_sdk_py.context import Context
 from resonate_sdk_py.scheduler import (
     Call,
     Invoke,
@@ -15,57 +16,61 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
-def _nested_gen(a: Promise[int]) -> Generator[Yieldable, Any, int]:
+def _nested_gen(ctx: Context, a: Promise[int]) -> Generator[Yieldable, Any, int]:  # noqa: ARG001
     x = yield a
     return x
 
 
-def _divide(a: int, b: int) -> int:
+def _divide(ctx: Context, a: int, b: int) -> int:  # noqa: ARG001
     return a // b
 
 
-def only_call() -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(_divide, a=3, b=1)
+def only_call(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, _divide, a=3, b=1)
     return x
 
 
-def call_with_errors() -> Generator[Yieldable, Any, int]:
+def call_with_errors(
+    ctx: Context,
+) -> Generator[Yieldable, Any, int]:
     x: int
     try:
-        x = yield Call(_divide, a=100, b=0)
+        x = yield Call(ctx, _divide, a=100, b=0)
     except ZeroDivisionError:
         x = 3
     return x
 
 
-def gen_call() -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
-    y: int = yield Call(_nested_gen, x)
+def gen_call(
+    ctx: Context,
+) -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
+    y: int = yield Call(ctx, _nested_gen, x)
     return y
 
 
-def gen_invoke() -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield Invoke(_divide, a=3, b=1)
-    y: Promise[int] = yield Invoke(_nested_gen, x)
+def gen_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
+    y: Promise[int] = yield Invoke(ctx, _nested_gen, x)
     z: int = yield y
     return z
 
 
-def double_call() -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(_divide, a=3, b=1)
-    y: int = yield Call(_divide, a=5, b=1)
+def double_call(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, _divide, a=3, b=1)
+    y: int = yield Call(ctx, _divide, a=5, b=1)
     return x + y
 
 
-def _abc(value: Promise[int]) -> Generator[Yieldable, int, int]:
+def _abc(ctx: Context, value: Promise[int]) -> Generator[Yieldable, int, int]:  # noqa: ARG001
     x = yield value
     return x
 
 
-def whatever() -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield Invoke(_divide, a=3, b=1)
-    xf: Promise[int] = yield Invoke(_abc, value=af)
-    yf: Promise[int] = yield Invoke(_abc, value=af)
+def whatever(ctx: Context) -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
+    xf: Promise[int] = yield Invoke(ctx, _abc, value=af)
+    yf: Promise[int] = yield Invoke(ctx, _abc, value=af)
     try:
         x: int = yield xf
     except Exception:  # noqa: BLE001
@@ -74,10 +79,10 @@ def whatever() -> Generator[Yieldable, Any, int]:
     return x + y
 
 
-def whatever_with_error() -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield Invoke(_divide, a=3, b=0)
-    xf: Promise[int] = yield Invoke(_abc, value=af)
-    yf: Promise[int] = yield Invoke(_abc, value=af)
+def whatever_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
+    af: Promise[int] = yield Invoke(ctx, _divide, a=3, b=0)
+    xf: Promise[int] = yield Invoke(ctx, _abc, value=af)
+    yf: Promise[int] = yield Invoke(ctx, _abc, value=af)
     try:
         x: int = yield xf
     except Exception:  # noqa: BLE001
@@ -88,52 +93,57 @@ def whatever_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_whatever() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(whatever())
+    p = s.add(whatever(ctx))
     assert p.result(timeout=4) == 6  # noqa: PLR2004
 
 
 def test_whatever_with_error() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(whatever_with_error())
+    p = s.add(whatever_with_error(ctx))
     with pytest.raises(ZeroDivisionError):
         p.result(timeout=4)
 
 
 def test_calls() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(only_call())
+    p = s.add(only_call(ctx))
     assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(call_with_errors())
+    p = s.add(call_with_errors(ctx))
     assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(double_call())
+    p = s.add(double_call(ctx))
     assert p.result(timeout=30) == 8  # noqa: PLR2004
 
 
 def test_call_gen() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(gen_call())
+    p = s.add(gen_call(ctx))
     assert p.result() == 3  # noqa: PLR2004
 
 
 def test_invoke_gen() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(gen_invoke())
+    p = s.add(gen_invoke(ctx))
     assert p.result() == 3  # noqa: PLR2004
 
 
-def only_invocation() -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(_divide, a=3, b=1)
+def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
     x: int = yield xp
     return x
 
 
-def invocation_with_error() -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(_divide, a=3, b=0)
+def invocation_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(ctx, _divide, a=3, b=0)
     try:
         x: int = yield xp
     except ZeroDivisionError:
@@ -143,23 +153,26 @@ def invocation_with_error() -> Generator[Yieldable, Any, int]:
 
 def test_invocation() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(only_invocation())
+    p = s.add(only_invocation(ctx))
     assert p.result(timeout=30) == 3  # noqa: PLR2004
 
 
 def test_invocation_with_error() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p = s.add(invocation_with_error())
+    p = s.add(invocation_with_error(ctx))
     assert p.result(timeout=30) == 4  # noqa: PLR2004
 
 
 def test_add_multiple() -> None:
     s = Scheduler()
+    ctx = Context()
     s.run()
-    p1 = s.add(invocation_with_error())
-    p2 = s.add(only_invocation())
+    p1 = s.add(invocation_with_error(ctx))
+    p2 = s.add(only_invocation(ctx))
 
     assert p1.result(timeout=3) == 4  # noqa: PLR2004
     assert p2.result(timeout=3) == 3  # noqa: PLR2004
