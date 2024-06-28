@@ -5,12 +5,13 @@ from functools import partial
 from inspect import isgeneratorfunction
 from queue import Queue
 from threading import Event, Lock, Thread
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from result import Ok
-from typing_extensions import ParamSpec, TypeVar, assert_never
+from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py import utils
+from resonate_sdk_py.context import Context
 from resonate_sdk_py.logging import logger
 from resonate_sdk_py.processor import SQE, Processor
 
@@ -60,10 +61,14 @@ class Scheduler(CoroScheduler):
 
     def add(
         self,
-        coro: Generator[Yieldable, Any, T],
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> Promise[T]:
         p = Promise[T]()
-        self._stg_q.put(item=CoroAndPromise(coro, p))
+        ctx = Context()
+        self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p))
         self.signal()
 
         return p

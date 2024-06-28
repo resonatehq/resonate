@@ -6,8 +6,9 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from result import Ok, Result
-from typing_extensions import ParamSpec, TypeVar, assert_never
+from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
+from resonate_sdk_py.context import Context
 from resonate_sdk_py.logging import logger
 
 from .itertools import (
@@ -48,11 +49,18 @@ class DSTScheduler(CoroScheduler):
 
     def add(
         self,
-        coro: Generator[Yieldable, Any, T],
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> Promise[T]:
         p = Promise[T]()
+        ctx = Context()
         self._pending_to_run.append(
-            Runnable(coro_and_promise=CoroAndPromise(coro, p), next_value=None)
+            Runnable(
+                coro_and_promise=CoroAndPromise(coro(ctx, *args, **kwargs), p),
+                next_value=None,
+            )
         )
         return p
 

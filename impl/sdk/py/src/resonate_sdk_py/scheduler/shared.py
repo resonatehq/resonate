@@ -23,7 +23,13 @@ P = ParamSpec("P")
 
 class CoroScheduler(ABC):
     @abstractmethod
-    def add(self, coros: Generator[Yieldable, Any, T]) -> Promise[T]: ...
+    def add(
+        self,
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Promise[T]: ...
 
     @abstractmethod
     def run(self) -> None: ...
