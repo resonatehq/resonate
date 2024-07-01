@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"embed"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
@@ -26,107 +29,18 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+var (
+	//go:embed migrations/*
+	migrationsFS embed.FS
+)
+
 const (
-	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE IF NOT EXISTS promises (
-		id                           TEXT UNIQUE,
-		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-		state                        INTEGER DEFAULT 1,
-		param_headers                BLOB,
-		param_data                   BLOB,
-		value_headers                BLOB,
-		value_data                   BLOB,
-		timeout                      INTEGER,
-		idempotency_key_for_create   TEXT,
-		idempotency_key_for_complete TEXT,
-		tags                         BLOB,
-		created_on                   INTEGER,
-		completed_on                 INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
-	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(json_extract(tags, '$.resonate:invocation'));
-	CREATE INDEX IF NOT EXISTS idx_promises_timeout ON promises(json_extract(tags, '$.resonate:timeout'));
-
-	CREATE TABLE IF NOT EXISTS schedules (
-		id                    TEXT UNIQUE,
-		sort_id               INTEGER PRIMARY KEY AUTOINCREMENT,
-		description           TEXT,
-		cron                  TEXT,
-		tags                  BLOB,
-		promise_id            TEXT,
-		promise_timeout       INTEGER,
-		promise_param_headers BLOB,
-		promise_param_data    BLOB,
-		promise_tags          BLOB,
-		last_run_time         INTEGER,
-		next_run_time         INTEGER,
-		idempotency_key       TEXT,
-		created_on            INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_schedules_id ON schedules(id);
-	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
-
-	CREATE TABLE IF NOT EXISTS tasks (
-		id                TEXT UNIQUE,
-		counter           INTEGER,
-		promise_id        TEXT,
-		claim_timeout     INTEGER, 
-		complete_timeout  INTEGER, 
-		promise_timeout   INTEGER,
-		created_on        INTEGER,
-		completed_on      INTEGER, 		
-		is_completed      BOOLEAN
-	); 
-
-	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
-
-	CREATE TABLE IF NOT EXISTS locks (
-		resource_id            TEXT UNIQUE,
-		process_id             TEXT,
-		execution_id           TEXT, 
-		expiry_in_milliseconds INTEGER,
-		timeout                INTEGER
-	); 
-
-	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id); 
-	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
-
-	CREATE TABLE IF NOT EXISTS timeouts (
-		id   TEXT,
-		time INTEGER,
-		PRIMARY KEY(id)
-	);
-
-	CREATE TABLE IF NOT EXISTS subscriptions (
-		id           TEXT,
-		promise_id   TEXT,
-		sort_id      INTEGER PRIMARY KEY AUTOINCREMENT,
-		url          TEXT,
-		retry_policy BLOB,
-		created_on   INTEGER,
-		UNIQUE(id, promise_id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_subscriptions_id ON subscriptions(id);
-
-	CREATE TABLE IF NOT EXISTS notifications (
-		id           TEXT,
-		promise_id   TEXT,
-		url          TEXT,
-		retry_policy BLOB,
-		time         INTEGER,
-		attempt      INTEGER,
-		PRIMARY KEY(id, promise_id)
-	);
-	
+	CREATE_MIGRATIONS_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS migrations (
-		id    INTEGER PRIMARY KEY
+		id    INTEGER,
+		PRIMARY KEY(id) 
 	);
-	
-	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
+	`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -407,6 +321,7 @@ type Config struct {
 	Path      string
 	TxTimeout time.Duration
 	Reset     bool
+	Plan      migrations.Plan
 }
 
 type SqliteStore struct {
@@ -435,11 +350,11 @@ func (s *SqliteStore) String() string {
 }
 
 func (s *SqliteStore) Start() error {
-	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
+	if _, err := s.db.Exec(CREATE_MIGRATIONS_TABLE_STATEMENT); err != nil {
 		return err
 	}
 
-	return nil
+	return Run(Version, s.db, 90*time.Second, migrationsFS, s.config.Plan)
 }
 
 func (s *SqliteStore) Stop() error {

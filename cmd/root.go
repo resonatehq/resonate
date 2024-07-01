@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/resonatehq/resonate/cmd/dst"
+	"github.com/resonatehq/resonate/cmd/migrations"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
@@ -43,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(quickstart.NewCmd())
+	rootCmd.AddCommand(migrations.NewCmd())
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)
