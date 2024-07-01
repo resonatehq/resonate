@@ -107,7 +107,7 @@ class Call:
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
-        self.ctx = ctx
+        self.ctx = ctx.new_child()
         self.args = args
         self.kwargs = kwargs
 
@@ -122,7 +122,7 @@ class Invoke:
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
-        self.ctx = ctx
+        self.ctx = ctx.new_child()
         self.args = args
         self.kwargs = kwargs
 

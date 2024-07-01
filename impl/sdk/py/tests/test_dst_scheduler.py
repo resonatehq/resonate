@@ -46,6 +46,12 @@ def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
     return x
 
 
+def failing_asserting(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, only_invocation)
+    ctx.assert_statement(x < 0, f"{x} should be negative")
+    return x
+
+
 def _promise_result(promises: list[Promise[T]]) -> list[T]:
     return [x.result() for x in promises]
 
@@ -93,3 +99,12 @@ def test_dst_determinitic() -> None:
     s.run()
     other_events = s.get_events()
     assert expected_events != other_events
+
+
+@pytest.mark.dst()
+def test_failing_asserting() -> None:
+    s = DSTScheduler(seed=1)
+    p = s.add(failing_asserting)
+    s.run()
+    with pytest.raises(AssertionError):
+        p.result()

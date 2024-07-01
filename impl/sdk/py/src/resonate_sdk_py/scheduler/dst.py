@@ -55,7 +55,7 @@ class DSTScheduler(CoroScheduler):
         **kwargs: P.kwargs,
     ) -> Promise[T]:
         p = Promise[T]()
-        ctx = Context()
+        ctx = Context(dst=True)
         self._pending_to_run.append(
             Runnable(
                 coro_and_promise=CoroAndPromise(coro(ctx, *args, **kwargs), p),
