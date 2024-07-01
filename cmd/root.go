@@ -52,21 +52,8 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 }
 
-func initCreds() {
-	yamlFile, err := os.ReadFile("sample-creds.yml")
-	if err != nil {
-		log.Fatalf("Failed to read YAML file: %v", err)
-	}
-
-	err = yaml.Unmarshal(yamlFile, &creds.CredsFromFile)
-	if err != nil {
-		log.Fatalf("Failed to unmarshal YAML: %v", err)
-	}
-
-}
 
 func initConfig() {
-	initCreds()
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)
 	} else {
@@ -83,6 +70,13 @@ func initConfig() {
 			slog.Error("error reading config file", "error", err)
 			os.Exit(1)
 		}
+	}
+
+	// Unmarshal the 'auth' key into the slice of Auth structs
+	err := viper.UnmarshalKey("auth", &creds.CredsFromFile)
+	if err != nil {
+		log.Fatalf("Error unmarshaling 'auth' key: %s\n", err)
+		return
 	}
 }
 

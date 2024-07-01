@@ -11,7 +11,7 @@ type Auth struct {
 }
 
 type CredentialsList struct {
-	Users []Auth `yaml:"users"`
+	Users []Auth `yaml:"auth"`
 }
 
 var CredsFromFile CredentialsList
