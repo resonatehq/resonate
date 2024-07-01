@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"github.com/resonatehq/resonate/internal/creds"
-	"gopkg.in/yaml.v3"
 	"log"
 	"log/slog"
 	"os"
@@ -19,7 +18,7 @@ import (
 )
 
 var (
-	server, cfgFile, credFile string
+	server, cfgFile string
 )
 
 var rootCmd = &cobra.Command{
