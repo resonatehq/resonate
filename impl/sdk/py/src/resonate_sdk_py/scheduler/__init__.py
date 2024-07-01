@@ -5,12 +5,13 @@ from functools import partial
 from inspect import isgeneratorfunction
 from queue import Queue
 from threading import Event, Lock, Thread
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from result import Ok
-from typing_extensions import ParamSpec, TypeVar, assert_never
+from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py import utils
+from resonate_sdk_py.context import Context
 from resonate_sdk_py.logging import logger
 from resonate_sdk_py.processor import SQE, Processor
 
@@ -60,10 +61,14 @@ class Scheduler(CoroScheduler):
 
     def add(
         self,
-        coro: Generator[Yieldable, Any, T],
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> Promise[T]:
         p = Promise[T]()
-        self._stg_q.put(item=CoroAndPromise(coro, p))
+        ctx = Context()
+        self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p))
         self.signal()
 
         return p
@@ -170,7 +175,7 @@ class Scheduler(CoroScheduler):
         if not isgeneratorfunction(call.fn):
             self._processor.enqueue(
                 SQE(
-                    cmd=wrap_fn_into_cmd(call.fn, *call.args, **call.kwargs),
+                    cmd=wrap_fn_into_cmd(call.ctx, call.fn, *call.args, **call.kwargs),
                     callback=partial(
                         callback,
                         p,
@@ -180,7 +185,7 @@ class Scheduler(CoroScheduler):
                 )
             )
         else:
-            coro = call.fn(*call.args, **call.kwargs)
+            coro = call.fn(call.ctx, *call.args, **call.kwargs)
             pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
     def _handle_invocation(
@@ -197,7 +202,10 @@ class Scheduler(CoroScheduler):
             self._processor.enqueue(
                 SQE(
                     cmd=wrap_fn_into_cmd(
-                        invocation.fn, *invocation.args, **invocation.kwargs
+                        invocation.ctx,
+                        invocation.fn,
+                        *invocation.args,
+                        **invocation.kwargs,
                     ),
                     callback=partial(
                         callback,
@@ -208,7 +216,7 @@ class Scheduler(CoroScheduler):
                 )
             )
         else:
-            coro = invocation.fn(*invocation.args, **invocation.kwargs)
+            coro = invocation.fn(invocation.ctx, *invocation.args, **invocation.kwargs)
             pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
 
     def _runnables_from_stg_q(self) -> PendingToRun | None:

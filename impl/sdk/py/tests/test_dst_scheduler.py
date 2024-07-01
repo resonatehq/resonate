@@ -11,36 +11,44 @@ from typing_extensions import TypeVar
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from resonate_sdk_py.context import Context
+
 T = TypeVar("T")
 
 
 def _add_many(s: DSTScheduler) -> list[Promise[Any]]:
     promises: list[Promise[Any]] = []
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_call()))
-    promises.append(s.add(only_invocation()))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_call))
+    promises.append(s.add(only_invocation))
     return promises
 
 
-def _number(n: int) -> int:
+def _number(ctx: Context, n: int) -> int:  # noqa: ARG001
     return n
 
 
-def only_call() -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(_number, n=1)
+def only_call(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, _number, n=1)
     return x
 
 
-def only_invocation() -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(_number, n=3)
+def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
+    xp: Promise[int] = yield Invoke(ctx, _number, n=3)
     x: int = yield xp
+    return x
+
+
+def failing_asserting(ctx: Context) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, only_invocation)
+    ctx.assert_statement(x < 0, f"{x} should be negative")
     return x
 
 
@@ -91,3 +99,12 @@ def test_dst_determinitic() -> None:
     s.run()
     other_events = s.get_events()
     assert expected_events != other_events
+
+
+@pytest.mark.dst()
+def test_failing_asserting() -> None:
+    s = DSTScheduler(seed=1)
+    p = s.add(failing_asserting)
+    s.run()
+    with pytest.raises(AssertionError):
+        p.result()

@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
 
 from result import Err, Ok, Result
-from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
+from typing_extensions import Concatenate, ParamSpec, TypeAlias, TypeVar, assert_never
 
+from resonate_sdk_py.context import Context
 from resonate_sdk_py.processor import IAsyncCommand, ICommand
 
 if TYPE_CHECKING:
@@ -22,7 +23,13 @@ P = ParamSpec("P")
 
 class CoroScheduler(ABC):
     @abstractmethod
-    def add(self, coros: Generator[Yieldable, Any, T]) -> Promise[T]: ...
+    def add(
+        self,
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Promise[T]: ...
 
     @abstractmethod
     def run(self) -> None: ...
@@ -30,16 +37,22 @@ class CoroScheduler(ABC):
 
 class FnCmd(ICommand[T]):
     def __init__(
-        self, fn: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs
+        self,
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
+        self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
 
     def run(self) -> Result[T, Exception]:
         result: Result[T, Exception]
         try:
-            result = Ok(self.fn(*self.args, **self.kwargs))
+            result = Ok(self.fn(self.ctx, *self.args, **self.kwargs))
         except Exception as e:  # noqa: BLE001
             result = Err(e)
         return result
@@ -48,46 +61,53 @@ class FnCmd(ICommand[T]):
 class AsyncFnCmd(IAsyncCommand[T]):
     def __init__(
         self,
-        fn: Callable[P, Coroutine[Any, Any, Any]],
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], Coroutine[Any, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
+        self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
 
     async def run(self) -> Result[T, Exception]:
         result: Result[T, Exception]
         try:
-            result = Ok(asyncio.run(self.fn(*self.args, **self.kwargs)))
+            result = Ok(asyncio.run(self.fn(self.ctx, *self.args, **self.kwargs)))
         except Exception as e:  # noqa: BLE001
             result = Err(e)
         return result
 
 
 def wrap_fn_into_cmd(
-    fn: Callable[P, T | Coroutine[Any, Any, T]],
+    ctx: Context,
+    fn: Callable[Concatenate[Context, P], T | Coroutine[Any, Any, T]],
     *args: P.args,
     **kwargs: P.kwargs,
 ) -> FnCmd[T] | AsyncFnCmd[T]:
     cmd: AsyncFnCmd[T] | FnCmd[T]
     if iscoroutinefunction(func=fn):
-        cmd = AsyncFnCmd(fn, *args, **kwargs)
+        cmd = AsyncFnCmd(ctx, fn, *args, **kwargs)
     else:
-        cmd = FnCmd(cast(Callable[P, T], fn), *args, **kwargs)
+        cmd = FnCmd(
+            ctx, cast(Callable[Concatenate[Context, P], T], fn), *args, **kwargs
+        )
     return cmd
 
 
 class Call:
     def __init__(
         self,
-        fn: Callable[P, Any | Coroutine[Any, Any, Any]],
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
+        self.ctx = ctx.new_child()
         self.args = args
         self.kwargs = kwargs
 
@@ -95,12 +115,14 @@ class Call:
 class Invoke:
     def __init__(
         self,
-        fn: Callable[P, Any | Coroutine[Any, Any, Any]],
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
+        self.ctx = ctx.new_child()
         self.args = args
         self.kwargs = kwargs
 

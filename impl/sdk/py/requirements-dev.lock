@@ -12,7 +12,7 @@ exceptiongroup==1.2.1
     # via pytest
 iniconfig==2.0.0
     # via pytest
-mypy==1.10.0
+mypy==1.10.1
 mypy-extensions==1.0.0
     # via mypy
 packaging==24.1
@@ -22,7 +22,7 @@ pluggy==1.5.0
 pytest==8.2.2
 result==0.17.0
     # via resonate-sdk-py
-ruff==0.4.9
+ruff==0.5.0
 tomli==2.0.1
     # via mypy
     # via pytest
