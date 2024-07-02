@@ -137,7 +137,7 @@ describe("Options", () => {
         expect(top.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
         expect(top.lock).toBe(true);
         expect(top.poll).toBe(resonateOpts.poll);
-        expect(top.retry).toBe(resonateOpts.retry);
+        expect(top.retry).toBe(overrides.retry);
         expect(top.tags).toEqual({ ...resonateOpts.tags, ...overrides.tags, "resonate:invocation": "true" });
         expect(top.timeout).toBe(overrides.timeout);
         expect(top.version).toBe(overrides.version);

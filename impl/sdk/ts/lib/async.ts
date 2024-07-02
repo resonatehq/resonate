@@ -1,3 +1,4 @@
+import { Func, isRFC, LFC, Params, Return, RFC } from "./core/calls";
 import { Execution, OrdinaryExecution, DeferredExecution } from "./core/execution";
 import { ResonatePromise } from "./core/future";
 import { Invocation } from "./core/invocation";
@@ -11,12 +12,6 @@ import { ResonateBase } from "./resonate";
 /////////////////////////////////////////////////////////////////////
 // Types
 /////////////////////////////////////////////////////////////////////
-
-export type Func = (ctx: Context, ...args: any[]) => any;
-
-export type Params<F> = F extends (ctx: any, ...args: infer P) => any ? P : never;
-
-export type Return<F> = F extends (...args: any[]) => infer T ? Awaited<T> : never;
 
 /////////////////////////////////////////////////////////////////////
 // Resonate
@@ -184,6 +179,15 @@ export class Context {
   run<F extends Func>(func: F, ...args: [...Params<F>, PartialOptions?]): ResonatePromise<Return<F>>;
 
   /**
+   * Invoke a Local Function Call (LFC).
+   *
+   * @template F - A type extending Function
+   * @param {LFC} lfc - The Local Function Call configuration
+   * @returns {ReturnType<F>} The result of the function execution
+   */
+  run<F extends Func>(lfc: LFC<F>): ResonatePromise<Return<F>>;
+
+  /**
    * Invoke a remote function.
    *
    * @template T The return type of the remote function.
@@ -195,7 +199,19 @@ export class Context {
   run<T>(func: string, args: any, opts?: PartialOptions): ResonatePromise<T>;
 
   /**
-   * Invoke a remote function.
+   * Invoke a Remote Function Call (RFC).
+   *
+   * @param {RFC} rfc - The Remote Function Call configuration
+   * @returns {ResonatePromise<T>} A promise that resolves with the result of the remote execution
+   *
+   * @description
+   * This function takes a Remote Function Call (RFC) configuration and executes the specified function
+   * remotely with the provided options.
+   */
+  run<T>(rfc: RFC): ResonatePromise<T>;
+
+  /**
+   * Invoke a remote function without arguments.
    *
    * @template T The return type of the remote function.
    * @param func The id of the remote function.
@@ -203,46 +219,88 @@ export class Context {
    * @returns A promise that resolves to the resolved value of the remote function.
    */
   run<T>(func: string, opts?: PartialOptions): ResonatePromise<T>;
-  run(func: string | ((...args: any[]) => any), ...argsWithOpts: any[]): ResonatePromise<any> {
+
+  run<F extends Func, T>(funcOrFc: F | LFC<F> | RFC | string, ...argsWithOpts: any[]): ResonatePromise<Return<F> | T> {
+    // Function with args and possibly options
+    if (typeof funcOrFc === "function") {
+      const { args, opts } = utils.split(argsWithOpts);
+      const lfc: LFC<F> = {
+        func: funcOrFc,
+        args,
+        opts: opts,
+      };
+
+      return this._run<F, T>(lfc);
+    }
+
+    // String (function name) with args and possibly options
+    if (typeof funcOrFc === "string") {
+      const funcName = funcOrFc;
+      const { args, opts } = utils.split(argsWithOpts);
+
+      const rfc: RFC = {
+        funcName,
+        args,
+        opts,
+      };
+
+      return this._run<F, T>(rfc);
+    }
+
+    // We are sure it is an FC
+    return this._run<F, T>(funcOrFc);
+  }
+
+  private _run<F extends Func, T>(fc: LFC<F> | RFC): ResonatePromise<Return<F> | T> {
     // the parent is the current invocation
     const parent = this.invocation;
+
+    // human readable name of the function
+    let name!: string;
 
     // the id is either:
     // 1. a provided string in the case of a deferred execution
     // 2. a generated string in the case of an ordinary execution
-    const id = typeof func === "string" ? func : `${parent.id}.${parent.counter}.${func.name}`;
+    let id!: string;
 
-    // human readable name of the function
-    const name = typeof func === "string" ? func : func.name;
+    // Params to store with the durable promise. For RemoteExecutions we just encode the
+    // given arg(s). Otherwise we store nothing since it is unncesary.
+    let param: any | undefined;
 
-    // opts are optional and can be provided as the last arg
-    const { args, opts: givenOpts } = utils.split(argsWithOpts);
+    if (isRFC(fc)) {
+      name = fc.funcName;
+      id = name;
+      param = fc.args;
+    } else {
+      name = fc.func.name;
+      id = `${parent.id}.${parent.counter}.${name}`;
+      param = undefined;
+    }
+
     const registeredOptions = this.resonate.registeredOptions(
       this.invocation.root.name,
       this.invocation.root.opts.version,
     );
+
     const resonateOptions = this.resonate.defaults();
 
     const opts = {
       ...resonateOptions,
       ...registeredOptions,
-      ...givenOpts,
+      ...fc.opts,
     };
 
     // Merge the tags
-    opts.tags = { ...resonateOptions.tags, ...registeredOptions.tags, ...givenOpts.tags };
+    opts.tags = { ...resonateOptions.tags, ...registeredOptions.tags, ...fc.opts?.tags };
 
     // Default lock is false for children execution
     opts.lock = opts.lock ?? false;
-
-    // param is only required for deferred executions
-    const param = typeof func === "string" ? args[0] : undefined;
 
     // create a new invocation
     const invocation = new Invocation(name, id, undefined, param, opts, parent);
 
     let execution: Execution<any>;
-    if (typeof func === "string") {
+    if (isRFC(fc)) {
       // create a deferred execution
       // this execution will be fulfilled out-of-process
       execution = new DeferredExecution(this.resonate, invocation);
@@ -250,7 +308,7 @@ export class Context {
       // create an ordinary execution
       // this execution wraps a user-provided function
       const ctx = new Context(this.resonate, invocation);
-      execution = new OrdinaryExecution(this.resonate, invocation, () => func(ctx, ...args));
+      execution = new OrdinaryExecution(this.resonate, invocation, () => fc.func(ctx, ...(fc.args ?? [])));
     }
 
     // bump the counter

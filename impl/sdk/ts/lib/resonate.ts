@@ -1,3 +1,4 @@
+import { TFC } from "./core/calls";
 import { IEncoder } from "./core/encoder";
 import { JSONEncoder } from "./core/encoders/json";
 import { ResonatePromise } from "./core/future";
@@ -159,6 +160,8 @@ export abstract class ResonateBase {
     }
   }
 
+  run<T>(tfc: TFC): ResonatePromise<T>;
+  run<T>(name: string, id: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T>;
   /**
    * Run a Resonate function. Functions must first be registered with {@link register}.
    *
@@ -168,53 +171,67 @@ export abstract class ResonateBase {
    * @param argsWithOpts The function arguments.
    * @returns A promise that resolve to the function return value.
    */
-  run<T>(name: string, id: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T> {
-    const { args, opts: givenOpts } = utils.split(argsWithOpts);
-    const { version, durable, idempotencyKeyFn, eidFn, tags, timeout } = givenOpts;
+  run<T>(nameOrTfc: string | TFC, id?: string, ...argsWithOpts: [...any, PartialOptions?]): ResonatePromise<T> {
+    let tfc!: TFC;
+    if (typeof nameOrTfc === "string") {
+      const { args, opts: givenOpts } = utils.split(argsWithOpts);
+      const { durable, eidFn, idempotencyKeyFn, retry, tags, timeout, version } = givenOpts;
 
-    if (!this.functions[name] || !this.functions[name][version || 0]) {
-      throw new Error(`Function ${name} version ${version} not registered`);
+      if (!id) {
+        throw new Error("Id was not set for a top level function call");
+      }
+
+      tfc = {
+        funcName: nameOrTfc,
+        id,
+        args,
+        optsOverrides: {
+          durable,
+          eidFn,
+          idempotencyKeyFn,
+          retry,
+          tags,
+          timeout,
+          version,
+        },
+      };
+    } else {
+      tfc = nameOrTfc;
+    }
+
+    return this._run(tfc);
+  }
+
+  private _run<T>(tfc: TFC): ResonatePromise<T> {
+    // Sets the defaults for the optional fields of TFC
+    tfc.optsOverrides = tfc.optsOverrides ?? {};
+    tfc.args = tfc.args ?? [];
+    tfc.optsOverrides.version = tfc.optsOverrides.version || 0;
+
+    if (!this.functions[tfc.funcName] || !this.functions[tfc.funcName][tfc.optsOverrides.version]) {
+      throw new Error(`Function ${tfc.funcName} version ${tfc.optsOverrides.version} not registered`);
     }
 
     // the options registered with the function are the defaults
-    const { func, opts: registeredOpts } = this.functions[name][version || 0];
-
-    // only the following options can be overridden, this information is persisted
-    // in the durable promise and therefore not required on the recovery path
-    const override: Partial<Options> = {};
-
-    if (durable !== undefined) {
-      override.durable = durable;
-    }
-
-    if (idempotencyKeyFn !== undefined) {
-      override.idempotencyKeyFn = idempotencyKeyFn;
-    }
-
-    if (eidFn !== undefined) {
-      override.eidFn = eidFn;
-    }
-
-    if (tags !== undefined) {
-      override.tags = { ...registeredOpts.tags, ...tags, "resonate:invocation": "true" };
-    } else {
-      override.tags = { ...registeredOpts.tags, "resonate:invocation": "true" };
-    }
-
-    if (timeout !== undefined) {
-      override.timeout = timeout;
-    }
+    const { func, opts: registeredOpts } = this.functions[tfc.funcName][tfc.optsOverrides.version];
 
     // merge defaults with override to get opts
-    const opts = {
-      ...registeredOpts,
-      ...override,
-    };
+    const opts = utils.mergeObjects(tfc.optsOverrides, registeredOpts);
+
+    // We want to preserve the version that was registered with the function
+    // when calling the function with `version=0` we will find the latest
+    // registered version of a function, but we want to make sure the registered
+    // version is preserved.
+    opts.version = registeredOpts.version;
+
+    // For tags we need to merge the objects themselves and add the
+    // resonate:invocation tag to identify a top level invocation
+    opts.tags = { ...registeredOpts.tags, ...tfc.optsOverrides.tags, "resonate:invocation": "true" };
 
     // lock on top level is true by default
     opts.lock = opts.lock ?? true;
 
-    return this.execute(name, id, func, args, opts);
+    return this.execute(tfc.funcName, tfc.id, func, tfc.args, opts);
   }
 
   // Gets the registered options for a specific function and version
