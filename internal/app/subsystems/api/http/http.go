@@ -2,13 +2,12 @@ package http
 
 import (
 	"context"
+	"github.com/resonatehq/resonate/internal/creds"
 	"net/http"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
-
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -16,20 +15,23 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 )
 
-type Auth struct {
-	Username string
-	Password string
-}
-
 type Config struct {
 	Addr    string
-	Auth    *Auth
+	Auth    []interface{}
 	Timeout time.Duration
 }
 
 type Http struct {
 	config *Config
 	server *http.Server
+}
+
+func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
+	credentials := creds.GetProcessedCreds(config.Auth)
+	if credentials != nil {
+		return gin.BasicAuth(credentials)
+	}
+	return nil
 }
 
 func New(api api.API, config *Config) api.Subsystem {
@@ -48,16 +50,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Authentication
 	authorized := r.Group("/")
-	if config.Auth.Username != "" || config.Auth.Password != "" {
-		util.Assert(config.Auth.Username != "", "http basic auth username is required")
-		util.Assert(config.Auth.Password != "", "http basic auth password is required")
-
-		accounts := gin.Accounts{
-			config.Auth.Username: config.Auth.Password,
-		}
-		basicAuthMiddleware := gin.BasicAuth(accounts)
-		authorized.Use(basicAuthMiddleware)
-	}
+	authorized.Use(BasicAuthMiddleware(config))
 
 	// Promises API
 	authorized.POST("/promises", s.createPromise)
