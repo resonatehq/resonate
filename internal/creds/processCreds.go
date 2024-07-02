@@ -1,7 +1,6 @@
 package creds
 
 import (
-	"errors"
 	"log/slog"
 )
 
@@ -10,25 +9,21 @@ type Auth struct {
 	Password string `yaml:"password"`
 }
 
-type CredentialsList struct {
-	Users []Auth `yaml:"auth"`
-}
-
-var CredsFromFile CredentialsList
-
-func GetCredentials() (CredentialsList, error) {
-	if len(CredsFromFile.Users) == 0 {
-		slog.Error("CredentialsList is empty", "error", errors.New("Credentials are empty."))
-		return CredentialsList{}, errors.New("Credentials are empty.")
-	} else {
-		return CredsFromFile, nil
+func GetProcessedCreds(credList []interface{}) map[string]string {
+	authMap := make(map[string]string)
+	for _, item := range credList {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			slog.Error("Invalid format in 'auth' section")
+			continue
+		}
+		username, usernameOk := entry["username"].(string)
+		password, passwordOk := entry["password"].(string)
+		if !usernameOk || !passwordOk {
+			slog.Error("Invalid username or password format in 'auth' section")
+			continue
+		}
+		authMap[username] = password
 	}
-}
-
-func GetProcessedCreds(credList *CredentialsList) map[string]string {
-	credentials := make(map[string]string)
-	for _, item := range credList.Users {
-		credentials[item.Username] = item.Password
-	}
-	return credentials
+	return authMap
 }

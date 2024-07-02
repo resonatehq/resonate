@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"github.com/resonatehq/resonate/internal/creds"
-	"log"
 	"log/slog"
 	"os"
 	"strings"
@@ -69,13 +67,6 @@ func initConfig() {
 			slog.Error("error reading config file", "error", err)
 			os.Exit(1)
 		}
-	}
-
-	// Unmarshal the 'auth' key into the slice of Auth structs
-	err := viper.UnmarshalKey("auth", &creds.CredsFromFile)
-	if err != nil {
-		log.Fatalf("Error unmarshaling 'auth' key: %s\n", err)
-		return
 	}
 }
 

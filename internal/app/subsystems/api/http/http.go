@@ -17,7 +17,7 @@ import (
 
 type Config struct {
 	Addr    string
-	Auth    *creds.CredentialsList
+	Auth    []interface{}
 	Timeout time.Duration
 }
 
