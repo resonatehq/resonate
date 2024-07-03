@@ -2,7 +2,6 @@ package http
 
 import (
 	"context"
-	"github.com/resonatehq/resonate/internal/creds"
 	"net/http"
 	"time"
 
@@ -17,7 +16,7 @@ import (
 
 type Config struct {
 	Addr    string
-	Auth    []interface{}
+	Auth    map[string]string
 	Timeout time.Duration
 }
 
@@ -26,13 +25,6 @@ type Http struct {
 	server *http.Server
 }
 
-func BasicAuthMiddleware(config *Config) gin.HandlerFunc {
-	credentials := creds.GetProcessedCreds(config.Auth)
-	if credentials != nil {
-		return gin.BasicAuth(credentials)
-	}
-	return nil
-}
 
 func New(api api.API, config *Config) api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
@@ -50,7 +42,9 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Authentication
 	authorized := r.Group("/")
-	authorized.Use(BasicAuthMiddleware(config))
+	if len(config.Auth) > 0 {
+		authorized.Use(gin.BasicAuth(config.Auth))
+	}
 
 	// Promises API
 	authorized.POST("/promises", s.createPromise)
