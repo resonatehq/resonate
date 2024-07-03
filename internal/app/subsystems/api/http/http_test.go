@@ -26,7 +26,7 @@ type httpTest struct {
 	client    *http.Client
 }
 
-func setup(auth []interface{}) *httpTest {
+func setup(auth map[string]string) *httpTest {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem := New(api, &Config{
@@ -56,20 +56,20 @@ func (t *httpTest) teardown() error {
 func TestHttpServer(t *testing.T) {
 	for _, ts := range []struct {
 		name          string
-		auth          []interface{}
+		auth          map[string]string
 		reqUsername   string
 		reqPassword   string
 		statusOveride int
 	}{
 		{
 			name:        "BasicAuthCorrectCredentials",
-			auth:        []interface{}{map[string]string{"username": "user1", "password": "pass1"}},
+			auth:        map[string]string{"username": "user1", "password": "pass1"},
 			reqUsername: "user1",
 			reqPassword: "password1",
 		},
 		{
 			name:          "BasicAuthIncorrectCredentials",
-			auth:          []interface{}{map[string]string{"username": "user1", "password": "pass1"}},
+			auth:          map[string]string{"username": "user1", "password": "pass1"},
 			reqUsername:   "username",
 			reqPassword:   "notthepassword",
 			statusOveride: 401,
