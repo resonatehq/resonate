@@ -1,12 +1,8 @@
 // resonate
 export * from "./resonate";
 
-// async (default)
+// async
 export * from "./async";
-export * as async from "./async";
-
-// generator
-export * as generator from "./generator";
 
 // errors
 export * from "./core/errors";
