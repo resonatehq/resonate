@@ -63,14 +63,14 @@ func TestHttpServer(t *testing.T) {
 	}{
 		{
 			name:        "BasicAuthCorrectCredentials",
-			auth:        map[string]string{"username": "user1", "password": "pass1"},
+			auth:        map[string]string{"user1": "pass1"},
 			reqUsername: "user1",
-			reqPassword: "password1",
+			reqPassword: "pass1",
 		},
 		{
 			name:          "BasicAuthIncorrectCredentials",
-			auth:          map[string]string{"username": "user1", "password": "pass1"},
-			reqUsername:   "username",
+			auth:          map[string]string{"user1": "pass1"},
+			reqUsername:   "user1",
 			reqPassword:   "notthepassword",
 			statusOveride: 401,
 		},
