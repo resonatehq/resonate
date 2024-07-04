@@ -8,8 +8,12 @@
 #   with-sources: false
 
 -e file:.
+attrs==23.2.0
+    # via hypothesis
 exceptiongroup==1.2.1
+    # via hypothesis
     # via pytest
+hypothesis==6.104.2
 iniconfig==2.0.0
     # via pytest
 mypy==1.10.1
@@ -23,6 +27,8 @@ pytest==8.2.2
 result==0.17.0
     # via resonate-sdk-py
 ruff==0.5.0
+sortedcontainers==2.4.0
+    # via hypothesis
 tomli==2.0.1
     # via mypy
     # via pytest

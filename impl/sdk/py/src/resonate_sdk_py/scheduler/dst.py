@@ -6,7 +6,7 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Callable, cast
 
 from result import Ok, Result
-from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
+from typing_extensions import ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py.context import Context
 from resonate_sdk_py.logging import logger
@@ -22,7 +22,6 @@ from .itertools import (
 from .shared import (
     Call,
     CoroAndPromise,
-    CoroScheduler,
     Invoke,
     Promise,
     Runnable,
@@ -32,39 +31,43 @@ from .shared import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from functools import partial
 
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
 
-class DSTScheduler(CoroScheduler):
+class DSTScheduler:
     def __init__(self, seed: int) -> None:
         self._pending_to_run: PendingToRun = []
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
         self._execution_events: list[str] = []
         self._callbacks_to_run: list[Callable[..., None]] = []
-        self._r = random.Random()  # noqa: RUF100, S311
-        self._r.seed(seed)
+        self._r = random.Random(seed)  # noqa: RUF100, S311
 
-    def add(
+    def _add(
         self,
-        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
+        coro: partial[Generator[Yieldable, Any, T]],
     ) -> Promise[T]:
         p = Promise[T]()
         ctx = Context(dst=True)
         self._pending_to_run.append(
             Runnable(
-                coro_and_promise=CoroAndPromise(coro(ctx, *args, **kwargs), p),
+                coro_and_promise=CoroAndPromise(coro(ctx), p),
                 next_value=None,
             )
         )
         return p
 
-    def run(self) -> None:
+    def run(
+        self, coros: list[partial[Generator[Yieldable, Any, Any]]]
+    ) -> list[Promise[Any]]:
+        promises: list[Promise[Any]] = []
+        for coro in coros:
+            p = self._add(coro)
+            promises.append(p)
+
         while True:
             while self._callbacks_to_run:
                 self._r.shuffle(self._callbacks_to_run)
@@ -77,6 +80,8 @@ class DSTScheduler(CoroScheduler):
 
             if not self._callbacks_to_run and not self._pending_to_run:
                 break
+        assert all(p.done() for p in promises), "All promises should be resolved."
+        return promises
 
     def _process_each_runnable(
         self,

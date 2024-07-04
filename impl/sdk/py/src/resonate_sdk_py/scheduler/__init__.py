@@ -26,7 +26,6 @@ from .itertools import (
 from .shared import (
     Call,
     CoroAndPromise,
-    CoroScheduler,
     Invoke,
     Promise,
     Runnable,
@@ -42,7 +41,7 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-class Scheduler(CoroScheduler):
+class Scheduler:
     def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
         self._stg_q = Queue[CoroAndPromise[Any]]()
         self._w_thread: Thread | None = None

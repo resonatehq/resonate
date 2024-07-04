@@ -1,5 +1,5 @@
 from __future__ import annotations
 
+from . import testing
 
-def hello() -> str:
-    return "Hello from resonate-sdk-py!"
+__all__ = ["testing"]
