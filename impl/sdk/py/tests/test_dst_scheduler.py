@@ -120,7 +120,7 @@ def test_failing_asserting() -> None:
 
 
 @pytest.mark.dst()
-@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst(range(10)))
+@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
     promises = scheduler.run(
         [

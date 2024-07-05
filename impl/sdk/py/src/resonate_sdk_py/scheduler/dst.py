@@ -44,7 +44,8 @@ class DSTScheduler:
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
         self._execution_events: list[str] = []
         self._callbacks_to_run: list[Callable[..., None]] = []
-        self._r = random.Random(seed)  # noqa: RUF100, S311
+        self.seed = seed
+        self._r = random.Random(self.seed)  # noqa: RUF100, S311
 
     def _add(
         self,
@@ -69,13 +70,13 @@ class DSTScheduler:
             promises.append(p)
 
         while True:
-            while self._callbacks_to_run:
-                self._r.shuffle(self._callbacks_to_run)
-                self._callbacks_to_run.pop()()
+            next_step = self._r.choice(["callbacks", "runnables"])
+            if next_step == "callbacks" and self._callbacks_to_run:
+                cb = get_random_element(self._callbacks_to_run, r=self._r)
+                cb()
 
-            while self._pending_to_run:
-                self._r.shuffle(self._pending_to_run)
-                runnable = self._pending_to_run.pop()
+            if next_step == "runnables" and self._pending_to_run:
+                runnable = get_random_element(self._pending_to_run, r=self._r)
                 self._process_each_runnable(runnable=runnable)
 
             if not self._callbacks_to_run and not self._pending_to_run:
@@ -195,3 +196,7 @@ class DSTScheduler:
 
     def get_events(self) -> list[str]:
         return self._execution_events
+
+
+def get_random_element(array: list[T], r: random.Random) -> T:
+    return array.pop(r.randrange(len(array)))
