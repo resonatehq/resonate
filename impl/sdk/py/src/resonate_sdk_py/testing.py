@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from typing_extensions import assert_never
 
 from resonate_sdk_py.scheduler.dst import DSTScheduler
