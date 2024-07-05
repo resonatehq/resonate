@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from abc import ABC, abstractmethod
 from asyncio import iscoroutinefunction
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -19,20 +18,6 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 P = ParamSpec("P")
-
-
-class CoroScheduler(ABC):
-    @abstractmethod
-    def add(
-        self,
-        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> Promise[T]: ...
-
-    @abstractmethod
-    def run(self) -> None: ...
 
 
 class FnCmd(ICommand[T]):

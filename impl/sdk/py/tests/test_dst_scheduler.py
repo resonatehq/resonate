@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import random
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import pytest
+import resonate_sdk_py
 from resonate_sdk_py.scheduler.dst import DSTScheduler
 from resonate_sdk_py.scheduler.shared import Call, Invoke, Promise, Yieldable
 from typing_extensions import TypeVar
@@ -16,27 +18,12 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
-def _add_many(s: DSTScheduler) -> list[Promise[Any]]:
-    promises: list[Promise[Any]] = []
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_call))
-    promises.append(s.add(only_invocation))
-    return promises
-
-
 def _number(ctx: Context, n: int) -> int:  # noqa: ARG001
     return n
 
 
-def only_call(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(ctx, _number, n=1)
+def only_call(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
+    x: int = yield Call(ctx, _number, n=n)
     return x
 
 
@@ -62,20 +49,22 @@ def test_dst_scheduler() -> None:
         seed = random.randint(0, 1000000)  # noqa: S311
         s = DSTScheduler(seed=seed)
 
-        promises = _add_many(s)
-        s.run()
+        promises = s.run(
+            [
+                partial(only_call, n=1),
+                partial(only_call, n=2),
+                partial(only_call, n=3),
+                partial(only_call, n=4),
+                partial(only_call, n=5),
+            ]
+        )
         values = _promise_result(promises=promises)
         assert values == [
             1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
-            1,
+            2,
             3,
+            4,
+            5,
         ], f"Test fails when seed it {seed}"
 
 
@@ -83,28 +72,63 @@ def test_dst_scheduler() -> None:
 def test_dst_determinitic() -> None:
     seed = random.randint(1, 100)  # noqa: S311
     s = DSTScheduler(seed=seed)
-    _add_many(s)
-    s.run()
+    promises = s.run(
+        [
+            partial(only_call, n=1),
+            partial(only_call, n=2),
+            partial(only_call, n=3),
+            partial(only_call, n=4),
+            partial(only_call, n=5),
+        ]
+    )
+    assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     expected_events = s.get_events()
 
-    s = DSTScheduler(seed=seed)
-    _add_many(s)
-    s.run()
-    reproduced_events = s.get_events()
+    same_seed_s = DSTScheduler(seed=seed)
+    promises = same_seed_s.run(
+        [
+            partial(only_call, n=1),
+            partial(only_call, n=2),
+            partial(only_call, n=3),
+            partial(only_call, n=4),
+            partial(only_call, n=5),
+        ]
+    )
+    assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
+    assert expected_events == same_seed_s.get_events()
 
-    assert expected_events == reproduced_events
-
-    s = DSTScheduler(seed=seed + 10)
-    _add_many(s)
-    s.run()
-    other_events = s.get_events()
-    assert expected_events != other_events
+    different_seed_s = DSTScheduler(seed=seed + 10)
+    promises = different_seed_s.run(
+        [
+            partial(only_call, n=1),
+            partial(only_call, n=2),
+            partial(only_call, n=3),
+            partial(only_call, n=4),
+            partial(only_call, n=5),
+        ]
+    )
+    assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
+    assert expected_events != different_seed_s.get_events()
 
 
 @pytest.mark.dst()
 def test_failing_asserting() -> None:
     s = DSTScheduler(seed=1)
-    p = s.add(failing_asserting)
-    s.run()
+    p = s.run([partial(failing_asserting)])
     with pytest.raises(AssertionError):
-        p.result()
+        p[0].result()
+
+
+@pytest.mark.dst()
+@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([range(10)]))
+def test_dst_framework(scheduler: DSTScheduler) -> None:
+    promises = scheduler.run(
+        [
+            partial(only_call, n=1),
+            partial(only_call, n=2),
+            partial(only_call, n=3),
+            partial(only_call, n=4),
+            partial(only_call, n=5),
+        ]
+    )
+    assert sum(p.result() for p in promises) == 15  # noqa: PLR2004

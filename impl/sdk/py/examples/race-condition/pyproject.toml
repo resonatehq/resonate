@@ -1,74 +1,47 @@
 [project]
-name = "resonate-sdk-py"
+name = "race-condition"
 version = "0.1.0"
 description = "Add your description here"
 authors = [
     { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
 ]
 dependencies = [
-    "result>=0.17.0",
+    "resonate-sdk-py @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..",
+    "typing-extensions>=4.12.2",
 ]
 readme = "README.md"
-requires-python = ">= 3.9"
-license = { text = "Apache-2.0" }
+requires-python = ">= 3.10"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.rye.scripts]
+check-types = "dmypy run --timeout 60 -- src tests"
+
 [tool.rye]
 managed = true
 dev-dependencies = [
-    "mypy>=1.10.0",
-    "pytest>=8.2.0",
-    "ruff>=0.4.7",
-    "hypothesis>=6.104.2",
+    "pytest>=8.2.2",
+    "mypy>=1.10.1",
 ]
-
-[tool.rye.scripts]
-check-types = "dmypy run --timeout 60 -- src tests"
 
 [tool.hatch.metadata]
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/resonate_sdk_py"]
-
-
-[tool.ruff]
-unsafe-fixes = true
-
-[tool.ruff.lint]
-select = ["ALL"]
-ignore = [
-    "D",
-    "ANN101",
-    "COM812",
-    "ISC001",
-    "S101"
-]
-
-[tool.ruff.lint.isort]
-combine-as-imports = true
-required-imports = ["from __future__ import annotations"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["INP001", "S101", "D"]
+packages = ["src/race_condition"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 xfail_strict = true
 addopts = [
     "--import-mode=importlib",
-    "--strict-markers",
     "--log-cli-level=DEBUG"
 ]
-markers = [
-    "integration: mark integration tests.",
-    "unit: mark unittest.",
-    "dev: mark tests on development.",
-    "dst: mark dst tests.",
-]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["INP001", "S101", "D"]
 
 [tool.mypy]
 mypy_path = "src"
