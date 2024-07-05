@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import sqlite3
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import pytest
 import race_condition
 import resonate_sdk_py
-from resonate_sdk_py.scheduler.shared import Promise
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,16 +30,6 @@ def setup_and_teardown() -> Generator[sqlite3.Connection, None, None]:
     )
     conn.commit()
     yield conn
-
-
-def check_one_transaction_should_fail(promises: list[Promise[Any]]) -> bool:
-    for p in promises:
-        try:
-            p.result()
-        except race_condition.NotEnoughMoneyError:
-            return True
-
-    return False
 
 
 @pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([963, 20, range(3)]))
@@ -75,6 +64,7 @@ def test_race_condition(
     target_balance: int = conn.execute(
         "SELECT balance FROM accounts WHERE account_id = 2"
     ).fetchone()[0]
+
     assert (
         source_balance == 0 and target_balance == 100
     ), f"Seed {scheduler.seed} causes a failure"

@@ -20,7 +20,6 @@ def get_current_balance(ctx: Context, conn: Connection, account_id: int) -> int:
     balance: int = conn.execute(
         "SELECT balance FROM accounts WHERE account_id = ?", (account_id,)
     ).fetchone()[0]
-    print(f"Balance for account {account_id} is {balance}")
     return balance
 
 
