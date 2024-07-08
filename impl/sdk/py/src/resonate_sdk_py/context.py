@@ -1,5 +1,44 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, Callable
+
+from typing_extensions import Concatenate, ParamSpec
+
+if TYPE_CHECKING:
+    from collections.abc import Coroutine
+
+P = ParamSpec("P")
+
+
+class Call:
+    def __init__(
+        self,
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.fn = fn
+        self.ctx = ctx
+        self.args = args
+        self.kwargs = kwargs
+
+
+class Invoke:
+    def __init__(
+        self,
+        ctx: Context,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.fn = fn
+        self.ctx = ctx
+        self.args = args
+        self.kwargs = kwargs
+
 
 class Context:
     def __init__(self, parent_ctx: Context | None = None, *, dst: bool = False) -> None:
@@ -13,3 +52,21 @@ class Context:
         if not self.dst:
             return
         assert stmt, msg
+
+    def invoke(
+        self,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Invoke:
+        return Invoke(self.new_child(), fn, *args, **kwargs)
+
+    def call(
+        self,
+        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Call:
+        return Call(self.new_child(), fn, *args, **kwargs)

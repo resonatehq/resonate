@@ -11,4 +11,5 @@
 result==0.17.0
     # via resonate-sdk-py
 typing-extensions==4.12.2
+    # via resonate-sdk-py
     # via result

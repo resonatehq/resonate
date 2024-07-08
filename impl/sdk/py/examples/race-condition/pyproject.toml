@@ -3,11 +3,10 @@ name = "race-condition"
 version = "0.1.0"
 description = "Add your description here"
 authors = [
-    { name = "Tomperez98", email = "tomasperezalvarez@gmail.com" }
+    { name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }
 ]
 dependencies = [
     "resonate-sdk-py @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..",
-    "typing-extensions>=4.12.2",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"

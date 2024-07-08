@@ -8,8 +8,9 @@ from typing import TYPE_CHECKING, Any, Callable, cast
 from result import Ok, Result
 from typing_extensions import ParamSpec, TypeVar, assert_never
 
-from resonate_sdk_py.context import Context
+from resonate_sdk_py.context import Call, Context, Invoke
 from resonate_sdk_py.logging import logger
+from resonate_sdk_py.typing import CoroAndPromise, Runnable
 
 from .itertools import (
     FinalValue,
@@ -20,18 +21,15 @@ from .itertools import (
     unblock_depands_coros,
 )
 from .shared import (
-    Call,
-    CoroAndPromise,
-    Invoke,
     Promise,
-    Runnable,
-    Yieldable,
     wrap_fn_into_cmd,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator
     from functools import partial
+
+    from resonate_sdk_py.typing import Yieldable
 
 
 T = TypeVar("T")

@@ -4,17 +4,15 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from resonate_sdk_py.scheduler import (
-    Call,
-    Invoke,
     Promise,
     Scheduler,
-    Yieldable,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate_sdk_py.context import Context
+    from resonate_sdk_py.typing import Yieldable
 
 
 def _nested_gen(ctx: Context, a: Promise[int]) -> Generator[Yieldable, Any, int]:  # noqa: ARG001
@@ -27,7 +25,7 @@ def _divide(ctx: Context, a: int, b: int) -> int:  # noqa: ARG001
 
 
 def only_call(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(ctx, _divide, a=3, b=1)
+    x: int = yield ctx.call(_divide, a=3, b=1)
     return x
 
 
@@ -36,7 +34,7 @@ def call_with_errors(
 ) -> Generator[Yieldable, Any, int]:
     x: int
     try:
-        x = yield Call(ctx, _divide, a=100, b=0)
+        x = yield ctx.call(_divide, a=100, b=0)
     except ZeroDivisionError:
         x = 3
     return x
@@ -45,21 +43,21 @@ def call_with_errors(
 def gen_call(
     ctx: Context,
 ) -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
-    y: int = yield Call(ctx, _nested_gen, x)
+    x: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
+    y: int = yield ctx.call(_nested_gen, x)
     return y
 
 
 def gen_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
-    y: Promise[int] = yield Invoke(ctx, _nested_gen, x)
+    x: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
+    y: Promise[int] = yield ctx.invoke(_nested_gen, x)
     z: int = yield y
     return z
 
 
 def double_call(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(ctx, _divide, a=3, b=1)
-    y: int = yield Call(ctx, _divide, a=5, b=1)
+    x: int = yield ctx.call(_divide, a=3, b=1)
+    y: int = yield ctx.call(_divide, a=5, b=1)
     return x + y
 
 
@@ -69,9 +67,9 @@ def _abc(ctx: Context, value: Promise[int]) -> Generator[Yieldable, int, int]:  
 
 
 def whatever(ctx: Context) -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
-    xf: Promise[int] = yield Invoke(ctx, _abc, value=af)
-    yf: Promise[int] = yield Invoke(ctx, _abc, value=af)
+    af: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
+    xf: Promise[int] = yield ctx.invoke(_abc, value=af)
+    yf: Promise[int] = yield ctx.invoke(_abc, value=af)
     try:
         x: int = yield xf
     except Exception:  # noqa: BLE001
@@ -83,9 +81,9 @@ def whatever(ctx: Context) -> Generator[Yieldable, Any, int]:
 
 
 def whatever_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield Invoke(ctx, _divide, a=3, b=0)
-    xf: Promise[int] = yield Invoke(ctx, _abc, value=af)
-    yf: Promise[int] = yield Invoke(ctx, _abc, value=af)
+    af: Promise[int] = yield ctx.invoke(_divide, a=3, b=0)
+    xf: Promise[int] = yield ctx.invoke(_abc, value=af)
+    yf: Promise[int] = yield ctx.invoke(_abc, value=af)
     try:
         x: int = yield xf
     except Exception:  # noqa: BLE001
@@ -135,13 +133,13 @@ def test_invoke_gen() -> None:
 
 
 def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(ctx, _divide, a=3, b=1)
+    xp: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
     x: int = yield xp
     return x
 
 
 def invocation_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(ctx, _divide, a=3, b=0)
+    xp: Promise[int] = yield ctx.invoke(_divide, a=3, b=0)
     try:
         x: int = yield xp
     except ZeroDivisionError:

@@ -34,4 +34,5 @@ tomli==2.0.1
     # via pytest
 typing-extensions==4.12.2
     # via mypy
+    # via resonate-sdk-py
     # via result

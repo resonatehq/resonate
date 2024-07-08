@@ -7,13 +7,14 @@ from typing import TYPE_CHECKING, Any
 import pytest
 import resonate_sdk_py
 from resonate_sdk_py.scheduler.dst import DSTScheduler
-from resonate_sdk_py.scheduler.shared import Call, Invoke, Promise, Yieldable
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate_sdk_py.context import Context
+    from resonate_sdk_py.scheduler.shared import Promise
+    from resonate_sdk_py.typing import Yieldable
 
 T = TypeVar("T")
 
@@ -23,18 +24,18 @@ def _number(ctx: Context, n: int) -> int:  # noqa: ARG001
 
 
 def only_call(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(ctx, _number, n=n)
+    x: int = yield ctx.call(_number, n=n)
     return x
 
 
 def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield Invoke(ctx, _number, n=3)
+    xp: Promise[int] = yield ctx.invoke(_number, n=3)
     x: int = yield xp
     return x
 
 
 def failing_asserting(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield Call(ctx, only_invocation)
+    x: int = yield ctx.call(only_invocation)
     ctx.assert_statement(x < 0, f"{x} should be negative")
     return x
 

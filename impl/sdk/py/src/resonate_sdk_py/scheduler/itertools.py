@@ -1,23 +1,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Generic
+from typing import TYPE_CHECKING, Any, Generic
 
 from result import Err, Ok, Result
-from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
+from typing_extensions import ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py.logging import logger
-from resonate_sdk_py.scheduler.shared import (
-    CoroAndPromise,
-    Promise,
-    Runnable,
-    Yieldable,
-)
+from resonate_sdk_py.typing import PendingToRun, Runnable, WaitingForPromiseResolution
+
+if TYPE_CHECKING:
+    from resonate_sdk_py.scheduler.shared import (
+        Promise,
+    )
+    from resonate_sdk_py.typing import Yieldable
 
 T = TypeVar("T")
 P = ParamSpec("P")
-WaitingForPromiseResolution: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
-PendingToRun: TypeAlias = list[Runnable[Any]]
 
 
 @dataclass(frozen=True)

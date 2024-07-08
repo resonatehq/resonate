@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlite3 import Connection
 from typing import TYPE_CHECKING, Any
 
-from resonate_sdk_py.scheduler.shared import Call, Yieldable
+from resonate_sdk_py.typing import Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -44,23 +44,21 @@ def modify_balance(
 def transaction(
     ctx: Context, conn: Connection, source: int, target: int, amount: int
 ) -> Generator[Yieldable, Any, None]:
-    source_balance: int = yield Call(
-        ctx, get_current_balance, conn=conn, account_id=source
+    source_balance: int = yield ctx.call(
+        get_current_balance, conn=conn, account_id=source
     )
 
     if source_balance - amount < 0:
         raise NotEnoughMoneyError(account_id=source)
 
-    yield Call(
-        ctx,
+    yield ctx.call(
         modify_balance,
         conn=conn,
         account_id=source,
         amount=amount * -1,
     )
 
-    yield Call(
-        ctx,
+    yield ctx.call(
         modify_balance,
         conn=conn,
         account_id=target,
