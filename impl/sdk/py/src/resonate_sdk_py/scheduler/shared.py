@@ -3,17 +3,16 @@ from __future__ import annotations
 import asyncio
 from asyncio import iscoroutinefunction
 from concurrent.futures import Future
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Generic, Union, cast
+from typing import TYPE_CHECKING, Any, Callable, Generic, cast
 
 from result import Err, Ok, Result
-from typing_extensions import Concatenate, ParamSpec, TypeAlias, TypeVar, assert_never
+from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
 from resonate_sdk_py.context import Context
 from resonate_sdk_py.processor import IAsyncCommand, ICommand
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Generator
+    from collections.abc import Coroutine
 
 
 T = TypeVar("T")
@@ -82,36 +81,6 @@ def wrap_fn_into_cmd(
     return cmd
 
 
-class Call:
-    def __init__(
-        self,
-        ctx: Context,
-        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.fn = fn
-        self.ctx = ctx.new_child()
-        self.args = args
-        self.kwargs = kwargs
-
-
-class Invoke:
-    def __init__(
-        self,
-        ctx: Context,
-        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.fn = fn
-        self.ctx = ctx.new_child()
-        self.args = args
-        self.kwargs = kwargs
-
-
 class Promise(Generic[T]):
     def __init__(self) -> None:
         self.f = Future[T]()
@@ -129,18 +98,3 @@ class Promise(Generic[T]):
 
     def done(self) -> bool:
         return self.f.done()
-
-
-Yieldable: TypeAlias = Union[Call, Invoke, Promise[Any]]
-
-
-@dataclass(frozen=True)
-class CoroAndPromise(Generic[T]):
-    coro: Generator[Yieldable, Any, T]
-    prom: Promise[T]
-
-
-@dataclass(frozen=True)
-class Runnable(Generic[T]):
-    coro_and_promise: CoroAndPromise[T]
-    next_value: Result[Any, Exception] | None

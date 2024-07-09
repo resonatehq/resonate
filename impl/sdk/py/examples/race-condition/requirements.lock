@@ -13,4 +13,4 @@ resonate-sdk-py @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/ex
 result==0.17.0
     # via resonate-sdk-py
 typing-extensions==4.12.2
-    # via race-condition
+    # via resonate-sdk-py
