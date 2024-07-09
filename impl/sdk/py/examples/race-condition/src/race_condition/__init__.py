@@ -11,24 +11,25 @@ if TYPE_CHECKING:
     from resonate_sdk_py.context import Context
 
 
-class NotEnoughMoneyError(Exception):
+class NotEnoughFundsError(Exception):
     def __init__(self, account_id: int) -> None:
         super().__init__(f"Account {account_id} does not have enough money")
 
 
-def get_current_balance(ctx: Context, conn: Connection, account_id: int) -> int:  # noqa: ARG001
+def current_balance(ctx: Context, account_id: int) -> int:  # noqa: ARG001
+    conn: Connection = ctx.get_dependency("conn")
     balance: int = conn.execute(
         "SELECT balance FROM accounts WHERE account_id = ?", (account_id,)
     ).fetchone()[0]
     return balance
 
 
-def modify_balance(
+def update_balance(
     ctx: Context,
-    conn: Connection,
     account_id: int,
     amount: int,
 ) -> None:
+    conn: Connection = ctx.get_dependency("conn")
     cur = conn.execute(
         """
         UPDATE accounts
@@ -44,23 +45,21 @@ def modify_balance(
 def transaction(
     ctx: Context, conn: Connection, source: int, target: int, amount: int
 ) -> Generator[Yieldable, Any, None]:
-    source_balance: int = yield ctx.call(
-        get_current_balance, conn=conn, account_id=source
-    )
+    ctx.set_dependency(key="conn", obj=conn)
+
+    source_balance: int = yield ctx.call(current_balance, account_id=source)
 
     if source_balance - amount < 0:
-        raise NotEnoughMoneyError(account_id=source)
+        raise NotEnoughFundsError(account_id=source)
 
     yield ctx.call(
-        modify_balance,
-        conn=conn,
+        update_balance,
         account_id=source,
         amount=amount * -1,
     )
 
     yield ctx.call(
-        modify_balance,
-        conn=conn,
+        update_balance,
         account_id=target,
         amount=amount,
     )
