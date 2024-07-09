@@ -57,37 +57,7 @@ def test_race_condition(
             ),
         ]
     )
-
-    source_balance: int = conn.execute(
-        "SELECT balance FROM accounts WHERE account_id = 1"
-    ).fetchone()[0]
-    target_balance: int = conn.execute(
-        "SELECT balance FROM accounts WHERE account_id = 2"
-    ).fetchone()[0]
-
-    assert (
-        source_balance == 0 and target_balance == 100
-    ), f"Seed {scheduler.seed} causes a failure"
-
-
-@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([range(1)]))
-def test_a(
-    scheduler: DSTScheduler,
-    setup_and_teardown: sqlite3.Connection,
-) -> None:
-    conn = setup_and_teardown
-
-    _ = scheduler.run(
-        [
-            partial(
-                race_condition.transaction,
-                conn=conn,
-                source=1,
-                target=2,
-                amount=100,
-            ),
-        ]
-    )
+    conn.commit()
 
     source_balance: int = conn.execute(
         "SELECT balance FROM accounts WHERE account_id = 1"

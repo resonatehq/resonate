@@ -63,4 +63,3 @@ def transaction(
         account_id=target,
         amount=amount,
     )
-    conn.commit()
