@@ -14,7 +14,7 @@ async function throwOrReturn(v: any) {
 
 describe("Combinators", () => {
   const resonate = new Resonate({
-    retry: retry.never(),
+    retryPolicy: retry.never(),
   });
 
   describe("all", () => {

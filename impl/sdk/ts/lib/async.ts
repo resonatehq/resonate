@@ -294,7 +294,7 @@ export class Context {
     opts.tags = { ...resonateOptions.tags, ...registeredOptions.tags, ...fc.opts?.tags };
 
     // Default lock is false for children execution
-    opts.lock = opts.lock ?? false;
+    opts.shouldLock = opts.shouldLock ?? false;
 
     // create a new invocation
     const invocation = new Invocation(name, id, undefined, param, opts, parent);
@@ -341,7 +341,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.all(values), this.options({
-      retry: retryPolicy.never(),
+      retryPolicy: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -366,7 +366,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.any(values), this.options({
-      retry: retryPolicy.never(),
+      retryPolicy: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -391,7 +391,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.race(values), this.options({
-      retry: retryPolicy.never(),
+      retryPolicy: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -419,7 +419,7 @@ export class Context {
 
     // prettier-ignore
     return this.run(() => Promise.allSettled(values), this.options({
-      retry: retryPolicy.never(),
+      retryPolicy: retryPolicy.never(),
       ...opts,
     }));
   }
@@ -446,7 +446,7 @@ export class Context {
     }
 
     // tight loop in case the promise is not yet resolved
-    await promise.wait(Infinity, this.invocation.opts.poll);
+    await promise.wait(Infinity, this.invocation.opts.pollFrequency);
   }
 
   /**
@@ -519,7 +519,7 @@ class Scheduler {
     const param = {
       func: name,
       version: opts.version,
-      retryPolicy: opts.retry,
+      retryPolicy: opts.retryPolicy,
       args,
     };
 

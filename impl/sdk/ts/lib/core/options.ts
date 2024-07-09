@@ -34,7 +34,7 @@ export type ResonateOptions = {
    * The frequency in ms to poll the promise store for remote
    * promises.
    */
-  poll: number;
+  pollFrequency: number;
 
   /**
    * A logger instance, if not provided a default logger will be
@@ -45,7 +45,7 @@ export type ResonateOptions = {
   /**
    * A retry policy, defaults to exponential backoff.
    */
-  retry: RetryPolicy;
+  retryPolicy: RetryPolicy;
 
   /**
    * Tags to add to all durable promises.
@@ -102,17 +102,17 @@ export type Options = {
   /**
    * Acquire a lock for the execution.
    */
-  lock: boolean | undefined;
+  shouldLock: boolean | undefined;
 
   /**
    * Overrides the default polling frequency.
    */
-  poll: number;
+  pollFrequency: number;
 
   /**
    * Overrides the default retry policy.
    */
-  retry: RetryPolicy;
+  retryPolicy: RetryPolicy;
 
   /**
    * Additional tags to add to the durable promise.

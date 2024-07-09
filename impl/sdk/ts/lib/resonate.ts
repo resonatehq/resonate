@@ -6,7 +6,7 @@ import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { ResonateOptions, Options, PartialOptions } from "./core/options";
 import * as promises from "./core/promises/promises";
-import * as retryPolicy from "./core/retry";
+import * as retryPolicies from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
 import { IStore } from "./core/store";
 import { LocalStore } from "./core/stores/local";
@@ -30,13 +30,13 @@ export abstract class ResonateBase {
   public readonly schedules: ResonateSchedules;
 
   public readonly pid: string;
-  public readonly poll: number;
+  public readonly pollFrequency: number;
   public readonly timeout: number;
   public readonly tags: Record<string, string>;
 
   public readonly encoder: IEncoder<unknown, string | undefined>;
   public readonly logger: ILogger;
-  public readonly retry: retryPolicy.RetryPolicy;
+  public readonly retryPolicy: retryPolicies.RetryPolicy;
   public readonly store: IStore;
 
   private interval: NodeJS.Timeout | undefined;
@@ -47,8 +47,8 @@ export abstract class ResonateBase {
     heartbeat = 15000, // 15s
     logger = new Logger(),
     pid = utils.randomId(),
-    poll = 5000, // 5s
-    retry = retryPolicy.exponential(),
+    pollFrequency = 5000, // 5s
+    retryPolicy = retryPolicies.exponential(),
     store = undefined,
     tags = {},
     timeout = 10000, // 10s
@@ -57,8 +57,8 @@ export abstract class ResonateBase {
     this.encoder = encoder;
     this.logger = logger;
     this.pid = pid;
-    this.poll = poll;
-    this.retry = retry;
+    this.pollFrequency = pollFrequency;
+    this.retryPolicy = retryPolicy;
     this.tags = tags;
     this.timeout = timeout;
 
@@ -175,7 +175,7 @@ export abstract class ResonateBase {
     let tfc!: TFC;
     if (typeof nameOrTfc === "string") {
       const { args, opts: givenOpts } = utils.split(argsWithOpts);
-      const { durable, eidFn, idempotencyKeyFn, retry, tags, timeout, version } = givenOpts;
+      const { durable, eidFn, idempotencyKeyFn, retryPolicy, tags, timeout, version } = givenOpts;
 
       if (!id) {
         throw new Error("Id was not set for a top level function call");
@@ -189,7 +189,7 @@ export abstract class ResonateBase {
           durable,
           eidFn,
           idempotencyKeyFn,
-          retry,
+          retryPolicy,
           tags,
           timeout,
           version,
@@ -229,7 +229,7 @@ export abstract class ResonateBase {
     opts.tags = { ...registeredOpts.tags, ...tfc.optsOverrides.tags, "resonate:invocation": "true" };
 
     // lock on top level is true by default
-    opts.lock = opts.lock ?? true;
+    opts.shouldLock = opts.shouldLock ?? true;
 
     return this.execute(tfc.funcName, tfc.id, func, tfc.args, opts);
   }
@@ -269,7 +269,7 @@ export abstract class ResonateBase {
     }
 
     const {
-      opts: { retry, version, timeout, tags: promiseTags },
+      opts: { retryPolicy: retry, version, timeout, tags: promiseTags },
     } = this.functions[funcName][opts.version];
 
     const idempotencyKey = opts.idempotencyKeyFn(funcName);
@@ -322,9 +322,9 @@ export abstract class ResonateBase {
     eidFn = utils.randomId,
     encoder = this.encoder,
     idempotencyKeyFn = utils.hash,
-    lock = undefined,
-    poll = this.poll,
-    retry = this.retry,
+    shouldLock: lock = undefined,
+    pollFrequency: poll = this.pollFrequency,
+    retryPolicy: retry = this.retryPolicy,
     tags = {},
     timeout = this.timeout,
     version = 0,
@@ -338,9 +338,9 @@ export abstract class ResonateBase {
       durable,
       encoder,
       idempotencyKeyFn,
-      lock,
-      poll,
-      retry,
+      shouldLock: lock,
+      pollFrequency: poll,
+      retryPolicy: retry,
       tags,
       timeout,
       version,
@@ -362,10 +362,10 @@ export abstract class ResonateBase {
             "args" in param &&
             Array.isArray(param.args) &&
             "retryPolicy" in param &&
-            retryPolicy.isRetryPolicy(param.retryPolicy)
+            retryPolicies.isRetryPolicy(param.retryPolicy)
           ) {
             const { func, opts } = this.functions[param.func][param.version];
-            opts.retry = param.retryPolicy;
+            opts.retryPolicy = param.retryPolicy;
             this.execute(param.func, promise.id, func, param.args, opts, promise);
           }
         }

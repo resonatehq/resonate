@@ -21,20 +21,20 @@ async function aTest(ctx: a.Context, opts: Partial<Options> = {}) {
 describe("Options", () => {
   const resonateOpts = {
     encoder: new JSONEncoder(),
-    poll: 1000,
-    retry: retry.exponential(),
+    pollFrequency: 1000,
+    retryPolicy: retry.exponential(),
     tags: { a: "a", b: "b", c: "c" },
     timeout: 1000,
   };
 
-  const overrides = {
+  const overrides: Partial<Options> = {
     durable: false,
     eidFn: () => "eid",
     encoder: new Base64Encoder(),
     idempotencyKeyFn: (_: string) => "idempotencyKey",
-    lock: false,
-    poll: 2000,
-    retry: retry.linear(),
+    shouldLock: false,
+    pollFrequency: 2000,
+    retryPolicy: retry.linear(),
     tags: { c: "x", d: "d", e: "e" },
     timeout: 2000,
     version: 2,
@@ -61,15 +61,15 @@ describe("Options", () => {
       expect(opts.eidFn).toBe(utils.randomId);
       expect(opts.encoder).toBe(resonateOpts.encoder);
       expect(opts.idempotencyKeyFn).toBe(utils.hash);
-      expect(opts.poll).toBe(resonateOpts.poll);
-      expect(opts.retry).toBe(resonateOpts.retry);
+      expect(opts.pollFrequency).toBe(resonateOpts.pollFrequency);
+      expect(opts.retryPolicy).toBe(resonateOpts.retryPolicy);
       expect(opts.timeout).toBe(resonateOpts.timeout);
       expect(opts.version).toBe(1);
     }
 
-    expect(top.lock).toBe(true);
-    expect(middle.lock).toBe(false);
-    expect(bottom.lock).toBe(false);
+    expect(top.shouldLock).toBe(true);
+    expect(middle.shouldLock).toBe(false);
+    expect(bottom.shouldLock).toBe(false);
 
     expect(top.tags).toEqual({ ...resonateOpts.tags, "resonate:invocation": "true" });
     expect(middle.tags).toEqual(resonateOpts.tags);
@@ -84,9 +84,9 @@ describe("Options", () => {
       expect(opts.eidFn).toBe(overrides.eidFn);
       expect(opts.encoder).toBe(overrides.encoder);
       expect(opts.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
-      expect(opts.lock).toBe(overrides.lock);
-      expect(opts.poll).toBe(overrides.poll);
-      expect(opts.retry).toBe(overrides.retry);
+      expect(opts.shouldLock).toBe(overrides.shouldLock);
+      expect(opts.pollFrequency).toBe(overrides.pollFrequency);
+      expect(opts.retryPolicy).toBe(overrides.retryPolicy);
       expect(opts.timeout).toBe(overrides.timeout);
       expect(opts.version).toBe(overrides.version);
     }
@@ -111,9 +111,9 @@ describe("Options", () => {
     expect(top.eidFn).toBe(overrides.eidFn);
     expect(top.encoder).toBe(resonateOpts.encoder);
     expect(top.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
-    expect(top.lock).toBe(true);
-    expect(top.poll).toBe(resonateOpts.poll);
-    expect(top.retry).toBe(overrides.retry);
+    expect(top.shouldLock).toBe(true);
+    expect(top.pollFrequency).toBe(resonateOpts.pollFrequency);
+    expect(top.retryPolicy).toBe(overrides.retryPolicy);
     expect(top.tags).toEqual({ ...resonateOpts.tags, ...overrides.tags, "resonate:invocation": "true" });
     expect(top.timeout).toBe(overrides.timeout);
     expect(top.version).toBe(overrides.version);
@@ -124,9 +124,9 @@ describe("Options", () => {
       expect(opts.eidFn).toBe(utils.randomId);
       expect(opts.encoder).toBe(resonateOpts.encoder);
       expect(opts.idempotencyKeyFn).toBe(utils.hash);
-      expect(opts.lock).toBe(false);
-      expect(opts.poll).toBe(resonateOpts.poll);
-      expect(opts.retry).toBe(resonateOpts.retry);
+      expect(opts.shouldLock).toBe(false);
+      expect(opts.pollFrequency).toBe(resonateOpts.pollFrequency);
+      expect(opts.retryPolicy).toBe(resonateOpts.retryPolicy);
       expect(opts.tags).toEqual(resonateOpts.tags);
       expect(opts.timeout).toBe(resonateOpts.timeout);
       expect(opts.version).toBe(overrides.version);
@@ -146,9 +146,9 @@ describe("Options", () => {
     expect(middle.eidFn).toBe(overrides.eidFn);
     expect(middle.encoder).toBe(overrides.encoder);
     expect(middle.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
-    expect(middle.lock).toBe(overrides.lock);
-    expect(middle.poll).toBe(overrides.poll);
-    expect(middle.retry).toBe(overrides.retry);
+    expect(middle.shouldLock).toBe(overrides.shouldLock);
+    expect(middle.pollFrequency).toBe(overrides.pollFrequency);
+    expect(middle.retryPolicy).toBe(overrides.retryPolicy);
     expect(middle.tags).toEqual({ ...resonateOpts.tags, ...overrides.tags });
     expect(middle.timeout).toBe(overrides.timeout);
 
@@ -158,8 +158,8 @@ describe("Options", () => {
       expect(opts.eidFn).toBe(utils.randomId);
       expect(opts.encoder).toBe(resonateOpts.encoder);
       expect(opts.idempotencyKeyFn).toBe(utils.hash);
-      expect(opts.poll).toBe(resonateOpts.poll);
-      expect(opts.retry).toBe(resonateOpts.retry);
+      expect(opts.pollFrequency).toBe(resonateOpts.pollFrequency);
+      expect(opts.retryPolicy).toBe(resonateOpts.retryPolicy);
       expect(opts.timeout).toBe(resonateOpts.timeout);
     }
 
@@ -167,8 +167,8 @@ describe("Options", () => {
     expect(middle.version).toBeDefined();
     expect(bottom.version).toBeDefined();
 
-    expect(top.lock).toBe(true);
-    expect(bottom.lock).toBe(false);
+    expect(top.shouldLock).toBe(true);
+    expect(bottom.shouldLock).toBe(false);
 
     expect(top.tags).toEqual({ ...resonateOpts.tags, "resonate:invocation": "true" });
     expect(bottom.tags).toEqual(resonateOpts.tags);

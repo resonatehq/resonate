@@ -126,8 +126,8 @@ export class OrdinaryExecution<T> extends Execution<T> {
   protected async join(future: Future<T>) {
     try {
       // acquire lock if necessary
-      while (this.invocation.opts.lock && !(await this.acquireLock())) {
-        await new Promise((resolve) => setTimeout(resolve, this.invocation.opts.poll));
+      while (this.invocation.opts.shouldLock && !(await this.acquireLock())) {
+        await new Promise((resolve) => setTimeout(resolve, this.invocation.opts.pollFrequency));
       }
 
       if (this.durablePromise) {
@@ -170,7 +170,7 @@ export class OrdinaryExecution<T> extends Execution<T> {
       }
 
       // release lock if necessary
-      if (this.invocation.opts.lock) {
+      if (this.invocation.opts.shouldLock) {
         await this.releaseLock();
       }
     } catch (e) {
@@ -238,7 +238,7 @@ export class DeferredExecution<T> extends Execution<T> {
   protected async join(future: Future<T>) {
     if (this.durablePromise) {
       // poll the completion of the durable promise
-      await this.durablePromise.sync(Infinity, this.invocation.opts.poll);
+      await this.durablePromise.sync(Infinity, this.invocation.opts.pollFrequency);
 
       if (this.durablePromise.resolved) {
         this.invocation.resolve(this.durablePromise.value());

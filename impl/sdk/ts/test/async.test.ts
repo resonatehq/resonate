@@ -31,25 +31,25 @@ describe("Functions: async", () => {
   }
 
   async function deferredSuccess(ctx: Context) {
-    return await ctx.run("success", ctx.options({ poll: 0 }));
+    return await ctx.run("success", ctx.options({ pollFrequency: 0 }));
   }
 
   async function deferredSuccessRFC(ctx: Context) {
-    return await ctx.run({ funcName: "success", opts: ctx.options({ poll: 0 }) });
+    return await ctx.run({ funcName: "success", opts: ctx.options({ pollFrequency: 0 }) });
   }
 
   async function deferredFailure(ctx: Context) {
-    return await ctx.run("failure", ctx.options({ poll: 0 }));
+    return await ctx.run("failure", ctx.options({ pollFrequency: 0 }));
   }
 
   async function deferredFailureRFC(ctx: Context) {
-    return await ctx.run({ funcName: "failure", opts: ctx.options({ poll: 0 }) });
+    return await ctx.run({ funcName: "failure", opts: ctx.options({ pollFrequency: 0 }) });
   }
 
   test("success", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: retry.exponential(
+      retryPolicy: retry.exponential(
         100, // initial delay (in ms)
         2, // backoff factor
         Infinity, // max attempts
@@ -90,7 +90,7 @@ describe("Functions: async", () => {
   test("failure", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: retry.linear(0, 3),
+      retryPolicy: retry.linear(0, 3),
     });
 
     resonate.register("run", run);
@@ -126,7 +126,7 @@ describe("Functions: async", () => {
   test("FC and non FC apis produce same result", async () => {
     const resonate = new Resonate({
       timeout: 1000,
-      retry: retry.linear(0, 3),
+      retryPolicy: retry.linear(0, 3),
     });
 
     resonate.register("runFC", async (ctx: Context, arg1: string, arg2: string) => {

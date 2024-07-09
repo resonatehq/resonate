@@ -22,7 +22,7 @@ export type TFC = {
   // with the DurablePromise can be overriden that way we can have the same set
   // of options when running in the recovery path.
   optsOverrides?: Partial<
-    Pick<Options, "durable" | "eidFn" | "idempotencyKeyFn" | "retry" | "tags" | "timeout" | "version">
+    Pick<Options, "durable" | "eidFn" | "idempotencyKeyFn" | "retryPolicy" | "tags" | "timeout" | "version">
   >;
 };
 
