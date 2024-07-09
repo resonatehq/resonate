@@ -20,13 +20,13 @@ packaging==24.1
 pluggy==1.5.0
     # via pytest
 pytest==8.2.2
-resonate @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..
+resonate-sdk==0.1.0
     # via race-condition
 result==0.17.0
-    # via resonate
+    # via resonate-sdk
 tomli==2.0.1
     # via mypy
     # via pytest
 typing-extensions==4.12.2
     # via mypy
-    # via resonate
+    # via resonate-sdk

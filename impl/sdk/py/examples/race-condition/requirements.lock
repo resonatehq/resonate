@@ -8,9 +8,9 @@
 #   with-sources: false
 
 -e file:.
-resonate @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..
+resonate-sdk==0.1.0
     # via race-condition
 result==0.17.0
-    # via resonate
+    # via resonate-sdk
 typing-extensions==4.12.2
-    # via resonate
+    # via resonate-sdk
