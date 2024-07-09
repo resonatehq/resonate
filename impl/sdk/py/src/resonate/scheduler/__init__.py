@@ -10,11 +10,11 @@ from typing import TYPE_CHECKING, Any, Callable
 from result import Ok
 from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
-from resonate_sdk_py import utils
-from resonate_sdk_py.context import Call, Context, Invoke
-from resonate_sdk_py.logging import logger
-from resonate_sdk_py.processor import SQE, Processor
-from resonate_sdk_py.typing import CoroAndPromise, Runnable
+from resonate import utils
+from resonate.context import Call, Context, Invoke
+from resonate.logging import logger
+from resonate.processor import SQE, Processor
+from resonate.typing import CoroAndPromise, Runnable
 
 from .itertools import (
     FinalValue,
@@ -32,7 +32,7 @@ from .shared import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate_sdk_py.typing import Yieldable
+    from resonate.typing import Yieldable
 
 
 T = TypeVar("T")

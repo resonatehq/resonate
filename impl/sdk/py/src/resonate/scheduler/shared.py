@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, cast
 from result import Err, Ok, Result
 from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
-from resonate_sdk_py.context import Context
-from resonate_sdk_py.processor import IAsyncCommand, ICommand
+from resonate.context import Context
+from resonate.processor import IAsyncCommand, ICommand
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine

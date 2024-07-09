@@ -25,7 +25,7 @@ pluggy==1.5.0
     # via pytest
 pytest==8.2.2
 result==0.17.0
-    # via resonate-sdk-py
+    # via resonate
 ruff==0.5.0
 sortedcontainers==2.4.0
     # via hypothesis
@@ -34,5 +34,5 @@ tomli==2.0.1
     # via pytest
 typing-extensions==4.12.2
     # via mypy
-    # via resonate-sdk-py
+    # via resonate
     # via result

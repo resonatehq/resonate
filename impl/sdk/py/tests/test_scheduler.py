@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate_sdk_py.scheduler import (
+from resonate.scheduler import (
     Promise,
     Scheduler,
 )
@@ -11,8 +11,8 @@ from resonate_sdk_py.scheduler import (
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate_sdk_py.context import Context
-    from resonate_sdk_py.typing import Yieldable
+    from resonate.context import Context
+    from resonate.typing import Yieldable
 
 
 def _nested_gen(ctx: Context, a: Promise[int]) -> Generator[Yieldable, Any, int]:  # noqa: ARG001

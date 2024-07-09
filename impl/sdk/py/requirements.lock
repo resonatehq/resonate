@@ -9,7 +9,7 @@
 
 -e file:.
 result==0.17.0
-    # via resonate-sdk-py
+    # via resonate
 typing-extensions==4.12.2
-    # via resonate-sdk-py
+    # via resonate
     # via result

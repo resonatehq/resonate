@@ -1,5 +1,5 @@
 [project]
-name = "resonate-sdk-py"
+name = "resonate"
 version = "0.1.0"
 description = "Distributed Async Await by Resonate HQ, Inc"
 authors = [
@@ -33,7 +33,7 @@ check-types = "dmypy run --timeout 60 -- src tests"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/resonate_sdk_py"]
+packages = ["src/resonate"]
 
 
 [tool.ruff]
