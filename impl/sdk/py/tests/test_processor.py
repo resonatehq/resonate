@@ -6,7 +6,7 @@ from functools import partial
 from time import sleep
 from typing import TypeVar
 
-from resonate_sdk_py.processor import SQE, IAsyncCommand, ICommand, Processor
+from resonate.processor import SQE, IAsyncCommand, ICommand, Processor
 from result import Ok, Result
 
 T = TypeVar("T")

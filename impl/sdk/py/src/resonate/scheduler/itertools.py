@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING, Any, Generic
 from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeVar, assert_never
 
-from resonate_sdk_py.logging import logger
-from resonate_sdk_py.typing import PendingToRun, Runnable, WaitingForPromiseResolution
+from resonate.logging import logger
+from resonate.typing import PendingToRun, Runnable, WaitingForPromiseResolution
 
 if TYPE_CHECKING:
-    from resonate_sdk_py.scheduler.shared import (
+    from resonate.scheduler.shared import (
         Promise,
     )
-    from resonate_sdk_py.typing import Yieldable
+    from resonate.typing import Yieldable
 
 T = TypeVar("T")
 P = ParamSpec("P")

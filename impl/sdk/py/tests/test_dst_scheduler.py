@@ -5,16 +5,16 @@ from functools import partial
 from typing import TYPE_CHECKING, Any
 
 import pytest
-import resonate_sdk_py
-from resonate_sdk_py.scheduler.dst import DSTScheduler
+import resonate
+from resonate.scheduler.dst import DSTScheduler
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate_sdk_py.context import Context
-    from resonate_sdk_py.scheduler.shared import Promise
-    from resonate_sdk_py.typing import Yieldable
+    from resonate.context import Context
+    from resonate.scheduler.shared import Promise
+    from resonate.typing import Yieldable
 
 T = TypeVar("T")
 
@@ -121,7 +121,7 @@ def test_failing_asserting() -> None:
 
 
 @pytest.mark.dst()
-@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([range(10)]))
+@pytest.mark.parametrize("scheduler", resonate.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
     promises = scheduler.run(
         [

@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 import race_condition
-import resonate_sdk_py
+import resonate
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate_sdk_py.scheduler.dst import DSTScheduler
+    from resonate.scheduler.dst import DSTScheduler
 
 
 @pytest.fixture()
@@ -32,7 +32,7 @@ def setup_and_teardown() -> Generator[sqlite3.Connection, None, None]:
     yield conn
 
 
-@pytest.mark.parametrize("scheduler", resonate_sdk_py.testing.dst([range(20)]))
+@pytest.mark.parametrize("scheduler", resonate.testing.dst([range(20)]))
 def test_race_condition(
     scheduler: DSTScheduler,
     setup_and_teardown: sqlite3.Connection,

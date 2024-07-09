@@ -1,4 +1,4 @@
-# resonate-sdk-py
+# resonate
 
 1. Retry logic
 2. Implement the Invocation with retry logic

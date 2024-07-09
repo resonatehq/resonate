@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing_extensions import assert_never
 
-from resonate_sdk_py.scheduler.dst import DSTScheduler
+from resonate.scheduler.dst import DSTScheduler
 
 
 def dst(seeds: list[range | int]) -> list[DSTScheduler]:

@@ -12,13 +12,13 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
 from result import Err, Ok
 
-from resonate_sdk_py import utils
-from resonate_sdk_py.logging import logger
+from resonate import utils
+from resonate.logging import logger
 
 if TYPE_CHECKING:
     from result import Result
 
-    from resonate_sdk_py.scheduler import Scheduler
+    from resonate.scheduler import Scheduler
 
 T = TypeVar("T")
 
