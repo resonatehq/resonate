@@ -3,12 +3,12 @@ from __future__ import annotations
 from sqlite3 import Connection
 from typing import TYPE_CHECKING, Any
 
-from resonate_sdk_py.typing import Yieldable
+from resonate.typing import Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate_sdk_py.context import Context
+    from resonate.context import Context
 
 
 class NotEnoughFundsError(Exception):

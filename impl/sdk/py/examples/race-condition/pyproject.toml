@@ -6,7 +6,7 @@ authors = [
     { name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }
 ]
 dependencies = [
-    "resonate-sdk-py @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..",
+    "resonate @ file:///Users/tomasperez/Documents/resonate/resonate-sdk-py/examples/race-condition/../..",
 ]
 readme = "README.md"
 requires-python = ">= 3.10"
