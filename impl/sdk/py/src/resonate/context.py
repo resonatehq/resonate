@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 from typing_extensions import Concatenate, ParamSpec
 
+from resonate.dependency_injection import Dependencies
+
 if TYPE_CHECKING:
     from collections.abc import Coroutine
 
@@ -45,25 +47,16 @@ class Context:
     def __init__(
         self,
         parent_ctx: Context | None = None,
-        deps: dict[str, Any] | None = None,
+        deps: Dependencies | None = None,
         *,
         dst: bool = False,
     ) -> None:
         self.parent_ctx = parent_ctx
         self.dst = dst
-        self._deps = deps or {}
+        self.deps = deps or Dependencies()
 
     def new_child(self) -> Context:
-        return Context(parent_ctx=self, dst=self.dst, deps=self._deps)
-
-    def set_dependency(self, key: str, obj: Any) -> None:  # noqa: ANN401
-        if key in self._deps:
-            msg = f"There's already an object under key: {key}"
-            raise RuntimeError(msg)
-        self._deps[key] = obj
-
-    def get_dependency(self, key: str) -> Any:  # noqa: ANN401
-        return self._deps[key]
+        return Context(parent_ctx=self, dst=self.dst, deps=self.deps)
 
     def assert_statement(self, stmt: bool, msg: str) -> None:  # noqa: FBT001
         if not self.dst:

@@ -12,6 +12,7 @@ from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
 from resonate import utils
 from resonate.context import Call, Context, Invoke
+from resonate.dependency_injection import Dependencies
 from resonate.logging import logger
 from resonate.processor import SQE, Processor
 from resonate.typing import CoroAndPromise, Runnable
@@ -51,6 +52,7 @@ class Scheduler:
             scheduler=self,
         )
         self._batch_size = batch_size
+        self.deps = Dependencies()
 
     def signal(self) -> None:
         with self._lock:
@@ -64,7 +66,7 @@ class Scheduler:
         **kwargs: P.kwargs,
     ) -> Promise[T]:
         p = Promise[T]()
-        ctx = Context()
+        ctx = Context(deps=self.deps)
         self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p))
         self.signal()
 
