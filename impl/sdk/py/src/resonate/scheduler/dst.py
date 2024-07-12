@@ -44,7 +44,7 @@ class DSTScheduler:
         self._execution_events: list[str] = []
         self._callbacks_to_run: list[Callable[..., None]] = []
         self.seed = seed
-        self._r = random.Random(self.seed)  # noqa: RUF100, S311
+        self.random = random.Random(self.seed)  # noqa: RUF100, S311
         self.deps = Dependencies()
 
     def _add(
@@ -70,13 +70,13 @@ class DSTScheduler:
             promises.append(p)
 
         while True:
-            next_step = self._r.choice(["callbacks", "runnables"])
+            next_step = self.random.choice(["callbacks", "runnables"])
             if next_step == "callbacks" and self._callbacks_to_run:
-                cb = get_random_element(self._callbacks_to_run, r=self._r)
+                cb = get_random_element(self._callbacks_to_run, r=self.random)
                 cb()
 
             if next_step == "runnables" and self._pending_to_run:
-                runnable = get_random_element(self._pending_to_run, r=self._r)
+                runnable = get_random_element(self._pending_to_run, r=self.random)
                 self._process_each_runnable(runnable=runnable)
 
             if not self._callbacks_to_run and not self._pending_to_run:
