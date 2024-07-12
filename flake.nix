@@ -18,7 +18,8 @@
     let
       # Version inference
       lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
-      version = "${builtins.substring 0 8 lastModifiedDate}-${self.shortRev or "dirty"}";
+      shortRev = "${self.shortRev or "dirty"}";
+      version = "${builtins.substring 0 8 lastModifiedDate}-${shortRev}";
 
       # Helpers for producing system-specific outputs
       supportedSystems = [ "x86_64-linux" "aarch64-darwin" "x86_64-darwin" "aarch64-linux" ];
@@ -77,6 +78,7 @@
         # The Resonate server
         resonate = pkgs.buildGoApplication rec {
           pname = "resonate";
+          inherit shortRev;
           inherit version;
           src = self;
           modules = ./gomod2nix.toml;
@@ -88,6 +90,7 @@
           ldflags = [
             "-s"
             "-w"
+            "-X github.com/resonatehq/resonate/internal/version.commit=$(shortRev)"
           ] ++ pkgs.lib.optional (pkgs.stdenv.isLinux) [
             "-extldflags=-static"
             "-linkmode=external"
