@@ -37,41 +37,41 @@ func (k Kind) String() string {
 	switch k {
 	// PROMISES
 	case ReadPromise:
-		return "read-promise"
+		return "ReadPromise"
 	case SearchPromises:
-		return "search-promises"
+		return "SearchPromises"
 	case CreatePromise:
-		return "create-promise"
+		return "CreatePromise"
 	case CompletePromise:
-		return "complete-promise"
+		return "CompletePromise"
 	// SCHEDULES
 	case ReadSchedule:
-		return "read-schedule"
+		return "ReadSchedule"
 	case SearchSchedules:
-		return "search-schedules"
+		return "SearchSchedules"
 	case CreateSchedule:
-		return "create-schedule"
+		return "CreateSchedule"
 	case DeleteSchedule:
-		return "delete-schedule"
+		return "DeleteSchedule"
 	// SUBSCRIPTIONS
 	case ReadSubscriptions:
-		return "read-subscriptions"
+		return "ReadSubscriptions"
 	case CreateSubscription:
-		return "create-subscription"
+		return "CreateSubscription"
 	case DeleteSubscription:
-		return "delete-subscription"
+		return "DeleteSubscription"
 	// LOCKS
 	case AcquireLock:
-		return "acquire-lock"
+		return "AcquireLock"
 	case HeartbeatLocks:
-		return "heartbeat-locks"
+		return "HeartbeatLocks"
 	case ReleaseLock:
-		return "release-lock"
+		return "ReleaseLock"
 	// TASKS
 	case ClaimTask:
-		return "claim-task"
+		return "ClaimTask"
 	case CompleteTask:
-		return "complete-task"
+		return "CompleteTask"
 	default:
 		panic("invalid api")
 	}

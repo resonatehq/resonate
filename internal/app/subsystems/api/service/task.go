@@ -31,14 +31,13 @@ func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTa
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "claim-task"),
-		Submission: &t_api.Request{
-			Kind:      t_api.ClaimTask,
-			ClaimTask: claimTask,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:      t_api.ClaimTask,
+		Tags:      s.tags(header.RequestId, "ClaimTask"),
+		ClaimTask: claimTask,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -84,14 +83,13 @@ func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.C
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "complete-task"),
-		Submission: &t_api.Request{
-			Kind:         t_api.CompleteTask,
-			CompleteTask: completeTask,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:         t_api.CompleteTask,
+		Tags:         s.tags(header.RequestId, "CompleteTask"),
+		CompleteTask: completeTask,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {

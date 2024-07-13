@@ -12,6 +12,7 @@ import (
 
 type Request struct {
 	Kind Kind
+	Tags map[string]string
 
 	// PROMISES
 	ReadPromise     *ReadPromiseRequest
@@ -41,6 +42,10 @@ type Request struct {
 
 	// ECHO
 	Echo *EchoRequest
+}
+
+func (r *Request) Id() string {
+	return r.Tags["request_id"]
 }
 
 // Promises

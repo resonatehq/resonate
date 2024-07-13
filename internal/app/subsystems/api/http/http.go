@@ -112,6 +112,6 @@ type server struct {
 }
 
 func (s *server) log(c *gin.Context) {
-	c.Next()
 	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
+	c.Next()
 }

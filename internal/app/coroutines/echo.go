@@ -1,28 +1,27 @@
 package coroutines
 
 import (
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
-func Echo(metadata *metadata.Metadata, req *t_api.Request, res func(*t_api.Response, error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		submission := &t_aio.Submission{
-			Kind: t_aio.Echo,
-			Echo: &t_aio.EchoSubmission{
-				Data: req.Echo.Data,
-			},
-		}
+func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	submission := &t_aio.Submission{
+		Kind: t_aio.Echo,
+		Tags: r.Tags,
+		Echo: &t_aio.EchoSubmission{
+			Data: r.Echo.Data,
+		},
+	}
 
-		completion, _ := c.Yield(submission)
+	completion, _ := gocoro.YieldAndAwait(c, submission)
 
-		res(&t_api.Response{
-			Kind: t_api.Echo,
-			Echo: &t_api.EchoResponse{
-				Data: completion.Echo.Data,
-			},
-		}, nil)
-	})
+	return &t_api.Response{
+		Kind: t_api.Echo,
+		Tags: r.Tags,
+		Echo: &t_api.EchoResponse{
+			Data: completion.Echo.Data,
+		},
+	}, nil
 }

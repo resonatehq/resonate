@@ -28,7 +28,6 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 
 	for i, sqe := range sqes {
 		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Metadata: sqe.Metadata,
 			Callback: sqe.Callback,
 		}
 
@@ -38,6 +37,7 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 		} else {
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Store,
+				Tags: sqe.Submission.Tags, // propagate the tags
 				Store: &t_aio.StoreCompletion{
 					Results: results[i],
 				},

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
@@ -18,7 +18,8 @@ type AIO interface {
 	Start() error
 	Stop() error
 	Shutdown()
-	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion])
+	CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion]
+	Enqueue(*t_aio.Submission, func(*t_aio.Completion, error))
 	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 	Flush(int64)
 	Errors() <-chan error
@@ -45,7 +46,7 @@ type workerWrapper struct {
 	batchSize int
 }
 
-func New(size int, metrics *metrics.Metrics) AIO {
+func New(size int, metrics *metrics.Metrics) *aio {
 	return &aio{
 		cq:         make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], size),
 		subsystems: map[t_aio.Kind]*subsystemWrapper{},
@@ -108,12 +109,35 @@ func (a *aio) Errors() <-chan error {
 	return a.errors
 }
 
-func (a *aio) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
-	if subsystem, ok := a.subsystems[sqe.Submission.Kind]; ok {
+func (a *aio) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
+	return a.cq
+}
+
+func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
+	util.Assert(submission.Tags != nil, "submission tags must be set")
+
+	if subsystem, ok := a.subsystems[submission.Kind]; ok {
+		sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
+			Submission: submission,
+			Callback: func(completion *t_aio.Completion, err error) {
+				var status string
+				if err != nil {
+					status = "failure"
+				} else {
+					status = "success"
+				}
+
+				a.metrics.AioTotal.WithLabelValues(completion.Kind.String(), status).Inc()
+				a.metrics.AioInFlight.WithLabelValues(completion.Kind.String()).Dec()
+
+				callback(completion, err)
+			},
+		}
+
 		select {
 		case subsystem.sq <- sqe:
-			slog.Debug("aio:enqueue", "sqe", sqe)
-			a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
+			slog.Debug("aio:enqueue", "id", submission.Id(), "sqe", sqe)
+			a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 		default:
 			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, fmt.Sprintf("aio:subsytem:%s submission queue full", subsystem), nil))
 		}
@@ -134,18 +158,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 				return cqes
 			}
 
-			var status string
-			if cqe.Error != nil {
-				status = "failure"
-			} else {
-				status = "success"
-			}
-
-			tags := cqe.Metadata.Tags.Split("aio")
-			a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
-			a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
-
-			slog.Debug("aio:dequeue", "cqe", cqe)
+			slog.Debug("aio:dequeue", "id", cqe.Completion.Id(), "cqe", cqe)
 			cqes = append(cqes, cqe)
 		default:
 			return cqes

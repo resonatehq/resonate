@@ -35,7 +35,7 @@ type aioDST struct {
 	metrics    *metrics.Metrics
 }
 
-func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) AIO {
+func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	return &aioDST{
 		r:          r,
 		p:          p,
@@ -74,9 +74,30 @@ func (a *aioDST) Errors() <-chan error {
 	return nil
 }
 
-func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
-	slog.Debug("aio:enqueue", "sqe", sqe)
-	a.metrics.AioInFlight.WithLabelValues(sqe.Metadata.Tags.Split("aio")...).Inc()
+func (a *aioDST) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
+	panic("not implemented")
+}
+
+func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
+	sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
+		Submission: submission,
+		Callback: func(completion *t_aio.Completion, err error) {
+			var status string
+			if err != nil {
+				status = "failure"
+			} else {
+				status = "success"
+			}
+
+			a.metrics.AioTotal.WithLabelValues(completion.Kind.String(), status).Inc()
+			a.metrics.AioInFlight.WithLabelValues(completion.Kind.String()).Dec()
+
+			callback(completion, err)
+		},
+	}
+
+	slog.Debug("aio:enqueue", "id", submission.Id(), "sqe", sqe)
+	a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 
 	i := a.r.Intn(len(a.sqes) + 1)
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
@@ -85,19 +106,6 @@ func (a *aioDST) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := a.cqes[:min(n, len(a.cqes))]
 	a.cqes = a.cqes[min(n, len(a.cqes)):]
-
-	for _, cqe := range cqes {
-		var status string
-		if cqe.Error != nil {
-			status = "failure"
-		} else {
-			status = "success"
-		}
-
-		tags := cqe.Metadata.Tags.Split("aio")
-		a.metrics.AioTotal.WithLabelValues(append(tags, status)...).Inc()
-		a.metrics.AioInFlight.WithLabelValues(tags...).Dec()
-	}
 
 	return cqes
 }
@@ -111,36 +119,33 @@ func (a *aioDST) Flush(t int64) {
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			// maintain a list of sqes that were not marked as errors
-			sqesOk := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
+			_sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
+
 			for i := range sqes.Value {
 				// Simulate failure before processing
 				if a.r.Float64() < a.p {
 					cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-						Metadata:   sqes.Value[i].Metadata,
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
 						Error:      &AioDSTError{msg: "aio dst: failure, before processing"},
 					}
 					a.cqes = append(a.cqes, cqe)
 				} else {
-					sqesOk = append(sqesOk, sqes.Value[i])
+					_sqes = append(_sqes, sqes.Value[i])
+
 				}
 			}
 
-			// don't process if all sqes were marked as errors
-			if len(sqesOk) == 0 {
-				continue
-			}
-
 			// Process the SQE
-			processedCQEs := subsystem.NewWorker(0).Process(sqesOk)
+			cqes := subsystem.NewWorker(0).Process(_sqes)
+
 			// Simulate failure after processing
 			if a.r.Float64() < a.p {
-				processedCQEs[0].Completion = nil
-				processedCQEs[0].Error = &AioDSTError{msg: "aio dst: failure, after processing"}
+				cqes[0].Completion = nil
+				cqes[0].Error = &AioDSTError{msg: "aio dst: failure, after processing"}
 			}
-			a.cqes = append(a.cqes, processedCQEs...)
 
+			a.cqes = append(a.cqes, cqes...)
 		} else {
 			panic("invalid aio submission")
 		}

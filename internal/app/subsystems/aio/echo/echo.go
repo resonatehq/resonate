@@ -39,8 +39,9 @@ func (d *EchoDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]
 
 	for i, sqe := range sqes {
 		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Metadata: sqe.Metadata,
 			Completion: &t_aio.Completion{
+				Kind: t_aio.Echo,
+				Tags: sqe.Submission.Tags, // propagate the tags
 				Echo: &t_aio.EchoCompletion{
 					Data: sqe.Submission.Echo.Data,
 				},

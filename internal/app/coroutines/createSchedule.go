@@ -3,44 +3,82 @@ package coroutines
 import (
 	"log/slog"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
 
-type Coroutine = scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]
+func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	if r.CreateSchedule.Tags == nil {
+		r.CreateSchedule.Tags = map[string]string{}
+	}
+	if r.CreateSchedule.PromiseParam.Headers == nil {
+		r.CreateSchedule.PromiseParam.Headers = map[string]string{}
+	}
+	if r.CreateSchedule.PromiseParam.Data == nil {
+		r.CreateSchedule.PromiseParam.Data = []byte{}
+	}
+	if r.CreateSchedule.PromiseTags == nil {
+		r.CreateSchedule.PromiseTags = map[string]string{}
+	}
 
-type CallBackFn = func(*t_api.Response, error)
+	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+		Kind: t_aio.Store,
+		Tags: r.Tags,
+		Store: &t_aio.StoreSubmission{
+			Transaction: &t_aio.Transaction{
+				Commands: []*t_aio.Command{
+					{
+						Kind: t_aio.ReadSchedule,
+						ReadSchedule: &t_aio.ReadScheduleCommand{
+							Id: r.CreateSchedule.Id,
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		slog.Error("failed to read schedule", "req", r, "err", err)
+		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err)
+	}
 
-func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBackFn) *Coroutine {
-	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
-		if req.CreateSchedule.Tags == nil {
-			req.CreateSchedule.Tags = map[string]string{}
-		}
-		if req.CreateSchedule.PromiseParam.Headers == nil {
-			req.CreateSchedule.PromiseParam.Headers = map[string]string{}
-		}
-		if req.CreateSchedule.PromiseParam.Data == nil {
-			req.CreateSchedule.PromiseParam.Data = []byte{}
-		}
-		if req.CreateSchedule.PromiseTags == nil {
-			req.CreateSchedule.PromiseTags = map[string]string{}
+	util.Assert(completion.Store != nil, "completion must not be nil")
+	result := completion.Store.Results[0].ReadSchedule
+	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
+
+	var res *t_api.Response
+
+	if result.RowsReturned == 0 {
+		createdOn := c.Time()
+		next, err := util.Next(createdOn, r.CreateSchedule.Cron)
+		if err != nil {
+			slog.Error("failed to calculate next run time", "req", r, "err", err)
+			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err)
 		}
 
-		// check if it already exists.
-
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: r.Tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
-							Kind: t_aio.ReadSchedule,
-							ReadSchedule: &t_aio.ReadScheduleCommand{
-								Id: req.CreateSchedule.Id,
+							Kind: t_aio.CreateSchedule,
+							CreateSchedule: &t_aio.CreateScheduleCommand{
+								Id:             r.CreateSchedule.Id,
+								Description:    r.CreateSchedule.Description,
+								Cron:           r.CreateSchedule.Cron,
+								Tags:           r.CreateSchedule.Tags,
+								PromiseId:      r.CreateSchedule.PromiseId,
+								PromiseTimeout: r.CreateSchedule.PromiseTimeout,
+								PromiseParam:   r.CreateSchedule.PromiseParam,
+								PromiseTags:    r.CreateSchedule.PromiseTags,
+								NextRunTime:    next,
+								IdempotencyKey: r.CreateSchedule.IdempotencyKey,
+								CreatedOn:      createdOn,
 							},
 						},
 					},
@@ -48,111 +86,65 @@ func CreateSchedule(metadata *metadata.Metadata, req *t_api.Request, res CallBac
 			},
 		})
 		if err != nil {
-			slog.Error("failed to read schedule", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err))
-			return
+			slog.Error("failed to create schedule", "req", r, "err", err)
+			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create schedule", err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
-		result := completion.Store.Results[0].ReadSchedule
-		util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
+		result := completion.Store.Results[0].CreateSchedule
+		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-		// create if not found.
-
-		if result.RowsReturned == 0 {
-			createdOn := c.Time()
-			next, err := util.Next(createdOn, req.CreateSchedule.Cron)
-			if err != nil {
-				slog.Error("failed to calculate next run time", "req", req, "err", err)
-				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err))
-				return
-			}
-
-			completion, err := c.Yield(&t_aio.Submission{
-				Kind: t_aio.Store,
-				Store: &t_aio.StoreSubmission{
-					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.CreateSchedule,
-								CreateSchedule: &t_aio.CreateScheduleCommand{
-									Id:             req.CreateSchedule.Id,
-									Description:    req.CreateSchedule.Description,
-									Cron:           req.CreateSchedule.Cron,
-									Tags:           req.CreateSchedule.Tags,
-									PromiseId:      req.CreateSchedule.PromiseId,
-									PromiseTimeout: req.CreateSchedule.PromiseTimeout,
-									PromiseParam:   req.CreateSchedule.PromiseParam,
-									PromiseTags:    req.CreateSchedule.PromiseTags,
-									NextRunTime:    next,
-									IdempotencyKey: req.CreateSchedule.IdempotencyKey,
-									CreatedOn:      createdOn,
-								},
-							},
-						},
+		if result.RowsAffected == 1 {
+			res = &t_api.Response{
+				Kind: t_api.CreateSchedule,
+				Tags: r.Tags,
+				CreateSchedule: &t_api.CreateScheduleResponse{
+					Status: t_api.StatusCreated,
+					Schedule: &schedule.Schedule{
+						Id:             r.CreateSchedule.Id,
+						Description:    r.CreateSchedule.Description,
+						Cron:           r.CreateSchedule.Cron,
+						Tags:           r.CreateSchedule.Tags,
+						PromiseId:      r.CreateSchedule.PromiseId,
+						PromiseTimeout: r.CreateSchedule.PromiseTimeout,
+						PromiseParam:   r.CreateSchedule.PromiseParam,
+						PromiseTags:    r.CreateSchedule.PromiseTags,
+						LastRunTime:    nil,
+						NextRunTime:    next,
+						IdempotencyKey: r.CreateSchedule.IdempotencyKey,
+						CreatedOn:      createdOn,
 					},
 				},
-			})
-			if err != nil {
-				slog.Error("failed to create schedule", "req", req, "err", err)
-				res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create schedule", err))
-				return
 			}
-
-			util.Assert(completion.Store != nil, "completion must not be nil")
-			result := completion.Store.Results[0].CreateSchedule
-			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
-
-			if result.RowsAffected == 1 {
-				res(&t_api.Response{
-					Kind: t_api.CreateSchedule,
-					CreateSchedule: &t_api.CreateScheduleResponse{
-						Status: t_api.StatusCreated,
-						Schedule: &schedule.Schedule{
-							Id:             req.CreateSchedule.Id,
-							Description:    req.CreateSchedule.Description,
-							Cron:           req.CreateSchedule.Cron,
-							Tags:           req.CreateSchedule.Tags,
-							PromiseId:      req.CreateSchedule.PromiseId,
-							PromiseTimeout: req.CreateSchedule.PromiseTimeout,
-							PromiseParam:   req.CreateSchedule.PromiseParam,
-							PromiseTags:    req.CreateSchedule.PromiseTags,
-							LastRunTime:    nil,
-							NextRunTime:    next,
-							IdempotencyKey: req.CreateSchedule.IdempotencyKey,
-							CreatedOn:      createdOn,
-						},
-					},
-				}, nil)
-			} else {
-				c.Scheduler.Add(CreateSchedule(metadata, req, res))
-			}
-			return
+		} else {
+			// It's possible that the schedule was completed by another coroutine
+			// while we were creating. In that case, we should just retry.
+			return CreateSchedule(c, r)
 		}
-
+	} else {
 		// return resource conflict.
 
 		s, err := result.Records[0].Schedule()
 		if err != nil {
-			slog.Error("failed to parse schedule", "req", req, "err", err)
-			res(nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to parse schedule", err))
-			return
+			slog.Error("failed to parse schedule", "req", r, "err", err)
+			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to parse schedule", err)
 		}
 
 		status := t_api.StatusScheduleAlreadyExists
-
-		// if same idempotency key, return ok.
-
-		if s.IdempotencyKey.Match(req.CreateSchedule.IdempotencyKey) {
+		if s.IdempotencyKey.Match(r.CreateSchedule.IdempotencyKey) {
 			status = t_api.StatusOK
 		}
 
-		res(&t_api.Response{
+		res = &t_api.Response{
 			Kind: t_api.CreateSchedule,
+			Tags: r.Tags,
 			CreateSchedule: &t_api.CreateScheduleResponse{
 				Status:   status,
 				Schedule: s,
 			},
-		}, nil)
-	})
+		}
+	}
+
+	util.Assert(res != nil, "response must not be nil")
+	return res, nil
 }

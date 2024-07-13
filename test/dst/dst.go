@@ -9,8 +9,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
@@ -144,27 +142,25 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System,
 			req := req
 			reqTime := t
 
-			metadata := metadata.New(strconv.FormatInt(i, 10))
-			metadata.Tags.Set("name", req.Kind.String())
-			metadata.Tags.Set("api", "dst")
+			req.Tags = map[string]string{
+				"request_id": strconv.FormatInt(i, 10),
+				"name":       req.Kind.String(),
+				"api":        "dst",
+			}
 
-			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-				Metadata:   metadata,
-				Submission: req,
-				Callback: func(res *t_api.Response, err error) {
-					resTime := t
-					modelErr := model.Step(reqTime, resTime, req, res, err)
-					if modelErr != nil {
-						errs = append(errs, modelErr)
-					}
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", metadata.TransactionId, "req", req, "res", res, "err", err, "ok", modelErr == nil)
-				},
+			api.Enqueue(req, func(res *t_api.Response, err error) {
+				resTime := t
+				modelErr := model.Step(reqTime, resTime, req, res, err)
+				if modelErr != nil {
+					errs = append(errs, modelErr)
+				}
+				slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", req.Tags["request_id"], "req", req, "res", res, "err", err, "ok", modelErr == nil)
 			})
 
 			i++
 		}
 
-		system.Tick(t, nil)
+		system.Tick(t, nil, nil)
 
 		if len(errs) > 0 {
 			break

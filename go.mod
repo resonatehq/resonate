@@ -1,6 +1,8 @@
 module github.com/resonatehq/resonate
 
-go 1.21
+go 1.21.3
+
+toolchain go1.22.4
 
 require (
 	github.com/gin-gonic/gin v1.10.0
@@ -14,6 +16,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oapi-codegen/runtime v1.1.1
 	github.com/prometheus/client_golang v1.19.1
+	github.com/resonatehq/gocoro v0.0.0-20240709182111-1287190e8d8c
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0
@@ -21,6 +24,8 @@ require (
 	google.golang.org/grpc v1.64.0
 	google.golang.org/protobuf v1.34.2
 )
+
+replace github.com/resonatehq/gocoro => ../gocoro
 
 require (
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect

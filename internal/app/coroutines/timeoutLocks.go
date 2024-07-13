@@ -1,25 +1,22 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func TimeoutLocks(t int64, config *system.Config) *Coroutine {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:timeoutLock", t))
-	metadata.Tags.Set("name", "timeout-locks")
+func TimeoutLocks(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(tags != nil, "tags must be set")
 
-	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
-
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
 		// Try to timeout all expired locks.
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -35,11 +32,13 @@ func TimeoutLocks(t int64, config *system.Config) *Coroutine {
 		})
 		if err != nil {
 			slog.Error("failed to timeout expired locks", "err", err)
-			return
+			return nil, nil
 		}
 
 		// up the asserts !
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == 1, "completion must have three results")
-	})
+
+		return nil, nil
+	}
 }

@@ -17,16 +17,15 @@ import (
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "read-promise"),
-		Submission: &t_api.Request{
-			Kind: t_api.ReadPromise,
-			ReadPromise: &t_api.ReadPromiseRequest{
-				Id: id,
-			},
+	req := &t_api.Request{
+		Kind: t_api.ReadPromise,
+		Tags: s.tags(header.RequestId, "ReadPromise"),
+		ReadPromise: &t_api.ReadPromiseRequest{
+			Id: id,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -110,14 +109,13 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "search-promises"),
-		Submission: &t_api.Request{
-			Kind:           t_api.SearchPromises,
-			SearchPromises: searchPromises,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:           t_api.SearchPromises,
+		Tags:           s.tags(header.RequestId, "SearchPromises"),
+		SearchPromises: searchPromises,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -139,21 +137,20 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "create-promise"),
-		Submission: &t_api.Request{
-			Kind: t_api.CreatePromise,
-			CreatePromise: &t_api.CreatePromiseRequest{
-				Id:             body.Id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Param:          body.Param,
-				Timeout:        body.Timeout, // required by connection
-				Tags:           body.Tags,
-			},
+	req := &t_api.Request{
+		Kind: t_api.CreatePromise,
+		Tags: s.tags(header.RequestId, "CreatePromise"),
+		CreatePromise: &t_api.CreatePromiseRequest{
+			Id:             body.Id,
+			IdempotencyKey: header.IdempotencyKey,
+			Strict:         header.Strict,
+			Param:          body.Param,
+			Timeout:        body.Timeout, // required by connection
+			Tags:           body.Tags,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -176,20 +173,19 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "complete-promise"),
-		Submission: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseRequest{
-				Id:             id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				State:          state,
-				Value:          body.Value,
-			},
+	req := &t_api.Request{
+		Kind: t_api.CompletePromise,
+		Tags: s.tags(header.RequestId, "CompletePromise"),
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:             id,
+			IdempotencyKey: header.IdempotencyKey,
+			Strict:         header.Strict,
+			State:          state,
+			Value:          body.Value,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {

@@ -15,16 +15,15 @@ import (
 func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "read-schedule"),
-		Submission: &t_api.Request{
-			Kind: t_api.ReadSchedule,
-			ReadSchedule: &t_api.ReadScheduleRequest{
-				Id: id,
-			},
+	req := &t_api.Request{
+		Kind: t_api.ReadSchedule,
+		Tags: s.tags(header.RequestId, "ReadSchedule"),
+		ReadSchedule: &t_api.ReadScheduleRequest{
+			Id: id,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -75,14 +74,13 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "search-schedules"),
-		Submission: &t_api.Request{
-			Kind:            t_api.SearchSchedules,
-			SearchSchedules: searchSchedules,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:            t_api.SearchSchedules,
+		Tags:            s.tags(header.RequestId, "SearchSchedules"),
+		SearchSchedules: searchSchedules,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -113,24 +111,23 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 		return nil, api.HandleValidationError(err)
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "create-schedule"),
-		Submission: &t_api.Request{
-			Kind: t_api.CreateSchedule,
-			CreateSchedule: &t_api.CreateScheduleRequest{
-				Id:             body.Id,
-				Description:    body.Description,
-				Cron:           body.Cron,
-				Tags:           body.Tags,
-				PromiseId:      body.PromiseId,
-				PromiseTimeout: body.PromiseTimeout,
-				PromiseParam:   body.PromiseParam,
-				PromiseTags:    body.PromiseTags,
-				IdempotencyKey: header.IdempotencyKey,
-			},
+	req := &t_api.Request{
+		Kind: t_api.CreateSchedule,
+		Tags: s.tags(header.RequestId, "CreateSchedule"),
+		CreateSchedule: &t_api.CreateScheduleRequest{
+			Id:             body.Id,
+			Description:    body.Description,
+			Cron:           body.Cron,
+			Tags:           body.Tags,
+			PromiseId:      body.PromiseId,
+			PromiseTimeout: body.PromiseTimeout,
+			PromiseParam:   body.PromiseParam,
+			PromiseTags:    body.PromiseTags,
+			IdempotencyKey: header.IdempotencyKey,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -153,16 +150,15 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "delete-schedule"),
-		Submission: &t_api.Request{
-			Kind: t_api.DeleteSchedule,
-			DeleteSchedule: &t_api.DeleteScheduleRequest{
-				Id: id,
-			},
+	req := &t_api.Request{
+		Kind: t_api.DeleteSchedule,
+		Tags: s.tags(header.RequestId, "DeleteSchedule"),
+		DeleteSchedule: &t_api.DeleteScheduleRequest{
+			Id: id,
 		},
-		Callback: s.sendOrPanic(cq),
-	})
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -196,15 +192,6 @@ func validatePromiseId(promiseId string) error {
 	if promiseId == "" {
 		return fmt.Errorf("promiseId is required")
 	}
-
-	// Remove checks for now
-	// TODO: parse then check for templated variables
-	// if !strings.Contains(promiseId, "{{") || !strings.Contains(promiseId, "}}") {
-	// 	return fmt.Errorf("promiseId must contain a templated variable")
-	// }
-	// if !strings.Contains(promiseId, "{{.timestamp}}") {
-	// 	return fmt.Errorf("promiseId must contain the {{.timeout}} template variable")
-	// }
 
 	return nil
 }

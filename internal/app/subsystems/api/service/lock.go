@@ -26,14 +26,13 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "acquire-lock"),
-		Submission: &t_api.Request{
-			Kind:        t_api.AcquireLock,
-			AcquireLock: acquireLock,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:        t_api.AcquireLock,
+		Tags:        s.tags(header.RequestId, "AcquireLock"),
+		AcquireLock: acquireLock,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -62,14 +61,13 @@ func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.Heartbe
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "heartbeat-locks"),
-		Submission: &t_api.Request{
-			Kind:           t_api.HeartbeatLocks,
-			HeartbeatLocks: HeartbeatLocks,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:           t_api.HeartbeatLocks,
+		Tags:           s.tags(header.RequestId, "HeartbeatLocks"),
+		HeartbeatLocks: HeartbeatLocks,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -100,14 +98,13 @@ func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.Rel
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Metadata: s.metadata(header.RequestId, "release-lock"),
-		Submission: &t_api.Request{
-			Kind:        t_api.ReleaseLock,
-			ReleaseLock: releaseLock,
-		},
-		Callback: s.sendOrPanic(cq),
-	})
+	req := &t_api.Request{
+		Kind:        t_api.ReleaseLock,
+		Tags:        s.tags(header.RequestId, "ReleaseLock"),
+		ReleaseLock: releaseLock,
+	}
+
+	s.api.Enqueue(req, s.sendOrPanic(cq))
 
 	cqe := <-cq
 	if cqe.Error != nil {

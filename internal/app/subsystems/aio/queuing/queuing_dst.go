@@ -84,12 +84,12 @@ func (w *QueuingWorkerDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 		}
 
 		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Metadata: sqe.Metadata,
 			Callback: sqe.Callback,
 		}
 
 		cqe.Completion = &t_aio.Completion{
 			Kind: t_aio.Queuing,
+			Tags: sqe.Submission.Tags, // propagate the tags
 			Queuing: &t_aio.QueuingCompletion{
 				Result: t_aio.Success,
 			},

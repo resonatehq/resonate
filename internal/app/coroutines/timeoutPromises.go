@@ -1,23 +1,21 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:timeout", t))
-	metadata.Tags.Set("name", "timeout-promises")
+func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(tags != nil, "tags must be set")
 
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		completion, err := c.Yield(&t_aio.Submission{
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -45,7 +43,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine[*t_aio
 		})
 		if err != nil {
 			slog.Error("failed to read timeouts", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -59,5 +57,7 @@ func TimeoutPromises(t int64, config *system.Config) *scheduler.Coroutine[*t_aio
 		if promises == 0 {
 			util.Assert(subscriptions == 0 && notifications == 0, "must not create notifications when no promises timed out")
 		}
-	})
+
+		return nil, nil
+	}
 }

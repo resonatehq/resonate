@@ -27,8 +27,7 @@ const (
 	StatusSubscriptionNotFound ResponseStatus = 4041
 	StatusScheduleNotFound     ResponseStatus = 4042
 	StatusLockNotFound         ResponseStatus = 4043
-
-	StatusTaskNotFound ResponseStatus = 4044
+	StatusTaskNotFound         ResponseStatus = 4044
 
 	StatusPromiseAlreadyExists  ResponseStatus = 4090
 	StatusScheduleAlreadyExists ResponseStatus = 4091
@@ -124,6 +123,7 @@ const (
 	ErrSystemShuttingDown           ResonateErrorCode = 5030
 	ErrAPISubmissionQueueFull       ResonateErrorCode = 5031
 	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5032
+	ErrSchedulerQueueFull           ResonateErrorCode = 5033
 )
 
 type ResonateErrorCode int
@@ -136,18 +136,20 @@ func (e ResonateErrorCode) GRPC() codes.Code {
 	switch e {
 	case ErrInternalServer:
 		return codes.Internal
-	case ErrSystemShuttingDown:
-		return codes.Unavailable
-	case ErrAPISubmissionQueueFull:
-		return codes.Unavailable
-	case ErrAIOSubmissionQueueFull:
-		return codes.Unavailable
 	case ErrAIONetworkFailure:
 		return codes.Internal
 	case ErrAIOStoreFailure:
 		return codes.Internal
 	case ErrAIOStoreSerializationFailure:
 		return codes.Internal
+	case ErrSystemShuttingDown:
+		return codes.Unavailable
+	case ErrAPISubmissionQueueFull:
+		return codes.Unavailable
+	case ErrAIOSubmissionQueueFull:
+		return codes.Unavailable
+	case ErrSchedulerQueueFull:
+		return codes.Unavailable
 	default:
 		panic(fmt.Sprintf("invalid error code: %d", e))
 	}

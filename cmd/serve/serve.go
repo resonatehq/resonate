@@ -108,11 +108,11 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick(1000, coroutines.EnqueueTasks)
-			system.AddOnTick(1000, coroutines.TimeoutLocks)
-			system.AddOnTick(1000, coroutines.SchedulePromises)
-			system.AddOnTick(1000, coroutines.TimeoutPromises)
-			system.AddOnTick(1000, coroutines.NotifySubscriptions)
+			system.AddOnTick("EnqueueTasks", 10*time.Second, coroutines.EnqueueTasks)
+			system.AddOnTick("TimeoutLocks", 10*time.Second, coroutines.TimeoutLocks)
+			system.AddOnTick("SchedulePromises", 10*time.Second, coroutines.SchedulePromises)
+			system.AddOnTick("TimeoutPromises", 10*time.Second, coroutines.TimeoutPromises)
+			system.AddOnTick("NotifySubscriptions", 10*time.Second, coroutines.NotifySubscriptions)
 
 			// metrics server
 			mux := netHttp.NewServeMux()
@@ -263,11 +263,13 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.queuing.config.routes", cmd.Flags().Lookup("aio-queuing-routes"))
 
 	// system
+	cmd.Flags().Int("system-coroutine-max-size", 1000, "max number of coroutines to run concurrently")
 	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	cmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	cmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
-	cmd.Flags().Int("system-schedule-batch-size", 10000, "max number of schedules to process on each tick")
+	cmd.Flags().Int("system-schedule-batch-size", 1000, "max number of schedules to process on each tick")
 
+	_ = viper.BindPFlag("system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))

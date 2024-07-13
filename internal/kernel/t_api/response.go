@@ -11,6 +11,7 @@ import (
 
 type Response struct {
 	Kind Kind
+	Tags map[string]string
 
 	// Promises
 	CreatePromise   *CreatePromiseResponse
@@ -40,6 +41,10 @@ type Response struct {
 
 	// ECHO
 	Echo *EchoResponse
+}
+
+func (r *Response) Id() string {
+	return r.Tags["request_id"]
 }
 
 // Promises
@@ -160,8 +165,8 @@ func (r *Response) String() string {
 	case CreatePromise:
 		return fmt.Sprintf(
 			"CreatePromise(status=%d, promise=%s)",
-			r.CompletePromise.Status,
-			r.CompletePromise.Promise,
+			r.CreatePromise.Status,
+			r.CreatePromise.Promise,
 		)
 	case CompletePromise:
 		return fmt.Sprintf(

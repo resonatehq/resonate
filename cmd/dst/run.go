@@ -152,10 +152,10 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick(1000, coroutines.EnqueueTasks)
-			system.AddOnTick(1000, coroutines.TimeoutLocks)
-			system.AddOnTick(1000, coroutines.SchedulePromises)
-			system.AddOnTick(1000, coroutines.NotifySubscriptions)
+			system.AddOnTick("EnqueueTasks", 5*time.Second, coroutines.EnqueueTasks)
+			system.AddOnTick("TimeoutLocks", 5*time.Second, coroutines.TimeoutLocks)
+			system.AddOnTick("SchedulePromises", 5*time.Second, coroutines.SchedulePromises)
+			system.AddOnTick("NotifySubscriptions", 5*time.Second, coroutines.NotifySubscriptions)
 
 			reqs := []t_api.Kind{
 				// PROMISE
@@ -189,7 +189,7 @@ func RunDSTCmd() *cobra.Command {
 			// to timedout state
 			if dstScenario.Kind != dst.LazyTimeout {
 				reqs = append(reqs, t_api.SearchPromises)
-				system.AddOnTick(1000, coroutines.TimeoutPromises)
+				system.AddOnTick("TimeoutPromises", 5*time.Second, coroutines.TimeoutPromises)
 			}
 
 			dst := dst.New(&dst.Config{
@@ -281,11 +281,13 @@ func RunDSTCmd() *cobra.Command {
 	_ = viper.BindPFlag("dst.aio.subsystems.queuingDST.config.p", cmd.Flags().Lookup("aio-queuing-success-rate"))
 
 	// system
+	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 10000}, "system-coroutine-max-size", "max number of coroutines to run concurrently")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-submission-batch-size", "size of the completion queue buffered channel")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-completion-batch-size", "max number of completions to process on each tick")
 	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 10000}, "system-schedule-batch-size", "max number of schedules to process on each tick")
 
+	_ = viper.BindPFlag("dst.system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("dst.system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
