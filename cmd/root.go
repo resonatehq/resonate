@@ -49,6 +49,7 @@ func init() {
 	rootCmd.SetErr(os.Stderr)
 }
 
+
 func initConfig() {
 	if cfgFile != "" {
 		viper.SetConfigFile(cfgFile)

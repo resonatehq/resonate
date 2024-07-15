@@ -7,8 +7,6 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
-
 	"log/slog"
 
 	"github.com/gin-gonic/gin"
@@ -16,14 +14,9 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 )
 
-type Auth struct {
-	Username string
-	Password string
-}
-
 type Config struct {
 	Addr    string
-	Auth    *Auth
+	Auth    map[string]string
 	Timeout time.Duration
 }
 
@@ -31,6 +24,7 @@ type Http struct {
 	config *Config
 	server *http.Server
 }
+
 
 func New(api api.API, config *Config) api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
@@ -48,15 +42,8 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Authentication
 	authorized := r.Group("/")
-	if config.Auth.Username != "" || config.Auth.Password != "" {
-		util.Assert(config.Auth.Username != "", "http basic auth username is required")
-		util.Assert(config.Auth.Password != "", "http basic auth password is required")
-
-		accounts := gin.Accounts{
-			config.Auth.Username: config.Auth.Password,
-		}
-		basicAuthMiddleware := gin.BasicAuth(accounts)
-		authorized.Use(basicAuthMiddleware)
+	if len(config.Auth) > 0 {
+		authorized.Use(gin.BasicAuth(config.Auth))
 	}
 
 	// Promises API

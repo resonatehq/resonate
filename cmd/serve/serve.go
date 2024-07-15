@@ -56,6 +56,7 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
+
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
 			grpc := grpc.New(api, config.API.Subsystems.Grpc)
@@ -190,16 +191,14 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
 	cmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
 	cmd.Flags().String("api-base-url", "http://localhost:8001", "base url to automatically generate absolute URLs for the server's resources")
-	cmd.Flags().String("api-http-auth-username", "", "username for basic auth")
-	cmd.Flags().String("api-http-auth-password", "", "password for basic auth")
+	cmd.Flags().StringToString("api-http-auth", map[string]string{}, "basic auth username/password pairs")
 
+	_ = viper.BindPFlag("api.subsystems.http.auth", cmd.Flags().Lookup("api-http-auth"))
 	_ = viper.BindPFlag("api.size", cmd.Flags().Lookup("api-size"))
 	_ = viper.BindPFlag("api.subsystems.http.addr", cmd.Flags().Lookup("api-http-addr"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", cmd.Flags().Lookup("api-http-timeout"))
 	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
 	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
-	_ = viper.BindPFlag("api.subsystems.http.auth.username", cmd.Flags().Lookup("api-http-auth-username"))
-	_ = viper.BindPFlag("api.subsystems.http.auth.password", cmd.Flags().Lookup("api-http-auth-password"))
 
 	// aio
 	// Store
