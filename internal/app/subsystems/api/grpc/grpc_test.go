@@ -1398,13 +1398,11 @@ func TestAcquireLock(t *testing.T) {
 		{
 			name: "AcquireLock",
 			grpcReq: &grpcApi.AcquireLockRequest{
-				RequestId: "AcquireLock",
-				Lock: &grpcApi.Lock{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 1,
-				},
+				RequestId:            "AcquireLock",
+				ResourceId:           "foo",
+				ProcessId:            "bar",
+				ExecutionId:          "baz",
+				ExpiryInMilliseconds: 1,
 			},
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
@@ -1437,12 +1435,10 @@ func TestAcquireLock(t *testing.T) {
 		{
 			name: "AcquireLockNoResourceId",
 			grpcReq: &grpcApi.AcquireLockRequest{
-				Lock: &grpcApi.Lock{
-					ResourceId:           "",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 1,
-				},
+				ResourceId:           "",
+				ProcessId:            "bar",
+				ExecutionId:          "baz",
+				ExpiryInMilliseconds: 1,
 			},
 			req:  nil,
 			res:  nil,
@@ -1451,12 +1447,10 @@ func TestAcquireLock(t *testing.T) {
 		{
 			name: "AcquireLockNoProcessId",
 			grpcReq: &grpcApi.AcquireLockRequest{
-				Lock: &grpcApi.Lock{
-					ResourceId:           "foo",
-					ProcessId:            "",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 1,
-				},
+				ResourceId:           "foo",
+				ProcessId:            "",
+				ExecutionId:          "baz",
+				ExpiryInMilliseconds: 1,
 			},
 			req:  nil,
 			res:  nil,
@@ -1465,11 +1459,9 @@ func TestAcquireLock(t *testing.T) {
 		{
 			name: "AcquireLockNoExecutionId",
 			grpcReq: &grpcApi.AcquireLockRequest{
-				Lock: &grpcApi.Lock{
-					ProcessId:            "bar",
-					ExecutionId:          "",
-					ExpiryInMilliseconds: 1,
-				},
+				ProcessId:            "bar",
+				ExecutionId:          "",
+				ExpiryInMilliseconds: 1,
 			},
 			req:  nil,
 			res:  nil,
@@ -1478,12 +1470,10 @@ func TestAcquireLock(t *testing.T) {
 		{
 			name: "AcquireLockNoTimeout",
 			grpcReq: &grpcApi.AcquireLockRequest{
-				Lock: &grpcApi.Lock{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 0,
-				},
+				ResourceId:           "foo",
+				ProcessId:            "bar",
+				ExecutionId:          "baz",
+				ExpiryInMilliseconds: 0,
 			},
 			req:  nil,
 			res:  nil,
