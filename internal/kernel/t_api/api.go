@@ -72,6 +72,9 @@ func (k Kind) String() string {
 		return "ClaimTask"
 	case CompleteTask:
 		return "CompleteTask"
+	// ECHO
+	case Echo:
+		return "Echo"
 	default:
 		panic("invalid api")
 	}

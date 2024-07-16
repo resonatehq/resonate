@@ -2,7 +2,6 @@ package test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -26,19 +25,25 @@ func (a *API) String() string {
 	return "api:test"
 }
 
-func (a *API) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
+func (a *API) SQ() <-chan *bus.SQE[t_api.Request, t_api.Response] {
+	panic("not implemented")
+}
+
+func (a *API) Enqueue(submission *t_api.Request, callback func(*t_api.Response, error)) {
 	// assert
-	assert.Equal(a.t, a.req, sqe.Submission)
+	assert.Equal(a.t, a.req, submission)
 
 	// immediately call callback
-	go sqe.Callback(a.res, nil)
+	go callback(a.res, nil)
 }
 
-func (a *API) Dequeue(int, <-chan time.Time) []*bus.SQE[t_api.Request, t_api.Response] {
-	return nil
+func (a *API) Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response] {
+	panic("not implemented")
 }
 
-func (a *API) AddSubsystem(subsystem api.Subsystem) {}
+func (a *API) AddSubsystem(subsystem api.Subsystem) {
+	panic("not implemented")
+}
 
 func (a *API) Start() error {
 	return nil

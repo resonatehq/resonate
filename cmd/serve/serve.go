@@ -156,7 +156,7 @@ func ServeCmd() *cobra.Command {
 				}
 
 				// shutdown system
-				system.Shutdown()
+				<-system.Shutdown()
 
 				// shutdown metrics server
 				if err := metricsServer.Close(); err != nil {

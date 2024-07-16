@@ -2,7 +2,6 @@ package system
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"testing"
 
@@ -11,8 +10,6 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -41,6 +38,7 @@ func TestSystemLoop(t *testing.T) {
 	}
 
 	config := &system.Config{
+		CoroutineMaxSize:    100,
 		SubmissionBatchSize: 1,
 		CompletionBatchSize: 1,
 	}
@@ -55,24 +53,19 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		data := strconv.Itoa(i)
 
-		metadata := metadata.New(fmt.Sprintf("a.%d", i))
-		metadata.Tags.Set("name", "echo")
-		metadata.Tags.Set("api", "test")
-
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-			Metadata: metadata,
-			Submission: &t_api.Request{
-				Kind: t_api.Echo,
-				Echo: &t_api.EchoRequest{
-					Data: data,
-				},
+		submission := &t_api.Request{
+			Kind: t_api.Echo,
+			Tags: map[string]string{},
+			Echo: &t_api.EchoRequest{
+				Data: data,
 			},
-			Callback: func(res *t_api.Response, err error) {
-				received <- 1
+		}
 
-				assert.Nil(t, err)
-				assert.Equal(t, data, res.Echo.Data)
-			},
+		api.Enqueue(submission, func(res *t_api.Response, err error) {
+			received <- 1
+
+			assert.Nil(t, err)
+			assert.Equal(t, data, res.Echo.Data)
 		})
 	}
 
@@ -81,26 +74,21 @@ func TestSystemLoop(t *testing.T) {
 
 	// all requests made after shutdown should fail
 	for i := 0; i < 5; i++ {
-		metadata := metadata.New(fmt.Sprintf("a.%d", i))
-		metadata.Tags.Set("name", "echo")
-		metadata.Tags.Set("api", "test")
-
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-			Metadata: metadata,
-			Submission: &t_api.Request{
-				Kind: t_api.Echo,
-				Echo: &t_api.EchoRequest{
-					Data: "nope",
-				},
+		submission := &t_api.Request{
+			Kind: t_api.Echo,
+			Tags: map[string]string{},
+			Echo: &t_api.EchoRequest{
+				Data: "nope",
 			},
-			Callback: func(res *t_api.Response, err error) {
-				received <- 1
+		}
 
-				var apiErr *t_api.ResonateError
-				assert.True(t, errors.As(err, &apiErr))
-				assert.NotNil(t, err)
-				assert.ErrorContains(t, apiErr, "system is shutting down")
-			},
+		api.Enqueue(submission, func(res *t_api.Response, err error) {
+			received <- 1
+
+			var apiErr *t_api.ResonateError
+			assert.True(t, errors.As(err, &apiErr))
+			assert.NotNil(t, err)
+			assert.ErrorContains(t, apiErr, "system is shutting down")
 		})
 	}
 
@@ -109,8 +97,12 @@ func TestSystemLoop(t *testing.T) {
 	}
 
 	for i := 0; i < 10; i++ {
-		<-received
+		select {
+		case <-received:
+		default:
+			t.Fatal("not enough responses received")
+		}
 	}
 
-	assert.Zero(t, len(received), "all sqes have been resolved")
+	assert.Zero(t, len(received), "too many responses received")
 }

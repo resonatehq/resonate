@@ -152,10 +152,10 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick("EnqueueTasks", 5*time.Second, coroutines.EnqueueTasks)
-			system.AddOnTick("TimeoutLocks", 5*time.Second, coroutines.TimeoutLocks)
-			system.AddOnTick("SchedulePromises", 5*time.Second, coroutines.SchedulePromises)
-			system.AddOnTick("NotifySubscriptions", 5*time.Second, coroutines.NotifySubscriptions)
+			system.AddOnTick("EnqueueTasks", 1*time.Second, coroutines.EnqueueTasks)
+			system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
+			system.AddOnTick("SchedulePromises", 1*time.Second, coroutines.SchedulePromises)
+			system.AddOnTick("NotifySubscriptions", 1*time.Second, coroutines.NotifySubscriptions)
 
 			reqs := []t_api.Kind{
 				// PROMISE
@@ -189,7 +189,7 @@ func RunDSTCmd() *cobra.Command {
 			// to timedout state
 			if dstScenario.Kind != dst.LazyTimeout {
 				reqs = append(reqs, t_api.SearchPromises)
-				system.AddOnTick("TimeoutPromises", 5*time.Second, coroutines.TimeoutPromises)
+				system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
 			}
 
 			dst := dst.New(&dst.Config{

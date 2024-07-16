@@ -161,10 +161,12 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 	s.aio.Flush(t)
 }
 
-func (s *System) Shutdown() {
+func (s *System) Shutdown() <-chan interface{} {
 	// start by shutting down the api
 	s.api.Shutdown()
-	<-s.shutdown
+
+	// return the channel so the caller can wait for the system to shutdown
+	return s.shutdown
 }
 
 func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], *t_api.Request) (*t_api.Response, error)) {
