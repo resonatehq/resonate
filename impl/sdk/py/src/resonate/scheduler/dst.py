@@ -129,10 +129,11 @@ class DSTScheduler:
             ):
                 raise DSTFailureError
 
+            next_step: Steps
             if self._mode == "sequential":
                 next_step = "callbacks" if self._callbacks_to_run else "runnables"
             else:
-                next_step: Steps = self.random.choice(["callbacks", "runnables"])
+                next_step = self.random.choice(["callbacks", "runnables"])
             if next_step == "callbacks" and self._callbacks_to_run:
                 cb = get_random_element(
                     self._callbacks_to_run, r=self.random, mode=self._mode
