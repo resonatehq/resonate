@@ -22,6 +22,8 @@ def dst(
     ]
     | None = None,
     mode: Mode = "concurrent",
+    failure_chance: float = 0,
+    max_failures: int = 0,
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 
@@ -31,9 +33,26 @@ def dst(
 
     for seed in seeds:
         if isinstance(seed, range):
-            schedulers.extend(DSTScheduler(i, mocks=mocks, mode=mode) for i in seed)
+            schedulers.extend(
+                DSTScheduler(
+                    i,
+                    mocks=mocks,
+                    mode=mode,
+                    failure_chance=failure_chance,
+                    max_failures=max_failures,
+                )
+                for i in seed
+            )
         elif isinstance(seed, int):
-            schedulers.append(DSTScheduler(seed=seed, mocks=mocks, mode=mode))
+            schedulers.append(
+                DSTScheduler(
+                    seed=seed,
+                    mocks=mocks,
+                    mode=mode,
+                    failure_chance=failure_chance,
+                    max_failures=max_failures,
+                )
+            )
         else:
             assert_never(seed)
 
