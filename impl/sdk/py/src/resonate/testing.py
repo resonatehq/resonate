@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from typing_extensions import Concatenate, assert_never
 
 from resonate.contants import ENV_VARIABLE_PIN_SEED
-from resonate.scheduler.dst import DSTScheduler
+from resonate.scheduler.dst import DSTScheduler, Mode
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine
@@ -21,6 +21,7 @@ def dst(
         Callable[[], Any],
     ]
     | None = None,
+    mode: Mode = "concurrent",
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 
@@ -30,9 +31,9 @@ def dst(
 
     for seed in seeds:
         if isinstance(seed, range):
-            schedulers.extend(DSTScheduler(i, mocks=mocks) for i in seed)
+            schedulers.extend(DSTScheduler(i, mocks=mocks, mode=mode) for i in seed)
         elif isinstance(seed, int):
-            schedulers.append(DSTScheduler(seed=seed, mocks=mocks))
+            schedulers.append(DSTScheduler(seed=seed, mocks=mocks, mode=mode))
         else:
             assert_never(seed)
 
