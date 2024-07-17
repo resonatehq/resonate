@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 P = ParamSpec("P")
 Steps: TypeAlias = Literal["callbacks", "runnables"]
+Mode: TypeAlias = Literal["concurrent", "sequential"]
 
 
 class DSTFailureError(Exception):
@@ -40,7 +41,7 @@ class DSTFailureError(Exception):
 
 
 class DSTScheduler:
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         seed: int,
         mocks: dict[
@@ -50,12 +51,14 @@ class DSTScheduler:
         | None = None,
         max_failures: int = 2,
         failure_chance: float = 0,
+        mode: Mode = "concurrent",
     ) -> None:
         self._failure_chance = failure_chance
         self._max_failures: int = max_failures
         self.current_failures: int = 0
         self.tick: int = -1
         self._top_level_invocations: list[Invoke] = []
+        self._mode: Mode = mode
 
         self._pending_to_run: PendingToRun = []
         self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
@@ -125,13 +128,21 @@ class DSTScheduler:
                 and self.random.uniform(0, 100) < self._failure_chance
             ):
                 raise DSTFailureError
-            next_step: Steps = self.random.choice(["callbacks", "runnables"])
+
+            if self._mode == "sequential":
+                next_step = "callbacks" if self._callbacks_to_run else "runnables"
+            else:
+                next_step: Steps = self.random.choice(["callbacks", "runnables"])
             if next_step == "callbacks" and self._callbacks_to_run:
-                cb = get_random_element(self._callbacks_to_run, r=self.random)
+                cb = get_random_element(
+                    self._callbacks_to_run, r=self.random, mode=self._mode
+                )
                 cb()
 
             if next_step == "runnables" and self._pending_to_run:
-                runnable = get_random_element(self._pending_to_run, r=self.random)
+                runnable = get_random_element(
+                    self._pending_to_run, r=self.random, mode=self._mode
+                )
                 self._process_each_runnable(runnable=runnable)
 
             if not self._callbacks_to_run and not self._pending_to_run:
@@ -268,8 +279,10 @@ class DSTScheduler:
         return self._execution_events
 
 
-def get_random_element(array: list[T], r: random.Random) -> T:
-    return array.pop(r.randrange(len(array)))
+def get_random_element(array: list[T], r: random.Random, mode: Mode) -> T:
+    if mode == "concurrent":
+        r.shuffle(array)
+    return array.pop()
 
 
 def _safe_run(fn: Callable[[], T]) -> Result[T, Exception]:

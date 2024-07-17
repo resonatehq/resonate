@@ -123,6 +123,8 @@ def test_call_gen() -> None:
     s.run()
     p = s.add(gen_call)
     assert p.result() == 3  # noqa: PLR2004
+    assert p.success()
+    assert not p.failure()
 
 
 def test_invoke_gen() -> None:

@@ -157,7 +157,7 @@ def test_failure() -> None:
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
-    assert scheduler.tick == 9  # noqa: PLR2004
+    assert scheduler.tick == 5  # noqa: PLR2004
     assert scheduler.current_failures == 2  # noqa: PLR2004
 
     scheduler = DSTScheduler(seed=1, max_failures=2, failure_chance=0)
@@ -165,5 +165,50 @@ def test_failure() -> None:
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
-    assert scheduler.tick == 4  # noqa: PLR2004
+    assert scheduler.tick == 5  # noqa: PLR2004
     assert scheduler.current_failures == 0
+
+
+@pytest.mark.dst()
+def test_sequential() -> None:
+    seq_scheduler = DSTScheduler(seed=1, mode="sequential")
+    seq_scheduler.add(only_call, n=1)
+    seq_scheduler.add(only_call, n=2)
+    seq_scheduler.add(only_call, n=3)
+    seq_scheduler.add(only_call, n=4)
+    seq_scheduler.add(only_call, n=5)
+    promises = seq_scheduler.run()
+    assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
+    assert seq_scheduler.get_events() == [
+        "Call number with params args=() kwargs={'n': 5} handled",
+        "Promise resolved with value Ok(5)",
+        "Call number with params args=() kwargs={'n': 4} handled",
+        "Promise resolved with value Ok(4)",
+        "Call number with params args=() kwargs={'n': 3} handled",
+        "Promise resolved with value Ok(3)",
+        "Call number with params args=() kwargs={'n': 2} handled",
+        "Promise resolved with value Ok(2)",
+        "Call number with params args=() kwargs={'n': 1} handled",
+        "Promise resolved with value Ok(1)",
+    ]
+
+    con_scheduler = DSTScheduler(seed=1, mode="concurrent")
+    con_scheduler.add(only_call, n=1)
+    con_scheduler.add(only_call, n=2)
+    con_scheduler.add(only_call, n=3)
+    con_scheduler.add(only_call, n=4)
+    con_scheduler.add(only_call, n=5)
+    promises = con_scheduler.run()
+    assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
+    assert con_scheduler.get_events() == [
+        "Call number with params args=() kwargs={'n': 4} handled",
+        "Call number with params args=() kwargs={'n': 5} handled",
+        "Call number with params args=() kwargs={'n': 2} handled",
+        "Call number with params args=() kwargs={'n': 1} handled",
+        "Promise resolved with value Ok(4)",
+        "Call number with params args=() kwargs={'n': 3} handled",
+        "Promise resolved with value Ok(2)",
+        "Promise resolved with value Ok(1)",
+        "Promise resolved with value Ok(3)",
+        "Promise resolved with value Ok(5)",
+    ]

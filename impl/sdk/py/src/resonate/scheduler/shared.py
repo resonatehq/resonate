@@ -98,3 +98,16 @@ class Promise(Generic[T]):
 
     def done(self) -> bool:
         return self.f.done()
+
+    def success(self) -> bool:
+        if not self.done():
+            return False
+        try:
+            self.result()
+        except Exception:  # noqa: BLE001
+            return False
+        else:
+            return True
+
+    def failure(self) -> bool:
+        return not self.success()
