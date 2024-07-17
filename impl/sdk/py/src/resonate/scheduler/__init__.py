@@ -67,7 +67,7 @@ class Scheduler:
     ) -> Promise[T]:
         p = Promise[T]()
         ctx = Context(deps=self.deps)
-        self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p))
+        self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p, ctx))
         self.signal()
 
         return p
@@ -171,10 +171,11 @@ class Scheduler:
         logger.debug("Processing call")
         p = Promise[Any]()
         waiting_for_promise[p] = [runnable.coro_and_promise]
+        child_ctx = runnable.coro_and_promise.ctx.new_child()
         if not isgeneratorfunction(call.fn):
             self._processor.enqueue(
                 SQE(
-                    cmd=wrap_fn_into_cmd(call.ctx, call.fn, *call.args, **call.kwargs),
+                    cmd=wrap_fn_into_cmd(child_ctx, call.fn, *call.args, **call.kwargs),
                     callback=partial(
                         callback,
                         p,
@@ -184,8 +185,10 @@ class Scheduler:
                 )
             )
         else:
-            coro = call.fn(call.ctx, *call.args, **call.kwargs)
-            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+            coro = call.fn(child_ctx, *call.args, **call.kwargs)
+            pending_to_run.append(
+                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
+            )
 
     def _handle_invocation(
         self,
@@ -197,11 +200,12 @@ class Scheduler:
         logger.debug("Processing invocation")
         p = Promise[Any]()
         pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
+        child_ctx = runnable.coro_and_promise.ctx.new_child()
         if not isgeneratorfunction(invocation.fn):
             self._processor.enqueue(
                 SQE(
                     cmd=wrap_fn_into_cmd(
-                        invocation.ctx,
+                        child_ctx,
                         invocation.fn,
                         *invocation.args,
                         **invocation.kwargs,
@@ -215,8 +219,10 @@ class Scheduler:
                 )
             )
         else:
-            coro = invocation.fn(invocation.ctx, *invocation.args, **invocation.kwargs)
-            pending_to_run.append(Runnable(CoroAndPromise(coro, p), next_value=None))
+            coro = invocation.fn(child_ctx, *invocation.args, **invocation.kwargs)
+            pending_to_run.append(
+                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
+            )
 
     def _runnables_from_stg_q(self) -> PendingToRun | None:
         new_runnables: PendingToRun = []

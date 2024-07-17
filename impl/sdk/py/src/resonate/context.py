@@ -16,14 +16,12 @@ T = TypeVar("T")
 class Call:
     def __init__(
         self,
-        ctx: Context,
         fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
-        self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
 
@@ -31,14 +29,12 @@ class Call:
 class Invoke:
     def __init__(
         self,
-        ctx: Context,
         fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
         self.fn = fn
-        self.ctx = ctx
         self.args = args
         self.kwargs = kwargs
 
@@ -70,7 +66,7 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Invoke:
-        return Invoke(self.new_child(), fn, *args, **kwargs)
+        return Invoke(fn, *args, **kwargs)
 
     def call(
         self,
@@ -79,4 +75,4 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Call:
-        return Call(self.new_child(), fn, *args, **kwargs)
+        return Call(fn, *args, **kwargs)

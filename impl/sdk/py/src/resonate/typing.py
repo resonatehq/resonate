@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, Union
 
 from typing_extensions import TypeAlias
 
-from resonate.context import Call, Invoke
+from resonate.context import Call, Context, Invoke
 from resonate.scheduler.shared import Promise
 
 if TYPE_CHECKING:
@@ -21,6 +21,7 @@ Yieldable: TypeAlias = Union[Call, Invoke, Promise[Any]]
 class CoroAndPromise(Generic[T]):
     coro: Generator[Yieldable, Any, T]
     prom: Promise[T]
+    ctx: Context
 
 
 @dataclass(frozen=True)
