@@ -32,8 +32,8 @@ type Response struct {
 
 	// LOCKS
 	AcquireLock    *AcquireLockResponse
-	HeartbeatLocks *HeartbeatLocksResponse
 	ReleaseLock    *ReleaseLockResponse
+	HeartbeatLocks *HeartbeatLocksResponse
 
 	// TASKS
 	ClaimTask    *ClaimTaskResponse
@@ -41,10 +41,6 @@ type Response struct {
 
 	// ECHO
 	Echo *EchoResponse
-}
-
-func (r *Response) Id() string {
-	return r.Tags["request_id"]
 }
 
 // Promises
@@ -120,13 +116,13 @@ type AcquireLockResponse struct {
 	Lock   *lock.Lock     `json:"lock,omitempty"`
 }
 
+type ReleaseLockResponse struct {
+	Status ResponseStatus `json:"status"`
+}
+
 type HeartbeatLocksResponse struct {
 	Status        ResponseStatus `json:"status"`
 	LocksAffected int64          `json:"locksAffected"`
-}
-
-type ReleaseLockResponse struct {
-	Status ResponseStatus `json:"status"`
 }
 
 // Tasks
@@ -145,9 +141,51 @@ type CompleteTaskResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 
+func (r *Response) Id() string {
+	return r.Tags["request_id"]
+}
+
+func (r *Response) Status() ResponseStatus {
+	switch r.Kind {
+	// PROMISES
+	case ReadPromise:
+		return r.ReadPromise.Status
+	case SearchPromises:
+		return r.SearchPromises.Status
+	case CreatePromise:
+		return r.CreatePromise.Status
+	case CompletePromise:
+		return r.CompletePromise.Status
+	// SCHEDULES
+	case ReadSchedule:
+		return r.ReadSchedule.Status
+	case SearchSchedules:
+		return r.SearchSchedules.Status
+	case CreateSchedule:
+		return r.CreateSchedule.Status
+	case DeleteSchedule:
+		return r.DeleteSchedule.Status
+	// SUBSCRIPTIONS
+	case ReadSubscriptions:
+		return r.ReadSubscriptions.Status
+	case CreateSubscription:
+		return r.CreateSubscription.Status
+	case DeleteSubscription:
+		return r.DeleteSubscription.Status
+	// LOCKS
+	case AcquireLock:
+		return r.AcquireLock.Status
+	case ReleaseLock:
+		return r.ReleaseLock.Status
+	case HeartbeatLocks:
+		return r.HeartbeatLocks.Status
+	default:
+		return 0
+	}
+}
+
 func (r *Response) String() string {
 	switch r.Kind {
-
 	// PROMISES
 	case ReadPromise:
 		return fmt.Sprintf(
@@ -227,15 +265,16 @@ func (r *Response) String() string {
 			r.AcquireLock.Status,
 			r.AcquireLock.Lock,
 		)
-	case HeartbeatLocks:
-		return fmt.Sprintf(
-			"HeartbeatLocks(status=%d)",
-			r.HeartbeatLocks.Status,
-		)
 	case ReleaseLock:
 		return fmt.Sprintf(
 			"ReleaseLock(status=%d)",
 			r.ReleaseLock.Status,
+		)
+	case HeartbeatLocks:
+		return fmt.Sprintf(
+			"HeartbeatLocks(status=%d, locksAffected=%d)",
+			r.HeartbeatLocks.Status,
+			r.HeartbeatLocks.LocksAffected,
 		)
 
 	// TASKS

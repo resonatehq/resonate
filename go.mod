@@ -5,6 +5,7 @@ go 1.21.3
 toolchain go1.22.4
 
 require (
+	github.com/anishathalye/porcupine v0.1.6
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-chi/chi/v5 v5.0.14
 	github.com/go-playground/validator/v10 v10.22.0

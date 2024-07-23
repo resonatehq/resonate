@@ -36,6 +36,26 @@ func (p *Promise) String() string {
 	)
 }
 
+func GetTimedoutState(p *Promise) State {
+	completedState := Timedout
+	if v, ok := p.Tags["resonate:timeout"]; ok {
+		if v == "true" {
+			completedState = Resolved
+		}
+	}
+
+	return completedState
+}
+
+func (p1 *Promise) Equals(p2 *Promise) bool {
+	// for dst only
+	return p1.Id == p2.Id &&
+		p1.State == p2.State &&
+		p1.Timeout == p2.Timeout &&
+		p1.IdempotencyKeyForCreate.Equals(p2.IdempotencyKeyForCreate) &&
+		p1.IdempotencyKeyForComplete.Equals(p2.IdempotencyKeyForComplete)
+}
+
 type State int
 
 const (
@@ -106,15 +126,4 @@ func (v Value) String() string {
 		v.Headers,
 		string(v.Data),
 	)
-}
-
-func GetTimedoutState(p *Promise) State {
-	completedState := Timedout
-	if v, ok := p.Tags["resonate:timeout"]; ok {
-		if v == "true" {
-			completedState = Resolved
-		}
-	}
-
-	return completedState
 }

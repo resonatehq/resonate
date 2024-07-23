@@ -71,10 +71,10 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.GET("/schedules/*id", s.readSchedule)
 	authorized.DELETE("/schedules/*id", s.deleteSchedule)
 
-	// Distributed Locks API
+	// Locks API
 	authorized.POST("/locks/acquire", s.acquireLock)
-	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
 	authorized.POST("/locks/release", s.releaseLock)
+	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
 
 	// Task API
 	authorized.POST("/tasks/claim", s.claimTask)

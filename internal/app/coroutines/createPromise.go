@@ -163,7 +163,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			res = &t_api.Response{
 				Kind: r.Kind,
 				Tags: r.Tags,
-				CompletePromise: &t_api.CompletePromiseResponse{
+				CreatePromise: &t_api.CreatePromiseResponse{
 					Status: status,
 					Promise: &promise.Promise{
 						Id:    p.Id,

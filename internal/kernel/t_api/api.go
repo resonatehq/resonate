@@ -22,8 +22,8 @@ const (
 
 	// LOCKS
 	AcquireLock
-	HeartbeatLocks
 	ReleaseLock
+	HeartbeatLocks
 
 	// TASKS
 	ClaimTask
@@ -63,10 +63,10 @@ func (k Kind) String() string {
 	// LOCKS
 	case AcquireLock:
 		return "AcquireLock"
-	case HeartbeatLocks:
-		return "HeartbeatLocks"
 	case ReleaseLock:
 		return "ReleaseLock"
+	case HeartbeatLocks:
+		return "HeartbeatLocks"
 	// TASKS
 	case ClaimTask:
 		return "ClaimTask"

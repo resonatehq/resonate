@@ -76,7 +76,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				}
 
 				// If not strict, status is OK
-				status := t_api.StatusPromiseAlreadyTimedOut
+				status := t_api.StatusPromiseAlreadyTimedout
 				if !r.CompletePromise.Strict {
 					status = t_api.StatusOK
 				}

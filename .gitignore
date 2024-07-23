@@ -24,6 +24,7 @@ go.work
 resonate*
 coverage.out
 .env
+dst.html
 
 # ignore goland files
 .idea

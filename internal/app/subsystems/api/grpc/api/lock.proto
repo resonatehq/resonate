@@ -12,16 +12,16 @@ service Locks {
 
 message Lock {
     string resource_id = 1;
-    string process_id = 2;
-    string execution_id = 3;
+    string execution_id = 2;
+    string process_id = 3;
     int64 expiry_in_milliseconds = 4;
     int64 expires_at = 5;
 }
 
 message AcquireLockRequest {
     string resource_id = 1;
-    string process_id = 2;
-    string execution_id = 3;
+    string execution_id = 2;
+    string process_id = 3;
     int64 expiry_in_milliseconds = 4;
     string request_id = 5;
 }

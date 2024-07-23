@@ -1,7 +1,7 @@
 package dst
 
 import (
-	"fmt"
+	"errors"
 	"log/slog"
 	"math/rand" // nosemgrep
 	netHttp "net/http"
@@ -14,8 +14,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -28,17 +26,24 @@ import (
 
 func RunDSTCmd() *cobra.Command {
 	var (
-		seed            int64
-		ticks           int64
-		scenario        string
-		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 1000}
-		ids             = util.RangeIntFlag{Min: 1, Max: 1000}
-		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 1000}
-		headers         = util.RangeIntFlag{Min: 1, Max: 1000}
-		data            = util.RangeIntFlag{Min: 1, Max: 1000}
-		tags            = util.RangeIntFlag{Min: 1, Max: 1000}
-		urls            = util.RangeIntFlag{Min: 1, Max: 1000}
-		retries         = util.RangeIntFlag{Min: 1, Max: 1000}
+		seed  int64
+		ticks int64
+		// scenario string
+
+		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 15}
+		ids             = util.RangeIntFlag{Min: 1, Max: 15}
+		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 15}
+		headers         = util.RangeIntFlag{Min: 1, Max: 15}
+		data            = util.RangeIntFlag{Min: 1, Max: 15}
+		tags            = util.RangeIntFlag{Min: 1, Max: 15}
+
+		apiSize = util.RangeIntFlag{Min: 1, Max: 1000}
+		aioSize = util.RangeIntFlag{Min: 1, Max: 1000}
+
+		coroutineMaxSize    = util.RangeIntFlag{Min: 1, Max: 1000}
+		submissionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
+		completionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
+		scheduleBatchSize   = util.RangeIntFlag{Min: 1, Max: 1000}
 	)
 
 	cmd := &cobra.Command{
@@ -85,46 +90,20 @@ func RunDSTCmd() *cobra.Command {
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
-			// scenario
-			var p float64
-			var dstScenario *dst.Scenario
-
-			switch scenario {
-			case "default":
-				p = 0
-				dstScenario = &dst.Scenario{Kind: dst.Default, Default: &dst.DefaultScenario{}}
-			case "fault":
-				p = r.Float64()
-				dstScenario = &dst.Scenario{Kind: dst.FaultInjection, FaultInjection: &dst.FaultInjectionScenario{P: p}}
-			case "lazy":
-				p = 0
-				dstScenario = &dst.Scenario{Kind: dst.LazyTimeout, LazyTimeout: &dst.LazyTimeoutScenario{}}
-			default:
-				return fmt.Errorf("invalid scenario: %s, permitted scenarios: {default, fault, lazy}", scenario)
-			}
+			// TODO: re-add scenarios
 
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			aio := aio.NewDST(r, p, metrics)
+			aio := aio.NewDST(r, 0, metrics)
 
 			// instatiate aio subsystems
-			network := network.NewDST(config.AIO.Subsystems.NetworkDST.Config, rand.New(rand.NewSource(r.Int63())))
 			store, err := util.NewStore(config.AIO.Subsystems.Store)
 			if err != nil {
 				return err
 			}
 
-			reqsPerTickSize := reqsPerTick.Resolve(r)
-			config.AIO.Subsystems.QueuingDST.Config.Queue = make(chan *queuing.ConnectionSubmissionDST, reqsPerTickSize)
-			queuing, err := queuing.NewDST(config.AIO.Subsystems.QueuingDST.Config, rand.New(rand.NewSource(r.Int63())))
-			if err != nil {
-				return err
-			}
-
 			// add api subsystems
-			aio.AddSubsystem(t_aio.Network, network, nil)
 			aio.AddSubsystem(t_aio.Store, store, nil)
-			aio.AddSubsystem(t_aio.Queuing, queuing, nil)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -144,75 +123,29 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 			system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
 			system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-			system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-			system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-			system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
-			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick("EnqueueTasks", 1*time.Second, coroutines.EnqueueTasks)
-			system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
+			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnTick("SchedulePromises", 1*time.Second, coroutines.SchedulePromises)
-			system.AddOnTick("NotifySubscriptions", 1*time.Second, coroutines.NotifySubscriptions)
+			system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
+			system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
 
-			reqs := []t_api.Kind{
-				// PROMISE
-				t_api.ReadPromise,
-				t_api.CreatePromise,
-				t_api.CompletePromise,
-
-				// SCHEDULE
-				t_api.ReadSchedule,
-				t_api.SearchSchedules,
-				t_api.CreateSchedule,
-				t_api.DeleteSchedule,
-
-				// SUBSCRIPTION
-				t_api.ReadSubscriptions,
-				t_api.CreateSubscription,
-				t_api.DeleteSubscription,
-
-				// LOCK
-				t_api.AcquireLock,
-				t_api.HeartbeatLocks,
-				t_api.ReleaseLock,
-
-				// TASK
-				t_api.ClaimTask,
-				t_api.CompleteTask,
-			}
-
-			// remove search promises and timeout promises if lazy timeout scenario
-			// this forces the "lazy" path to be taken for promises to transition
-			// to timedout state
-			if dstScenario.Kind != dst.LazyTimeout {
-				reqs = append(reqs, t_api.SearchPromises)
-				system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
-			}
-
-			dst := dst.New(&dst.Config{
-				Scenario:           dstScenario,
-				TaskQueue:          config.AIO.Subsystems.QueuingDST.Config.Queue,
+			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,
-				TimeElapsedPerTick: 50_000, // milliseconds
-				Reqs: func() int {
-					return reqsPerTickSize
+				TimeElapsedPerTick: 1000, // ms
+				ReqsPerTick: func() int {
+					return reqsPerTick.Resolve(r)
 				},
 				Ids:             ids.Resolve(r),
 				IdempotencyKeys: idempotencyKeys.Resolve(r),
 				Headers:         headers.Resolve(r),
 				Data:            data.Resolve(r),
 				Tags:            tags.Resolve(r),
-				Urls:            urls.Resolve(r),
-				Retries:         retries.Resolve(r),
 			})
 
-			slog.Info("DST", "seed", seed, "ticks", ticks, "reqs", reqsPerTick.String(), "dst", dst, "system", system)
-			if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
-				return errs[0]
-			}
+			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
+
+			ok := dst.Run(r, api, aio, system)
 
 			// reset store
 			if err := store.Reset(); err != nil {
@@ -227,13 +160,17 @@ func RunDSTCmd() *cobra.Command {
 				return err
 			}
 
+			if !ok {
+				return errors.New("DST failed")
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
-	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy}")
+	// cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy}")
 
 	// dst related values
 	cmd.Flags().Var(&reqsPerTick, "reqs-per-tick", "number of requests per tick")
@@ -242,15 +179,13 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&headers, "headers", "number promise headers")
 	cmd.Flags().Var(&data, "data", "number promise data byte arrays")
 	cmd.Flags().Var(&tags, "tags", "number promise tags")
-	cmd.Flags().Var(&urls, "urls", "number subscription urls")
-	cmd.Flags().Var(&retries, "retries", "number subscription retries")
 
 	// api
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000000}, "api-size", "size of the submission queue buffered channel")
+	cmd.Flags().Var(&apiSize, "api-size", "size of the submission queue buffered channel")
 	_ = viper.BindPFlag("dst.api.size", cmd.Flags().Lookup("api-size"))
 
 	// aio
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000000}, "aio-size", "size of the completion queue buffered channel")
+	cmd.Flags().Var(&aioSize, "aio-size", "size of the completion queue buffered channel")
 	cmd.Flags().String("aio-store", "sqlite", "promise store type")
 	cmd.Flags().Int("aio-store-workers", 1, "number of concurrent connections to the store")
 	cmd.Flags().String("aio-store-sqlite-path", ":memory:", "sqlite database path")
@@ -281,17 +216,15 @@ func RunDSTCmd() *cobra.Command {
 	_ = viper.BindPFlag("dst.aio.subsystems.queuingDST.config.p", cmd.Flags().Lookup("aio-queuing-success-rate"))
 
 	// system
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 10000}, "system-coroutine-max-size", "max number of coroutines to run concurrently")
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-notification-cache-size", "max number of notifications to keep in cache")
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-submission-batch-size", "size of the completion queue buffered channel")
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 1000}, "system-completion-batch-size", "max number of completions to process on each tick")
-	cmd.Flags().Var(&util.RangeIntFlag{Min: 1, Max: 10000}, "system-schedule-batch-size", "max number of schedules to process on each tick")
+	cmd.Flags().Var(&coroutineMaxSize, "system-coroutine-max-size", "max number of coroutines to run concurrently")
+	cmd.Flags().Var(&submissionBatchSize, "system-submission-batch-size", "size of the completion queue buffered channel")
+	cmd.Flags().Var(&completionBatchSize, "system-completion-batch-size", "max number of completions to process on each tick")
+	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each tick")
 
 	_ = viper.BindPFlag("dst.system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
-	_ = viper.BindPFlag("dst.system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
-	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+	_ = viper.BindPFlag("dst.system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
 
 	cmd.Flags().SortFlags = false
 

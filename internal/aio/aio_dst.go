@@ -99,8 +99,20 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 	slog.Debug("aio:enqueue", "id", submission.Id(), "sqe", sqe)
 	a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 
-	i := a.r.Intn(len(a.sqes) + 1)
-	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
+	a.sqes = append(a.sqes, sqe)
+
+	// insert at random position
+	// i := a.r.Intn(len(a.sqes) + 1)
+	// sqes := make([]*bus.SQE[t_aio.Submission, t_aio.Completion], len(a.sqes)+1)
+	// copy(sqes, a.sqes[:i])
+	// sqes[i] = sqe
+	// copy(sqes[i+1:], a.sqes[i:])
+
+	// a.sqes = sqes
+
+	// insert at random position
+	// i := a.r.Intn(len(a.sqes) + 1)
+	// a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
 }
 
 func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
@@ -132,7 +144,6 @@ func (a *aioDST) Flush(t int64) {
 					a.cqes = append(a.cqes, cqe)
 				} else {
 					_sqes = append(_sqes, sqes.Value[i])
-
 				}
 			}
 

@@ -9,7 +9,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Generator struct {
@@ -20,8 +19,6 @@ type Generator struct {
 	headersSet         []map[string]string
 	dataSet            [][]byte
 	tagsSet            []map[string]string
-	urlSet             []string
-	retrySet           []int
 	requests           []RequestGenerator
 }
 
@@ -62,17 +59,11 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 			tags[strconv.Itoa(j)] = fmt.Sprintf("%d.%d", i, j)
 		}
 
+		if r.Intn(2) == 0 {
+			tags["resonate:timeout"] = "true" // transition to resolved on timeout
+		}
+
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
-	}
-
-	retrySet := make([]int, config.Retries)
-	for i := 0; i < config.Retries; i++ {
-		retrySet[i] = i
-	}
-
-	urlSet := make([]string, config.Urls)
-	for i := 0; i < config.Urls; i++ {
-		urlSet[i] = fmt.Sprintf("https://resonatehq.io/%d", i)
 	}
 
 	return &Generator{
@@ -83,8 +74,6 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		headersSet:         headersSet,
 		dataSet:            dataSet,
 		tagsSet:            tagsSet,
-		urlSet:             urlSet,
-		retrySet:           retrySet,
 	}
 }
 
@@ -92,21 +81,25 @@ func (g *Generator) AddRequest(request RequestGenerator) {
 	g.requests = append(g.requests, request)
 }
 
-func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors []*t_api.Request) []*t_api.Request {
-	reqs := []*t_api.Request{}
+func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors *[]*t_api.Request) []*t_api.Request {
+	reqs := make([]*t_api.Request, n)
 
 	for i := 0; i < n; i++ {
 		bound := len(g.requests)
-		if len(cursors) > 0 {
-			bound = bound + 1
+		if cursors != nil && len(*cursors) > 0 {
+			bound++
 		}
 
 		switch j := r.Intn(bound); j {
 		case len(g.requests):
-			reqs = append(reqs, cursors[r.Intn(len(cursors))])
+			k := r.Intn(len(*cursors))
+			reqs[i] = (*cursors)[k]
+
+			// now remove from cursors
+			*cursors = append((*cursors)[:k], (*cursors)[k+1:]...)
 		default:
 			f := g.requests[j]
-			reqs = append(reqs, f(r, t))
+			reqs[i] = f(r, t)
 		}
 
 	}
@@ -172,27 +165,12 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
 
-	// Triggers the task framework.
-	if RandBool(r) {
-		id = fmt.Sprintf("/gpu/summarize/%s", id)
-	}
-
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	strict := r.Intn(2) == 0
-
-	// Create a simple timeout promise (deep copy so it's not shared with other generator functions).
-	if tags != nil && RandBool(r) {
-		tempTags := make(map[string]string, len(tags)+1)
-		for k, v := range tags {
-			tempTags[k] = v
-		}
-		tempTags["resonate:timeout"] = "true"
-		tags = tempTags
-	}
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
@@ -307,79 +285,21 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
-func (g *Generator) GenerateReadSubscriptions(r *rand.Rand, t int64) *t_api.Request {
-	limit := r.Intn(10)
-	id := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Kind: t_api.ReadSubscriptions,
-		ReadSubscriptions: &t_api.ReadSubscriptionsRequest{
-			PromiseId: id,
-			Limit:     limit,
-		},
-	}
-}
-
-func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	promiseId := g.idSet[r.Intn(len(g.idSet))]
-	url := g.urlSet[r.Intn(len(g.urlSet))]
-	delay := g.retrySet[r.Intn(len(g.retrySet))]
-	attempts := RangeIntn(r, 1, 4)
-
-	return &t_api.Request{
-		Kind: t_api.CreateSubscription,
-		CreateSubscription: &t_api.CreateSubscriptionRequest{
-			Id:        id,
-			PromiseId: promiseId,
-			Url:       url,
-			RetryPolicy: &subscription.RetryPolicy{
-				Delay:    int64(delay),
-				Attempts: int64(attempts),
-			},
-		},
-	}
-}
-
-func (g *Generator) GenerateDeleteSubscription(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-	promiseId := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Kind: t_api.DeleteSubscription,
-		DeleteSubscription: &t_api.DeleteSubscriptionRequest{
-			Id:        id,
-			PromiseId: promiseId,
-		},
-	}
-}
-
 // LOCK
 
 func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	resourceId := g.idSet[r.Intn(len(g.idSet))]
-	processId := g.idSet[r.Intn(len(g.idSet))]
 	executionId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInMilliseconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	processId := g.idSet[r.Intn(len(g.idSet))]
+	expiryInMilliseconds := RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
 
 	return &t_api.Request{
 		Kind: t_api.AcquireLock,
 		AcquireLock: &t_api.AcquireLockRequest{
 			ResourceId:           resourceId,
-			ProcessId:            processId,
 			ExecutionId:          executionId,
+			ProcessId:            processId,
 			ExpiryInMilliseconds: expiryInMilliseconds,
-		},
-	}
-}
-
-func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request {
-	processId := g.idSet[r.Intn(len(g.idSet))]
-
-	return &t_api.Request{
-		Kind: t_api.HeartbeatLocks,
-		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-			ProcessId: processId,
 		},
 	}
 }
@@ -397,50 +317,13 @@ func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
 	}
 }
 
-// TASK
-
-func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
-	taskId := g.idSet[r.Intn(len(g.idSet))]
-	counter := r.Int()
+func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request {
 	processId := g.idSet[r.Intn(len(g.idSet))]
-	executionId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInMilliseconds := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
 	return &t_api.Request{
-		Kind: t_api.ClaimTask,
-		ClaimTask: &t_api.ClaimTaskRequest{
-			TaskId:               taskId,
-			Counter:              counter,
-			ProcessId:            processId,
-			ExecutionId:          executionId,
-			ExpiryInMilliseconds: expiryInMilliseconds,
-		},
-	}
-}
-
-func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
-	taskId := g.idSet[r.Intn(len(g.idSet))]
-	counter := r.Int()
-	executionId := g.idSet[r.Intn(len(g.idSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-
-	state := promise.Resolved
-	if RandBool(r) {
-		state = promise.Rejected
-	}
-
-	return &t_api.Request{
-		Kind: t_api.CompleteTask,
-		CompleteTask: &t_api.CompleteTaskRequest{
-			TaskId:      taskId,
-			Counter:     counter,
-			ExecutionId: executionId,
-			State:       state,
-			Value: promise.Value{
-				Headers: headers,
-				Data:    data,
-			},
+		Kind: t_api.HeartbeatLocks,
+		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+			ProcessId: processId,
 		},
 	}
 }

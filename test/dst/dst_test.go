@@ -9,8 +9,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -20,27 +18,6 @@ import (
 )
 
 func TestDST(t *testing.T) {
-	test(t, &Scenario{Kind: Default})
-}
-
-func TestDSTFaultInjection(t *testing.T) {
-	test(t, &Scenario{
-		Kind:           FaultInjection,
-		FaultInjection: &FaultInjectionScenario{P: 0.5},
-	})
-}
-
-func TestDSTLazyTimeout(t *testing.T) {
-	test(t, &Scenario{
-		Kind:        LazyTimeout,
-		LazyTimeout: &LazyTimeoutScenario{},
-	})
-}
-
-func test(t *testing.T, scenario *Scenario) {
-	// TODO: reimplement
-	t.Skip("DST is disabled")
-
 	r := rand.New(rand.NewSource(0))
 
 	// instantiate metrics
@@ -49,41 +26,24 @@ func test(t *testing.T, scenario *Scenario) {
 
 	// config
 	config := &system.Config{
-		NotificationCacheSize: 100,
-		SubmissionBatchSize:   100,
-		CompletionBatchSize:   100,
-	}
-
-	var _aio aio.AIO
-	switch scenario.Kind {
-	case FaultInjection:
-		_aio = aio.NewDST(r, scenario.FaultInjection.P, metrics)
-	default:
-		_aio = aio.NewDST(r, 0, metrics)
+		CoroutineMaxSize:    100,
+		SubmissionBatchSize: 100,
+		CompletionBatchSize: 100,
+		ScheduleBatchSize:   100,
 	}
 
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	aio := _aio
+	aio := aio.NewDST(r, 0, metrics)
 
 	// instatiate aio subsystems
-	network := network.NewDST(&network.ConfigDST{P: 0.5}, r)
 	store, err := sqlite.New(&sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	reqsPerTickSize := 100
-	taskQueue := make(chan *queuing.ConnectionSubmissionDST, reqsPerTickSize)
-	queuing, err := queuing.NewDST(&queuing.ConfigDST{P: 0.5, Queue: taskQueue}, r)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// add api subsystems
-	aio.AddSubsystem(t_aio.Network, network, nil)
 	aio.AddSubsystem(t_aio.Store, store, nil)
-	aio.AddSubsystem(t_aio.Queuing, queuing, nil)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -95,54 +55,12 @@ func test(t *testing.T, scenario *Scenario) {
 	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
 	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-	system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-	system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
-	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-	system.AddOnTick("EnqueueTasks", 1*time.Second, coroutines.EnqueueTasks)
-	system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
+	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 	system.AddOnTick("SchedulePromises", 1*time.Second, coroutines.SchedulePromises)
-	system.AddOnTick("NotifySubscriptions", 1*time.Second, coroutines.NotifySubscriptions)
-
-	// specify reqs to enable
-	reqs := []t_api.Kind{
-		// PROMISE
-		t_api.ReadPromise,
-		t_api.CreatePromise,
-		t_api.CompletePromise,
-
-		// SCHEDULE
-		t_api.ReadSchedule,
-		t_api.SearchSchedules,
-		t_api.CreateSchedule,
-		t_api.DeleteSchedule,
-
-		// SUBSCRIPTION
-		t_api.ReadSubscriptions,
-		t_api.CreateSubscription,
-		t_api.DeleteSubscription,
-
-		// LOCK
-		t_api.AcquireLock,
-		t_api.HeartbeatLocks,
-		t_api.ReleaseLock,
-
-		// TASK
-		t_api.ClaimTask,
-		t_api.CompleteTask,
-	}
-
-	// remove search promises and timeout promises if lazy timeout scenario
-	// this forces the "lazy" path to be taken for promises to transition
-	// to timedout state
-	if scenario.Kind != LazyTimeout {
-		reqs = append(reqs, t_api.SearchPromises)
-		system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
-	}
+	system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
+	system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
 
 	// start api/aio
 	if err := api.Start(); err != nil {
@@ -152,24 +70,18 @@ func test(t *testing.T, scenario *Scenario) {
 		t.Fatal(err)
 	}
 
-	dst := New(&Config{
-		Ticks:              3_000,
-		TimeElapsedPerTick: 50_000, // milliseconds
-		Reqs:               func() int { return reqsPerTickSize },
+	dst := New(r, &Config{
+		Ticks:              1000,
+		TimeElapsedPerTick: 1000, // ms
+		ReqsPerTick:        func() int { return 25 },
 		Ids:                100,
 		IdempotencyKeys:    100,
 		Headers:            100,
 		Data:               100,
 		Tags:               100,
-		Urls:               100,
-		Retries:            100,
-		Scenario:           scenario,
-		TaskQueue:          taskQueue,
 	})
 
-	if errs := dst.Run(r, api, aio, system, reqs); len(errs) > 0 {
-		t.Fatal(errs)
-	}
+	ok := dst.Run(r, api, aio, system)
 
 	// shutdown api/aio
 	api.Shutdown()
@@ -186,5 +98,9 @@ func test(t *testing.T, scenario *Scenario) {
 	}
 	if err := aio.Stop(); err != nil {
 		t.Fatal(err)
+	}
+
+	if !ok {
+		t.Fatal("DST failed")
 	}
 }

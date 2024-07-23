@@ -72,26 +72,26 @@ const (
 		id                TEXT UNIQUE,
 		counter           INTEGER,
 		promise_id        TEXT,
-		claim_timeout     INTEGER, 
-		complete_timeout  INTEGER, 
+		claim_timeout     INTEGER,
+		complete_timeout  INTEGER,
 		promise_timeout   INTEGER,
 		created_on        INTEGER,
-		completed_on      INTEGER, 		
+		completed_on      INTEGER,
 		is_completed      BOOLEAN
-	); 
+	);
 
-	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
+	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id);
 
 	CREATE TABLE IF NOT EXISTS locks (
 		resource_id            TEXT UNIQUE,
+		execution_id           TEXT,
 		process_id             TEXT,
-		execution_id           TEXT, 
 		expiry_in_milliseconds INTEGER,
 		timeout                INTEGER
-	); 
+	);
 
-	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id); 
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id); 
+	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id);
+	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);
 	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
@@ -121,11 +121,11 @@ const (
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);
-	
+
 	CREATE TABLE IF NOT EXISTS migrations (
 		id    INTEGER PRIMARY KEY
 	);
-	
+
 	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	PROMISE_SELECT_STATEMENT = `
@@ -173,7 +173,7 @@ const (
 		state = CASE
 					WHEN json_extract(tags, '$.resonate:timeout') IS NOT NULL AND json_extract(tags, '$.resonate:timeout') = 'true' THEN 2
 					ELSE 16
-				END, 
+				END,
 		completed_on = timeout
 	WHERE
 		state = 1 AND timeout <= ?`
@@ -246,7 +246,7 @@ const (
 		id = ?`
 
 	TASK_SELECT_STATEMENT = `
-	SELECT 
+	SELECT
 		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
 	FROM
 		tasks
@@ -254,20 +254,20 @@ const (
 		id = ?`
 
 	TASK_SELECT_ALL_STATEMENT = `
-	SELECT 
+	SELECT
 		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
 	FROM
 		tasks
 	WHERE
-		is_completed = ? AND 
-		claim_timeout < ? AND 
-		complete_timeout < ? AND 
+		is_completed = ? AND
+		claim_timeout < ? AND
+		complete_timeout < ? AND
 		promise_timeout > ?
 	ORDER BY
 		created_on ASC, id`
 
 	LOCK_READ_STATEMENT = `
-	SELECT 
+	SELECT
 		resource_id, process_id, execution_id, expiry_in_milliseconds, timeout
 	FROM
 		locks
@@ -276,16 +276,19 @@ const (
 
 	LOCK_ACQUIRE_STATEMENT = `
 	INSERT INTO locks
-		(resource_id, process_id, execution_id, expiry_in_milliseconds, timeout)
+		(resource_id, execution_id, process_id, expiry_in_milliseconds, timeout)
 	VALUES
 		(?, ?, ?, ?, ?)
 	ON CONFLICT(resource_id)
-	DO UPDATE SET 
-		process_id = excluded.process_id,
+	DO UPDATE SET
+		process_id = EXCLUDED.process_id,
 		expiry_in_milliseconds = excluded.expiry_in_milliseconds,
 		timeout = excluded.timeout
 	WHERE
-		execution_id = excluded.execution_id`
+		 execution_id = excluded.execution_id`
+
+	LOCK_RELEASE_STATEMENT = `
+	DELETE FROM locks WHERE resource_id = ? AND execution_id = ?`
 
 	LOCK_HEARTBEAT_STATEMENT = `
 	UPDATE
@@ -294,9 +297,6 @@ const (
 		timeout = ? + expiry_in_milliseconds
 	WHERE
 		process_id = ?`
-
-	LOCK_RELEASE_STATEMENT = `
-	DELETE FROM locks WHERE resource_id = ? AND execution_id = ?`
 
 	LOCK_TIMEOUT_STATEMENT = `
 	DELETE FROM locks WHERE timeout <= ?`
@@ -515,8 +515,8 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	var notificationDeleteStmt *sql.Stmt
 	var notificationInsertTimeoutStmt *sql.Stmt
 	var lockAcquireStmt *sql.Stmt
-	var lockHeartbeatStmt *sql.Stmt
 	var lockReleaseStmt *sql.Stmt
+	var lockHeartbeatStmt *sql.Stmt
 	var lockTimeoutStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
@@ -760,17 +760,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
 				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
-			case t_aio.HeartbeatLocks:
-				if lockHeartbeatStmt == nil {
-					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-					defer lockHeartbeatStmt.Close()
-				}
-
-				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
-				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.ReleaseLock:
 				if lockReleaseStmt == nil {
 					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
@@ -782,6 +771,17 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
 				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
+			case t_aio.HeartbeatLocks:
+				if lockHeartbeatStmt == nil {
+					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockHeartbeatStmt.Close()
+				}
+
+				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
+				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.TimeoutLocks:
 				if lockTimeoutStmt == nil {
 					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
@@ -991,7 +991,7 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 
 func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.ExpiryInMilliseconds, cmd.Timeout)
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.ExpiryInMilliseconds, cmd.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -1004,26 +1004,6 @@ func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.A
 	return &t_aio.Result{
 		Kind: t_aio.AcquireLock,
 		AcquireLock: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
-	// update
-	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.HeartbeatLocks,
-		HeartbeatLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -1044,6 +1024,26 @@ func (w *SqliteStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.R
 	return &t_aio.Result{
 		Kind: t_aio.ReleaseLock,
 		ReleaseLock: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
+	// update
+	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.HeartbeatLocks,
+		HeartbeatLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

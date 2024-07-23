@@ -33,8 +33,8 @@ type Request struct {
 
 	// LOCKS
 	AcquireLock    *AcquireLockRequest
-	HeartbeatLocks *HeartbeatLocksRequest
 	ReleaseLock    *ReleaseLockRequest
+	HeartbeatLocks *HeartbeatLocksRequest
 
 	// TASKS
 	ClaimTask    *ClaimTaskRequest
@@ -157,18 +157,18 @@ type EchoRequest struct {
 
 type AcquireLockRequest struct {
 	ResourceId           string `json:"resourceId"`
-	ProcessId            string `json:"processId"`
 	ExecutionId          string `json:"executionId"`
+	ProcessId            string `json:"processId"`
 	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
-}
-
-type HeartbeatLocksRequest struct {
-	ProcessId string `json:"processId"`
 }
 
 type ReleaseLockRequest struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
+}
+
+type HeartbeatLocksRequest struct {
+	ProcessId string `json:"processId"`
 }
 
 // Tasks
@@ -226,25 +226,38 @@ func (r *Request) String() string {
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
-			"CreatePromise(id=%s, idempotencyKey=%s, timeout=%d, strict=%t)",
+			"CreatePromise(id=%s, idempotencyKey=%s, strict=%t, timeout=%d)",
 			r.CreatePromise.Id,
 			r.CreatePromise.IdempotencyKey,
-			r.CreatePromise.Timeout,
 			r.CreatePromise.Strict,
+			r.CreatePromise.Timeout,
 		)
 	case CompletePromise:
 		return fmt.Sprintf(
-			"CompletePromise(id=%s, state=%s, idempotencyKey=%s, strict=%t)",
+			"CompletePromise(id=%s, idempotencyKey=%s, strict=%t, state=%s)",
 			r.CompletePromise.Id,
-			r.CompletePromise.State,
 			r.CompletePromise.IdempotencyKey,
 			r.CompletePromise.Strict,
+			r.CompletePromise.State,
 		)
 	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(
 			"ReadSchedule(id=%s)",
 			r.ReadSchedule.Id,
+		)
+	case SearchSchedules:
+		sortId := "<nil>"
+		if r.SearchSchedules.SortId != nil {
+			sortId = strconv.FormatInt(*r.SearchSchedules.SortId, 10)
+		}
+
+		return fmt.Sprintf(
+			"SearchSchedules(id=%s, tags=%s, limit=%d, sortId=%s)",
+			r.SearchSchedules.Id,
+			r.SearchSchedules.Tags,
+			r.SearchSchedules.Limit,
+			sortId,
 		)
 	case CreateSchedule:
 		return fmt.Sprintf(
@@ -290,23 +303,22 @@ func (r *Request) String() string {
 	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
-			"AcquireLock(resourceId=%s, processId=%s, executionId=%s, expiryInMilliseconds=%d)",
+			"AcquireLock(resourceId=%s, executionId=%s, processId=%s, expiryInMilliseconds=%d)",
 			r.AcquireLock.ResourceId,
-			r.AcquireLock.ProcessId,
 			r.AcquireLock.ExecutionId,
+			r.AcquireLock.ProcessId,
 			r.AcquireLock.ExpiryInMilliseconds,
 		)
-	case HeartbeatLocks:
-		return fmt.Sprintf(
-			"HeartbeatLocks(processId=%s)",
-			r.HeartbeatLocks.ProcessId,
-		)
-
 	case ReleaseLock:
 		return fmt.Sprintf(
 			"ReleaseLock(resourceId=%s, executionId=%s)",
 			r.ReleaseLock.ResourceId,
 			r.ReleaseLock.ExecutionId,
+		)
+	case HeartbeatLocks:
+		return fmt.Sprintf(
+			"HeartbeatLocks(processId=%s)",
+			r.HeartbeatLocks.ProcessId,
 		)
 
 	// TASKS

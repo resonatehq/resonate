@@ -13,14 +13,14 @@ import (
 
 func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, error) {
 	util.Assert(body.ResourceId != "", "lock.resource_id must be provided")
-	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
 	util.Assert(body.ExecutionId != "", "lock.execution_id must be provided")
+	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
 	util.Assert(body.ExpiryInMilliseconds != 0, "lock.expiry_in_milliseconds must be provided")
 
 	acquireLock := &t_api.AcquireLockRequest{
 		ResourceId:           body.ResourceId,
-		ProcessId:            body.ProcessId,
 		ExecutionId:          body.ExecutionId,
+		ProcessId:            body.ProcessId,
 		ExpiryInMilliseconds: body.ExpiryInMilliseconds,
 	}
 
