@@ -37,7 +37,6 @@ func (v *Validator) Validate(model *Model, reqTime int64, resTime int64, req *t_
 // PROMISES
 
 func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	// get the promise
 	p := model.promises.get(req.ReadPromise.Id)
 
 	switch res.ReadPromise.Status {
@@ -66,52 +65,36 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 }
 
 func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	updatedModel := false
-
 	switch res.SearchPromises.Status {
 	case t_api.StatusOK:
 		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
 
-		for _, sp := range res.SearchPromises.Promises {
+		for _, p := range res.SearchPromises.Promises {
 			// ignore scheduled promises
-			if _, ok := sp.Tags["resonate:schedule"]; ok {
+			if _, ok := p.Tags["resonate:schedule"]; ok {
 				continue
 			}
 
-			p := model.promises.get(sp.Id)
-
-			if p == nil {
-				return model, fmt.Errorf("promise '%s' does not exist", sp.Id)
-			}
-			if p.State != sp.State {
-				// the only way this can happen is if the promise timedout
-				if sp.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
-					if !updatedModel {
-						model = model.Copy()
-						updatedModel = true
-					}
-					model.promises.set(sp.Id, sp)
-				} else {
-					return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, sp.State, sp.Id)
-				}
+			if model.promises.get(p.Id) == nil {
+				return model, fmt.Errorf("promise '%s' does not exist", p.Id)
 			}
 
+			if !regex.MatchString(p.Id) {
+				return model, fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Id)
+			}
 			states := map[promise.State]bool{}
 			for _, state := range req.SearchPromises.States {
 				states[state] = true
 			}
-			if !regex.MatchString(sp.Id) {
-				return model, fmt.Errorf("promise id '%s' does not match search query '%s'", sp.Id, req.SearchPromises.Id)
+			if _, ok := states[p.State]; !ok {
+				return model, fmt.Errorf("promise state '%s' not in search states '%s'", p.State, req.SearchPromises.States)
 			}
-			if _, ok := states[sp.State]; !ok {
-				return model, fmt.Errorf("promise state '%s' not in search states '%s'", sp.State, req.SearchPromises.States)
-			}
-			if req.SearchPromises.SortId != nil && *req.SearchPromises.SortId <= sp.SortId {
-				return model, fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", *req.SearchPromises.SortId, sp.SortId)
+			if req.SearchPromises.SortId != nil && *req.SearchPromises.SortId <= p.SortId {
+				return model, fmt.Errorf("unexpected sortId, promise sortId %d is greater than the request sortId %d", p.SortId, *req.SearchPromises.SortId)
 			}
 			for k, v := range req.SearchPromises.Tags {
-				if _v, ok := sp.Tags[k]; !ok || v != _v {
-					return model, fmt.Errorf("promise %s has unexpected tag '%s:%s', expected '%s:%s'", sp.Id, k, _v, k, v)
+				if _v, ok := p.Tags[k]; !ok || v != _v {
+					return model, fmt.Errorf("promise %s has unexpected tag '%s:%s', expected '%s:%s'", p.Id, k, _v, k, v)
 				}
 			}
 		}
@@ -287,6 +270,14 @@ func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime
 			}
 			if !regex.MatchString(s.Id) {
 				return model, fmt.Errorf("schedule id '%s' does not match search query '%s'", s.Id, req.SearchSchedules.Id)
+			}
+			if req.SearchSchedules.SortId != nil && *req.SearchSchedules.SortId <= s.SortId {
+				return model, fmt.Errorf("unexpected sortId, schedule sortId %d is greater than the request sortId %d", s.SortId, *req.SearchSchedules.SortId)
+			}
+			for k, v := range req.SearchSchedules.Tags {
+				if _v, ok := s.Tags[k]; !ok || v != _v {
+					return model, fmt.Errorf("schedule %s has unexpected tag '%s:%s', expected '%s:%s'", s.Id, k, _v, k, v)
+				}
 			}
 		}
 		return model, nil

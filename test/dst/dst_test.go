@@ -72,8 +72,10 @@ func TestDST(t *testing.T) {
 
 	dst := New(r, &Config{
 		Ticks:              1000,
+		VisualizationPath:  "dst.html",
 		TimeElapsedPerTick: 1000, // ms
-		ReqsPerTick:        func() int { return 25 },
+		ReqsPerTick:        func() int { return RangeIntn(r, 0, 25) },
+		MaxReqsPerTick:     25,
 		Ids:                100,
 		IdempotencyKeys:    100,
 		Headers:            100,

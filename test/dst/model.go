@@ -98,6 +98,10 @@ func (s *Store[T]) delete(id string) {
 }
 
 func (s1 *Store[T]) equals(s2 *Store[T]) bool {
+	if s1 == s2 {
+		return true
+	}
+
 	if len(*s1) != len(*s2) {
 		return false
 	}

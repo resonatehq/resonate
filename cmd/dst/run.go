@@ -26,8 +26,10 @@ import (
 
 func RunDSTCmd() *cobra.Command {
 	var (
-		seed  int64
-		ticks int64
+		seed              int64
+		ticks             int64
+		timeout           time.Duration
+		visualizationPath string
 		// scenario string
 
 		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 25}
@@ -132,15 +134,16 @@ func RunDSTCmd() *cobra.Command {
 
 			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,
+				Timeout:            timeout,
+				VisualizationPath:  visualizationPath,
 				TimeElapsedPerTick: 1000, // ms
-				ReqsPerTick: func() int {
-					return reqsPerTick.Resolve(r)
-				},
-				Ids:             ids.Resolve(r),
-				IdempotencyKeys: idempotencyKeys.Resolve(r),
-				Headers:         headers.Resolve(r),
-				Data:            data.Resolve(r),
-				Tags:            tags.Resolve(r),
+				ReqsPerTick:        func() int { return reqsPerTick.Resolve(r) },
+				MaxReqsPerTick:     reqsPerTick.Max,
+				Ids:                ids.Resolve(r),
+				IdempotencyKeys:    idempotencyKeys.Resolve(r),
+				Headers:            headers.Resolve(r),
+				Data:               data.Resolve(r),
+				Tags:               tags.Resolve(r),
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -170,6 +173,8 @@ func RunDSTCmd() *cobra.Command {
 
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
+	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "timeout")
+	cmd.Flags().StringVar(&visualizationPath, "visualization-path", "dst.html", "file path for porcupine visualization")
 	// cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy}")
 
 	// dst related values

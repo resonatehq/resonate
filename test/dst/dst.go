@@ -23,8 +23,11 @@ type DST struct {
 
 type Config struct {
 	Ticks              int64
+	Timeout            time.Duration
+	VisualizationPath  string
 	TimeElapsedPerTick int64
 	ReqsPerTick        func() int
+	MaxReqsPerTick     int
 	Ids                int
 	IdempotencyKeys    int
 	Headers            int
@@ -123,7 +126,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 				// add operation to porcupine
 				ops = append(ops, porcupine.Operation{
-					ClientId: int(j % 100),
+					ClientId: int(j % int64(d.config.MaxReqsPerTick)),
 					Call:     reqTime,
 					Return:   resTime,
 					Input:    &Req{reqTime, req},
@@ -180,7 +183,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			model1 := state1.(*Model)
 			model2 := state2.(*Model)
 
-			return model1.Equals(model2)
+			return model1 == model2 || model1.Equals(model2)
 		},
 		DescribeOperation: func(input interface{}, output interface{}) string {
 			req := input.(*Req)
@@ -293,11 +296,19 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		},
 	}
 
-	result, history := porcupine.CheckOperationsVerbose(model, ops, 2*time.Minute)
-
-	if err := porcupine.VisualizePath(model, history, "dst.html"); err != nil {
+	result, history := porcupine.CheckOperationsVerbose(model, ops, d.config.Timeout)
+	if err := porcupine.VisualizePath(model, history, d.config.VisualizationPath); err != nil {
 		slog.Error("failed to create visualization", "err", err)
 		return false
+	}
+
+	switch result {
+	case porcupine.Ok:
+		slog.Info("DST is linearizable")
+	case porcupine.Illegal:
+		slog.Error("DST is non linearizable")
+	case porcupine.Unknown:
+		slog.Error("DST timed out before linearizability could be determined")
 	}
 
 	return result == porcupine.Ok

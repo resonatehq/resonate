@@ -38,10 +38,8 @@ func (p *Promise) String() string {
 
 func GetTimedoutState(p *Promise) State {
 	completedState := Timedout
-	if v, ok := p.Tags["resonate:timeout"]; ok {
-		if v == "true" {
-			completedState = Resolved
-		}
+	if p.Tags["resonate:timeout"] == "true" {
+		completedState = Resolved
 	}
 
 	return completedState
