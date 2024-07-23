@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, cast
 from result import Err, Ok, Result
 from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
 
-from resonate.context import Context
+from resonate.context import Context, Invoke
 from resonate.processor import IAsyncCommand, ICommand
 
 if TYPE_CHECKING:
@@ -82,8 +82,14 @@ def wrap_fn_into_cmd(
 
 
 class Promise(Generic[T]):
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        promise_id: int,
+        invocation: Invoke,
+    ) -> None:
+        self.promise_id = promise_id
         self.f = Future[T]()
+        self.invocation = invocation
 
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)

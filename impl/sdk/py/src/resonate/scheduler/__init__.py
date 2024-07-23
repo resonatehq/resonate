@@ -54,9 +54,15 @@ class Scheduler:
         self._batch_size = batch_size
         self.deps = Dependencies()
 
+        self._promise_created = 0
+
     def signal(self) -> None:
         with self._lock:
             self._w_continue.set()
+
+    def _increate_promise_created(self) -> int:
+        self._promise_created += 1
+        return self._promise_created
 
     def add(
         self,
@@ -65,7 +71,10 @@ class Scheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
-        p = Promise[T]()
+        p = Promise[T](
+            promise_id=self._increate_promise_created(),
+            invocation=Invoke(coro, *args, **kwargs),
+        )
         ctx = Context(deps=self.deps)
         self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p, ctx))
         self.signal()
@@ -169,7 +178,7 @@ class Scheduler:
         pending_to_run: PendingToRun,
     ) -> None:
         logger.debug("Processing call")
-        p = Promise[Any]()
+        p = Promise[Any](self._increate_promise_created(), call.to_invoke())
         waiting_for_promise[p] = [runnable.coro_and_promise]
         child_ctx = runnable.coro_and_promise.ctx.new_child()
         if not isgeneratorfunction(call.fn):
@@ -198,7 +207,7 @@ class Scheduler:
         waiting_for_promise: WaitingForPromiseResolution,
     ) -> None:
         logger.debug("Processing invocation")
-        p = Promise[Any]()
+        p = Promise[Any](self._increate_promise_created(), invocation)
         pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
         child_ctx = runnable.coro_and_promise.ctx.new_child()
         if not isgeneratorfunction(invocation.fn):

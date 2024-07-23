@@ -25,6 +25,9 @@ class Call:
         self.args = args
         self.kwargs = kwargs
 
+    def to_invoke(self) -> Invoke:
+        return Invoke(self.fn, *self.args, **self.kwargs)
+
 
 class Invoke:
     def __init__(

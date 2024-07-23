@@ -29,7 +29,6 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | FinalValue[T]:
     try:
         if runnable.next_value is None:
             # next_value is None means we need to initialize the coro
-            logger.debug("Initializing coro")
             yieldable = next(runnable.coro_and_promise.coro)
         elif isinstance(runnable.next_value, Ok):
             # next_value is Ok mean we can pass a value to the coro

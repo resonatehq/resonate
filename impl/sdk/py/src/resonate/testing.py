@@ -14,13 +14,14 @@ if TYPE_CHECKING:
     from resonate.context import Context
 
 
-def dst(
+def dst(  # noqa: PLR0913
     seeds: list[range | int],
     mocks: dict[
         Callable[Concatenate[Context, ...], Any | Coroutine[None, None, Any]],
         Callable[[], Any],
     ]
     | None = None,
+    log_file: str | None = None,
     mode: Mode = "concurrent",
     failure_chance: float = 0,
     max_failures: int = 0,
@@ -40,6 +41,7 @@ def dst(
                     mode=mode,
                     failure_chance=failure_chance,
                     max_failures=max_failures,
+                    log_file=log_file,
                 )
                 for i in seed
             )
@@ -51,6 +53,7 @@ def dst(
                     mode=mode,
                     failure_chance=failure_chance,
                     max_failures=max_failures,
+                    log_file=log_file,
                 )
             )
         else:
