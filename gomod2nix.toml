@@ -1,6 +1,9 @@
 schema = 3
 
 [mod]
+  [mod."github.com/anishathalye/porcupine"]
+    version = "v0.1.6"
+    hash = "sha256-hM8nlRwPCjtSolROEnnmIOHnPzRIrdssZo7AtD8D9oA="
   [mod."github.com/apapsch/go-jsonmerge/v2"]
     version = "v2.0.0"
     hash = "sha256-xp/1B6XUN2EbddBfoUkTV3oTk+34m4kOZP+66HhfLg4="
@@ -118,6 +121,9 @@ schema = 3
   [mod."github.com/prometheus/procfs"]
     version = "v0.12.0"
     hash = "sha256-Y4ZZmxIpVCO67zN3pGwSk2TcI88zvmGJkgwq9DRTwFw="
+  [mod."github.com/resonatehq/gocoro"]
+    version = "v0.0.0-20240715191948-713092525ab8"
+    hash = "sha256-0DabqfcrzqnLsxO3hCyzFBOFMxHlI/uG0+vuywYTvso="
   [mod."github.com/robfig/cron/v3"]
     version = "v3.0.1"
     hash = "sha256-FUdqNbWYi5biQc/tjCeqzxu4iy4ot1ZvDU1M1wRf/6k="

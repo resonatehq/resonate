@@ -30,12 +30,12 @@ func RunDSTCmd() *cobra.Command {
 		ticks int64
 		// scenario string
 
-		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 15}
-		ids             = util.RangeIntFlag{Min: 1, Max: 15}
-		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 15}
-		headers         = util.RangeIntFlag{Min: 1, Max: 15}
-		data            = util.RangeIntFlag{Min: 1, Max: 15}
-		tags            = util.RangeIntFlag{Min: 1, Max: 15}
+		reqsPerTick     = util.RangeIntFlag{Min: 1, Max: 25}
+		ids             = util.RangeIntFlag{Min: 1, Max: 25}
+		idempotencyKeys = util.RangeIntFlag{Min: 1, Max: 25}
+		headers         = util.RangeIntFlag{Min: 1, Max: 25}
+		data            = util.RangeIntFlag{Min: 1, Max: 25}
+		tags            = util.RangeIntFlag{Min: 1, Max: 25}
 
 		apiSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		aioSize = util.RangeIntFlag{Min: 1, Max: 1000}
