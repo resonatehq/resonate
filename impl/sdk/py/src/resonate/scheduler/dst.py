@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 import random
-import shutil
 from collections import deque
 from inspect import isgeneratorfunction
 from pathlib import Path
@@ -120,18 +118,9 @@ class DSTScheduler:
         if self._log_file is None:
             return
         logs_folder = Path().cwd() / self._log_file
-        if not logs_folder.exists() and not logs_folder.is_file():
-            logs_folder.mkdir(exist_ok=False)
-
-        for content in os.listdir(logs_folder):
-            content_path = logs_folder / content
-            if content_path.is_file():
-                content_path.unlink()
-            else:
-                shutil.rmtree(content_path)
 
         all_logs: str = "".join(f"{event}\n" for event in self._events)
-        with (logs_folder / f"{self.seed}.txt").open(mode="w") as file:
+        with (logs_folder / f"seed_{self.seed}.txt").open(mode="w") as file:
             file.write(all_logs)
 
     def run(self) -> list[Promise[Any]]:
