@@ -148,9 +148,8 @@ jobs:
           path: test/results/
 
   scan:
-    name: semgrep
     runs-on: ubuntu-20.04
-    needs: [check-default, check-postgres, check-linearizability]
+    needs: [lint, test, linearizability]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
     if: (github.actor != 'dependabot[bot]')
