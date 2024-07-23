@@ -1,6 +1,6 @@
 import { describe, test, expect, jest } from "@jest/globals";
-import { Resonate, Context } from "../lib/async";
 import * as retry from "../lib/core/retry";
+import { Resonate, Context } from "../lib/resonate";
 
 jest.setTimeout(10000);
 

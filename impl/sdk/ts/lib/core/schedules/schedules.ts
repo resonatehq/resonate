@@ -15,7 +15,7 @@ export class Schedule {
   constructor(
     private store: IScheduleStore,
     private encoder: IEncoder<unknown, string | undefined>,
-    private schedule: ScheduleRecord,
+    public schedule: ScheduleRecord,
   ) {}
 
   static async create(

@@ -127,6 +127,29 @@ export function retryIterator<T extends { retryPolicy: RetryPolicy; attempt: num
   };
 }
 
+export async function runWithRetry<T>(func: () => Promise<T>, retryPolicy: RetryPolicy, timeout: number) {
+  let error;
+
+  const ctx = { attempt: 0, retryPolicy, timeout };
+
+  // invoke the function according to the retry policy
+  for (const delay of retryIterator(ctx)) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+
+    try {
+      return await func();
+    } catch (e) {
+      error = e;
+
+      // bump the attempt count
+      ctx.attempt++;
+    }
+  }
+
+  // if all attempts fail throw the last error
+  throw error;
+}
+
 function retryDefaults(retryPolicy: RetryPolicy): {
   initialDelay: number;
   backoffFactor: number;

@@ -152,11 +152,11 @@ export class LocalPromiseStore implements IPromiseStore {
       }
 
       if (strict && !isPendingPromise(promise)) {
-        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
+        throw new ResonateError("Forbidden request: Durable promise previously created", ErrorCodes.STORE_FORBIDDEN);
       }
 
       if (promise.idempotencyKeyForCreate === undefined || ikey !== promise.idempotencyKeyForCreate) {
-        throw new ResonateError("Forbidden request", ErrorCodes.STORE_FORBIDDEN);
+        throw new ResonateError("Forbidden request: Missing idempotency key for create", ErrorCodes.STORE_FORBIDDEN);
       }
 
       return promise;

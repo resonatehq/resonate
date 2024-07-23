@@ -62,7 +62,20 @@ export class RemoteStore implements IStore {
           body: options.body,
         });
 
-        const r = await fetch(`${this.url}/${path}`, options);
+        let r!: Response;
+        try {
+          r = await fetch(`${this.url}/${path}`, options);
+        } catch (err) {
+          // We need to differentiate between errors in this fetch and possible fetching
+          // errors in the user code, that is why we wrap the fetch error in a resonate
+          // error.
+          // Some fetch errors are caused by malformed urls or wrong use of headers,
+          // thoses shouldn't be retriable, but fetch throws a `TypeError` for those
+          // aswell as errors when the server is unreachble which is a retriable error.
+          // Since it is hard to identify which error was thrown, we mark all of them as retriable.
+          throw new ResonateError("Fetch Error", ErrorCodes.FETCH, err, true);
+        }
+
         const body: unknown = r.status !== 204 ? await r.json() : undefined;
 
         this.logger.debug("store:res", {

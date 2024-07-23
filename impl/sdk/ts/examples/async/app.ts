@@ -2,7 +2,7 @@ import { Resonate, Context, exponential } from "@resonatehq/sdk";
 
 const resonate = new Resonate({
   timeout: 1000,
-  retry: exponential(
+  retryPolicy: exponential(
     100,      // initial delay (in ms)
     2,        // backoff factor
     Infinity, // max attempts

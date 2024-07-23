@@ -1,14 +1,8 @@
-// resonate
+// invok
 export * from "./resonate";
-
-// async
-export * from "./async";
 
 // errors
 export * from "./core/errors";
-
-// futures
-export * from "./core/future";
 
 // options
 export * from "./core/options";

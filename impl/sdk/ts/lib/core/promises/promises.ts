@@ -201,7 +201,7 @@ export class DurablePromise<T> {
     id: string,
     timeout: number,
     opts: Partial<CreateOptions> = {},
-  ) {
+  ): Promise<DurablePromise<T>> {
     const storedPromise = await store.create(
       id,
       opts.idempotencyKey,

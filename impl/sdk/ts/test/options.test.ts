@@ -1,19 +1,19 @@
 import { describe, test, expect, jest } from "@jest/globals";
-import * as a from "../lib/async";
 import { Base64Encoder } from "../lib/core/encoders/base64";
 import { JSONEncoder } from "../lib/core/encoders/json";
-import { Options } from "../lib/core/options";
+import { Options, options } from "../lib/core/options";
 import * as retry from "../lib/core/retry";
 import * as utils from "../lib/core/utils";
+import * as a from "../lib/resonate";
 
 jest.setTimeout(10000);
 
 async function aTest(ctx: a.Context, opts: Partial<Options> = {}) {
   return [
-    ctx.opts,
+    ctx.invocationData.opts,
     ...(await ctx.run(
-      async (ctx: a.Context) => [ctx.opts, await ctx.run((ctx: a.Context) => ctx.opts)],
-      ctx.options(opts),
+      async (ctx: a.Context) => [ctx.invocationData.opts, await ctx.run((ctx: a.Context) => ctx.invocationData.opts)],
+      options(opts),
     )),
   ];
 }
@@ -52,7 +52,7 @@ describe("Options", () => {
     const [top, middle, bottom] = await resonate.run<[Options, Options, Options]>(
       "test.1",
       `test.1.1`,
-      resonate.options({ version: 1 }),
+      options({ version: 1 }),
     );
 
     // Most options defaults are set when created a resonate instance
@@ -97,11 +97,7 @@ describe("Options", () => {
   });
 
   test("options passed to resonate run affect top level only", async () => {
-    const [top, ...bottom] = await resonate.run<[Options, Options, Options]>(
-      "test.1",
-      `test.1.2`,
-      resonate.options(overrides),
-    );
+    const [top, ...bottom] = await resonate.run<[Options, Options, Options]>("test.1", `test.1.2`, options(overrides));
 
     // Note: only some options are valid at the top level
     // this is because we would lose this information on the recovery path.
@@ -138,7 +134,7 @@ describe("Options", () => {
       "test.1",
       `test.1.3`,
       overrides,
-      resonate.options({ version: 1 }),
+      options({ version: 1 }),
     );
 
     // middle options (overriden)

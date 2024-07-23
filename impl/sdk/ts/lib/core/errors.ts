@@ -1,6 +1,7 @@
 export enum ErrorCodes {
   // unknown
   UNKNOWN = 0,
+  FETCH = 1,
 
   // canceled
   CANCELED = 10,
@@ -8,8 +9,8 @@ export enum ErrorCodes {
   // timedout
   TIMEDOUT = 20,
 
-  // killed
-  KILLED = 30,
+  // ABORT
+  ABORT = 30,
 
   // store
   STORE = 40,
@@ -20,6 +21,9 @@ export enum ErrorCodes {
   STORE_ALREADY_EXISTS = 45,
   STORE_INVALID_STATE = 46,
   STORE_ENCODER = 47,
+
+  // error in user function
+  USER = 60,
 }
 
 export class ResonateError extends Error {
