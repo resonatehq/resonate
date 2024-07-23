@@ -228,7 +228,7 @@ def test_sequential() -> None:
         PromiseResolved(promise_id=1, tick=15),
     ]
 
-    con_scheduler = DSTScheduler(seed=1, mode="concurrent")
+    con_scheduler = DSTScheduler(seed=1, mode="concurrent", log_file=".dom/%s.txt")
     con_scheduler.add(only_call, n=1)
     con_scheduler.add(only_call, n=2)
     con_scheduler.add(only_call, n=3)

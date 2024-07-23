@@ -3,12 +3,12 @@ from __future__ import annotations
 import random
 from collections import deque
 from inspect import isgeneratorfunction
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
 from result import Err, Ok, Result
 from typing_extensions import Concatenate, ParamSpec, TypeAlias, TypeVar, assert_never
 
+from resonate.contants import CWD
 from resonate.context import Call, Context, Invoke
 from resonate.dependency_injection import Dependencies
 from resonate.logging import logger
@@ -114,14 +114,14 @@ class DSTScheduler:
         self._events.clear()
         self._callbacks_to_run.clear()
 
-    def _write_logs(self) -> None:
-        if self._log_file is None:
-            return
-        logs_folder = Path().cwd() / self._log_file
+    def dump(self, file: str) -> None:
+        log_file = CWD / (file % (self.seed))
+
+        log_file.parent.mkdir(parents=True, exist_ok=True)
 
         all_logs: str = "".join(f"{event}\n" for event in self._events)
-        with (logs_folder / f"seed_{self.seed}.txt").open(mode="w") as file:
-            file.write(all_logs)
+        with log_file.open(mode="w") as f:
+            f.write(all_logs)
 
     def run(self) -> list[Promise[Any]]:
         while True:
@@ -222,7 +222,8 @@ class DSTScheduler:
                 self._process_each_runnable(runnable=runnable)
 
         assert all(p.done() for p in promises), "All promises should be resolved."
-        self._write_logs()
+        if self._log_file is not None:
+            self.dump(file=self._log_file)
         return promises
 
     def _process_each_runnable(
