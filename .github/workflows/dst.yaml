@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        type: string
+        type: number
+        default: 0
+      ticks:
+        type: number
+        default: 1000
   schedule:
     - cron: "0 */4 * * *" # every 4 hours
 
@@ -90,9 +94,9 @@ jobs:
           path: resonate
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
-      - name: Run dst (seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
+      - name: Run dst (seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
         run: |
-          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
+          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks ${{ inputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
       - name: Create issue if dst failed
         env:
           GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -100,9 +104,10 @@ jobs:
         run: |
           ./resonate dst issue \
             --seed ${{ needs.seed.outputs.seed }} \
+            --ticks ${{ inputs.ticks }} \
             --scenario ${{ matrix.scenario }} \
             --store ${{ matrix.store }} \
-            --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+            --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
             --file logs.txt \
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
@@ -160,9 +165,10 @@ jobs:
         run: |
           ./resonate dst issue \
             --seed ${{ needs.seed.outputs.seed }} \
+            --ticks ${{ inputs.ticks }} \
             --scenario ${{ matrix.scenario }} \
             --store ${{ matrix.store }} \
-            --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+            --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
             --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID

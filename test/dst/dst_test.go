@@ -76,11 +76,12 @@ func TestDST(t *testing.T) {
 		TimeElapsedPerTick: 1000, // ms
 		ReqsPerTick:        func() int { return RangeIntn(r, 0, 25) },
 		MaxReqsPerTick:     25,
-		Ids:                100,
-		IdempotencyKeys:    100,
-		Headers:            100,
-		Data:               100,
-		Tags:               100,
+		Ids:                10,
+		IdempotencyKeys:    10,
+		Headers:            10,
+		Data:               10,
+		Tags:               10,
+		Searches:           10,
 	})
 
 	ok := dst.Run(r, api, aio, system)

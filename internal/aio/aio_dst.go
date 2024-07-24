@@ -119,12 +119,11 @@ func (a *aioDST) Flush(t int64) {
 
 	for _, sqes := range util.OrderedRangeKV(flush) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
-			// maintain a list of sqes that were not marked as errors
-			_sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
+			toProcess := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
 
 			for i := range sqes.Value {
-				// Simulate failure before processing
 				if a.r.Float64() < a.p {
+					// Simulate failure before processing
 					cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
@@ -132,20 +131,19 @@ func (a *aioDST) Flush(t int64) {
 					}
 					a.cqes = append(a.cqes, cqe)
 				} else {
-					_sqes = append(_sqes, sqes.Value[i])
+					toProcess = append(toProcess, sqes.Value[i])
 				}
 			}
 
 			// Process the SQE
-			cqes := subsystem.NewWorker(0).Process(_sqes)
-
-			// Simulate failure after processing
-			if a.r.Float64() < a.p {
-				cqes[0].Completion = nil
-				cqes[0].Error = &AioDSTError{msg: "aio dst: failure, after processing"}
+			for _, cqe := range subsystem.NewWorker(0).Process(toProcess) {
+				if a.r.Float64() < a.p {
+					// Simulate failure after processing
+					cqe.Completion = nil
+					cqe.Error = &AioDSTError{msg: "aio dst: failure, after processing"}
+				}
+				a.cqes = append(a.cqes, cqe)
 			}
-
-			a.cqes = append(a.cqes, cqes...)
 		} else {
 			panic("invalid aio submission")
 		}
@@ -157,7 +155,7 @@ func (a *aioDST) Flush(t int64) {
 func (a *aioDST) String() string {
 	// use subsystem keys so that we can compare cross-store dst runs
 	subsystems := make([]t_aio.Kind, len(a.subsystems))
-	for i, subsystem := range util.OrderedRangeKV[t_aio.Kind](a.subsystems) {
+	for i, subsystem := range util.OrderedRangeKV(a.subsystems) {
 		subsystems[i] = subsystem.Key
 	}
 

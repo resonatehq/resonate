@@ -2,8 +2,8 @@ package dst
 
 import (
 	"fmt"
+	"math/rand"
 	"regexp"
-	"strings"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -11,13 +11,21 @@ import (
 
 type Validator struct {
 	responses map[t_api.Kind]ResponseValidator
+	regexes   map[string]*regexp.Regexp
 }
 
 type ResponseValidator func(*Model, int64, int64, *t_api.Request, *t_api.Response) (*Model, error)
 
-func NewValidator() *Validator {
+func NewValidator(r *rand.Rand, config *Config) *Validator {
+	regexes := make(map[string]*regexp.Regexp, config.Searches*2)
+	for i := 0; i < config.Searches*2; i = i + 2 {
+		regexes[fmt.Sprintf("*%d", i)] = regexp.MustCompile(fmt.Sprintf("^.*%d$", i))
+		regexes[fmt.Sprintf("%d*", i)] = regexp.MustCompile(fmt.Sprintf("^%d.*$", i))
+	}
+
 	return &Validator{
 		responses: make(map[t_api.Kind]ResponseValidator),
+		regexes:   regexes,
 	}
 }
 
@@ -67,7 +75,7 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	switch res.SearchPromises.Status {
 	case t_api.StatusOK:
-		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchPromises.Id, "*", ".*")))
+		regex := v.regexes[req.SearchPromises.Id]
 
 		for _, p := range res.SearchPromises.Promises {
 			// ignore scheduled promises
@@ -262,7 +270,7 @@ func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime in
 func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	switch res.SearchSchedules.Status {
 	case t_api.StatusOK:
-		regex := regexp.MustCompile(fmt.Sprintf("^%s$", strings.ReplaceAll(req.SearchSchedules.Id, "*", ".*")))
+		regex := v.regexes[req.SearchSchedules.Id]
 
 		for _, s := range res.SearchSchedules.Schedules {
 			if model.schedules.get(s.Id) == nil {

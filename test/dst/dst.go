@@ -33,6 +33,7 @@ type Config struct {
 	Headers            int
 	Data               int
 	Tags               int
+	Searches           int
 }
 
 type Req struct {
@@ -50,7 +51,7 @@ func New(r *rand.Rand, config *Config) *DST {
 	return &DST{
 		config:    config,
 		generator: NewGenerator(r, config),
-		validator: NewValidator(),
+		validator: NewValidator(r, config),
 	}
 }
 
@@ -346,11 +347,12 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d)",
+		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, searches=%d)",
 		d.config.Ids,
 		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,
+		d.config.Searches,
 	)
 }

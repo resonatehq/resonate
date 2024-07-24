@@ -38,6 +38,7 @@ func RunDSTCmd() *cobra.Command {
 		headers         = util.RangeIntFlag{Min: 1, Max: 25}
 		data            = util.RangeIntFlag{Min: 1, Max: 25}
 		tags            = util.RangeIntFlag{Min: 1, Max: 25}
+		searches        = util.RangeIntFlag{Min: 1, Max: 10}
 
 		apiSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		aioSize = util.RangeIntFlag{Min: 1, Max: 1000}
@@ -144,6 +145,7 @@ func RunDSTCmd() *cobra.Command {
 				Headers:            headers.Resolve(r),
 				Data:               data.Resolve(r),
 				Tags:               tags.Resolve(r),
+				Searches:           searches.Resolve(r),
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -184,6 +186,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&headers, "headers", "number promise headers")
 	cmd.Flags().Var(&data, "data", "number promise data byte arrays")
 	cmd.Flags().Var(&tags, "tags", "number promise tags")
+	cmd.Flags().Var(&searches, "searches", "number searches queries")
 
 	// api
 	cmd.Flags().Var(&apiSize, "api-size", "size of the submission queue buffered channel")

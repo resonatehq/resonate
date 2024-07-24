@@ -19,6 +19,7 @@ type Generator struct {
 	headersSet         []map[string]string
 	dataSet            [][]byte
 	tagsSet            []map[string]string
+	searchSet          []string
 	requests           []RequestGenerator
 }
 
@@ -66,6 +67,12 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
 	}
 
+	searchSet := make([]string, config.Searches*2)
+	for i := 0; i < config.Searches*2; i = i + 2 {
+		searchSet[i+0] = fmt.Sprintf("*%d", i)
+		searchSet[i+1] = fmt.Sprintf("%d*", i)
+	}
+
 	return &Generator{
 		ticks:              config.Ticks,
 		timeElapsedPerTick: config.TimeElapsedPerTick,
@@ -74,6 +81,7 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		headersSet:         headersSet,
 		dataSet:            dataSet,
 		tagsSet:            tagsSet,
+		searchSet:          searchSet,
 	}
 }
 
@@ -121,16 +129,10 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request {
+	id := g.searchSet[r.Intn(len(g.searchSet))]
 	limit := RangeIntn(r, 1, 11)
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	states := []promise.State{}
-
-	var id string
-	switch r.Intn(2) {
-	case 0:
-		id = fmt.Sprintf("*%d", r.Intn(10))
-	default:
-		id = fmt.Sprintf("%d*", r.Intn(10))
-	}
 
 	// states
 	for i := 0; i < r.Intn(5); i++ {
@@ -147,9 +149,6 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 			states = append(states, promise.Canceled)
 		}
 	}
-
-	// tags
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
 	return &t_api.Request{
 		Kind: t_api.SearchPromises,
@@ -225,16 +224,8 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Request {
+	id := g.searchSet[r.Intn(len(g.searchSet))]
 	limit := RangeIntn(r, 1, 11)
-
-	var id string
-	switch r.Intn(2) {
-	case 0:
-		id = fmt.Sprintf("*%d", r.Intn(10))
-	default:
-		id = fmt.Sprintf("%d*", r.Intn(10))
-	}
-
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
 	return &t_api.Request{
