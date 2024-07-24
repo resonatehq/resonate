@@ -17,7 +17,6 @@ import (
 
 type DST struct {
 	config    *Config
-	model     *porcupine.Model
 	generator *Generator
 	validator *Validator
 }
