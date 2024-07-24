@@ -95,7 +95,7 @@ jobs:
           fail-on-cache-miss: true
       - name: Run dst (seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
         run: |
-          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks ${{ inputs.seed }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
+          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks ${{ inputs.ticks }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
       - name: Create issue if dst failed
         env:
           GITHUB_TOKEN: ${{ secrets.github_token }}
