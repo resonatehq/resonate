@@ -56,8 +56,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # scenario: [default, fault, lazy]
-        scenario: [default]
+        scenario: [default, fault, lazy]
         store: [sqlite, postgres]
         run: [1, 2]
 
@@ -124,7 +123,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [default]
+        scenario: [default, fault, lazy]
         store: [sqlite, postgres, sqlite/postgres]
         include:
           - store: sqlite

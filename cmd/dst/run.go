@@ -94,18 +94,23 @@ func RunDSTCmd() *cobra.Command {
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
-			// set up scenarios
 			var p float64
+			var t int64
 			var d time.Duration
+
+			// set up scenarios
 			switch scenario {
 			case "default":
 				p = 0
+				t = ticks
 				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
 			case "fault":
 				p = r.Float64()
+				t = ticks
 				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
 			case "lazy":
 				p = 0
+				t = 10
 				d = 0
 			default:
 				return fmt.Errorf("invalid scenario %s", scenario)
@@ -154,6 +159,7 @@ func RunDSTCmd() *cobra.Command {
 				Timeout:            timeout,
 				VisualizationPath:  visualizationPath,
 				TimeElapsedPerTick: 1000, // ms
+				TimeoutTicks:       t,
 				ReqsPerTick:        func() int { return reqsPerTick.Resolve(r) },
 				MaxReqsPerTick:     reqsPerTick.Max,
 				Ids:                ids.Resolve(r),

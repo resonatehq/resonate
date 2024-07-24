@@ -14,6 +14,7 @@ import (
 type Generator struct {
 	ticks              int64
 	timeElapsedPerTick int64
+	timeoutTicks       int64 // max ticks in the future to set promise timeout
 	idSet              []string
 	idemotencyKeySet   []*idempotency.Key
 	headersSet         []map[string]string
@@ -76,6 +77,7 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 	return &Generator{
 		ticks:              config.Ticks,
 		timeElapsedPerTick: config.TimeElapsedPerTick,
+		timeoutTicks:       config.TimeoutTicks,
 		idSet:              idSet,
 		idemotencyKeySet:   idempotencyKeySet,
 		headersSet:         headersSet,
@@ -168,7 +170,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
-	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
 	strict := r.Intn(2) == 0
 
 	return &t_api.Request{

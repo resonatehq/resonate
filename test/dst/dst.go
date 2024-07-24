@@ -26,6 +26,7 @@ type Config struct {
 	Timeout            time.Duration
 	VisualizationPath  string
 	TimeElapsedPerTick int64
+	TimeoutTicks       int64
 	ReqsPerTick        func() int
 	MaxReqsPerTick     int
 	Ids                int

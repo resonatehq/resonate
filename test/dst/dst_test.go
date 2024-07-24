@@ -82,10 +82,17 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 		t.Fatal(err)
 	}
 
+	ticks := int64(1000)
+	timeoutTicks := ticks
+	if d == 0 {
+		timeoutTicks = 5
+	}
+
 	dst := New(r, &Config{
-		Ticks:              1000,
+		Ticks:              ticks,
 		VisualizationPath:  vp,
 		TimeElapsedPerTick: 1000, // ms
+		TimeoutTicks:       timeoutTicks,
 		ReqsPerTick:        func() int { return RangeIntn(r, 0, 25) },
 		MaxReqsPerTick:     25,
 		Ids:                10,
