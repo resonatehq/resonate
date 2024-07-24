@@ -47,21 +47,6 @@ jobs:
               --verbose \
               --timeout=3m
 
-      # - name: Run go test and generate coverage report
-      #   run: |
-      #     nix develop --command \
-      #       go test \
-      #         -v \
-      #         -coverprofile=coverage.out \
-      #         -coverpkg=./... \
-      #         ./...
-
-      # - name: Upload coverage report to Codecov
-      #   uses: codecov/codecov-action@v4 # nosemgrep
-      #   with:
-      #     token: ${{ secrets.CODECOV_TOKEN }}
-      #     codecov_yml_path: codecov.yml
-
   test:
     runs-on: ubuntu-22.04
     env:
