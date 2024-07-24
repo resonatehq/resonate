@@ -120,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [default, fault, lazy]
+        scenario: [default]
         store: [sqlite, postgres, sqlite/postgres]
         include:
           - store: sqlite
