@@ -80,9 +80,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	var ops []porcupine.Operation
 
 	// run all requests through the server and collect responses
-	var i, j int64
+	var t, i, j int64
 	var cursors []*t_api.Request
-	for t := int64(0); t < d.config.Ticks; t++ {
+	for t = int64(0); t < d.config.Ticks; t++ {
 		time := d.Time(t)
 
 		for _, req := range d.generator.Generate(r, time, d.config.ReqsPerTick(), &cursors) {

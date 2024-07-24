@@ -99,8 +99,6 @@ github.com/prometheus/common v0.48.0 h1:QO8U2CdOzSn1BBsmXJXduaaW+dY/5QLjfB8svtSz
 github.com/prometheus/common v0.48.0/go.mod h1:0/KsvlIEfPQCQ5I2iNSAWKPZziNCvRs5EC6ILDTlAPc=
 github.com/prometheus/procfs v0.12.0 h1:jluTpSng7V9hY0O2R9DzzJHYb2xULk9VTR1V1R/k6Bo=
 github.com/prometheus/procfs v0.12.0/go.mod h1:pcuDEFsWDnvcgNzo4EEweacyhjeA9Zk3cnaOZAZEfOo=
-github.com/resonatehq/gocoro v0.0.0-20240709182111-1287190e8d8c h1:KAnaeQSJn3BE+OyyjesyP8q6N1s/cuBX7xek2vsloms=
-github.com/resonatehq/gocoro v0.0.0-20240709182111-1287190e8d8c/go.mod h1:MiSQNx9BVIPobnUhUrf83L43RteI/m+NIYT9CXMFQHw=
 github.com/resonatehq/gocoro v0.0.0-20240715191948-713092525ab8 h1:KXJI8s9+uKN5UNVxFyrntCWXEnYbVDrTKsokx/CAfl8=
 github.com/resonatehq/gocoro v0.0.0-20240715191948-713092525ab8/go.mod h1:MiSQNx9BVIPobnUhUrf83L43RteI/m+NIYT9CXMFQHw=
 github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
