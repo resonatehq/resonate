@@ -17,6 +17,7 @@ import (
 
 type DST struct {
 	config    *Config
+	model     *porcupine.Model
 	generator *Generator
 	validator *Validator
 }
@@ -34,6 +35,7 @@ type Config struct {
 	Data               int
 	Tags               int
 	Searches           int
+	FaultInjection     bool
 }
 
 type Req struct {
@@ -143,8 +145,42 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		system.Tick(time, nil, nil)
 	}
 
-	// porcupine model
-	model := porcupine.Model{
+	// shutdown the system
+	system.Shutdown()
+
+	// keep ticking until all submissions have been processed
+	for !system.Done() {
+		t++
+		system.Tick(d.Time(t), nil, nil)
+	}
+
+	if d.config.FaultInjection {
+		slog.Info("Skipping linearization check because DST was run with fault injections")
+		return true
+	}
+
+	model := d.Model()
+	result, history := porcupine.CheckOperationsVerbose(model, ops, d.config.Timeout)
+
+	if err := porcupine.VisualizePath(model, history, d.config.VisualizationPath); err != nil {
+		slog.Error("failed to create visualization", "err", err)
+		return false
+	}
+
+	switch result {
+	case porcupine.Ok:
+		slog.Info("DST is linearizable")
+	case porcupine.Illegal:
+		slog.Error("DST is non linearizable")
+	case porcupine.Unknown:
+		slog.Error("DST timed out before linearizability could be determined")
+	}
+
+	return result == porcupine.Ok
+}
+
+func (d *DST) Model() porcupine.Model {
+	return porcupine.Model{
 		Init: func() interface{} {
 			return NewModel()
 		},
@@ -190,9 +226,14 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			req := input.(*Req)
 			res := output.(*Res)
 
-			var status t_api.ResponseStatus
-			if res.res != nil {
-				status = res.res.Status()
+			var status int
+			if res.err != nil {
+				var err *t_api.ResonateError
+				if errors.As(res.err, &err) {
+					status = int(err.Code())
+				}
+			} else {
+				status = int(res.res.Status())
 			}
 
 			return fmt.Sprintf("%s | %s → %d", req.req.Id(), req.req, status)
@@ -296,23 +337,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			`, promises, schedules, locks)
 		},
 	}
-
-	result, history := porcupine.CheckOperationsVerbose(model, ops, d.config.Timeout)
-	if err := porcupine.VisualizePath(model, history, d.config.VisualizationPath); err != nil {
-		slog.Error("failed to create visualization", "err", err)
-		return false
-	}
-
-	switch result {
-	case porcupine.Ok:
-		slog.Info("DST is linearizable")
-	case porcupine.Illegal:
-		slog.Error("DST is non linearizable")
-	case porcupine.Unknown:
-		slog.Error("DST timed out before linearizability could be determined")
-	}
-
-	return result == porcupine.Ok
 }
 
 func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response, err error) (*Model, error) {

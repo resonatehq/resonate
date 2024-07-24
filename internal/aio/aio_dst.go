@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math/rand" // nosemgrep
 
+	"github.com/resonatehq/gocoro/pkg/io"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-// create a DST fault injection error
 type AioDSTError struct {
 	msg string
 }
@@ -30,7 +30,7 @@ type aioDST struct {
 	r          *rand.Rand
 	p          float64
 	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
-	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	cqes       []io.QE
 	subsystems map[t_aio.Kind]Subsystem
 	metrics    *metrics.Metrics
 }
@@ -82,6 +82,8 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 	sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
 		Submission: submission,
 		Callback: func(completion *t_aio.Completion, err error) {
+			util.Assert(completion != nil && err == nil || completion == nil && err != nil, "one of completion/err must be set")
+
 			var status string
 			if err != nil {
 				status = "failure"
@@ -89,8 +91,8 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 				status = "success"
 			}
 
-			a.metrics.AioTotal.WithLabelValues(completion.Kind.String(), status).Inc()
-			a.metrics.AioInFlight.WithLabelValues(completion.Kind.String()).Dec()
+			a.metrics.AioTotal.WithLabelValues(submission.Kind.String(), status).Inc()
+			a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Dec()
 
 			callback(completion, err)
 		},
@@ -104,7 +106,7 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
 }
 
-func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (a *aioDST) Dequeue(n int) []io.QE {
 	cqes := a.cqes[:min(n, len(a.cqes))]
 	a.cqes = a.cqes[min(n, len(a.cqes)):]
 
@@ -121,26 +123,38 @@ func (a *aioDST) Flush(t int64) {
 		if subsystem, ok := a.subsystems[sqes.Key]; ok {
 			toProcess := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
 
+			preFailure, postFailure, n := map[int]bool{}, map[int]bool{}, 0
 			for i := range sqes.Value {
+				// there is a p percent chance of failure
+				// either pre or post processing
 				if a.r.Float64() < a.p {
+					switch a.r.Intn(2) {
+					case 0:
+						preFailure[i] = true
+					case 1:
+						postFailure[n] = true
+					}
+				}
+
+				if preFailure[i] {
 					// Simulate failure before processing
-					cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+					a.cqes = append(a.cqes, &bus.CQE[t_aio.Submission, t_aio.Completion]{
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
-						Error:      &AioDSTError{msg: "aio dst: failure, before processing"},
-					}
-					a.cqes = append(a.cqes, cqe)
+						Error:      &AioDSTError{"simulated failure before processing"},
+					})
 				} else {
 					toProcess = append(toProcess, sqes.Value[i])
+					n++
 				}
 			}
 
 			// Process the SQE
-			for _, cqe := range subsystem.NewWorker(0).Process(toProcess) {
-				if a.r.Float64() < a.p {
+			for i, cqe := range subsystem.NewWorker(0).Process(toProcess) {
+				if postFailure[i] {
 					// Simulate failure after processing
 					cqe.Completion = nil
-					cqe.Error = &AioDSTError{msg: "aio dst: failure, after processing"}
+					cqe.Error = &AioDSTError{"simulated failure after processing"}
 				}
 				a.cqes = append(a.cqes, cqe)
 			}

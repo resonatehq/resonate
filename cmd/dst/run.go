@@ -2,6 +2,7 @@ package dst
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
 	netHttp "net/http"
@@ -93,11 +94,26 @@ func RunDSTCmd() *cobra.Command {
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
-			// TODO: re-add scenarios
+			// set up scenarios
+			var p float64
+			var d time.Duration
+			switch scenario {
+			case "default":
+				p = 0
+				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
+			case "fault":
+				p = r.Float64()
+				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
+			case "lazy":
+				p = 0
+				d = 0
+			default:
+				return fmt.Errorf("invalid scenario %s", scenario)
+			}
 
 			// instatiate api/aio
 			api := api.New(config.API.Size, metrics)
-			aio := aio.NewDST(r, 0, metrics)
+			aio := aio.NewDST(r, p, metrics)
 
 			// instatiate aio subsystems
 			store, err := util.NewStore(config.AIO.Subsystems.Store)
@@ -129,9 +145,9 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
-			system.AddOnTick("SchedulePromises", 1*time.Second, coroutines.SchedulePromises)
-			system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
-			system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
+			system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
+			system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
+			system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,
@@ -146,6 +162,7 @@ func RunDSTCmd() *cobra.Command {
 				Data:               data.Resolve(r),
 				Tags:               tags.Resolve(r),
 				Searches:           searches.Resolve(r),
+				FaultInjection:     p != 0,
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -177,7 +194,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
 	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "timeout")
 	cmd.Flags().StringVar(&visualizationPath, "visualization-path", "dst.html", "file path for porcupine visualization")
-	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy} ignored temporarily")
+	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: {default, fault, lazy}")
 
 	// dst related values
 	cmd.Flags().Var(&reqsPerTick, "reqs-per-tick", "number of requests per tick")

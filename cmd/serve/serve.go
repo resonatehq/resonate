@@ -108,11 +108,11 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick("EnqueueTasks", 10*time.Second, coroutines.EnqueueTasks)
-			system.AddOnTick("TimeoutLocks", 10*time.Second, coroutines.TimeoutLocks)
-			system.AddOnTick("SchedulePromises", 10*time.Second, coroutines.SchedulePromises)
-			system.AddOnTick("TimeoutPromises", 10*time.Second, coroutines.TimeoutPromises)
-			system.AddOnTick("NotifySubscriptions", 10*time.Second, coroutines.NotifySubscriptions)
+			system.AddOnTick(10*time.Second, "EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddOnTick(10*time.Second, "NotifySubscriptions", coroutines.NotifySubscriptions)
+			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
+			system.AddOnTick(10*time.Second, "TimeoutPromises", coroutines.TimeoutPromises)
+			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			// metrics server
 			mux := netHttp.NewServeMux()

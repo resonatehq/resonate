@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/resonatehq/gocoro/pkg/io"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -20,7 +21,7 @@ type AIO interface {
 	Shutdown()
 	CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	Enqueue(*t_aio.Submission, func(*t_aio.Completion, error))
-	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	Dequeue(int) []io.QE
 	Flush(int64)
 	Errors() <-chan error
 }
@@ -120,6 +121,8 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 		sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
 			Submission: submission,
 			Callback: func(completion *t_aio.Completion, err error) {
+				util.Assert(completion != nil && err == nil || completion == nil && err != nil, "one of completion/err must be set")
+
 				var status string
 				if err != nil {
 					status = "failure"
@@ -127,8 +130,8 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 					status = "success"
 				}
 
-				a.metrics.AioTotal.WithLabelValues(completion.Kind.String(), status).Inc()
-				a.metrics.AioInFlight.WithLabelValues(completion.Kind.String()).Dec()
+				a.metrics.AioTotal.WithLabelValues(submission.Kind.String(), status).Inc()
+				a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Dec()
 
 				callback(completion, err)
 			},
@@ -146,8 +149,8 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 	}
 }
 
-func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	cqes := []*bus.CQE[t_aio.Submission, t_aio.Completion]{}
+func (a *aio) Dequeue(n int) []io.QE {
+	cqes := []io.QE{}
 
 	// collects n entries or until the channel is
 	// exhausted, whichever happens first

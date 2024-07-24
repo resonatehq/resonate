@@ -5,6 +5,7 @@ import (
 
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -52,7 +53,7 @@ func TimeoutPromise(p *promise.Promise) gocoro.CoroutineFunc[*t_aio.Submission, 
 
 		if err != nil {
 			slog.Error("failed to update promise", "id", p.Id, "err", err)
-			return false, err
+			return false, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")

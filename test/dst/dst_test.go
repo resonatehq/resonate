@@ -18,6 +18,18 @@ import (
 )
 
 func TestDST(t *testing.T) {
+	dst(t, 0, 1*time.Second, "dst.html")
+}
+
+func TestDSTFault(t *testing.T) {
+	dst(t, 0.5, 1*time.Second, "dst-fault.html")
+}
+
+func TestDSTLazy(t *testing.T) {
+	dst(t, 0, 0, "dst-lazy.html")
+}
+
+func dst(t *testing.T, p float64, d time.Duration, vp string) {
 	r := rand.New(rand.NewSource(0))
 
 	// instantiate metrics
@@ -34,7 +46,7 @@ func TestDST(t *testing.T) {
 
 	// instatiate api/aio
 	api := api.New(1000, metrics)
-	aio := aio.NewDST(r, 0, metrics)
+	aio := aio.NewDST(r, p, metrics)
 
 	// instatiate aio subsystems
 	store, err := sqlite.New(&sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
@@ -58,9 +70,9 @@ func TestDST(t *testing.T) {
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
-	system.AddOnTick("SchedulePromises", 1*time.Second, coroutines.SchedulePromises)
-	system.AddOnTick("TimeoutPromises", 1*time.Second, coroutines.TimeoutPromises)
-	system.AddOnTick("TimeoutLocks", 1*time.Second, coroutines.TimeoutLocks)
+	system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
+	system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
+	system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
 
 	// start api/aio
 	if err := api.Start(); err != nil {
@@ -72,7 +84,7 @@ func TestDST(t *testing.T) {
 
 	dst := New(r, &Config{
 		Ticks:              1000,
-		VisualizationPath:  "dst.html",
+		VisualizationPath:  vp,
 		TimeElapsedPerTick: 1000, // ms
 		ReqsPerTick:        func() int { return RangeIntn(r, 0, 25) },
 		MaxReqsPerTick:     25,
@@ -82,6 +94,7 @@ func TestDST(t *testing.T) {
 		Data:               10,
 		Tags:               10,
 		Searches:           10,
+		FaultInjection:     p != 0,
 	})
 
 	ok := dst.Run(r, api, aio, system)

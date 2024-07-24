@@ -96,7 +96,7 @@ jobs:
         if: ${{ always() }}
         with:
           name: dst-results
-          path: test/dst/dst.html
+          path: test/dst/dst*.html
 
   linearizability:
     runs-on: ubuntu-22.04

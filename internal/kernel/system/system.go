@@ -83,7 +83,7 @@ func (s *System) Loop() error {
 			s.Tick(time.Now().UnixMilli(), nil, nil)
 		}
 
-		if s.api.Done() && s.scheduler.Size() == 0 {
+		if s.Done() {
 			// now we can shut down the aio and scheduler
 			s.aio.Shutdown()
 			s.scheduler.Shutdown()
@@ -98,7 +98,7 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
 	var sqes []*bus.SQE[t_api.Request, t_api.Response]
-	var cqes []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	var cqes []io.QE
 
 	if sqe != nil {
 		sqes = append(sqes, sqe)
@@ -116,9 +116,10 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 
 	// add tick coroutines
 	for _, tick := range s.onTick {
-		// add the coroutine if the interval has elapsed
-		// and the api sq is not done (which means we are shutting down)
-		if (t-tick.last) > int64(tick.every.Milliseconds()) && !s.api.Done() {
+		// add the coroutine if the interval has elapsed and the api sq is
+		// not done (which means we are shutting down)
+		// if every is set to 0 never add the coroutine
+		if tick.every != 0 && (t-tick.last) > int64(tick.every.Milliseconds()) && !s.api.Done() {
 			tick.last = t
 
 			tags := map[string]string{
@@ -148,14 +149,8 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 		}
 	}
 
-	// why?
-	_cqes := make([]io.QE, len(cqes))
-	for i, cqe := range cqes {
-		_cqes[i] = cqe
-	}
-
 	// tick scheduler
-	s.scheduler.RunUntilBlocked(t, _cqes)
+	s.scheduler.RunUntilBlocked(t, cqes)
 
 	// the system is now responsible for flushing the aio
 	s.aio.Flush(t)
@@ -169,6 +164,10 @@ func (s *System) Shutdown() <-chan interface{} {
 	return s.shutdown
 }
 
+func (s *System) Done() bool {
+	return s.api.Done() && s.scheduler.Size() == 0
+}
+
 func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], *t_api.Request) (*t_api.Response, error)) {
 	s.onRequest[kind] = func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
 		return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
@@ -178,8 +177,8 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 	}
 }
 
-func (s *System) AddOnTick(name string, every time.Duration, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
-	util.Assert(every > 0, "frequency must be greater than zero")
+func (s *System) AddOnTick(every time.Duration, name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
+	util.Assert(every >= 0, "frequency must be non negative")
 	s.onTick = append(s.onTick, &coroutineTick{
 		coroutine: constructor,
 		name:      name,

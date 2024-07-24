@@ -89,8 +89,7 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 	sqe := &bus.SQE[t_api.Request, t_api.Response]{
 		Submission: request,
 
-		// replace sqe.Callback with a callback that wraps the original
-		// function and emits metrics
+		// replace callback with a function that emits metrics
 		Callback: func(res *t_api.Response, err error) {
 			var status int
 
@@ -124,10 +123,10 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 					status = int(res.DeleteSubscription.Status)
 				case t_api.AcquireLock:
 					status = int(res.AcquireLock.Status)
-				case t_api.HeartbeatLocks:
-					status = int(res.HeartbeatLocks.Status)
 				case t_api.ReleaseLock:
 					status = int(res.ReleaseLock.Status)
+				case t_api.HeartbeatLocks:
+					status = int(res.HeartbeatLocks.Status)
 				case t_api.ClaimTask:
 					status = int(res.ClaimTask.Status)
 				case t_api.CompleteTask:

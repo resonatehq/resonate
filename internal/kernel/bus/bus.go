@@ -16,7 +16,6 @@ type Output interface {
 }
 
 type SQE[I Input, O Output] struct {
-	// Metadata   *metadata.Metadata
 	Submission *I
 	Callback   func(*O, error)
 }

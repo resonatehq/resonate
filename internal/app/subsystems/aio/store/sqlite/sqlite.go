@@ -471,8 +471,6 @@ func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Comp
 }
 
 func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
-	util.Assert(len(transactions) > 0, "expected a transaction")
-
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
 	defer cancel()
 

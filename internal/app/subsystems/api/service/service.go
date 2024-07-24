@@ -34,7 +34,6 @@ func (s *Service) tags(requestId string, name string) map[string]string {
 func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
 	return func(completion *t_api.Response, err error) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			// Tags:       s.protocol(),
 			Completion: completion,
 			Error:      err,
 		}
