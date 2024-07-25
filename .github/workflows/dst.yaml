@@ -7,9 +7,8 @@ on:
         type: number
       ticks:
         type: number
-        default: 1000
   schedule:
-    - cron: "0 */4 * * *" # every 4 hours
+    - cron: "0 * * * *" # every hour
 
 permissions:
   contents: read
@@ -39,18 +38,19 @@ jobs:
           path: resonate
           key: resonate-${{ github.sha }}
 
-  seed:
+  values:
     runs-on: ubuntu-22.04
     steps:
       - id: seed
         name: Set random seed
         run: echo seed=$RANDOM >> $GITHUB_OUTPUT
     outputs:
-      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+      seed: ${{ inputs.seed || steps.values.outputs.seed }}
+      ticks: ${{ inputs.ticks || 1000 }}
 
   dst:
     runs-on: ubuntu-22.04
-    needs: [build, seed]
+    needs: [build, values]
     timeout-minutes: 150
 
     strategy:
@@ -92,11 +92,11 @@ jobs:
           path: resonate
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
-      - name: Run dst (seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
+      - name: Run dst (seed=${{ needs.values.outputs.seed }}, ticks=${{ needs.values.outputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
         run: |
           ./resonate dst run \
-            --seed ${{ needs.seed.outputs.seed }} \
-            --ticks ${{ inputs.ticks }} \
+            --seed ${{ needs.values.outputs.seed }} \
+            --ticks ${{ needs.values.outputs.ticks }} \
             --timeout 2h \
             --scenario ${{ matrix.scenario }} \
             --aio-store ${{ matrix.store }} \
@@ -107,11 +107,11 @@ jobs:
         if: ${{ failure() && matrix.run == 1 }}
         run: |
           ./resonate dst issue \
-            --seed ${{ needs.seed.outputs.seed }} \
+            --seed ${{ needs.values.outputs.seed }} \
             --ticks ${{ inputs.ticks }} \
             --scenario ${{ matrix.scenario }} \
             --store ${{ matrix.store }} \
-            --reason "DST run failed for seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+            --reason "DST run failed for seed=${{ needs.values.outputs.seed }}, ticks=${{ needs.values.outputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
             --file logs.txt \
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
@@ -129,7 +129,7 @@ jobs:
 
   diff:
     runs-on: ubuntu-22.04
-    needs: [build, seed, dst]
+    needs: [build, values, dst]
 
     strategy:
       fail-fast: false
@@ -173,11 +173,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           ./resonate dst issue \
-            --seed ${{ needs.seed.outputs.seed }} \
-            --ticks ${{ inputs.ticks }} \
+            --seed ${{ needs.values.outputs.seed }} \
+            --ticks ${{ needs.values.outputs.ticks }} \
             --scenario ${{ matrix.scenario }} \
             --store ${{ matrix.store }} \
-            --reason "Two DST runs produced different results for seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
+            --reason "Two DST runs produced different results for seed=${{ needs.values.outputs.seed }}, ticks=${{ needs.values.outputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }}." \
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
             --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
