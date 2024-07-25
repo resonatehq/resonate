@@ -74,28 +74,28 @@ const (
 		id                TEXT,
 		counter           INTEGER,
 		promise_id        TEXT,
-		claim_timeout     BIGINT, 
-		complete_timeout  BIGINT, 
+		claim_timeout     BIGINT,
+		complete_timeout  BIGINT,
 		promise_timeout   BIGINT,
 		created_on        BIGINT,
-		completed_on      BIGINT, 		
-		is_completed      BOOLEAN, 
+		completed_on      BIGINT,
+		is_completed      BOOLEAN,
 		PRIMARY KEY(id)
-	); 
+	);
 
-	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id); 
+	CREATE INDEX IF NOT EXISTS idx_tasks_id ON tasks(id);
 
 	CREATE TABLE IF NOT EXISTS locks (
 		resource_id            TEXT,
+		execution_id           TEXT,
 		process_id             TEXT,
-		execution_id           TEXT,  
 		expiry_in_milliseconds BIGINT,
-		timeout                BIGINT, 
+		timeout                BIGINT,
 		PRIMARY KEY(resource_id)
 	);
-	  
+
 	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);  
+	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);
 	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
 
 	CREATE TABLE IF NOT EXISTS timeouts (
@@ -125,12 +125,12 @@ const (
 		attempt      INTEGER,
 		PRIMARY KEY(id, promise_id)
 	);
-	
+
 	CREATE TABLE IF NOT EXISTS migrations (
 		id    INTEGER,
-		PRIMARY KEY(id) 
+		PRIMARY KEY(id)
 	);
-	
+
 	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	DROP_TABLE_STATEMENT = `
@@ -145,11 +145,11 @@ const (
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
-        id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
-    FROM
-        promises
-    WHERE
-        id = $1`
+		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on
+	FROM
+		promises
+	WHERE
+		id = $1`
 
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
@@ -168,17 +168,17 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-	    (id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
-	    ($1, $2, $3, $4, $5, $6, $7, $8)
+		($1, $2, $3, $4, $5, $6, $7, $8)
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATEMENT = `
 	UPDATE
 		promises
-    SET
+	SET
 		state = $1, value_headers = $2, value_data = $3, idempotency_key_for_complete = $4, completed_on = $5
-    WHERE
+	WHERE
 		id = $6 AND state = 1`
 
 	PROMISE_UPDATE_TIMEOUT_STATEMENT = `
@@ -186,7 +186,7 @@ const (
 		promises
 	SET
 		state = CASE
-					WHEN tags ->> 'resonate:timeout' IS NOT NULL AND tags ->> 'resonate:timeout' = 'true' THEN 2 
+					WHEN tags ->> 'resonate:timeout' IS NOT NULL AND tags ->> 'resonate:timeout' = 'true' THEN 2
 					ELSE 16
 				END,
 		completed_on = timeout
@@ -261,7 +261,7 @@ const (
 		id = $6`
 
 	TASK_SELECT_STATEMENT = `
-	SELECT 
+	SELECT
 		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
 	FROM
 		tasks
@@ -269,20 +269,20 @@ const (
 		id = $1`
 
 	TASK_SELECT_ALL_STATEMENT = `
-	SELECT 
+	SELECT
 		id, counter, promise_id, claim_timeout, complete_timeout, promise_timeout, created_on, completed_on, is_completed
 	FROM
 		tasks
 	WHERE
-		is_completed = $1 AND 
-		claim_timeout < $2 AND 
-		complete_timeout < $2 AND 
+		is_completed = $1 AND
+		claim_timeout < $2 AND
+		complete_timeout < $2 AND
 		promise_timeout > $2
 	ORDER BY
 		created_on ASC, id`
 
 	LOCK_READ_STATEMENT = `
-	SELECT 
+	SELECT
 		resource_id, process_id, execution_id, expiry_in_milliseconds, timeout
 	FROM
 		locks
@@ -290,46 +290,45 @@ const (
 		resource_id = $1`
 
 	LOCK_ACQUIRE_STATEMENT = `
-  	INSERT INTO locks 
-		(resource_id, process_id, execution_id, expiry_in_milliseconds, timeout) 
-  	VALUES 
+	INSERT INTO locks
+		(resource_id, execution_id, process_id, expiry_in_milliseconds, timeout)
+	VALUES
 		($1, $2, $3, $4, $5)
-  	ON CONFLICT(resource_id)
-	DO UPDATE SET 
-	  process_id = EXCLUDED.process_id,
-	  expiry_in_milliseconds = EXCLUDED.expiry_in_milliseconds,
-	  timeout = EXCLUDED.timeout
-  	WHERE locks.execution_id = EXCLUDED.execution_id`
-
-	LOCK_HEARTBEAT_STATEMENT = `
-  	UPDATE 
-		locks 
-  	SET 
-		timeout = $1 + expiry_in_milliseconds
-  	WHERE 
-		process_id = $2`
+	ON CONFLICT(resource_id)
+	DO UPDATE SET
+		process_id = EXCLUDED.process_id,
+		expiry_in_milliseconds = EXCLUDED.expiry_in_milliseconds,
+		timeout = EXCLUDED.timeout
+	WHERE locks.execution_id = EXCLUDED.execution_id`
 
 	LOCK_RELEASE_STATEMENT = `
 	DELETE FROM locks WHERE resource_id = $1 AND execution_id = $2`
 
+	LOCK_HEARTBEAT_STATEMENT = `
+	UPDATE
+		locks
+	SET
+		timeout = $1 + expiry_in_milliseconds
+	WHERE
+		process_id = $2`
+
 	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks
-	WHERE timeout <= $1`
+	DELETE FROM locks WHERE timeout <= $1`
 
 	TIMEOUT_SELECT_STATEMENT = `
 	SELECT
-        id, time
-    FROM
-        timeouts
-    ORDER BY
-        time ASC, id
-    LIMIT $1`
+		id, time
+	FROM
+		timeouts
+	ORDER BY
+		time ASC, id
+	LIMIT $1`
 
 	TIMEOUT_INSERT_STATEMENT = `
 	INSERT INTO timeouts
-        (id, time)
-    VALUES
-        ($1, $2)
+		(id, time)
+	VALUES
+		($1, $2)
 	ON CONFLICT(id) DO NOTHING`
 
 	TIMEOUT_DELETE_STATEMENT = `
@@ -358,9 +357,9 @@ const (
 
 	SUBSCRIPTION_INSERT_STATEMENT = `
 	INSERT INTO subscriptions
-        (id, promise_id, url, retry_policy, created_on)
-    VALUES
-        ($1, $2, $3, $4, $5)
+		(id, promise_id, url, retry_policy, created_on)
+	VALUES
+		($1, $2, $3, $4, $5)
 	ON CONFLICT(id, promise_id) DO NOTHING`
 
 	SUBSCRIPTION_DELETE_STATEMENT = `
@@ -377,12 +376,12 @@ const (
 
 	NOTIFICATION_SELECT_STATEMENT = `
 	SELECT
-        id, promise_id, url, retry_policy, time, attempt
-    FROM
-        notifications
-    ORDER BY
+		id, promise_id, url, retry_policy, time, attempt
+	FROM
+		notifications
+	ORDER BY
 		time ASC, promise_id, id
-    LIMIT $1`
+	LIMIT $1`
 
 	NOTIFICATION_INSERT_STATEMENT = `
 	INSERT INTO notifications
@@ -408,8 +407,8 @@ const (
 
 	NOTIFICATION_UPDATE_STATEMENT = `
 	UPDATE notifications
-    SET time = $1, attempt = $2
-    WHERE id = $3 AND promise_id = $4`
+	SET time = $1, attempt = $2
+	WHERE id = $3 AND promise_id = $4`
 
 	NOTIFICATION_DELETE_STATEMENT = `
 	DELETE FROM notifications WHERE id = $1 AND promise_id = $2`
@@ -509,8 +508,6 @@ func (w *PostgresStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Co
 }
 
 func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
-	util.Assert(len(transactions) > 0, "expected a transaction")
-
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
 	defer cancel()
 
@@ -553,8 +550,8 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var notificationDeleteStmt *sql.Stmt
 	var notificationInsertTimeoutStmt *sql.Stmt
 	var lockAcquireStmt *sql.Stmt
-	var lockHeartbeatStmt *sql.Stmt
 	var lockReleaseStmt *sql.Stmt
+	var lockHeartbeatStmt *sql.Stmt
 	var lockTimeoutStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
@@ -798,17 +795,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
 				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
-			case t_aio.HeartbeatLocks:
-				if lockHeartbeatStmt == nil {
-					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-					defer lockHeartbeatStmt.Close()
-				}
-
-				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
-				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.ReleaseLock:
 				if lockReleaseStmt == nil {
 					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
@@ -820,6 +806,17 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
 				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
+			case t_aio.HeartbeatLocks:
+				if lockHeartbeatStmt == nil {
+					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer lockHeartbeatStmt.Close()
+				}
+
+				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
+				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
 			case t_aio.TimeoutLocks:
 				if lockTimeoutStmt == nil {
 					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
@@ -1029,7 +1026,7 @@ func (w *PostgresStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (
 
 func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ProcessId, cmd.ExecutionId, cmd.ExpiryInMilliseconds, cmd.Timeout)
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.ExpiryInMilliseconds, cmd.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -1042,26 +1039,6 @@ func (w *PostgresStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	return &t_aio.Result{
 		Kind: t_aio.AcquireLock,
 		AcquireLock: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
-	// update
-	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.HeartbeatLocks,
-		HeartbeatLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
@@ -1082,6 +1059,26 @@ func (w *PostgresStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	return &t_aio.Result{
 		Kind: t_aio.ReleaseLock,
 		ReleaseLock: &t_aio.AlterLocksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
+	// update
+	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.HeartbeatLocks,
+		HeartbeatLocks: &t_aio.AlterLocksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

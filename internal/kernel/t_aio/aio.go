@@ -26,10 +26,15 @@ func (k Kind) String() string {
 
 type Submission struct {
 	Kind    Kind
+	Tags    map[string]string
 	Echo    *EchoSubmission
 	Network *NetworkSubmission
 	Store   *StoreSubmission
 	Queuing *QueuingSubmission
+}
+
+func (s *Submission) Id() string {
+	return s.Tags["request_id"]
 }
 
 func (s *Submission) String() string {
@@ -49,10 +54,15 @@ func (s *Submission) String() string {
 
 type Completion struct {
 	Kind    Kind
+	Tags    map[string]string
 	Echo    *EchoCompletion
 	Network *NetworkCompletion
 	Store   *StoreCompletion
 	Queuing *QueuingCompletion
+}
+
+func (c *Completion) Id() string {
+	return c.Tags["request_id"]
 }
 
 func (c *Completion) String() string {

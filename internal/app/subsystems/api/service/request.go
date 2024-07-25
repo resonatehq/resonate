@@ -65,18 +65,18 @@ type CreateScheduleBody struct {
 
 type AcquireLockBody struct {
 	ResourceId           string `json:"resourceId" binding:"required"`
-	ProcessId            string `json:"processId" binding:"required"`
 	ExecutionId          string `json:"executionId" binding:"required"`
+	ProcessId            string `json:"processId" binding:"required"`
 	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds" binding:"required"`
-}
-
-type HeartbeatBody struct {
-	ProcessId string `json:"processId" binding:"required"`
 }
 
 type ReleaseLockBody struct {
 	ResourceId  string `json:"resourceId" binding:"required"`
 	ExecutionId string `json:"executionId" binding:"required"`
+}
+
+type HeartbeatBody struct {
+	ProcessId string `json:"processId" binding:"required"`
 }
 
 // TASKS

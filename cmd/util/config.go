@@ -108,17 +108,19 @@ func (c *AIOConfigDST) Resolve(r *rand.Rand) *AIOConfig {
 }
 
 type SystemConfigDST struct {
-	TimeoutCacheSize      *RangeIntFlag
+	CoroutineMaxSize      *RangeIntFlag
 	NotificationCacheSize *RangeIntFlag
 	SubmissionBatchSize   *RangeIntFlag
 	CompletionBatchSize   *RangeIntFlag
+	ScheduleBatchSize     *RangeIntFlag
 }
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 	return &system.Config{
-		NotificationCacheSize: c.NotificationCacheSize.Resolve(r),
-		SubmissionBatchSize:   c.SubmissionBatchSize.Resolve(r),
-		CompletionBatchSize:   c.CompletionBatchSize.Resolve(r),
+		CoroutineMaxSize:    c.CoroutineMaxSize.Resolve(r),
+		SubmissionBatchSize: c.SubmissionBatchSize.Resolve(r),
+		CompletionBatchSize: c.CompletionBatchSize.Resolve(r),
+		ScheduleBatchSize:   c.ScheduleBatchSize.Resolve(r),
 	}
 }
 

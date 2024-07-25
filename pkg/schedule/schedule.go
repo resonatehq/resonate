@@ -41,3 +41,8 @@ func (s *Schedule) String() string {
 		s.CreatedOn,
 	)
 }
+
+func (s1 *Schedule) Equals(s2 *Schedule) bool {
+	// for dst only
+	return s1.Id == s2.Id && s1.IdempotencyKey.Equals(s2.IdempotencyKey)
+}

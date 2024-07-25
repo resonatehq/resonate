@@ -1,8 +1,9 @@
 module github.com/resonatehq/resonate
 
-go 1.21
+go 1.22.4
 
 require (
+	github.com/anishathalye/porcupine v0.1.6
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-chi/chi/v5 v5.1.0
 	github.com/go-playground/validator/v10 v10.22.0
@@ -14,6 +15,7 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oapi-codegen/runtime v1.1.1
 	github.com/prometheus/client_golang v1.19.1
+	github.com/resonatehq/gocoro v0.0.0-20240715191948-713092525ab8
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.19.0

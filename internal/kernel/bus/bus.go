@@ -3,7 +3,6 @@ package bus
 import (
 	"fmt"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
@@ -17,22 +16,24 @@ type Output interface {
 }
 
 type SQE[I Input, O Output] struct {
-	Metadata   *metadata.Metadata
 	Submission *I
 	Callback   func(*O, error)
 }
 
 func (sqe *SQE[I, O]) String() string {
-	return fmt.Sprintf("SQE(metadata=%s, submission=%v)", sqe.Metadata, sqe.Submission)
+	return fmt.Sprintf("SQE(submission=%v)", sqe.Submission)
 }
 
 type CQE[I Input, O Output] struct {
-	Metadata   *metadata.Metadata
 	Completion *O
 	Callback   func(*O, error)
 	Error      error
 }
 
+func (cqe *CQE[I, O]) Invoke() {
+	cqe.Callback(cqe.Completion, cqe.Error)
+}
+
 func (cqe *CQE[I, O]) String() string {
-	return fmt.Sprintf("CQE(metadata=%s, completion=%v, error=%v)", cqe.Metadata, cqe.Completion, cqe.Error)
+	return fmt.Sprintf("CQE(completion=%v, error=%v)", cqe.Completion, cqe.Error)
 }

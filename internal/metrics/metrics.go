@@ -24,11 +24,11 @@ func New(reg prometheus.Registerer) *Metrics {
 		ApiTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "api_total_requests",
 			Help: "Total number of api requests",
-		}, []string{"type", "status"}),
+		}, []string{"type", "protocol", "status"}),
 		ApiInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
 			Name: "api_in_flight_requests",
 			Help: "Number of in flight api requests",
-		}, []string{"type"}),
+		}, []string{"type", "protocol"}),
 		CoroutinesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "coroutines_total",
 			Help: "Total number of coroutines",

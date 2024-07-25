@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 jobs:
-  check-default:
+  lint:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -47,31 +47,15 @@ jobs:
               --verbose \
               --timeout=3m
 
-      - name: Run go test and generate coverage report
-        run: |
-          nix develop --command \
-            go test \
-              -v \
-              -coverprofile=coverage.out \
-              -coverpkg=./... \
-              ./...
-
-      - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v4 # nosemgrep
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          codecov_yml_path: codecov.yml
-          
-  check-postgres: 
+  test:
     runs-on: ubuntu-22.04
-    
     env:
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
       TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_test"
-      
+
     services:
       postgres:
         image: postgres:15
@@ -86,7 +70,7 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-          
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -97,12 +81,24 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Intentionally not using nix here as a workout around to the postgres dependency. 
+      # Intentionally not using nix here as a workout around to the postgres dependency.
       - name: Run go test and generate coverage report
         run: |
           go test -v -coverprofile=coverage.out -coverpkg=./... ./...
 
-  check-linearizability:
+      - name: Upload coverage report to Codecov
+        uses: codecov/codecov-action@v4 # nosemgrep
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          codecov_yml_path: codecov.yml
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: dst-results
+          path: test/dst/dst*.html
+
+  linearizability:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out repository
@@ -137,22 +133,21 @@ jobs:
           path: test/results/
 
   scan:
-    name: semgrep
     runs-on: ubuntu-20.04
-    needs: [check-default, check-postgres, check-linearizability]
+    needs: [lint, test, linearizability]
     env:
       SEMGREP_RULES: "auto semgrep.yml"
     if: (github.actor != 'dependabot[bot]')
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v11
 
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v6
-      
+
       - name: semgrep
         run: |
           nix develop --command \

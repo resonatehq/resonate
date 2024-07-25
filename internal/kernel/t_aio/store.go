@@ -54,8 +54,8 @@ const (
 	// LOCKS
 	ReadLock
 	AcquireLock
-	HeartbeatLocks
 	ReleaseLock
+	HeartbeatLocks
 	TimeoutLocks
 
 	// TASKS
@@ -132,10 +132,10 @@ func (k StoreKind) String() string {
 		return "ReadLock"
 	case AcquireLock:
 		return "AcquireLock"
-	case HeartbeatLocks:
-		return "HeartbeatLocks"
 	case ReleaseLock:
 		return "ReleaseLock"
+	case HeartbeatLocks:
+		return "HeartbeatLocks"
 	case TimeoutLocks:
 		return "TimeoutLocks"
 
@@ -215,8 +215,8 @@ type Command struct {
 	// LOCKS
 	ReadLock       *ReadLockCommand
 	AcquireLock    *AcquireLockCommand
-	HeartbeatLocks *HeartbeatLocksCommand
 	ReleaseLock    *ReleaseLockCommand
+	HeartbeatLocks *HeartbeatLocksCommand
 	TimeoutLocks   *TimeoutLocksCommand
 
 	// TASKS
@@ -271,8 +271,8 @@ type Result struct {
 	// LOCKS
 	ReadLock       *QueryLocksResult
 	AcquireLock    *AlterLocksResult
-	HeartbeatLocks *AlterLocksResult
 	ReleaseLock    *AlterLocksResult
+	HeartbeatLocks *AlterLocksResult
 	TimeoutLocks   *AlterLocksResult
 
 	// TASKS
@@ -516,14 +516,14 @@ type AcquireLockCommand struct {
 	Timeout              int64
 }
 
-type HeartbeatLocksCommand struct {
-	ProcessId string
-	Time      int64
-}
-
 type ReleaseLockCommand struct {
 	ResourceId  string
 	ExecutionId string
+}
+
+type HeartbeatLocksCommand struct {
+	ProcessId string
+	Time      int64
 }
 
 type TimeoutLocksCommand struct {

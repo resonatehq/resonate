@@ -7,15 +7,14 @@ import (
 	"math"
 	"net/http"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/notification"
 )
 
-var inflights = inflight{}
+var notificationsInflight = inflight{}
 
 type inflight map[string]bool
 
@@ -31,13 +30,13 @@ func (i inflight) remove(id string) {
 	delete(i, id)
 }
 
-func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:notify", t))
-	metadata.Tags.Set("name", "notify-subscriptions")
+func NotifySubscriptions(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(tags != nil, "tags must be set")
 
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		completion, err := c.Yield(&t_aio.Submission{
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -54,7 +53,7 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine[*t
 
 		if err != nil {
 			slog.Error("failed to read notifications", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -67,24 +66,25 @@ func NotifySubscriptions(t int64, config *system.Config) *scheduler.Coroutine[*t
 				continue
 			}
 
-			if c.Time() >= record.Time && !inflights.get(id(notification)) {
-				c.Scheduler.Add(notifySubscription(metadata.TransactionId, notification))
+			if c.Time() >= record.Time && !notificationsInflight.get(id(notification)) {
+				notificationsInflight.add(id(notification))
+
+				// TODO: fix runaway concurrency
+				gocoro.Spawn(c, notifySubscription(notification, tags))
 			}
 		}
-	})
+
+		return nil, nil
+	}
 }
 
-func notifySubscription(tid string, notification *notification.Notification) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	metadata := metadata.New(tid)
-	metadata.Tags.Set("name", "notify-subscription")
+func notifySubscription(notification *notification.Notification, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+		defer notificationsInflight.remove(id(notification))
 
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		// handle inflight cache
-		inflights.add(id(notification))
-		c.OnDone(func() { inflights.remove(id(notification)) })
-
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -101,7 +101,7 @@ func notifySubscription(tid string, notification *notification.Notification) *sc
 
 		if err != nil {
 			slog.Error("failed to read promise", "id", notification.PromiseId, "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -111,27 +111,28 @@ func notifySubscription(tid string, notification *notification.Notification) *sc
 
 		if result.RowsReturned == 0 {
 			slog.Warn("promise not found, aborting notification", "id", notification.PromiseId)
-			abort(c, notification)
-			return
+			abort(c, notification, tags)
+			return nil, nil
 		}
 
 		record := result.Records[0]
 		promise, err := record.Promise()
 		if err != nil {
 			slog.Warn("failed to parse promise record, aborting notification", "record", record)
-			abort(c, notification)
-			return
+			abort(c, notification, tags)
+			return nil, nil
 		}
 
 		body, err := json.Marshal(promise)
 		if err != nil {
 			slog.Warn("failed to serialize promise, aborting notification", "promise", promise)
-			abort(c, notification)
-			return
+			abort(c, notification, tags)
+			return nil, nil
 		}
 
-		completion, err = c.Yield(&t_aio.Submission{
+		completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Network,
+			Tags: tags,
 			Network: &t_aio.NetworkSubmission{
 				Kind: t_aio.Http,
 				Http: &t_aio.HttpRequest{
@@ -167,8 +168,9 @@ func notifySubscription(tid string, notification *notification.Notification) *sc
 			}
 		}
 
-		_, err = c.Yield(&t_aio.Submission{
+		_, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{command},
@@ -179,12 +181,15 @@ func notifySubscription(tid string, notification *notification.Notification) *sc
 		if err != nil {
 			slog.Warn("failed to update notification", "notification", notification)
 		}
-	})
+
+		return nil, nil
+	}
 }
 
-func abort(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission], notification *notification.Notification) {
-	_, err := c.Yield(&t_aio.Submission{
+func abort(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], notification *notification.Notification, tags map[string]string) {
+	_, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
+		Tags: tags,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{

@@ -1,11 +1,9 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
@@ -14,19 +12,18 @@ import (
 
 var tasksInflight = inflight{}
 
-func EnqueueTasks(t int64, config *system.Config) *Coroutine {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:enqueueTasks", t))
-	metadata.Tags.Set("name", "enqueue-tasks")
+func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(tags != nil, "tags must be set")
 
-	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
-
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
 		// Read tasks from the store that are pending, but
 		// filter out the ones that are already inflight
 		// (e.g., tasks that are already claimed by a process)
 		// and that have not been globally timed out yet.
 
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -43,7 +40,7 @@ func EnqueueTasks(t int64, config *system.Config) *Coroutine {
 		})
 		if err != nil {
 			slog.Error("failed to read tasks", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -59,28 +56,26 @@ func EnqueueTasks(t int64, config *system.Config) *Coroutine {
 			}
 
 			if !tasksInflight.get(taskId(task)) {
-				c.Scheduler.Add(enqueueTask(metadata.TransactionId, task))
+				tasksInflight.add(taskId(task))
+
+				// TODO: fix runaway concurrency
+				gocoro.Spawn(c, enqueueTask(task, tags))
 			}
 		}
-	})
+
+		return nil, nil
+	}
 }
 
 // enqueueTask is a coroutine that enqueues a single task to the queuing subsystem.
-func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	metadata := metadata.New(tid)
-	metadata.Tags.Set("name", "enqueue-task")
-
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-
-		// Handle inflight cache.
-
-		tasksInflight.add(taskId(task))
-		c.OnDone(func() { tasksInflight.remove(taskId(task)) })
+func enqueueTask(task *task.Task, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+		defer tasksInflight.remove(taskId(task))
 
 		// Update counter for the task before enqueuing.
-
-		dbCompletion, err := c.Yield(&t_aio.Submission{
+		dbCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -101,7 +96,7 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		})
 		if err != nil {
 			slog.Error("failed to update task", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(dbCompletion.Store != nil, "completion must not be nil")
@@ -110,7 +105,7 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 
 		// Enqueue the task.
 
-		queueCompletion, err := c.Yield(&t_aio.Submission{
+		queueCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Queuing,
 			Queuing: &t_aio.QueuingSubmission{
 				TaskId:  task.Id,
@@ -119,11 +114,12 @@ func enqueueTask(tid string, task *task.Task) *scheduler.Coroutine[*t_aio.Comple
 		})
 		if err != nil {
 			slog.Error("failed to enqueue task", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(queueCompletion.Queuing != nil, "completion must not be nil")
-	})
+		return nil, nil
+	}
 }
 
 func taskId(task *task.Task) string {

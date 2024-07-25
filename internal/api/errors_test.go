@@ -80,7 +80,7 @@ func TestHandleRequestError(t *testing.T) {
 		},
 		{
 			name:         "PromiseAlreadyTimedout",
-			inputError:   t_api.StatusPromiseAlreadyTimedOut,
+			inputError:   t_api.StatusPromiseAlreadyTimedout,
 			expectedCode: http.StatusForbidden,
 		},
 		{

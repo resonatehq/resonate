@@ -4,7 +4,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 )
 
@@ -20,22 +19,21 @@ func New(api api.API, protocol string) *Service {
 	}
 }
 
-func (s *Service) metadata(id string, name string) *metadata.Metadata {
-	if id == "" {
-		id = uuid.New().String()
+func (s *Service) tags(requestId string, name string) map[string]string {
+	if requestId == "" {
+		requestId = uuid.New().String()
 	}
 
-	metadata := metadata.New(id)
-	metadata.Tags.Set("name", name)
-	metadata.Tags.Set("api", s.protocol)
-
-	return metadata
+	return map[string]string{
+		"request_id": requestId,
+		"name":       name,
+		"protocol":   s.protocol,
+	}
 }
 
 func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
 	return func(completion *t_api.Response, err error) {
 		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			// Tags:       s.protocol(),
 			Completion: completion,
 			Error:      err,
 		}

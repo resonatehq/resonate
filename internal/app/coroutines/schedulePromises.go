@@ -6,8 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
@@ -18,16 +17,14 @@ import (
 
 var schedulesInflight = inflight{}
 
-func SchedulePromises(t int64, config *system.Config) *Coroutine {
-	metadata := metadata.New(fmt.Sprintf("tick:%d:schedule", t))
-	metadata.Tags.Set("name", "schedule-promises")
+func SchedulePromises(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(tags != nil, "tags must be set")
 
-	return scheduler.NewCoroutine(metadata, func(c *Coroutine) {
-
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
 		// Read schedules from the store that are due to run.
-
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -44,7 +41,7 @@ func SchedulePromises(t int64, config *system.Config) *Coroutine {
 		})
 		if err != nil {
 			slog.Error("failed to read schedules", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -60,27 +57,27 @@ func SchedulePromises(t int64, config *system.Config) *Coroutine {
 			}
 
 			if !schedulesInflight.get(sid(schedule)) {
-				c.Scheduler.Add(schedulePromise(metadata.TransactionId, schedule))
+				schedulesInflight.add(sid(schedule))
+
+				// TODO: fix runaway concurrency
+				gocoro.Spawn(c, schedulePromise(schedule, tags))
 			}
 		}
-	})
+
+		return nil, nil
+	}
 }
 
-func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	metadata := metadata.New(tid)
-	metadata.Tags.Set("name", "schedule-promise")
-
+func schedulePromise(schedule *schedule.Schedule, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
 	// handle creating promise (schedule run) and updating schedule record.
 
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
-		// handle inflight cache
-		schedulesInflight.add(sid(schedule))
-		c.OnDone(func() { schedulesInflight.remove(sid(schedule)) })
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+		defer schedulesInflight.remove(sid(schedule))
 
 		next, err := util.Next(schedule.NextRunTime, schedule.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "err", err)
-			return
+			return nil, nil
 		}
 
 		id, err := generatePromiseId(schedule.PromiseId, map[string]string{
@@ -89,7 +86,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		})
 		if err != nil {
 			slog.Error("failed to generate promise id", "err", err)
-			return
+			return nil, nil
 		}
 
 		if schedule.PromiseParam.Headers == nil {
@@ -118,8 +115,9 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		// "create" idempotently when picked up by the sdk
 		idempotencyKey := idempotency.Key(id)
 
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -149,7 +147,7 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 		})
 		if err != nil {
 			slog.Error("failed to create promise and update schedule", "err", err)
-			return
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -159,10 +157,11 @@ func schedulePromise(tid string, schedule *schedule.Schedule) *scheduler.Corouti
 
 		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
 			slog.Warn("promise to be scheduled already exists", "schedule", schedule, "promise", id)
-			return
+			return nil, nil
 		}
 
-	})
+		return nil, nil
+	}
 }
 
 // helpers

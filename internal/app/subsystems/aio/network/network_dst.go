@@ -59,7 +59,6 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 		switch sqe.Submission.Network.Kind {
 		case t_aio.Http:
 			cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
-				Metadata: sqe.Metadata,
 				Callback: sqe.Callback,
 			}
 
@@ -77,6 +76,7 @@ func (d *NetworkDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Compl
 
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Network,
+				Tags: sqe.Submission.Tags, // propagate the tags
 				Network: &t_aio.NetworkCompletion{
 					Kind: t_aio.Http,
 					Http: res,

@@ -16,7 +16,7 @@ const (
 	StatusPromiseAlreadyResolved ResponseStatus = 4030
 	StatusPromiseAlreadyRejected ResponseStatus = 4031
 	StatusPromiseAlreadyCanceled ResponseStatus = 4032
-	StatusPromiseAlreadyTimedOut ResponseStatus = 4033
+	StatusPromiseAlreadyTimedout ResponseStatus = 4033
 	StatusLockAlreadyAcquired    ResponseStatus = 4034
 
 	StatusTaskAlreadyTimedOut  ResponseStatus = 4035
@@ -27,8 +27,7 @@ const (
 	StatusSubscriptionNotFound ResponseStatus = 4041
 	StatusScheduleNotFound     ResponseStatus = 4042
 	StatusLockNotFound         ResponseStatus = 4043
-
-	StatusTaskNotFound ResponseStatus = 4044
+	StatusTaskNotFound         ResponseStatus = 4044
 
 	StatusPromiseAlreadyExists  ResponseStatus = 4090
 	StatusScheduleAlreadyExists ResponseStatus = 4091
@@ -50,7 +49,7 @@ func (s ResponseStatus) String() string {
 		return "The promise has already been rejected"
 	case StatusPromiseAlreadyCanceled:
 		return "The promise has already been canceled"
-	case StatusPromiseAlreadyTimedOut:
+	case StatusPromiseAlreadyTimedout:
 		return "The promise has already timed out"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
@@ -83,7 +82,7 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.OK
 	case StatusFieldValidationFailure:
 		return codes.InvalidArgument
-	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedOut:
+	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedout:
 		return codes.PermissionDenied
 	case StatusPromiseNotFound, StatusSubscriptionNotFound:
 		return codes.NotFound
@@ -109,7 +108,7 @@ func ForbiddenStatus(state promise.State) ResponseStatus {
 	case promise.Canceled:
 		return StatusPromiseAlreadyCanceled
 	case promise.Timedout:
-		return StatusPromiseAlreadyTimedOut
+		return StatusPromiseAlreadyTimedout
 	default:
 		panic(fmt.Sprintf("invalid promise state: %s", state))
 	}
@@ -124,6 +123,7 @@ const (
 	ErrSystemShuttingDown           ResonateErrorCode = 5030
 	ErrAPISubmissionQueueFull       ResonateErrorCode = 5031
 	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5032
+	ErrSchedulerQueueFull           ResonateErrorCode = 5033
 )
 
 type ResonateErrorCode int
@@ -136,18 +136,20 @@ func (e ResonateErrorCode) GRPC() codes.Code {
 	switch e {
 	case ErrInternalServer:
 		return codes.Internal
-	case ErrSystemShuttingDown:
-		return codes.Unavailable
-	case ErrAPISubmissionQueueFull:
-		return codes.Unavailable
-	case ErrAIOSubmissionQueueFull:
-		return codes.Unavailable
 	case ErrAIONetworkFailure:
 		return codes.Internal
 	case ErrAIOStoreFailure:
 		return codes.Internal
 	case ErrAIOStoreSerializationFailure:
 		return codes.Internal
+	case ErrSystemShuttingDown:
+		return codes.Unavailable
+	case ErrAPISubmissionQueueFull:
+		return codes.Unavailable
+	case ErrAIOSubmissionQueueFull:
+		return codes.Unavailable
+	case ErrSchedulerQueueFull:
+		return codes.Unavailable
 	default:
 		panic(fmt.Sprintf("invalid error code: %d", e))
 	}

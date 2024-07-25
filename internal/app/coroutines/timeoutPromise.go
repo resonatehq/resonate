@@ -3,20 +3,21 @@ package coroutines
 import (
 	"log/slog"
 
-	"github.com/resonatehq/resonate/internal/kernel/metadata"
-	"github.com/resonatehq/resonate/internal/kernel/scheduler"
+	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission], res func(error)) *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission] {
-	return scheduler.NewCoroutine(metadata, func(c *scheduler.Coroutine[*t_aio.Completion, *t_aio.Submission]) {
+func TimeoutPromise(p *promise.Promise) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
+	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
 		completedState := promise.GetTimedoutState(p)
-		util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "completedState must be Timedout or Resolved")
+		util.Assert(completedState == promise.Timedout || completedState == promise.Resolved, "terminus state must be Timedout or Resolved")
 
-		completion, err := c.Yield(&t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
+			Tags: map[string]string{},
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -52,8 +53,7 @@ func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *sche
 
 		if err != nil {
 			slog.Error("failed to update promise", "id", p.Id, "err", err)
-			res(err)
-			return
+			return false, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -61,10 +61,6 @@ func TimeoutPromise(metadata *metadata.Metadata, p *promise.Promise, retry *sche
 		result := completion.Store.Results[0].UpdatePromise
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-		if result.RowsAffected == 1 {
-			res(nil)
-		} else {
-			c.Scheduler.Add(retry)
-		}
-	})
+		return result.RowsAffected == 1, nil
+	}
 }

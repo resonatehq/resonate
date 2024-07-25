@@ -52,7 +52,7 @@ func TestResponseStatusString(t *testing.T) {
 		},
 		{
 			name:   "StatusPromiseAlreadyTimedOut",
-			status: StatusPromiseAlreadyTimedOut,
+			status: StatusPromiseAlreadyTimedout,
 			want:   "The promise has already timed out",
 		},
 		{
@@ -145,7 +145,7 @@ func TestResponseStatusGRPC(t *testing.T) {
 		},
 		{
 			name:   "StatusPromiseAlreadyTimedOut",
-			status: StatusPromiseAlreadyTimedOut,
+			status: StatusPromiseAlreadyTimedout,
 			want:   codes.PermissionDenied,
 		},
 		{
@@ -180,6 +180,11 @@ func TestResonateErrorHTTP(t *testing.T) {
 		{
 			name: "ErrSystemShuttingDown",
 			code: ErrSystemShuttingDown,
+			want: http.StatusServiceUnavailable,
+		},
+		{
+			name: "ErrSchedulerQueueFull",
+			code: ErrSchedulerQueueFull,
 			want: http.StatusServiceUnavailable,
 		},
 		{
@@ -228,6 +233,11 @@ func TestResonateErrorGRPC(t *testing.T) {
 		{
 			name: "ErrSystemShuttingDown",
 			code: ErrSystemShuttingDown,
+			want: codes.Unavailable,
+		},
+		{
+			name: "ErrSchedulerQueueFull",
+			code: ErrSchedulerQueueFull,
 			want: codes.Unavailable,
 		},
 		{
