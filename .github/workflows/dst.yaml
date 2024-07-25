@@ -45,7 +45,7 @@ jobs:
         name: Set random seed
         run: echo seed=$RANDOM >> $GITHUB_OUTPUT
     outputs:
-      seed: ${{ inputs.seed || steps.values.outputs.seed }}
+      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
       ticks: ${{ inputs.ticks || 1000 }}
 
   dst:
