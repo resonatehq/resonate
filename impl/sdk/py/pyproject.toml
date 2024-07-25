@@ -67,7 +67,6 @@ xfail_strict = true
 addopts = [
     "--import-mode=importlib",
     "--strict-markers",
-    "--log-cli-level=DEBUG"
 ]
 markers = [
     "integration: mark integration tests.",
