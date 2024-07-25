@@ -94,7 +94,13 @@ jobs:
           fail-on-cache-miss: true
       - name: Run dst (seed=${{ needs.seed.outputs.seed }}, ticks=${{ inputs.ticks }}, scenario=${{ matrix.scenario }}, store=${{ matrix.store }})
         run: |
-          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --ticks ${{ inputs.ticks }} --scenario ${{ matrix.scenario }} --aio-store ${{ matrix.store }} > logs.txt 2>&1
+          ./resonate dst run \
+            --seed ${{ needs.seed.outputs.seed }} \
+            --ticks ${{ inputs.ticks }} \
+            --timeout 2h \
+            --scenario ${{ matrix.scenario }} \
+            --aio-store ${{ matrix.store }} \
+            > logs.txt 2>&1
       - name: Create issue if dst failed
         env:
           GITHUB_TOKEN: ${{ secrets.github_token }}
@@ -113,8 +119,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
-          name: ${{ matrix.scenario }}-${{ matrix.store }}-logs-${{ matrix.run }}
+          name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-logs
           path: logs.txt
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() && matrix.scenario != 'fault' }}
+        with:
+          name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-visualization
+          path: dst.html
 
   diff:
     runs-on: ubuntu-22.04
@@ -127,14 +138,14 @@ jobs:
         store: [sqlite, postgres, sqlite/postgres]
         include:
           - store: sqlite
-            logs1: sqlite-logs-1
-            logs2: sqlite-logs-2
+            logs1: sqlite-1-logs
+            logs2: sqlite-2-logs
           - store: postgres
-            logs1: postgres-logs-1
-            logs2: postgres-logs-2
+            logs1: postgres-1-logs
+            logs2: postgres-2-logs
           - store: sqlite/postgres
-            logs1: sqlite-logs-1
-            logs2: postgres-logs-1
+            logs1: sqlite-1-logs
+            logs2: postgres-1-logs
 
     steps:
       - name: Restore resonate binary
