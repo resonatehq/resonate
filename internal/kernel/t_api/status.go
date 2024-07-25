@@ -19,15 +19,9 @@ const (
 	StatusPromiseAlreadyTimedout ResponseStatus = 4033
 	StatusLockAlreadyAcquired    ResponseStatus = 4034
 
-	StatusTaskAlreadyTimedOut  ResponseStatus = 4035
-	StatusTaskAlreadyCompleted ResponseStatus = 4036
-	StatusTaskWrongCounter     ResponseStatus = 4037
-
-	StatusPromiseNotFound      ResponseStatus = 4040
-	StatusSubscriptionNotFound ResponseStatus = 4041
-	StatusScheduleNotFound     ResponseStatus = 4042
-	StatusLockNotFound         ResponseStatus = 4043
-	StatusTaskNotFound         ResponseStatus = 4044
+	StatusPromiseNotFound  ResponseStatus = 4040
+	StatusScheduleNotFound ResponseStatus = 4041
+	StatusLockNotFound     ResponseStatus = 4042
 
 	StatusPromiseAlreadyExists  ResponseStatus = 4090
 	StatusScheduleAlreadyExists ResponseStatus = 4091
@@ -53,8 +47,6 @@ func (s ResponseStatus) String() string {
 		return "The promise has already timed out"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
-	case StatusSubscriptionNotFound:
-		return "The specified subscription was not found"
 	case StatusScheduleNotFound:
 		return "The specified schedule was not found"
 	case StatusPromiseAlreadyExists:
@@ -84,7 +76,7 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.InvalidArgument
 	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedout:
 		return codes.PermissionDenied
-	case StatusPromiseNotFound, StatusSubscriptionNotFound:
+	case StatusPromiseNotFound:
 		return codes.NotFound
 	case StatusPromiseAlreadyExists:
 		return codes.AlreadyExists
@@ -117,9 +109,8 @@ func ForbiddenStatus(state promise.State) ResponseStatus {
 // Platform level errors (5000-5999)
 const (
 	ErrInternalServer               ResonateErrorCode = 5000
-	ErrAIONetworkFailure            ResonateErrorCode = 5001
-	ErrAIOStoreFailure              ResonateErrorCode = 5002
-	ErrAIOStoreSerializationFailure ResonateErrorCode = 5003
+	ErrAIOStoreFailure              ResonateErrorCode = 5001
+	ErrAIOStoreSerializationFailure ResonateErrorCode = 5002
 	ErrSystemShuttingDown           ResonateErrorCode = 5030
 	ErrAPISubmissionQueueFull       ResonateErrorCode = 5031
 	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5032
@@ -135,8 +126,6 @@ func (e ResonateErrorCode) HTTP() int {
 func (e ResonateErrorCode) GRPC() codes.Code {
 	switch e {
 	case ErrInternalServer:
-		return codes.Internal
-	case ErrAIONetworkFailure:
 		return codes.Internal
 	case ErrAIOStoreFailure:
 		return codes.Internal

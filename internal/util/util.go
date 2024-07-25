@@ -74,18 +74,17 @@ func SafeDeref[T any](val *T) T {
 	return *val
 }
 
-func UnixMilliToTime(unixMilli int64) time.Time {
-	return time.Unix(0, unixMilli*int64(time.Millisecond))
-}
-
-// ref: t := time.Now().UnixMilli()
 func Next(curr int64, cronExp string) (int64, error) {
 	scheduler, err := ParseCron(cronExp)
 	if err != nil {
 		return 0, err
 	}
 
-	return scheduler.Next(UnixMilliToTime(curr)).UnixMilli(), nil
+	return scheduler.Next(unixMilliToTime(curr)).UnixMilli(), nil
+}
+
+func unixMilliToTime(unixMilli int64) time.Time {
+	return time.Unix(0, unixMilli*int64(time.Millisecond))
 }
 
 func ParseCron(cronExp string) (cron.Schedule, error) {

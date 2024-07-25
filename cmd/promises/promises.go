@@ -78,8 +78,8 @@ func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
 	fmt.Fprintf(w, "Timeout:\t%d\n", promise.Timeout)
 	fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Idempotency Key (create):\t%s\n", util.SafeDerefToString(promise.IdempotencyKeyForCreate))
-	fmt.Fprintf(w, "Idempotency Key (complete):\t%s\n", util.SafeDerefToString(promise.IdempotencyKeyForComplete))
+	fmt.Fprintf(w, "Idempotency Key (create):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForCreate))
+	fmt.Fprintf(w, "Idempotency Key (complete):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForComplete))
 	fmt.Fprintf(w, "\n")
 
 	fmt.Fprintf(w, "Param:\n")

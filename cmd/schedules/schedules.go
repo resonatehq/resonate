@@ -63,8 +63,8 @@ func prettyPrintSchedules(cmd *cobra.Command, schedules ...schedules.Schedule) {
 		formatted(
 			schedule.Id,
 			schedule.Cron,
-			util.SafeDerefToString(schedule.LastRunTime),
-			util.SafeDerefToString(schedule.NextRunTime),
+			util.SafeDeref(schedule.LastRunTime),
+			util.SafeDeref(schedule.NextRunTime),
 			strings.Join(util.PrettyHeaders(util.SafeDeref(schedule.Tags), ":"), " "),
 		)
 	}
@@ -79,8 +79,8 @@ func prettyPrintSchedule(cmd *cobra.Command, schedule *schedules.Schedule) {
 	fmt.Fprintf(w, "Description:\t%s\n", util.SafeDeref(schedule.Description))
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "Cron:\t%s\n", schedule.Cron)
-	fmt.Fprintf(w, "Last run time:\t%s\n", util.SafeDerefToString(schedule.LastRunTime))
-	fmt.Fprintf(w, "Next run time:\t%s\n", util.SafeDerefToString(schedule.NextRunTime))
+	fmt.Fprintf(w, "Last run time:\t%d\n", util.SafeDeref(schedule.LastRunTime))
+	fmt.Fprintf(w, "Next run time:\t%d\n", util.SafeDeref(schedule.NextRunTime))
 	fmt.Fprintf(w, "\n")
 	fmt.Fprintf(w, "Tags:\n")
 	for _, tag := range util.PrettyHeaders(util.SafeDeref(schedule.Tags), ":\t") {

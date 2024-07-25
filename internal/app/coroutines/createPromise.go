@@ -1,11 +1,9 @@
 package coroutines
 
 import (
-	"errors"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -55,48 +53,25 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	if result.RowsReturned == 0 {
 		createdOn := c.Time()
 
-		createCmds := []*t_aio.Command{
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:             r.CreatePromise.Id,
-					State:          promise.Pending,
-					Param:          r.CreatePromise.Param,
-					Timeout:        r.CreatePromise.Timeout,
-					IdempotencyKey: r.CreatePromise.IdempotencyKey,
-					Tags:           r.CreatePromise.Tags,
-					CreatedOn:      createdOn,
-				},
-			},
-		}
-
-		_, err := queuing.CoroutineRouter().Match(r.CreatePromise.Id)
-		if err != nil {
-			if !errors.Is(err, queuing.ErrRouteDoesNotMatchAnyPattern) {
-				panic(err)
-			}
-		}
-
-		if err == nil {
-			createCmds = append(createCmds, &t_aio.Command{
-				Kind: t_aio.CreateTask,
-				CreateTask: &t_aio.CreateTaskCommand{
-					Id:             r.CreatePromise.Id,
-					Counter:        0,
-					PromiseId:      r.CreatePromise.Id,
-					ClaimTimeout:   createdOn, // Set it to the createdOn time to trigger immediately.
-					PromiseTimeout: r.CreatePromise.Timeout,
-					CreatedOn:      createdOn,
-				},
-			})
-		}
-
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: r.Tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: createCmds,
+					Commands: []*t_aio.Command{
+						{
+							Kind: t_aio.CreatePromise,
+							CreatePromise: &t_aio.CreatePromiseCommand{
+								Id:             r.CreatePromise.Id,
+								State:          promise.Pending,
+								Param:          r.CreatePromise.Param,
+								Timeout:        r.CreatePromise.Timeout,
+								IdempotencyKey: r.CreatePromise.IdempotencyKey,
+								Tags:           r.CreatePromise.Tags,
+								CreatedOn:      createdOn,
+							},
+						},
+					},
 				},
 			},
 		})

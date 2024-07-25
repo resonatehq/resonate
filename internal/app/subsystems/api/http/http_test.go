@@ -1013,48 +1013,6 @@ func TestHttpServer(t *testing.T) {
 					status: 400,
 				},
 				{
-					name:   "HeartbeatLocks",
-					path:   "locks/heartbeat",
-					method: "POST",
-					headers: map[string]string{
-						"Request-Id": "HeartbeatLocks",
-					},
-					body: []byte(`{
-						"processId": "bar"
-					}`),
-					req: &t_api.Request{
-						Kind: t_api.HeartbeatLocks,
-						Tags: map[string]string{
-							"request_id": "HeartbeatLocks",
-							"name":       "HeartbeatLocks",
-							"protocol":   "http",
-						},
-						HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-							ProcessId: "bar",
-						},
-					},
-					res: &t_api.Response{
-						Kind: t_api.HeartbeatLocks,
-						HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-							Status:        t_api.StatusOK,
-							LocksAffected: 0,
-						},
-					},
-					status: 200,
-				},
-				{
-					name:   "HeartbeatLocksNoProcessId",
-					path:   "locks/heartbeat",
-					method: "POST",
-					body: []byte(`{
-						"processId": "",
-						"timeout": 1736571600000
-					}`),
-					req:    nil,
-					res:    nil,
-					status: 400,
-				},
-				{
 					name:   "ReleaseLock",
 					path:   "locks/release",
 					method: "POST",
@@ -1097,91 +1055,47 @@ func TestHttpServer(t *testing.T) {
 					res:    nil,
 					status: 400,
 				},
-
-				// Tasks API
 				{
-					name:   "ClaimTask",
-					path:   "tasks/claim",
+					name:   "HeartbeatLocks",
+					path:   "locks/heartbeat",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "HeartbeatLocks",
 					},
 					body: []byte(`{
-						"taskId": "foo",
-						"counter": 1,
-						"processId": "bar",
-						"executionId": "baz",
-						"expiryInMilliseconds": 10000
+						"processId": "bar"
 					}`),
 					req: &t_api.Request{
-						Kind: t_api.ClaimTask,
+						Kind: t_api.HeartbeatLocks,
 						Tags: map[string]string{
-							"request_id": "ClaimTask",
-							"name":       "ClaimTask",
+							"request_id": "HeartbeatLocks",
+							"name":       "HeartbeatLocks",
 							"protocol":   "http",
 						},
-						ClaimTask: &t_api.ClaimTaskRequest{
-							TaskId:               "foo",
-							Counter:              1,
-							ProcessId:            "bar",
-							ExecutionId:          "baz",
-							ExpiryInMilliseconds: 10_000,
+						HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+							ProcessId: "bar",
 						},
 					},
 					res: &t_api.Response{
-						Kind: t_api.ClaimTask,
-						ClaimTask: &t_api.ClaimTaskResponse{
-							Status: t_api.StatusOK,
-							Promise: &promise.Promise{
-								Id:    "foo/bar",
-								State: promise.Pending,
-							},
+						Kind: t_api.HeartbeatLocks,
+						HeartbeatLocks: &t_api.HeartbeatLocksResponse{
+							Status:        t_api.StatusOK,
+							LocksAffected: 0,
 						},
 					},
 					status: 200,
 				},
 				{
-					name:   "CompleteTask",
-					path:   "tasks/complete",
+					name:   "HeartbeatLocksNoProcessId",
+					path:   "locks/heartbeat",
 					method: "POST",
-					headers: map[string]string{
-						"Request-Id": "CompleteTask",
-					},
 					body: []byte(`{
-						"taskId": "foo",
-						"counter": 1,
-						"executionId": "baz",
-						"state": "RESOLVED",
-						"value": {
-							"headers": {"a":"a","b":"b","c":"c"},
-							"data": "cGVuZGluZw=="
-						}
+						"processId": "",
+						"timeout": 1736571600000
 					}`),
-					req: &t_api.Request{
-						Kind: t_api.CompleteTask,
-						Tags: map[string]string{
-							"request_id": "CompleteTask",
-							"name":       "CompleteTask",
-							"protocol":   "http",
-						},
-						CompleteTask: &t_api.CompleteTaskRequest{
-							TaskId:      "foo",
-							Counter:     1,
-							ExecutionId: "baz",
-							State:       promise.Resolved,
-							Value: promise.Value{
-								Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-								Data:    []byte("pending"),
-							},
-						},
-					},
-					res: &t_api.Response{
-						Kind: t_api.CompleteTask,
-						CompleteTask: &t_api.CompleteTaskResponse{
-							Status: t_api.StatusOK,
-						},
-					},
-					status: 200,
+					req:    nil,
+					res:    nil,
+					status: 400,
 				},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -1239,5 +1153,3 @@ func TestHttpServer(t *testing.T) {
 		}
 	}
 }
-
-// todo: Distributed Locks API

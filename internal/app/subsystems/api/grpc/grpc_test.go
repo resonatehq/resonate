@@ -1513,87 +1513,6 @@ func TestAcquireLock(t *testing.T) {
 	}
 }
 
-func TestHeartbeatLocks(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.HeartbeatLocksRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
-		{
-			name: "HeartbeatLocks",
-			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				RequestId: "HeartbeatLocks",
-				ProcessId: "foo",
-			},
-			req: &t_api.Request{
-				Kind: t_api.HeartbeatLocks,
-				Tags: map[string]string{
-					"request_id": "HeartbeatLocks",
-					"name":       "HeartbeatLocks",
-					"protocol":   "grpc",
-				},
-				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
-					ProcessId: "foo",
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.HeartbeatLocks,
-				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-					Status: t_api.StatusOK,
-				},
-			},
-			code: codes.OK,
-		},
-		{
-			name: "HeartbeatLocksNoProcessId",
-			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId: "",
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.lockClient.HeartbeatLocks(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestReleaseLock(t *testing.T) {
 	grpcTest, err := setup()
 	if err != nil {
@@ -1687,9 +1606,7 @@ func TestReleaseLock(t *testing.T) {
 	}
 }
 
-// TASKS
-
-func TestClaimTask(t *testing.T) {
+func TestHeartbeatLocks(t *testing.T) {
 	grpcTest, err := setup()
 	if err != nil {
 		t.Fatal(err)
@@ -1697,47 +1614,44 @@ func TestClaimTask(t *testing.T) {
 
 	tcs := []struct {
 		name    string
-		grpcReq *grpcApi.ClaimTaskRequest
+		grpcReq *grpcApi.HeartbeatLocksRequest
 		req     *t_api.Request
 		res     *t_api.Response
 		code    codes.Code
 	}{
 		{
-			name: "ClaimTask",
-			grpcReq: &grpcApi.ClaimTaskRequest{
-				RequestId:            "ClaimTask",
-				TaskId:               "foo",
-				Counter:              1,
-				ProcessId:            "bar",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 10,
+			name: "HeartbeatLocks",
+			grpcReq: &grpcApi.HeartbeatLocksRequest{
+				RequestId: "HeartbeatLocks",
+				ProcessId: "foo",
 			},
 			req: &t_api.Request{
-				Kind: t_api.ClaimTask,
+				Kind: t_api.HeartbeatLocks,
 				Tags: map[string]string{
-					"request_id": "ClaimTask",
-					"name":       "ClaimTask",
+					"request_id": "HeartbeatLocks",
+					"name":       "HeartbeatLocks",
 					"protocol":   "grpc",
 				},
-				ClaimTask: &t_api.ClaimTaskRequest{
-					TaskId:               "foo",
-					Counter:              1,
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10,
+				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+					ProcessId: "foo",
 				},
 			},
 			res: &t_api.Response{
-				Kind: t_api.ClaimTask,
-				ClaimTask: &t_api.ClaimTaskResponse{
+				Kind: t_api.HeartbeatLocks,
+				HeartbeatLocks: &t_api.HeartbeatLocksResponse{
 					Status: t_api.StatusOK,
-					Promise: &promise.Promise{
-						Id:    "foo/bar",
-						State: promise.Pending,
-					},
 				},
 			},
 			code: codes.OK,
+		},
+		{
+			name: "HeartbeatLocksNoProcessId",
+			grpcReq: &grpcApi.HeartbeatLocksRequest{
+				ProcessId: "",
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
 		},
 	}
 
@@ -1748,93 +1662,7 @@ func TestClaimTask(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.taskClient.ClaimTask(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCompleteTask(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.CompleteTaskRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
-		{
-			name: "CompleteTask",
-			grpcReq: &grpcApi.CompleteTaskRequest{
-				RequestId:   "CompleteTask",
-				TaskId:      "foo",
-				Counter:     1,
-				ExecutionId: "baz",
-				State:       grpcApi.TaskState_RESOLVED,
-				Value: &grpcApi.TaskValue{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("pending"),
-				},
-			},
-			req: &t_api.Request{
-				Kind: t_api.CompleteTask,
-				Tags: map[string]string{
-					"request_id": "CompleteTask",
-					"name":       "CompleteTask",
-					"protocol":   "grpc",
-				},
-				CompleteTask: &t_api.CompleteTaskRequest{
-					TaskId:      "foo",
-					Counter:     1,
-					ExecutionId: "baz",
-					State:       promise.Resolved,
-					Value: promise.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("pending"),
-					},
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CompleteTask,
-				CompleteTask: &t_api.CompleteTaskResponse{
-					Status: t_api.StatusOK,
-				},
-			},
-			code: codes.OK,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.taskClient.CompleteTask(ctx, tc.grpcReq)
+			_, err := grpcTest.lockClient.HeartbeatLocks(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {

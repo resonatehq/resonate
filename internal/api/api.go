@@ -115,22 +115,12 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 					status = int(res.CreateSchedule.Status)
 				case t_api.DeleteSchedule:
 					status = int(res.DeleteSchedule.Status)
-				case t_api.ReadSubscriptions:
-					status = int(res.ReadSubscriptions.Status)
-				case t_api.CreateSubscription:
-					status = int(res.CreateSubscription.Status)
-				case t_api.DeleteSubscription:
-					status = int(res.DeleteSubscription.Status)
 				case t_api.AcquireLock:
 					status = int(res.AcquireLock.Status)
 				case t_api.ReleaseLock:
 					status = int(res.ReleaseLock.Status)
 				case t_api.HeartbeatLocks:
 					status = int(res.HeartbeatLocks.Status)
-				case t_api.ClaimTask:
-					status = int(res.ClaimTask.Status)
-				case t_api.CompleteTask:
-					status = int(res.CompleteTask.Status)
 				case t_api.Echo:
 					status = 2000
 				default:

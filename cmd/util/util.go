@@ -7,13 +7,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func SafeDerefToString[T any](val *T) string {
-	if val == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", *val)
-}
-
 func SafeDeref[T any](val *T) T {
 	if val == nil {
 		var zero T

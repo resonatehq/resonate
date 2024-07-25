@@ -32,11 +32,6 @@ func TestHandleResonateError(t *testing.T) {
 			expectedCode: http.StatusServiceUnavailable,
 		},
 		{
-			name:         "AIONetworkFailure",
-			inputError:   t_api.NewResonateError(t_api.ErrAIONetworkFailure, "", errors.New("")),
-			expectedCode: http.StatusInternalServerError,
-		},
-		{
 			name:         "AIOStoreFailure",
 			inputError:   t_api.NewResonateError(t_api.ErrAIOStoreFailure, "", errors.New("")),
 			expectedCode: http.StatusInternalServerError,

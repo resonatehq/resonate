@@ -5,12 +5,8 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/subscription"
-	"github.com/resonatehq/resonate/pkg/task"
-	"github.com/resonatehq/resonate/pkg/timeout"
 )
 
 type StoreKind int
@@ -31,38 +27,12 @@ const (
 	UpdateSchedule
 	DeleteSchedule
 
-	// SUBSCRIPTIONS
-	ReadSubscription
-	ReadSubscriptions
-	CreateSubscription
-	DeleteSubscription
-	DeleteSubscriptions
-	TimeoutDeleteSubscriptions
-
-	// NOTIFICATIONS
-	ReadNotifications
-	CreateNotifications
-	UpdateNotification
-	DeleteNotification
-	TimeoutCreateNotifications
-
-	// TIMEOUTS
-	ReadTimeouts
-	CreateTimeout
-	DeleteTimeout
-
 	// LOCKS
 	ReadLock
 	AcquireLock
 	ReleaseLock
 	HeartbeatLocks
 	TimeoutLocks
-
-	// TASKS
-	CreateTask
-	UpdateTask
-	ReadTask
-	ReadTasks
 )
 
 func (k StoreKind) String() string {
@@ -93,40 +63,6 @@ func (k StoreKind) String() string {
 	case DeleteSchedule:
 		return "DeleteSchedule"
 
-	// SUBSCRIPTIONS
-	case ReadSubscription:
-		return "ReadSubscription"
-	case ReadSubscriptions:
-		return "ReadSubscriptions"
-	case CreateSubscription:
-		return "CreateSubscription"
-	case DeleteSubscription:
-		return "DeleteSubscription"
-	case DeleteSubscriptions:
-		return "DeleteSubscriptions"
-	case TimeoutDeleteSubscriptions:
-		return "TimeoutDeleteSubscriptions"
-
-	// NOTIFICATIONS
-	case ReadNotifications:
-		return "ReadNotifications"
-	case CreateNotifications:
-		return "CreateNotifications"
-	case UpdateNotification:
-		return "UpdateNotification"
-	case DeleteNotification:
-		return "DeleteNotification"
-	case TimeoutCreateNotifications:
-		return "TimeoutCreateNotifications"
-
-	// TIMEOUTS
-	case ReadTimeouts:
-		return "ReadTimeouts"
-	case CreateTimeout:
-		return "CreateTimeout"
-	case DeleteTimeout:
-		return "DeleteTimeout"
-
 	// LOCKS
 	case ReadLock:
 		return "ReadLock"
@@ -138,16 +74,6 @@ func (k StoreKind) String() string {
 		return "HeartbeatLocks"
 	case TimeoutLocks:
 		return "TimeoutLocks"
-
-	// TASKS
-	case CreateTask:
-		return "CreateTask"
-	case UpdateTask:
-		return "UpdateTask"
-	case ReadTask:
-		return "ReadTask"
-	case ReadTasks:
-		return "ReadTasks"
 
 	default:
 		panic("invalid store kind")
@@ -192,38 +118,12 @@ type Command struct {
 	UpdateSchedule  *UpdateScheduleCommand
 	DeleteSchedule  *DeleteScheduleCommand
 
-	// SUBSCRIPTIONS
-	ReadSubscription           *ReadSubscriptionCommand
-	ReadSubscriptions          *ReadSubscriptionsCommand
-	CreateSubscription         *CreateSubscriptionCommand
-	DeleteSubscription         *DeleteSubscriptionCommand
-	DeleteSubscriptions        *DeleteSubscriptionsCommand
-	TimeoutDeleteSubscriptions *TimeoutDeleteSubscriptionsCommand
-
-	// NOTIFICATIONS
-	ReadNotifications          *ReadNotificationsCommand
-	CreateNotifications        *CreateNotificationsCommand
-	UpdateNotification         *UpdateNotificationCommand
-	DeleteNotification         *DeleteNotificationCommand
-	TimeoutCreateNotifications *TimeoutCreateNotificationsCommand
-
-	// TIMEOUTS
-	ReadTimeouts  *ReadTimeoutsCommand
-	CreateTimeout *CreateTimeoutCommand
-	DeleteTimeout *DeleteTimeoutCommand
-
 	// LOCKS
 	ReadLock       *ReadLockCommand
 	AcquireLock    *AcquireLockCommand
 	ReleaseLock    *ReleaseLockCommand
 	HeartbeatLocks *HeartbeatLocksCommand
 	TimeoutLocks   *TimeoutLocksCommand
-
-	// TASKS
-	CreateTask *CreateTaskCommand
-	UpdateTask *UpdateTaskCommand
-	ReadTask   *ReadTaskCommand
-	ReadTasks  *ReadTasksCommand
 }
 
 func (c *Command) String() string {
@@ -248,38 +148,12 @@ type Result struct {
 	UpdateSchedule  *AlterSchedulesResult
 	DeleteSchedule  *AlterSchedulesResult
 
-	// SUBSCRIPTIONS
-	ReadSubscription           *QuerySubscriptionsResult
-	ReadSubscriptions          *QuerySubscriptionsResult
-	CreateSubscription         *AlterSubscriptionsResult
-	DeleteSubscription         *AlterSubscriptionsResult
-	DeleteSubscriptions        *AlterSubscriptionsResult
-	TimeoutDeleteSubscriptions *AlterSubscriptionsResult
-
-	// NOTIFICATIONS
-	ReadNotifications          *QueryNotificationsResult
-	CreateNotifications        *AlterNotificationsResult
-	UpdateNotification         *AlterNotificationsResult
-	DeleteNotification         *AlterNotificationsResult
-	TimeoutCreateNotifications *AlterNotificationsResult
-
-	// TIMEOUTS
-	ReadTimeouts  *QueryTimeoutsResult
-	CreateTimeout *AlterTimeoutsResult
-	DeleteTimeout *AlterTimeoutsResult
-
 	// LOCKS
 	ReadLock       *QueryLocksResult
 	AcquireLock    *AlterLocksResult
 	ReleaseLock    *AlterLocksResult
 	HeartbeatLocks *AlterLocksResult
 	TimeoutLocks   *AlterLocksResult
-
-	// TASKS
-	CreateTask *AlterTasksResult
-	UpdateTask *AlterTasksResult
-	ReadTask   *QueryTasksResult
-	ReadTasks  *QueryTasksResult
 }
 
 func (r *Result) String() string {
@@ -306,7 +180,6 @@ type CreatePromiseCommand struct {
 	Param          promise.Value
 	Timeout        int64
 	IdempotencyKey *idempotency.Key
-	Subscriptions  []*CreateSubscriptionCommand
 	Tags           map[string]string
 	CreatedOn      int64
 }
@@ -317,6 +190,10 @@ type UpdatePromiseCommand struct {
 	Value          promise.Value
 	IdempotencyKey *idempotency.Key
 	CompletedOn    int64
+}
+
+type TimeoutPromisesCommand struct {
+	Time int64
 }
 
 // Promise results
@@ -385,123 +262,6 @@ type AlterSchedulesResult struct {
 	RowsAffected int64
 }
 
-// Timeout commands
-
-type ReadTimeoutsCommand struct {
-	N int
-}
-
-type CreateTimeoutCommand struct {
-	Id   string
-	Time int64
-}
-
-type DeleteTimeoutCommand struct {
-	Id string
-}
-
-// This timeout promises command takes into account 'regular' and 'timeout' promises.
-// Regular promises are those that have their state updated to REJECTED_TIMEDOUT when the timeout is reached.
-// Timeout promises are those that have their state updated to RESOLVED when the timeout is reached.
-type TimeoutPromisesCommand struct {
-	Time int64
-}
-
-type TimeoutDeleteSubscriptionsCommand struct {
-	Time int64
-}
-
-type TimeoutCreateNotificationsCommand struct {
-	Time int64
-}
-
-// Timeout results
-
-type QueryTimeoutsResult struct {
-	RowsReturned int64
-	Records      []*timeout.TimeoutRecord
-}
-
-type AlterTimeoutsResult struct {
-	RowsAffected int64
-}
-
-// Subscription commands
-
-type ReadSubscriptionCommand struct {
-	Id        string
-	PromiseId string
-}
-
-type ReadSubscriptionsCommand struct {
-	PromiseId string
-	Limit     int
-	SortId    *int64
-}
-
-type CreateSubscriptionCommand struct {
-	Id          string
-	PromiseId   string
-	Url         string
-	RetryPolicy *subscription.RetryPolicy
-	CreatedOn   int64
-}
-
-type DeleteSubscriptionCommand struct {
-	Id        string
-	PromiseId string
-}
-
-type DeleteSubscriptionsCommand struct {
-	PromiseId string
-}
-
-// Subscription results
-
-type QuerySubscriptionsResult struct {
-	RowsReturned int64
-	LastSortId   int64
-	Records      []*subscription.SubscriptionRecord
-}
-
-type AlterSubscriptionsResult struct {
-	RowsAffected int64
-}
-
-// Notification commands
-
-type ReadNotificationsCommand struct {
-	N int
-}
-
-type CreateNotificationsCommand struct {
-	PromiseId string
-	Time      int64
-}
-
-type UpdateNotificationCommand struct {
-	Id        string
-	PromiseId string
-	Time      int64
-	Attempt   int64
-}
-
-type DeleteNotificationCommand struct {
-	Id        string
-	PromiseId string
-}
-
-// Notification results
-
-type QueryNotificationsResult struct {
-	RowsReturned int64
-	Records      []*notification.NotificationRecord
-}
-
-type AlterNotificationsResult struct {
-	RowsAffected int64
-}
-
 // Lock commands
 
 type ReadLockCommand struct {
@@ -538,48 +298,5 @@ type QueryLocksResult struct {
 }
 
 type AlterLocksResult struct {
-	RowsAffected int64
-}
-
-// Task commands
-
-type CreateTaskCommand struct {
-	Id              string
-	Counter         int
-	PromiseId       string
-	ClaimTimeout    int64
-	CompleteTimeout int64
-	PromiseTimeout  int64
-	CreatedOn       int64
-	CompletedOn     int64
-	IsCompleted     bool
-}
-
-type UpdateTaskCommand struct {
-	Id              string
-	Counter         int
-	ClaimTimeout    int64
-	CompleteTimeout int64
-	CompletedOn     int64
-	IsCompleted     bool
-}
-
-type ReadTaskCommand struct {
-	Id string
-}
-
-type ReadTasksCommand struct {
-	IsCompleted bool
-	RunTime     int64
-}
-
-// Task results
-
-type QueryTasksResult struct {
-	RowsReturned int64
-	Records      []*task.TaskRecord
-}
-
-type AlterTasksResult struct {
 	RowsAffected int64
 }
