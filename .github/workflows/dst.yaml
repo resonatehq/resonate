@@ -26,7 +26,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v11
 
       - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v6
+        uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Build resonate binary
         run: |
