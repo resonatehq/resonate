@@ -87,13 +87,9 @@ const (
 	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
 
 	DROP_TABLE_STATEMENT = `
-	DROP TABLE notifications;
-	DROP TABLE subscriptions;
-	DROP TABLE schedules;
-	DROP TABLE timeouts;
 	DROP TABLE promises;
+	DROP TABLE schedules;
 	DROP TABLE locks;
-	DROP TABLE tasks;
 	DROP TABLE migrations;`
 
 	PROMISE_SELECT_STATEMENT = `
