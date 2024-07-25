@@ -6,7 +6,6 @@ authors = [
     { name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }
 ]
 dependencies = [
-    "result>=0.17.0",
     "typing-extensions>=4.12.2",
 ]
 readme = "README.md"

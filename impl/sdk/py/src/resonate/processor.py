@@ -10,14 +10,12 @@ from dataclasses import dataclass
 from threading import Thread
 from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar
 
-from result import Err, Ok
-
 from resonate import utils
 from resonate.logging import logger
+from resonate.result import Err, Ok
 
 if TYPE_CHECKING:
-    from result import Result
-
+    from resonate.result import Result
     from resonate.scheduler import Scheduler
 
 T = TypeVar("T")

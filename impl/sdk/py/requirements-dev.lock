@@ -10,23 +10,21 @@
 -e file:.
 attrs==23.2.0
     # via hypothesis
-exceptiongroup==1.2.1
+exceptiongroup==1.2.2
     # via hypothesis
     # via pytest
-hypothesis==6.104.2
+hypothesis==6.108.4
 iniconfig==2.0.0
     # via pytest
-mypy==1.10.1
+mypy==1.11.0
 mypy-extensions==1.0.0
     # via mypy
 packaging==24.1
     # via pytest
 pluggy==1.5.0
     # via pytest
-pytest==8.2.2
-result==0.17.0
-    # via resonate-sdk
-ruff==0.5.0
+pytest==8.3.1
+ruff==0.5.4
 sortedcontainers==2.4.0
     # via hypothesis
 tomli==2.0.1
@@ -35,4 +33,3 @@ tomli==2.0.1
 typing-extensions==4.12.2
     # via mypy
     # via resonate-sdk
-    # via result

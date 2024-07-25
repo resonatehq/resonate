@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Callable, TypeVar
+from typing import TYPE_CHECKING, Any, Callable, TypeVar, Union
 
-from typing_extensions import Concatenate, ParamSpec
+from typing_extensions import Concatenate, ParamSpec, TypeAlias
 
 from resonate.dependency_injection import Dependencies
 
@@ -13,7 +13,15 @@ P = ParamSpec("P")
 T = TypeVar("T")
 
 
-class Call:
+class Command:
+    def __call__(self, ctx: Context) -> None:
+        # This is not meant to be call. We are making the type system happy.
+        _ = ctx
+        msg = "You should never be here!"
+        raise AssertionError(msg)
+
+
+class FnOrCoroutine:
     def __init__(
         self,
         fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
@@ -25,21 +33,32 @@ class Call:
         self.args = args
         self.kwargs = kwargs
 
+
+ExecutionUnit: TypeAlias = Union[Command, FnOrCoroutine]
+
+
+def _wrap_into_execution_unit(
+    fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
+    /,
+    *args: P.args,
+    **kwargs: P.kwargs,
+) -> ExecutionUnit:
+    if isinstance(fn, Command):
+        return fn
+    return FnOrCoroutine(fn, *args, **kwargs)
+
+
+class Call:
+    def __init__(self, exec_unit: ExecutionUnit) -> None:
+        self.exec_unit = exec_unit
+
     def to_invoke(self) -> Invoke:
-        return Invoke(self.fn, *self.args, **self.kwargs)
+        return Invoke(self.exec_unit)
 
 
 class Invoke:
-    def __init__(
-        self,
-        fn: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
+    def __init__(self, exec_unit: ExecutionUnit) -> None:
+        self.exec_unit = exec_unit
 
 
 class Context:
@@ -69,7 +88,8 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Invoke:
-        return Invoke(fn, *args, **kwargs)
+        exec_unit = _wrap_into_execution_unit(fn, *args, **kwargs)
+        return Invoke(exec_unit)
 
     def call(
         self,
@@ -78,4 +98,5 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Call:
-        return Call(fn, *args, **kwargs)
+        exec_unit = _wrap_into_execution_unit(fn, *args, **kwargs)
+        return Call(exec_unit)

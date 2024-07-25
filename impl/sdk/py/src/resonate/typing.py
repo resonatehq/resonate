@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, Union
 from typing_extensions import TypeAlias
 
 from resonate.context import Call, Context, Invoke
-from resonate.scheduler.shared import Promise
+from resonate.promise import Promise
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from result import Result
+    from resonate.result import Result
 
 T = TypeVar("T")
 Yieldable: TypeAlias = Union[Call, Invoke, Promise[Any]]
@@ -30,5 +30,5 @@ class Runnable(Generic[T]):
     next_value: Result[Any, Exception] | None
 
 
-WaitingForPromiseResolution: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
-PendingToRun: TypeAlias = list[Runnable[Any]]
+Awaitables: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
+Runnables: TypeAlias = list[Runnable[Any]]

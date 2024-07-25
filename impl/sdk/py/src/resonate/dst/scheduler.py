@@ -5,41 +5,40 @@ from collections import deque
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Callable, Literal, cast
 
-from result import Err, Ok, Result
 from typing_extensions import Concatenate, ParamSpec, TypeAlias, TypeVar, assert_never
 
+from resonate import utils
 from resonate.contants import CWD
-from resonate.context import Call, Context, Invoke
+from resonate.context import Call, Command, Context, FnOrCoroutine, Invoke
 from resonate.dependency_injection import Dependencies
-from resonate.logging import logger
-from resonate.scheduler.events import (
+from resonate.events import (
     AwaitedForPromise,
     ExecutionStarted,
     PromiseCreated,
     PromiseResolved,
     SchedulerEvents,
 )
-from resonate.typing import CoroAndPromise, Runnable, Yieldable
-
-from .itertools import (
+from resonate.itertools import (
+    Awaitables,
     FinalValue,
-    PendingToRun,
-    WaitingForPromiseResolution,
+    Runnables,
     callback,
     iterate_coro,
     unblock_depands_coros,
 )
-from .shared import (
-    Promise,
-    wrap_fn_into_cmd,
-)
+from resonate.logging import logger
+from resonate.promise import Promise
+from resonate.result import Err, Ok, Result
+from resonate.typing import CoroAndPromise, Runnable, Yieldable
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
 
 
 T = TypeVar("T")
+Cmd = TypeVar("Cmd", bound=Command)
 P = ParamSpec("P")
+
 Steps: TypeAlias = Literal["callbacks", "runnables"]
 Mode: TypeAlias = Literal["concurrent", "sequential"]
 
@@ -47,7 +46,7 @@ Mode: TypeAlias = Literal["concurrent", "sequential"]
 class _TopLevelInvoke:
     def __init__(
         self,
-        fn: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        fn: Callable[Concatenate[Context, P], Generator[Yieldable, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -57,7 +56,7 @@ class _TopLevelInvoke:
         self.kwargs = kwargs
 
     def to_invocation(self) -> Invoke:
-        return Invoke(self.fn, *self.args, **self.kwargs)
+        return Invoke(FnOrCoroutine(self.fn, *self.args, **self.kwargs))
 
 
 class DSTFailureError(Exception):
@@ -66,6 +65,13 @@ class DSTFailureError(Exception):
 
 
 class DSTScheduler:
+    """
+    The DSTScheduler class manages coroutines in a deterministic way, allowing for
+    controlled execution with reproducibility. It can handle errors gracefully by
+    resetting its state and retrying up to a specified number of times.
+    The scheduler maintains a log of events, which can be dumped to a file for analysis.
+    """
+
     def __init__(  # noqa: PLR0913
         self,
         seed: int,
@@ -73,11 +79,11 @@ class DSTScheduler:
             Callable[Concatenate[Context, ...], Any | Coroutine[Any, Any, Any]],
             Callable[[], Any],
         ]
-        | None = None,
-        log_file: str | None = None,
-        max_failures: int = 2,
-        failure_chance: float = 0,
-        mode: Mode = "concurrent",
+        | None,
+        log_file: str | None,
+        max_failures: int,
+        failure_chance: float,
+        mode: Mode,
     ) -> None:
         self._failure_chance = failure_chance
         self._max_failures: int = max_failures
@@ -86,8 +92,8 @@ class DSTScheduler:
         self._top_level_invocations: deque[_TopLevelInvoke] = deque()
         self._mode: Mode = mode
 
-        self._pending_to_run: PendingToRun = []
-        self._waiting_for_prom_resolution: WaitingForPromiseResolution = {}
+        self.runnables: Runnables = []
+        self.awaitables: Awaitables = {}
         self._callbacks_to_run: list[Callable[..., None]] = []
 
         self.seed = seed
@@ -99,9 +105,24 @@ class DSTScheduler:
         self._promise_created: int = 0
         self._log_file = log_file
 
+        self._handlers: dict[type[Command], Callable[[list[Any]], list[Any]]] = {}
+        self._handler_queues: dict[type[Command], deque[Command]] = {}
+
+    def register_command(
+        self,
+        cmd: type[Cmd],
+        handler: Callable[[list[Cmd]], list[Any]],
+        max_batch: int,
+    ) -> None:
+        self._handlers[cmd] = handler
+        self._handler_queues[cmd] = deque[Command](maxlen=max_batch)
+
+    def get_handler(self, cmd: type[Command]) -> Callable[[list[Any]], list[Any]]:
+        return self._handlers[cmd]
+
     def add(
         self,
-        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, Any]],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -109,8 +130,8 @@ class DSTScheduler:
         self._top_level_invocations.appendleft(_TopLevelInvoke(coro, *args, **kwargs))
 
     def _reset(self) -> None:
-        self._pending_to_run.clear()
-        self._waiting_for_prom_resolution.clear()
+        self.runnables.clear()
+        self.awaitables.clear()
         self._events.clear()
         self._callbacks_to_run.clear()
 
@@ -151,7 +172,7 @@ class DSTScheduler:
                 )
             )
             ctx = Context(dst=True, deps=self.deps)
-            self._pending_to_run.append(
+            self.runnables.append(
                 Runnable(
                     coro_and_promise=CoroAndPromise(
                         top_level_invocation.fn(
@@ -180,9 +201,9 @@ class DSTScheduler:
             next_step = "callbacks" if self._callbacks_to_run else "runnables"
         elif not self._callbacks_to_run:
             next_step = "runnables"
-            assert self._pending_to_run, "There should something in callbacks"
+            assert self.runnables, "There should something in callbacks"
 
-        elif not self._pending_to_run:
+        elif not self.runnables:
             next_step = "callbacks"
             assert self._callbacks_to_run, "There should something in callbacks"
 
@@ -198,7 +219,7 @@ class DSTScheduler:
         ), "No promise should be resolved by now."
 
         while True:
-            if not self._callbacks_to_run and not self._pending_to_run:
+            if not self._callbacks_to_run and not self.runnables:
                 break
             self.tick += 1
 
@@ -217,7 +238,7 @@ class DSTScheduler:
 
             if next_step == "runnables":
                 runnable = get_random_element(
-                    self._pending_to_run, r=self.random, mode=self._mode
+                    self.runnables, r=self.random, mode=self._mode
                 )
                 self._process_each_runnable(runnable=runnable)
 
@@ -230,17 +251,23 @@ class DSTScheduler:
         self,
         runnable: Runnable[Any],
     ) -> None:
-        if runnable.next_value is None:
+        yieldable_or_final_value = iterate_coro(runnable)
+
+        if (
+            isinstance(
+                runnable.coro_and_promise.prom.invocation.exec_unit, FnOrCoroutine
+            )
+            and runnable.next_value is None
+        ):
             self._events.append(
                 ExecutionStarted(
                     promise_id=runnable.coro_and_promise.prom.promise_id,
                     tick=self.tick,
-                    fn_name=runnable.coro_and_promise.prom.invocation.fn.__name__,
-                    args=runnable.coro_and_promise.prom.invocation.args,
-                    kwargs=runnable.coro_and_promise.prom.invocation.kwargs,
+                    fn_name=runnable.coro_and_promise.prom.invocation.exec_unit.fn.__name__,
+                    args=runnable.coro_and_promise.prom.invocation.exec_unit.args,
+                    kwargs=runnable.coro_and_promise.prom.invocation.exec_unit.kwargs,
                 )
             )
-        yieldable_or_final_value = iterate_coro(runnable)
 
         if isinstance(yieldable_or_final_value, FinalValue):
             value = yieldable_or_final_value.v
@@ -251,8 +278,8 @@ class DSTScheduler:
             )
             unblock_depands_coros(
                 p=runnable.coro_and_promise.prom,
-                waiting=self._waiting_for_prom_resolution,
-                runnables=self._pending_to_run,
+                awaitables=self.awaitables,
+                runnables=self.runnables,
             )
 
         elif isinstance(yieldable_or_final_value, Call):
@@ -268,18 +295,15 @@ class DSTScheduler:
             )
 
         elif isinstance(yieldable_or_final_value, Promise):
-            self._waiting_for_prom_resolution.setdefault(
-                yieldable_or_final_value, []
-            ).append(
+            self.awaitables.setdefault(yieldable_or_final_value, []).append(
                 runnable.coro_and_promise,
             )
             if yieldable_or_final_value.done():
                 unblock_depands_coros(
                     p=yieldable_or_final_value,
-                    waiting=self._waiting_for_prom_resolution,
-                    runnables=self._pending_to_run,
+                    awaitables=self.awaitables,
+                    runnables=self.runnables,
                 )
-
         else:
             assert_never(yieldable_or_final_value)
 
@@ -292,37 +316,50 @@ class DSTScheduler:
         p = Promise[Any](
             promise_id=self._increate_promise_created(), invocation=call.to_invoke()
         )
-
-        self._waiting_for_prom_resolution[p] = [runnable.coro_and_promise]
+        # We cannot advance the coroutine so we block it until the promise
+        # gets resolved.
+        self.awaitables[p] = [runnable.coro_and_promise]
         child_ctx = runnable.coro_and_promise.ctx.new_child()
-        if not isgeneratorfunction(call.fn):
-            mock_fn = self.mocks.get(call.fn)
-            if mock_fn is not None:
-                v = _safe_run(fn=mock_fn)
-            else:
-                v = cast(
-                    Result[Any, Exception],
-                    wrap_fn_into_cmd(
-                        child_ctx, call.fn, *call.args, **call.kwargs
-                    ).run(),
-                )
 
-            self._callbacks_to_run.append(
-                lambda: callback(
-                    p=p,
-                    waiting_for_promise=self._waiting_for_prom_resolution,
-                    pending_to_run=self._pending_to_run,
-                    v=v,
+        if isinstance(call.exec_unit, FnOrCoroutine):
+            if not isgeneratorfunction(call.exec_unit.fn):
+                mock_fn = self.mocks.get(call.exec_unit.fn)
+                if mock_fn is not None:
+                    v = _safe_run(fn=mock_fn)
+                else:
+                    v = cast(
+                        Result[Any, Exception],
+                        utils.wrap_fn_into_cmd(
+                            child_ctx,
+                            call.exec_unit.fn,
+                            *call.exec_unit.args,
+                            **call.exec_unit.kwargs,
+                        ).run(),
+                    )
+
+                self._callbacks_to_run.append(
+                    lambda: callback(
+                        p=p,
+                        awaitables=self.awaitables,
+                        runnables=self.runnables,
+                        v=v,
+                    )
                 )
-            )
-            self._events.append(
-                AwaitedForPromise(promise_id=p.promise_id, tick=self.tick)
-            )
+                self._events.append(
+                    AwaitedForPromise(promise_id=p.promise_id, tick=self.tick)
+                )
+            else:
+                coro = call.exec_unit.fn(
+                    child_ctx, *call.exec_unit.args, **call.exec_unit.kwargs
+                )
+                self.runnables.append(
+                    Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
+                )
+        elif isinstance(call.exec_unit, Command):
+            msg = "execution unit must be fn or coroutine at this point."
+            raise TypeError(msg)
         else:
-            coro = call.fn(child_ctx, *call.args, **call.kwargs)
-            self._pending_to_run.append(
-                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
-            )
+            assert_never(call.exec_unit)
 
     def _increate_promise_created(self) -> int:
         self._promise_created += 1
@@ -337,36 +374,49 @@ class DSTScheduler:
         p = Promise[Any](
             promise_id=self._increate_promise_created(), invocation=invocation
         )
-        self._pending_to_run.append(Runnable(runnable.coro_and_promise, Ok(p)))
+        # We can advance the promise by passing the Promise,
+        # even if it's not already resolved.
+        self.runnables.append(Runnable(runnable.coro_and_promise, Ok(p)))
         child_ctx = runnable.coro_and_promise.ctx.new_child()
-        if not isgeneratorfunction(invocation.fn):
-            mock_fn = self.mocks.get(invocation.fn)
-            if mock_fn is not None:
-                v = _safe_run(mock_fn)
-            else:
-                v = cast(
-                    Result[Any, Exception],
-                    wrap_fn_into_cmd(
-                        child_ctx,
-                        invocation.fn,
-                        *invocation.args,
-                        **invocation.kwargs,
-                    ).run(),
-                )
-            self._callbacks_to_run.append(
-                lambda: callback(
-                    p=p,
-                    waiting_for_promise=self._waiting_for_prom_resolution,
-                    pending_to_run=self._pending_to_run,
-                    v=v,
-                )
-            )
 
+        if isinstance(invocation.exec_unit, FnOrCoroutine):
+            if not isgeneratorfunction(invocation.exec_unit.fn):
+                mock_fn = self.mocks.get(invocation.exec_unit.fn)
+                if mock_fn is not None:
+                    v = _safe_run(mock_fn)
+                else:
+                    v = cast(
+                        Result[Any, Exception],
+                        utils.wrap_fn_into_cmd(
+                            child_ctx,
+                            invocation.exec_unit.fn,
+                            *invocation.exec_unit.args,
+                            **invocation.exec_unit.kwargs,
+                        ).run(),
+                    )
+                self._callbacks_to_run.append(
+                    lambda: callback(
+                        p=p,
+                        awaitables=self.awaitables,
+                        runnables=self.runnables,
+                        v=v,
+                    )
+                )
+
+            else:
+                coro = invocation.exec_unit.fn(
+                    child_ctx,
+                    *invocation.exec_unit.args,
+                    **invocation.exec_unit.kwargs,
+                )
+                self.runnables.append(
+                    Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
+                )
+        elif isinstance(invocation.exec_unit, Command):
+            msg = "execution unit must be fn or coroutine at this point."
+            raise TypeError(msg)
         else:
-            coro = invocation.fn(child_ctx, *invocation.args, **invocation.kwargs)
-            self._pending_to_run.append(
-                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
-            )
+            assert_never(invocation.exec_unit)
 
     def get_events(self) -> list[SchedulerEvents]:
         return self._events
@@ -385,3 +435,10 @@ def _safe_run(fn: Callable[[], T]) -> Result[T, Exception]:
     except Exception as e:  # noqa: BLE001
         result = Err(e)
     return result
+
+
+def _pop_all(x: list[T] | deque[T]) -> list[T]:
+    all_elements: list[T] = []
+    while x:
+        all_elements.append(x.pop())
+    return all_elements

@@ -8,8 +8,5 @@
 #   with-sources: false
 
 -e file:.
-result==0.17.0
-    # via resonate-sdk
 typing-extensions==4.12.2
     # via resonate-sdk
-    # via result

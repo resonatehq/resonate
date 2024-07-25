@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from typing_extensions import Concatenate, assert_never
 
 from resonate.contants import ENV_VARIABLE_PIN_SEED
-from resonate.scheduler.dst import DSTScheduler, Mode
+from resonate.dst.scheduler import DSTScheduler, Mode
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine

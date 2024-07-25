@@ -7,7 +7,7 @@ from time import sleep
 from typing import TypeVar
 
 from resonate.processor import SQE, IAsyncCommand, ICommand, Processor
-from result import Ok, Result
+from resonate.result import Ok, Result
 
 T = TypeVar("T")
 

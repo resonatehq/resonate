@@ -3,16 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic
 
-from result import Err, Ok, Result
 from typing_extensions import ParamSpec, TypeVar, assert_never
 
 from resonate.logging import logger
-from resonate.typing import PendingToRun, Runnable, WaitingForPromiseResolution
+from resonate.result import Err, Ok, Result
+from resonate.typing import Awaitables, Runnable, Runnables
 
 if TYPE_CHECKING:
-    from resonate.scheduler.shared import (
-        Promise,
-    )
+    from resonate.promise import Promise
     from resonate.typing import Yieldable
 
 T = TypeVar("T")
@@ -54,12 +52,12 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | FinalValue[T]:
 
 def unblock_depands_coros(
     p: Promise[T],
-    waiting: WaitingForPromiseResolution,
-    runnables: PendingToRun,
+    awaitables: Awaitables,
+    runnables: Runnables,
 ) -> None:
     assert p.done(), "Promise must be done to unblock dependant coros"
 
-    if waiting.get(p) is None:
+    if awaitables.get(p) is None:
         return
 
     res: Result[T, Exception]
@@ -68,7 +66,7 @@ def unblock_depands_coros(
     except Exception as e:  # noqa: BLE001
         res = Err(e)
 
-    dependant_coros = waiting.pop(p)
+    dependant_coros = awaitables.pop(p)
     logger.debug("Unblocking `%s` pending promises", len(dependant_coros))
 
     new_runnables = (Runnable(c_and_p, next_value=res) for c_and_p in dependant_coros)
@@ -77,26 +75,26 @@ def unblock_depands_coros(
 
 def callback(
     p: Promise[T],
-    waiting_for_promise: WaitingForPromiseResolution,
-    pending_to_run: PendingToRun,
+    awaitables: Awaitables,
+    runnables: Runnables,
     v: Result[T, Exception],
 ) -> None:
     p.set_result(v)
-    unblock_depands_coros(p=p, waiting=waiting_for_promise, runnables=pending_to_run)
+    unblock_depands_coros(p=p, awaitables=awaitables, runnables=runnables)
 
 
 def handle_return_promise(
     running: Runnable[T],
     prom: Promise[T],
-    waiting_for_prom: WaitingForPromiseResolution,
-    pending_to_run: list[Runnable[Any]],
+    awaitables: Awaitables,
+    runnables: list[Runnable[Any]],
 ) -> None:
     if prom.done():
         unblock_depands_coros(
             p=prom,
-            waiting=waiting_for_prom,
-            runnables=pending_to_run,
+            awaitables=awaitables,
+            runnables=runnables,
         )
     else:
-        waiting_for_expired_prom = waiting_for_prom.pop(running.coro_and_promise.prom)
-        waiting_for_prom[prom].extend(waiting_for_expired_prom)
+        waiting_for_expired_prom = awaitables.pop(running.coro_and_promise.prom)
+        awaitables[prom].extend(waiting_for_expired_prom)

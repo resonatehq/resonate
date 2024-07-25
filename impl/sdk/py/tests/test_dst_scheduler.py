@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import os
 import random
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
 import resonate
 from resonate.contants import ENV_VARIABLE_PIN_SEED
-from resonate.scheduler.dst import DSTScheduler
-from resonate.scheduler.events import (
+from resonate.context import Command
+from resonate.dst.scheduler import DSTScheduler
+from resonate.events import (
     AwaitedForPromise,
     ExecutionStarted,
     PromiseCreated,
@@ -21,7 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.context import Context
-    from resonate.scheduler.shared import Promise
+    from resonate.promise import Promise
     from resonate.typing import Yieldable
 
 T = TypeVar("T")
@@ -56,6 +60,48 @@ def mocked_number() -> int:
     return 23
 
 
+@dataclass(frozen=True)
+class GreetCommand(Command):
+    name: str
+
+
+def batch_function(cmds: list[GreetCommand]) -> list[str]:
+    return [f"Hi {cmd.name}" for cmd in cmds]
+
+
+def greet(ctx: Context, name: str) -> Generator[Yieldable, Any, str]:
+    p: Promise[str] = yield ctx.invoke(GreetCommand(name=name))
+    greeting: str = yield p
+    return greeting
+
+
+@pytest.mark.skip()
+def test_batching() -> None:
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
+    s.register_command(cmd=GreetCommand, handler=batch_function, max_batch=4)
+    assert s.get_handler(GreetCommand) == batch_function
+    s.add(greet, name="Ging")
+    s.add(greet, name="Razor")
+    s.add(greet, name="Eta")
+    s.add(greet, name="Elena")
+    s.add(greet, name="Dwun")
+    greetings_promises = s.run()
+    assert [p.result() for p in greetings_promises] == [
+        "Hello Ging",
+        "Hello Razor",
+        "Hello Eta",
+        "Hello Elena",
+        "Hello Dwun",
+    ]
+
+
 @pytest.mark.dst()
 def test_pin_seed() -> None:
     s = dst(seeds=[1])[0]
@@ -69,12 +115,26 @@ def test_pin_seed() -> None:
 
 @pytest.mark.dst()
 def test_mock_function() -> None:
-    s = DSTScheduler(seed=1)
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        mode="concurrent",
+        failure_chance=0,
+        max_failures=0,
+        log_file=None,
+    )
     s.add(only_call, n=3)
     s.add(only_invocation, n=3)
     promises = s.run()
     assert all(p.result() == 3 for p in promises)  # noqa: PLR2004
-    s = DSTScheduler(seed=1, mocks={number: mocked_number})
+    s = DSTScheduler(
+        seed=1,
+        mocks={number: mocked_number},
+        mode="concurrent",
+        failure_chance=0,
+        max_failures=0,
+        log_file=None,
+    )
     promises = s.run()
     assert all(p.result() == 23 for p in promises)  # noqa: PLR2004
 
@@ -83,7 +143,14 @@ def test_mock_function() -> None:
 def test_dst_scheduler() -> None:
     for _ in range(100):
         seed = random.randint(0, 1000000)  # noqa: S311
-        s = DSTScheduler(seed=seed)
+        s = DSTScheduler(
+            seed=seed,
+            mocks=None,
+            max_failures=0,
+            failure_chance=0,
+            mode="concurrent",
+            log_file=None,
+        )
         s.add(only_call, n=1)
         s.add(only_call, n=2)
         s.add(only_call, n=3)
@@ -104,7 +171,14 @@ def test_dst_scheduler() -> None:
 @pytest.mark.dst()
 def test_dst_determinitic() -> None:
     seed = random.randint(1, 100)  # noqa: S311
-    s = DSTScheduler(seed=seed)
+    s = DSTScheduler(
+        seed=seed,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
     s.add(only_call, n=1)
     s.add(only_call, n=2)
     s.add(only_call, n=3)
@@ -114,7 +188,14 @@ def test_dst_determinitic() -> None:
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     expected_events = s.get_events()
 
-    same_seed_s = DSTScheduler(seed=seed)
+    same_seed_s = DSTScheduler(
+        seed=seed,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
     same_seed_s.add(only_call, n=1)
     same_seed_s.add(only_call, n=2)
     same_seed_s.add(only_call, n=3)
@@ -124,7 +205,14 @@ def test_dst_determinitic() -> None:
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     assert expected_events == same_seed_s.get_events()
 
-    different_seed_s = DSTScheduler(seed=seed + 10)
+    different_seed_s = DSTScheduler(
+        seed=seed + 10,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
     different_seed_s.add(only_call, n=1)
     different_seed_s.add(only_call, n=2)
     different_seed_s.add(only_call, n=3)
@@ -137,7 +225,14 @@ def test_dst_determinitic() -> None:
 
 @pytest.mark.dst()
 def test_failing_asserting() -> None:
-    s = DSTScheduler(seed=1)
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
     s.add(failing_asserting)
     p = s.run()
     with pytest.raises(AssertionError):
@@ -158,7 +253,14 @@ def test_dst_framework(scheduler: DSTScheduler) -> None:
 
 @pytest.mark.dst()
 def test_failure() -> None:
-    scheduler = DSTScheduler(seed=1, max_failures=3, failure_chance=100)
+    scheduler = DSTScheduler(
+        seed=1,
+        max_failures=3,
+        failure_chance=100,
+        mocks=None,
+        mode="concurrent",
+        log_file=None,
+    )
     scheduler.add(only_call, n=1)
     p = scheduler.run()
     assert p[0].done()
@@ -166,7 +268,14 @@ def test_failure() -> None:
     assert scheduler.tick == 6  # noqa: PLR2004
     assert scheduler.current_failures == 3  # noqa: PLR2004
 
-    scheduler = DSTScheduler(seed=1, max_failures=2, failure_chance=0)
+    scheduler = DSTScheduler(
+        seed=1,
+        max_failures=2,
+        failure_chance=0,
+        mocks=None,
+        mode="concurrent",
+        log_file=None,
+    )
     scheduler.add(only_call, n=1)
     p = scheduler.run()
     assert p[0].done()
@@ -177,7 +286,14 @@ def test_failure() -> None:
 
 @pytest.mark.dst()
 def test_sequential() -> None:
-    seq_scheduler = DSTScheduler(seed=1, mode="sequential")
+    seq_scheduler = DSTScheduler(
+        seed=1,
+        mode="sequential",
+        failure_chance=0,
+        max_failures=0,
+        mocks=None,
+        log_file=None,
+    )
     seq_scheduler.add(only_call, n=1)
     seq_scheduler.add(only_call, n=2)
     seq_scheduler.add(only_call, n=3)
@@ -228,7 +344,14 @@ def test_sequential() -> None:
         PromiseResolved(promise_id=1, tick=15),
     ]
 
-    con_scheduler = DSTScheduler(seed=1, mode="concurrent", log_file=".dom/%s.txt")
+    con_scheduler = DSTScheduler(
+        seed=1,
+        mode="concurrent",
+        mocks=None,
+        failure_chance=0,
+        max_failures=2,
+        log_file=None,
+    )
     con_scheduler.add(only_call, n=1)
     con_scheduler.add(only_call, n=2)
     con_scheduler.add(only_call, n=3)
@@ -278,3 +401,29 @@ def test_sequential() -> None:
         PromiseResolved(promise_id=4, tick=13),
         PromiseResolved(promise_id=2, tick=15),
     ]
+
+
+def test_dump_events() -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        log_file_path = Path(temp_dir) / "cool_log_%s.txt"
+        s = DSTScheduler(
+            seed=1,
+            log_file=log_file_path.as_posix(),
+            mocks=None,
+            max_failures=1,
+            failure_chance=0,
+            mode="concurrent",
+        )
+        formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
+        assert not formatted_file_path.exists()
+        s.add(only_call, n=1)
+        s.add(only_call, n=2)
+        s.add(only_call, n=3)
+        s.add(only_call, n=4)
+        s.add(only_call, n=5)
+        s.run()
+
+        assert formatted_file_path.exists()
+        assert formatted_file_path.read_text() == "".join(
+            f"{e}\n" for e in s.get_events()
+        )
