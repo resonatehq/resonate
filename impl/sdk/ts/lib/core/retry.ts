@@ -127,20 +127,27 @@ export function retryIterator<T extends { retryPolicy: RetryPolicy; attempt: num
   };
 }
 
-export async function runWithRetry<T>(func: () => Promise<T>, retryPolicy: RetryPolicy, timeout: number) {
+export async function runWithRetry<T>(
+  func: () => Promise<T>,
+  onRetry: () => Promise<void>,
+  retryPolicy: RetryPolicy,
+  timeout: number,
+) {
   let error;
 
   const ctx = { attempt: 0, retryPolicy, timeout };
-
   // invoke the function according to the retry policy
   for (const delay of retryIterator(ctx)) {
     await new Promise((resolve) => setTimeout(resolve, delay));
+
+    if (ctx.attempt > 0) {
+      await onRetry();
+    }
 
     try {
       return await func();
     } catch (e) {
       error = e;
-
       // bump the attempt count
       ctx.attempt++;
     }
