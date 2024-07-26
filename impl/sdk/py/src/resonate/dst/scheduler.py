@@ -39,7 +39,7 @@ T = TypeVar("T")
 Cmd = TypeVar("Cmd", bound=Command)
 P = ParamSpec("P")
 
-Steps: TypeAlias = Literal["callbacks", "runnables"]
+Step: TypeAlias = Literal["callbacks", "runnables"]
 Mode: TypeAlias = Literal["concurrent", "sequential"]
 
 
@@ -222,8 +222,8 @@ class DSTScheduler:
 
         return promises
 
-    def _next_step(self) -> Steps:
-        next_step: Steps
+    def _next_step(self) -> Step:
+        next_step: Step
         if self._mode == "sequential":
             next_step = "callbacks" if self._callbacks_to_run else "runnables"
         elif not self._callbacks_to_run:
@@ -348,16 +348,12 @@ class DSTScheduler:
         if isinstance(yieldable_or_final_value, FinalValue):
             value = yieldable_or_final_value.v
             logger.debug("Processing final value `%s`", value)
-            runnable.coro_and_promise.prom.set_result(value)
+            callback(
+                runnable.coro_and_promise.prom, self.awaitables, self.runnables, value
+            )
             self._events.append(
                 PromiseResolved(runnable.coro_and_promise.prom.promise_id, self.tick)
             )
-            unblock_depands_coros(
-                p=runnable.coro_and_promise.prom,
-                awaitables=self.awaitables,
-                runnables=self.runnables,
-            )
-
         elif isinstance(yieldable_or_final_value, Call):
             p = self._handle_invocation(
                 invocation=yieldable_or_final_value.to_invoke(),
@@ -370,8 +366,6 @@ class DSTScheduler:
                 invocation=yieldable_or_final_value,
                 runnable=runnable,
             )
-            # We can advance the promise by passing the Promise,
-            # even if it's not already resolved.
             self.runnables.append(Runnable(runnable.coro_and_promise, Ok(p)))
 
         elif isinstance(yieldable_or_final_value, Promise):
@@ -462,13 +456,6 @@ def _safe_run(fn: Callable[[], T]) -> Result[T, Exception]:
     except Exception as e:  # noqa: BLE001
         result = Err(e)
     return result
-
-
-def _pop_all(x: list[T] | deque[T]) -> list[T]:
-    all_elements: list[T] = []
-    while x:
-        all_elements.append(x.pop())
-    return all_elements
 
 
 def _split_array_by_max_length(arr: list[T], max_length: int) -> Generator[list[T]]:
