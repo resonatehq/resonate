@@ -75,9 +75,20 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					return CompletePromise(c, r)
 				}
 
-				// If not strict, status is OK
-				status := t_api.StatusPromiseAlreadyTimedout
-				if !r.CompletePromise.Strict {
+				// Determine the status based on the state of the promise:
+				// - a timer promise transitions to resolved
+				//   - status is 403
+				// - a regular promise transitions to timedout
+				//   - status is 403 if strict
+				//   - status is 200 if not strict
+				var status t_api.ResponseStatus
+				state := promise.GetTimedoutState(p)
+
+				if state == promise.Resolved {
+					status = t_api.StatusPromiseAlreadyResolved
+				} else if r.CompletePromise.Strict {
+					status = t_api.StatusPromiseAlreadyTimedout
+				} else {
 					status = t_api.StatusOK
 				}
 
@@ -88,7 +99,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 						Status: status,
 						Promise: &promise.Promise{
 							Id:    p.Id,
-							State: promise.GetTimedoutState(p),
+							State: state,
 							Param: p.Param,
 							Value: promise.Value{
 								Headers: map[string]string{},
