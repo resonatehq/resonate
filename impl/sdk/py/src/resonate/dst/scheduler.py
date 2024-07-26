@@ -128,7 +128,9 @@ class DSTScheduler:
         self._promise_created: int = 0
         self._log_file = log_file
 
-        self._handlers: dict[type[Command], Callable[[list[Any]], list[Any]]] = {}
+        self._handlers: dict[
+            type[Command], Callable[[list[Any]], list[Any] | None]
+        ] = {}
         self._handler_queues: dict[
             type[Command], _ListWithLenght[tuple[Promise[Any], Command]]
         ] = {}
@@ -136,7 +138,7 @@ class DSTScheduler:
     def register_command(
         self,
         cmd: type[Cmd],
-        handler: Callable[[list[Cmd]], list[Any]],
+        handler: Callable[[list[Cmd]], list[Any] | None],
         max_batch: int,
     ) -> None:
         self._handlers[cmd] = handler
@@ -144,7 +146,9 @@ class DSTScheduler:
             max_length=max_batch,
         )
 
-    def get_handler(self, cmd: type[Command]) -> Callable[[list[Any]], list[Any]]:
+    def get_handler(
+        self, cmd: type[Command]
+    ) -> Callable[[list[Any]], list[Any] | None]:
         return self._handlers[cmd]
 
     def add(
@@ -248,12 +252,15 @@ class DSTScheduler:
         self,
         cmd: type[Command],
     ) -> None:
-        promises: list[Promise[Any]] = []
-        cmds: list[Command] = []
         cmd_buffer = self._handler_queues[cmd]
+        cmd_handler = self._handlers[cmd]
         for subbuffer in _split_array_by_max_length(
             cmd_buffer.pop_all(), cmd_buffer.max_length
         ):
+            n_cmds: int = 0
+            promises: list[Promise[Any]] = []
+            cmds: list[Command] = []
+
             assert (
                 len(subbuffer) <= cmd_buffer.max_length
             ), "Subbuffer length is greater that max batch size"
@@ -261,26 +268,29 @@ class DSTScheduler:
             for p, c in subbuffer:
                 promises.append(p)
                 cmds.append(c)
+                n_cmds += 1
 
-            n_cmds = len(cmds)
-            cmd_handler = self._handlers[cmd]
+            try:
+                results = cmd_handler(cmds)
+                if results is None:
+                    for p in promises:
+                        callback(p, self.awaitables, self.runnables, Ok(None))
 
-        try:
-            results = cmd_handler(cmds)
-        except Exception as e:  # noqa: BLE001
-            for p in promises:
-                callback(p, self.awaitables, self.runnables, Err(e))
+                else:
+                    assert (
+                        len(results) == n_cmds
+                    ), "Numbers of commands and number of results must be the same"
+                    for idx, _ in enumerate(range(n_cmds)):
+                        callback(
+                            promises[idx],
+                            self.awaitables,
+                            self.runnables,
+                            Ok(results[idx]),
+                        )
 
-        assert (
-            len(results) == n_cmds
-        ), "Numbers of commands and number of results must be the same"
-        for idx, _ in enumerate(range(n_cmds)):
-            callback(
-                promises[idx],
-                self.awaitables,
-                self.runnables,
-                Ok(results[idx]),
-            )
+            except Exception as e:  # noqa: BLE001
+                for p in promises:
+                    callback(p, self.awaitables, self.runnables, Err(e))
 
     def _run(self) -> list[Promise[Any]]:
         promises = self._initialize_runnables()

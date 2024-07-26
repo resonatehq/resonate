@@ -34,6 +34,19 @@ def number(ctx: Context, n: int) -> int:  # noqa: ARG001
     return n
 
 
+def failing_function(ctx: Context) -> None:  # noqa: ARG001
+    msg = "An error happenned"
+    raise RuntimeError(msg)
+
+
+def coro_that_fails_call(ctx: Context) -> Generator[Yieldable, Any, None]:
+    return (yield ctx.call(failing_function))
+
+
+def coro_that_fails_invoke(ctx: Context) -> Generator[Yieldable, Any, None]:
+    return (yield (yield ctx.invoke(failing_function)))
+
+
 def only_call(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
     x: int = yield ctx.call(number, n=n)
     return x
@@ -79,6 +92,34 @@ def greet_with_batching_but_with_call(
 ) -> Generator[Yieldable, Any, str]:
     g: str = yield ctx.call(GreetCommand(name=name))
     return g
+
+
+def test_failing_call() -> None:
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
+    s.add(coro_that_fails_call)
+    promises = s.run()
+    assert (p.failure() for p in promises)
+    assert (not p.success() for p in promises)
+
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+    )
+    s.add(coro_that_fails_invoke)
+    promises = s.run()
+    assert (p.failure() for p in promises)
+    assert (not p.success() for p in promises)
 
 
 def test_batching_using_call() -> None:
