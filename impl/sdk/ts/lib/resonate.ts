@@ -8,7 +8,7 @@ import { DurablePromiseRecord } from "./core/promises/types";
 import * as retryPolicies from "./core/retry";
 import { runWithRetry } from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
-import { IStore } from "./core/store";
+import { ILockStore, IPromiseStore, IStore } from "./core/store";
 import { LocalStore } from "./core/stores/local";
 import { RemoteStore } from "./core/stores/remote";
 import * as utils from "./core/utils";
@@ -310,138 +310,18 @@ export class Resonate {
       opts.tags,
     );
 
-    const runFunc = async (): Promise<R> => {
-      const eid = opts.eidFn(id);
-      let value!: R;
+    const ctx = Context.createRootContext(this, { id, name, opts, eid: opts.eidFn(id) });
+    const resultPromise: Promise<R> = _runFunc<R>(
+      func,
+      ctx,
+      args,
+      idempotencyKey,
+      storedPromise,
+      this.store.locks,
+      this.store.promises,
+    );
 
-      // If the promise that comes back from the server is already completed, resolve or reject right away.
-      switch (storedPromise.state) {
-        case "RESOLVED":
-          return opts.encoder.decode(storedPromise.value.data) as R;
-        case "REJECTED":
-          throw opts.encoder.decode(storedPromise.value.data);
-        case "REJECTED_CANCELED":
-          throw new ResonateError(
-            "Resonate function canceled",
-            ErrorCodes.CANCELED,
-            opts.encoder.decode(storedPromise.value.data),
-          );
-        case "REJECTED_TIMEDOUT":
-          throw new ResonateError(
-            `Resonate function timedout at ${new Date(storedPromise.timeout).toISOString()}`,
-            ErrorCodes.TIMEDOUT,
-          );
-      }
-
-      // storedPromise.state === "PENDING"
-      try {
-        // Acquire the lock if necessary
-        if (opts.shouldLock) {
-          const acquireLock = async (): Promise<boolean> => {
-            try {
-              return await this.store.locks.tryAcquire(id, eid);
-            } catch (e: unknown) {
-              // if lock is already acquired, return false so we can poll
-              if (e instanceof ResonateError && e.code === ErrorCodes.STORE_FORBIDDEN) {
-                return false;
-              }
-
-              throw e;
-            }
-          };
-          while (!(await acquireLock())) {
-            await sleep(opts.pollFrequency);
-          }
-        }
-
-        let error: any;
-        const ctx = Context.createRootContext(this, { id, eid, name, opts });
-
-        // we need to hold on to a boolean to determine if the function was successful,
-        // we cannot rely on the value or error since func could return undefined.
-        let success = true;
-        try {
-          value = await runWithRetry(
-            async () => await func(ctx, ...args), //func
-            async () => await ctx.onRetry(), //onRetry
-            opts.retryPolicy,
-            storedPromise.timeout,
-          );
-        } catch (e) {
-          if (ctx.aborted) {
-            throw e;
-          }
-          // We need to capture the error to be able to reject the durable promise
-          // after that we will then propagate this error by rejecting the result promise
-          error = e;
-          success = false;
-        } finally {
-          await ctx.finalize();
-        }
-
-        let completedPromiseRecord!: DurablePromiseRecord;
-        if (success) {
-          completedPromiseRecord = await this.promisesStore.resolve(
-            id,
-            idempotencyKey,
-            false,
-            storedPromise.value.headers,
-            opts.encoder.encode(value),
-          );
-        } else {
-          completedPromiseRecord = await this.promisesStore.reject(
-            id,
-            idempotencyKey,
-            false,
-            storedPromise.value.headers,
-            opts.encoder.encode(error),
-          );
-        }
-
-        // Because of eventual consistency and recovery paths it is possible that we get a
-        // rejected promise even if we did call `resolve` on it or the other way around.
-        // What should never happen is that we get a "PENDING" promise
-        switch (completedPromiseRecord.state) {
-          case "RESOLVED":
-            return value as R;
-          case "REJECTED":
-            throw error;
-          case "REJECTED_CANCELED":
-            throw new ResonateError("Resonate function canceled", ErrorCodes.CANCELED, error);
-          case "REJECTED_TIMEDOUT":
-            throw new ResonateError(
-              `Resonate function timedout at ${new Date(completedPromiseRecord.timeout).toISOString()}`,
-              ErrorCodes.TIMEDOUT,
-            );
-          case "PENDING":
-            throw new Error("Unreachable");
-        }
-      } catch (err) {
-        if (err instanceof ResonateError && (err.code === ErrorCodes.CANCELED || err.code === ErrorCodes.TIMEDOUT)) {
-          // Cancel and timeout errors just forward them
-          throw err;
-        } else if (err instanceof ResonateError && err.code !== ErrorCodes.ABORT) {
-          // All other resonate errors we wrap them in an abort.
-          throw new ResonateError("Unrecoverable Error: Aborting", ErrorCodes.ABORT, err);
-        } else {
-          // - The error was already an abort error, for example, the unrecoverable error happened in one
-          // of the children invocations
-          // - Error in the user function.
-          // Either way, just forward it.
-          throw err;
-        }
-      } finally {
-        // release lock if necessary
-        if (opts.shouldLock) {
-          await this.locksStore.release(id, eid);
-        }
-      }
-
-      return value;
-    };
-
-    const resultPromise: Promise<R> = runFunc();
-    const handle = new InvocationHandle(resultPromise, id);
+    const handle = new InvocationHandle(id, resultPromise);
     this.#invocationHandles.set(id, handle);
     return handle;
   }
@@ -577,6 +457,8 @@ export class Context {
   }
 
   abort(cause: any) {
+    this.#aborted = true;
+    this.#abortCause = cause;
     this.root.#aborted = true;
     this.root.#abortCause = cause;
   }
@@ -751,7 +633,7 @@ export class Context {
       throw new Error(`Polling of remote invocation with ${funcId} was stopped`);
     };
     const resultPromise: Promise<R> = runFunc();
-    const invocationHandle = new InvocationHandle(resultPromise, funcId);
+    const invocationHandle = new InvocationHandle(funcId, resultPromise);
     this.#invocationHandles.set(funcId, invocationHandle);
 
     return invocationHandle;
@@ -783,11 +665,10 @@ export class Context {
     if (this.#invocationHandles.has(id)) {
       return this.#invocationHandles.get(id) as InvocationHandle<R>;
     }
+    const ctx = Context.createChildrenContext(this, { name, id, eid: opts.eidFn(id), opts });
 
     if (!opts.durable) {
-      const eid = opts.eidFn(id);
       const runFunc = async () => {
-        const ctx = Context.createChildrenContext(this, { name, id, eid, opts });
         const timeout = Date.now() + opts.timeout;
         return (await runWithRetry(
           async () => await func(ctx, ...args),
@@ -797,7 +678,7 @@ export class Context {
         )) as R;
       };
       const resultPromise = runFunc();
-      const handle = new InvocationHandle<R>(resultPromise, id);
+      const handle = new InvocationHandle<R>(id, resultPromise);
       this.#invocationHandles.set(id, handle);
       return handle;
     }
@@ -816,138 +697,17 @@ export class Context {
       opts.tags,
     );
 
-    const runFunc = async (): Promise<R> => {
-      const eid = opts.eidFn(id);
-      let value!: R;
+    const resultPromise: Promise<R> = _runFunc<R>(
+      func,
+      ctx,
+      args,
+      idempotencyKey,
+      storedPromise,
+      this.#resonate.store.locks,
+      this.#resonate.store.promises,
+    );
 
-      // If the promise that comes back from the server is already completed, resolve or reject right away.
-      switch (storedPromise.state) {
-        case "RESOLVED":
-          return opts.encoder.decode(storedPromise.value.data) as R;
-        case "REJECTED":
-          throw opts.encoder.decode(storedPromise.value.data);
-        case "REJECTED_CANCELED":
-          throw new ResonateError(
-            "Resonate function canceled",
-            ErrorCodes.CANCELED,
-            opts.encoder.decode(storedPromise.value.data),
-          );
-        case "REJECTED_TIMEDOUT":
-          throw new ResonateError(
-            `Resonate function timedout at ${new Date(storedPromise.timeout).toISOString()}`,
-            ErrorCodes.TIMEDOUT,
-          );
-      }
-
-      // storedPromise.state === "PENDING"
-      try {
-        // Acquire the lock if necessary
-        if (opts.shouldLock) {
-          const acquireLock = async (): Promise<boolean> => {
-            try {
-              return await this.#resonate.locksStore.tryAcquire(id, eid);
-            } catch (e: unknown) {
-              // if lock is already acquired, return false so we can poll
-              if (e instanceof ResonateError && e.code === ErrorCodes.STORE_FORBIDDEN) {
-                return false;
-              }
-
-              throw e;
-            }
-          };
-          while (!(await acquireLock())) {
-            await sleep(opts.pollFrequency);
-          }
-        }
-
-        let error: any;
-        const ctx = Context.createChildrenContext(this, { id, eid, name, opts });
-
-        // we need to hold on to a boolean to determine if the function was successful,
-        // we cannot rely on the value or error as these values could be undefined
-        let success = true;
-        try {
-          value = await runWithRetry(
-            async () => await func(ctx, ...args),
-            async () => await ctx.onRetry(),
-            opts.retryPolicy,
-            storedPromise.timeout,
-          );
-        } catch (e) {
-          // We need to capture the error to be able to reject the durable promise,
-          // after that we will then propagate this error by rejecting the result promise
-          error = e;
-          success = false;
-        } finally {
-          // Resonate will implicitly await all the invocationHandles as the last
-          // thing it does with the context before it goes out of scope
-          await ctx.finalize();
-        }
-
-        if (this.root.aborted) {
-          throw new ResonateError("Unrecoverable Error: Aborting", ErrorCodes.ABORT, this.root.abortCause);
-        }
-
-        let completedPromiseRecord!: DurablePromiseRecord;
-        if (success) {
-          completedPromiseRecord = await this.#resonate.promisesStore.resolve(
-            id,
-            idempotencyKey,
-            false,
-            storedPromise.value.headers,
-            opts.encoder.encode(value),
-          );
-        } else {
-          completedPromiseRecord = await this.#resonate.promisesStore.reject(
-            id,
-            idempotencyKey,
-            false,
-            storedPromise.value.headers,
-            opts.encoder.encode(error),
-          );
-        }
-
-        // Because of eventual consistency and recovery paths it is possible that we get a
-        // rejected promise even if we did call `resolve` on it or the other way around.
-        // What should never happen is that we get a "PENDING" promise
-        switch (completedPromiseRecord.state) {
-          case "RESOLVED":
-            return value as R;
-          case "REJECTED":
-            throw error;
-          case "REJECTED_CANCELED":
-            throw new ResonateError("Resonate function canceled", ErrorCodes.CANCELED, error);
-          case "REJECTED_TIMEDOUT":
-            throw new ResonateError(
-              `Resonate function timedout at ${new Date(completedPromiseRecord.timeout).toISOString()}`,
-              ErrorCodes.TIMEDOUT,
-            );
-          case "PENDING":
-            throw new Error("Unreachable");
-        }
-      } catch (err) {
-        if (err instanceof ResonateError && (err.code === ErrorCodes.CANCELED || err.code === ErrorCodes.TIMEDOUT)) {
-          // Cancel and timeout errors, just forward them
-          throw err;
-        } else if (err instanceof ResonateError && err.code !== ErrorCodes.ABORT) {
-          // Any other instance of ResonateError we must abort the current execution.
-          this.abort(err);
-          throw new ResonateError("Unrecoverable Error: Aborting", ErrorCodes.ABORT, err);
-        } else {
-          throw err;
-        }
-      } finally {
-        // release lock if necessary
-        if (opts.shouldLock) {
-          await this.#resonate.locksStore.release(id, eid);
-        }
-      }
-
-      return value;
-    };
-
-    const resultPromise: Promise<R> = runFunc();
-    const invocationHandle = new InvocationHandle(resultPromise, id);
+    const invocationHandle = new InvocationHandle(id, resultPromise);
     this.#invocationHandles.set(id, invocationHandle);
 
     return invocationHandle;
@@ -1219,8 +979,8 @@ export interface ResonateSchedules {
 
 export class InvocationHandle<R> {
   constructor(
-    readonly resultPromise: Promise<R>,
     readonly invocationId: string,
+    readonly resultPromise: Promise<R>,
   ) {}
 
   /**
@@ -1235,3 +995,139 @@ export class InvocationHandle<R> {
     return this.resultPromise;
   }
 }
+
+const acquireLock = async (id: string, eid: string, locksStore: ILockStore): Promise<boolean> => {
+  try {
+    return await locksStore.tryAcquire(id, eid);
+  } catch (e: unknown) {
+    // if lock is already acquired, return false so we can poll
+    if (e instanceof ResonateError && e.code === ErrorCodes.STORE_FORBIDDEN) {
+      return false;
+    }
+
+    throw e;
+  }
+};
+
+const _runFunc = async <R>(
+  func: Func,
+  ctx: Context,
+  args: Params<Func>,
+  idempotencyKey: string,
+  storedPromise: DurablePromiseRecord,
+  locksStore: ILockStore,
+  promisesStore: IPromiseStore,
+): Promise<R> => {
+  const { id, eid, opts } = ctx.invocationData;
+
+  // If the promise that comes back from the server is already completed, resolve or reject right away.
+  switch (storedPromise.state) {
+    case "RESOLVED":
+      return opts.encoder.decode(storedPromise.value.data) as R;
+    case "REJECTED":
+      throw opts.encoder.decode(storedPromise.value.data);
+    case "REJECTED_CANCELED":
+      throw new ResonateError(
+        "Resonate function canceled",
+        ErrorCodes.CANCELED,
+        opts.encoder.decode(storedPromise.value.data),
+      );
+    case "REJECTED_TIMEDOUT":
+      throw new ResonateError(
+        `Resonate function timedout at ${new Date(storedPromise.timeout).toISOString()}`,
+        ErrorCodes.TIMEDOUT,
+      );
+  }
+
+  // storedPromise.state === "PENDING"
+  try {
+    // Acquire the lock if necessary
+    if (opts.shouldLock) {
+      while (!(await acquireLock(id, eid, locksStore))) {
+        await sleep(opts.pollFrequency);
+      }
+    }
+
+    let error: any;
+    let value!: R;
+
+    // we need to hold on to a boolean to determine if the function was successful,
+    // we cannot rely on the value or error as these values could be undefined
+    let success = true;
+    try {
+      value = await runWithRetry(
+        async () => await func(ctx, ...args),
+        async () => await ctx.onRetry(),
+        opts.retryPolicy,
+        storedPromise.timeout,
+      );
+    } catch (e) {
+      // We need to capture the error to be able to reject the durable promise,
+      // after that we will then propagate this error by rejecting the result promise
+      error = e;
+      success = false;
+    } finally {
+      // Resonate will implicitly await all the invocationHandles as the last
+      // thing it does with the context before it goes out of scope
+      await ctx.finalize();
+    }
+
+    if (ctx.root.aborted) {
+      throw new ResonateError("Unrecoverable Error: Aborting", ErrorCodes.ABORT, ctx.root.abortCause);
+    }
+
+    let completedPromiseRecord!: DurablePromiseRecord;
+    if (success) {
+      completedPromiseRecord = await promisesStore.resolve(
+        id,
+        idempotencyKey,
+        false,
+        storedPromise.value.headers,
+        opts.encoder.encode(value),
+      );
+    } else {
+      completedPromiseRecord = await promisesStore.reject(
+        id,
+        idempotencyKey,
+        false,
+        storedPromise.value.headers,
+        opts.encoder.encode(error),
+      );
+    }
+
+    // Because of eventual consistency and recovery paths it is possible that we get a
+    // rejected promise even if we did call `resolve` on it or the other way around.
+    // What should never happen is that we get a "PENDING" promise
+    switch (completedPromiseRecord.state) {
+      case "RESOLVED":
+        return value as R;
+      case "REJECTED":
+        throw error;
+      case "REJECTED_CANCELED":
+        throw new ResonateError("Resonate function canceled", ErrorCodes.CANCELED, error);
+      case "REJECTED_TIMEDOUT":
+        throw new ResonateError(
+          `Resonate function timedout at ${new Date(completedPromiseRecord.timeout).toISOString()}`,
+          ErrorCodes.TIMEDOUT,
+        );
+      case "PENDING":
+        throw new Error("Unreachable");
+    }
+  } catch (err) {
+    if (err instanceof ResonateError && (err.code === ErrorCodes.CANCELED || err.code === ErrorCodes.TIMEDOUT)) {
+      // Cancel and timeout errors, just forward them
+      throw err;
+    } else if (err instanceof ResonateError && err.code !== ErrorCodes.ABORT) {
+      // Any other instance of ResonateError we must abort the current execution.
+      ctx.abort(err);
+      throw new ResonateError("Unrecoverable Error: Aborting", ErrorCodes.ABORT, err);
+    } else {
+      throw err;
+    }
+  } finally {
+    // release lock if necessary
+    if (opts.shouldLock) {
+      await locksStore.release(id, eid);
+    }
+  }
+};
