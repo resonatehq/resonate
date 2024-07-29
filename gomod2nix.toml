@@ -40,9 +40,6 @@ schema = 3
   [mod."github.com/gin-gonic/gin"]
     version = "v1.10.0"
     hash = "sha256-esJasHrJtuTBwGPGAoc/XSb428J8va+tPGcZ0gTfsgc="
-  [mod."github.com/go-chi/chi/v5"]
-    version = "v5.1.0"
-    hash = "sha256-DpVfbPlJe4zQNdBrirWq9Q37/awSu5zb3IJgcuyEED8="
   [mod."github.com/go-playground/locales"]
     version = "v0.14.1"
     hash = "sha256-BMJGAexq96waZn60DJXZfByRHb8zA/JP/i6f/YrW9oQ="

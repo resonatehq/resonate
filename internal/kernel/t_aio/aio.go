@@ -3,34 +3,27 @@ package t_aio
 type Kind int
 
 const (
-	Echo Kind = iota
-	Network
-	Store
-	Queuing
+	Store Kind = iota
+	Echo
 )
 
 func (k Kind) String() string {
 	switch k {
-	case Echo:
-		return "echo"
-	case Network:
-		return "network"
 	case Store:
 		return "store"
-	case Queuing:
-		return "queuing"
+	case Echo:
+		return "echo"
 	default:
 		panic("invalid aio")
 	}
 }
 
 type Submission struct {
-	Kind    Kind
-	Tags    map[string]string
-	Echo    *EchoSubmission
-	Network *NetworkSubmission
-	Store   *StoreSubmission
-	Queuing *QueuingSubmission
+	Kind Kind
+	Tags map[string]string
+
+	Store *StoreSubmission
+	Echo  *EchoSubmission
 }
 
 func (s *Submission) Id() string {
@@ -39,26 +32,21 @@ func (s *Submission) Id() string {
 
 func (s *Submission) String() string {
 	switch s.Kind {
-	case Echo:
-		return s.Echo.String()
-	case Network:
-		return s.Network.String()
 	case Store:
 		return s.Store.String()
-	case Queuing:
-		return s.Queuing.String()
+	case Echo:
+		return s.Echo.String()
 	default:
 		panic("invalid aio submission")
 	}
 }
 
 type Completion struct {
-	Kind    Kind
-	Tags    map[string]string
-	Echo    *EchoCompletion
-	Network *NetworkCompletion
-	Store   *StoreCompletion
-	Queuing *QueuingCompletion
+	Kind Kind
+	Tags map[string]string
+
+	Store *StoreCompletion
+	Echo  *EchoCompletion
 }
 
 func (c *Completion) Id() string {
@@ -69,12 +57,8 @@ func (c *Completion) String() string {
 	switch c.Kind {
 	case Echo:
 		return c.Echo.String()
-	case Network:
-		return c.Network.String()
 	case Store:
 		return c.Store.String()
-	case Queuing:
-		return c.Queuing.String()
 	default:
 		panic("invalid aio completion")
 	}

@@ -61,11 +61,6 @@ func TestResponseStatusString(t *testing.T) {
 			want:   "The specified promise was not found",
 		},
 		{
-			name:   "StatusSubscriptionNotFound",
-			status: StatusSubscriptionNotFound,
-			want:   "The specified subscription was not found",
-		},
-		{
 			name:   "StatusPromiseAlreadyExists",
 			status: StatusPromiseAlreadyExists,
 			want:   "A promise with this identifier already exists",
@@ -154,11 +149,6 @@ func TestResponseStatusGRPC(t *testing.T) {
 			want:   codes.NotFound,
 		},
 		{
-			name:   "StatusSubscriptionNotFound",
-			status: StatusSubscriptionNotFound,
-			want:   codes.NotFound,
-		},
-		{
 			name:   "StatusPromiseAlreadyExists",
 			status: StatusPromiseAlreadyExists,
 			want:   codes.AlreadyExists,
@@ -196,11 +186,6 @@ func TestResonateErrorHTTP(t *testing.T) {
 			name: "ErrAIOSubmissionQueueFull",
 			code: ErrAIOSubmissionQueueFull,
 			want: http.StatusServiceUnavailable,
-		},
-		{
-			name: "ErrAIONetworkFailure",
-			code: ErrAIONetworkFailure,
-			want: http.StatusInternalServerError,
 		},
 		{
 			name: "ErrAIOStoreFailure",
@@ -249,11 +234,6 @@ func TestResonateErrorGRPC(t *testing.T) {
 			name: "ErrAIOSubmissionQueueFull",
 			code: ErrAIOSubmissionQueueFull,
 			want: codes.Unavailable,
-		},
-		{
-			name: "ErrAIONetworkFailure",
-			code: ErrAIONetworkFailure,
-			want: codes.Internal,
 		},
 		{
 			name: "ErrAIOStoreFailure",

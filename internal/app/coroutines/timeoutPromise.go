@@ -33,19 +33,6 @@ func TimeoutPromise(p *promise.Promise) gocoro.CoroutineFunc[*t_aio.Submission, 
 								CompletedOn: p.Timeout,
 							},
 						},
-						{
-							Kind: t_aio.CreateNotifications,
-							CreateNotifications: &t_aio.CreateNotificationsCommand{
-								PromiseId: p.Id,
-								Time:      c.Time(),
-							},
-						},
-						{
-							Kind: t_aio.DeleteSubscriptions,
-							DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
-								PromiseId: p.Id,
-							},
-						},
 					},
 				},
 			},

@@ -9,13 +9,9 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/notification"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/subscription"
-	"github.com/resonatehq/resonate/pkg/task"
 
-	"github.com/resonatehq/resonate/pkg/timeout"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -98,416 +94,7 @@ func (c *testCase) Panic() bool {
 }
 
 var TestCases = []*testCase{
-
-	// TASKS
-	{
-		name: "Basic task lifecyle",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateTask,
-				CreateTask: &t_aio.CreateTaskCommand{
-					Id:              "taskId",
-					Counter:         0,
-					PromiseId:       "promiseId",
-					ClaimTimeout:    10_000,
-					CompleteTimeout: 10_000,
-					PromiseTimeout:  30_000,
-					CreatedOn:       5_000,
-					CompletedOn:     0,
-					IsCompleted:     false,
-				},
-			},
-			{
-				Kind: t_aio.ReadTasks,
-				ReadTasks: &t_aio.ReadTasksCommand{
-					IsCompleted: false,
-					RunTime:     20_000,
-				},
-			},
-			{
-				Kind: t_aio.UpdateTask,
-				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:              "taskId",
-					Counter:         0,
-					ClaimTimeout:    10_000,
-					CompleteTimeout: 10_000,
-					CompletedOn:     25_000,
-					IsCompleted:     true,
-				},
-			},
-			{
-				Kind: t_aio.ReadTask,
-				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "taskId",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateTask,
-				CreateTask: &t_aio.AlterTasksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadTasks,
-				ReadTasks: &t_aio.QueryTasksResult{
-					RowsReturned: 1,
-					Records: []*task.TaskRecord{
-						{
-							Id:              "taskId",
-							Counter:         0,
-							PromiseId:       "promiseId",
-							ClaimTimeout:    10_000,
-							CompleteTimeout: 10_000,
-							PromiseTimeout:  30_000,
-							CreatedOn:       5_000,
-							CompletedOn:     0,
-							IsCompleted:     false,
-						},
-					},
-				},
-			},
-			{
-				Kind: t_aio.UpdateTask,
-				UpdateTask: &t_aio.AlterTasksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadTask,
-				ReadTask: &t_aio.QueryTasksResult{
-					RowsReturned: 1,
-					Records: []*task.TaskRecord{
-						{
-							Id:              "taskId",
-							Counter:         0,
-							PromiseId:       "promiseId",
-							ClaimTimeout:    10_000,
-							CompleteTimeout: 10_000,
-							PromiseTimeout:  30_000,
-							CreatedOn:       5_000,
-							CompletedOn:     25_000,
-							IsCompleted:     true,
-						},
-					},
-				},
-			},
-		},
-	},
-
-	// LOCKS
-	{
-		name: "AcquireLock: duplicate requests",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:  "foo",
-					ProcessId:   "bar",
-					ExecutionId: "baz",
-					Timeout:     1736571600000,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "AcquireLock: reacquire lock with same execution id, but different process id",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "barUpdated",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571700000,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "AcquireLock: fail to acquire lock",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz1",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz2",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "HeartbeatLock",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo-1",
-					ProcessId:            "a",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo-2",
-					ProcessId:            "a",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo-3",
-					ProcessId:            "b",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.HeartbeatLocks,
-				HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
-					ProcessId: "a",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.HeartbeatLocks,
-				HeartbeatLocks: &t_aio.AlterLocksResult{
-					RowsAffected: 2,
-				},
-			},
-		},
-	},
-	{
-		name: "ReleaseLock: success",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.ReadLock,
-				ReadLock: &t_aio.ReadLockCommand{
-					ResourceId: "foo",
-				},
-			},
-			{
-				Kind: t_aio.ReleaseLock,
-				ReleaseLock: &t_aio.ReleaseLockCommand{
-					ResourceId:  "foo",
-					ExecutionId: "baz",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadLock,
-				ReadLock: &t_aio.QueryLocksResult{
-					RowsReturned: 1,
-					Records: []*lock.LockRecord{{
-						ResourceId:           "foo",
-						ProcessId:            "bar",
-						ExecutionId:          "baz",
-						ExpiryInMilliseconds: 10_000,
-						Timeout:              1736571600000,
-					}},
-				},
-			},
-			{
-				Kind: t_aio.ReleaseLock,
-				ReleaseLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "ReleaseLock: lock exists, but not owned by execution id or does not exist at all (no-op)",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.ReleaseLock,
-				ReleaseLock: &t_aio.ReleaseLockCommand{
-					ResourceId:  "foo",
-					ExecutionId: "bazOther",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReleaseLock,
-				ReleaseLock: &t_aio.AlterLocksResult{
-					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "TimeoutLocks",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AcquireLockCommand{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 10_000,
-					Timeout:              1736571600000,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutLocks,
-				TimeoutLocks: &t_aio.TimeoutLocksCommand{
-					Timeout: 1736571700000,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.AcquireLock,
-				AcquireLock: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutLocks,
-				TimeoutLocks: &t_aio.AlterLocksResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-
 	// PROMISES
-
 	{
 		name: "CreatePromise",
 		commands: []*t_aio.Command{
@@ -2388,7 +1975,6 @@ var TestCases = []*testCase{
 	},
 
 	// SCHEDULES
-
 	{
 		name: "CreateUpdateDeleteSchedule",
 		commands: []*t_aio.Command{
@@ -2742,1216 +2328,317 @@ var TestCases = []*testCase{
 		},
 	},
 
-	// TIMEOUTS
-
+	// LOCKS
 	{
-		name: "CreateTimeout",
+		name: "AcquireLock",
 		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "foo",
-					Time: 0,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Timeout:     1736571600000,
 				},
 			},
 		},
 		expected: []*t_aio.Result{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 		},
 	},
 	{
-		name: "CreateTimeoutTwice",
+		name: "AcquireLockDifferentProcessId",
 		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "foo",
-					Time: 0,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "foo",
-					Time: 1,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "barUpdated",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571700000,
 				},
 			},
 		},
 		expected: []*t_aio.Result{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+	{
+		name: "AcquireLockFail",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz1",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz2",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 0,
 				},
 			},
 		},
 	},
 	{
-		name: "ReadNTimeout",
+		name: "ReleaseLock",
 		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "foo",
-					Time: 0,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "bar",
-					Time: 1,
+				Kind: t_aio.ReadLock,
+				ReadLock: &t_aio.ReadLockCommand{
+					ResourceId: "foo",
 				},
 			},
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "baz",
-					Time: 2,
-				},
-			},
-			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "qux",
-					Time: 3,
-				},
-			},
-			{
-				Kind: t_aio.ReadTimeouts,
-				ReadTimeouts: &t_aio.ReadTimeoutsCommand{
-					N: 3,
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.ReleaseLockCommand{
+					ResourceId:  "foo",
+					ExecutionId: "baz",
 				},
 			},
 		},
 		expected: []*t_aio.Result{
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadTimeouts,
-				ReadTimeouts: &t_aio.QueryTimeoutsResult{
-					RowsReturned: 3,
-					Records: []*timeout.TimeoutRecord{
-						{Id: "foo", Time: 0},
-						{Id: "bar", Time: 1},
-						{Id: "baz", Time: 2},
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "ReadNTimeoutNoResults",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.ReadTimeouts,
-				ReadTimeouts: &t_aio.ReadTimeoutsCommand{
-					N: 3,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.ReadTimeouts,
-				ReadTimeouts: &t_aio.QueryTimeoutsResult{
-					RowsReturned: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "DeleteTimeout",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.CreateTimeoutCommand{
-					Id:   "foo",
-					Time: 0,
-				},
-			},
-			{
-				Kind: t_aio.DeleteTimeout,
-				DeleteTimeout: &t_aio.DeleteTimeoutCommand{
-					Id: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateTimeout,
-				CreateTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteTimeout,
-				DeleteTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "DeleteTimeoutThatDoesNotExist",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.DeleteTimeout,
-				DeleteTimeout: &t_aio.DeleteTimeoutCommand{
-					Id: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.DeleteTimeout,
-				DeleteTimeout: &t_aio.AlterTimeoutsResult{
-					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "CreateSubscription",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "CreateSubscriptionTwice",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   2,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 0,
-				},
-			},
-		},
-	},
-	{
-		name: "DeleteSubscription",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteSubscription,
-				DeleteSubscription: &t_aio.DeleteSubscriptionCommand{
-					Id:        "a",
-					PromiseId: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteSubscription,
-				DeleteSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-		},
-	},
-	{
-		name: "DeleteSubscriptions",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "b",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/b",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "c",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/c",
-					RetryPolicy: &subscription.RetryPolicy{},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteSubscriptions,
-				DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
-					PromiseId: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteSubscriptions,
-				DeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 3,
-				},
-			},
-		},
-	},
-	{
-		name: "ReadSubscription",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscription,
-				ReadSubscription: &t_aio.ReadSubscriptionCommand{
-					Id:        "a",
-					PromiseId: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscription,
-				ReadSubscription: &t_aio.QuerySubscriptionsResult{
+				Kind: t_aio.ReadLock,
+				ReadLock: &t_aio.QueryLocksResult{
 					RowsReturned: 1,
-					Records: []*subscription.SubscriptionRecord{
-						{
-							Id:          "a",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/a",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-							CreatedOn:   1,
-						},
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "ReadSubscriptions",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "b",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/b",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
-					CreatedOn:   2,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "bar",
-					Url:         "https://bar.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
-					CreatedOn:   3,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "b",
-					PromiseId:   "bar",
-					Url:         "https://bar.com/b",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 4, Attempts: 4},
-					CreatedOn:   4,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "foo",
-					Limit:     4,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "bar",
-					Limit:     1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "bar",
-					Limit:     1,
-					SortId:    util.ToPointer(int64(4)),
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 2,
-					LastSortId:   1,
-					Records: []*subscription.SubscriptionRecord{
-						{
-							Id:          "b",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/b",
-							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
-							CreatedOn:   2,
-							SortId:      2,
-						},
-						{
-							Id:          "a",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/a",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-							CreatedOn:   1,
-							SortId:      1,
-						},
-					},
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 1,
-					LastSortId:   4,
-					Records: []*subscription.SubscriptionRecord{
-						{
-							Id:          "b",
-							PromiseId:   "bar",
-							Url:         "https://bar.com/b",
-							RetryPolicy: []byte("{\"delay\":4,\"attempts\":4}"),
-							CreatedOn:   4,
-							SortId:      4,
-						},
-					},
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 1,
-					LastSortId:   3,
-					Records: []*subscription.SubscriptionRecord{
-						{
-							Id:          "a",
-							PromiseId:   "bar",
-							Url:         "https://bar.com/a",
-							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-							CreatedOn:   3,
-							SortId:      3,
-						},
-					},
-				},
-			},
-		},
-	},
-	{
-		name: "TimeoutPromises",
-		commands: []*t_aio.Command{
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "foo",
-					State:   promise.Pending,
-					Timeout: 2,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags: map[string]string{
-						"resonate:timeout": "true",
-					},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "bar",
-					State:   promise.Pending,
-					Timeout: 2,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "bar",
-					Url:         "https://bar.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
-					CreatedOn:   2,
-				},
-			},
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "baz",
-					State:   promise.Pending,
-					Timeout: 2,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "baz",
-					Url:         "https://baz.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
-					CreatedOn:   3,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutCreateNotifications,
-				TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
-					Time: 2,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutDeleteSubscriptions,
-				TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
-					Time: 2,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutPromises,
-				TimeoutPromises: &t_aio.TimeoutPromisesCommand{
-					Time: 2,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.ReadNotificationsCommand{
-					N: 5,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "foo",
-					Limit:     3,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "bar",
-					Limit:     3,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.ReadSubscriptionsCommand{
-					PromiseId: "baz",
-					Limit:     3,
-				},
-			},
-			{
-				Kind: t_aio.SearchPromises,
-				SearchPromises: &t_aio.SearchPromisesCommand{
-					Id:     "*",
-					States: []promise.State{promise.Timedout},
-					Tags:   map[string]string{},
-					Limit:  5,
-				},
-			},
-			{
-				Kind: t_aio.ReadPromise,
-				ReadPromise: &t_aio.ReadPromiseCommand{
-					Id: "foo",
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutCreateNotifications,
-				TimeoutCreateNotifications: &t_aio.AlterNotificationsResult{
-					RowsAffected: 3,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutDeleteSubscriptions,
-				TimeoutDeleteSubscriptions: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 3,
-				},
-			},
-			{
-				Kind: t_aio.TimeoutPromises,
-				TimeoutPromises: &t_aio.AlterPromisesResult{
-					RowsAffected: 3,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.QueryNotificationsResult{
-					RowsReturned: 3,
-					Records: []*notification.NotificationRecord{
-						{
-							Id:          "a",
-							PromiseId:   "bar",
-							Url:         "https://bar.com/a",
-							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
-							Time:        2,
-							Attempt:     0,
-						},
-						{
-							Id:          "a",
-							PromiseId:   "baz",
-							Url:         "https://baz.com/a",
-							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-							Time:        2,
-							Attempt:     0,
-						},
-						{
-							Id:          "a",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/a",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-							Time:        2,
-							Attempt:     0,
-						},
-					},
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 0,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 0,
-				},
-			},
-			{
-				Kind: t_aio.ReadSubscriptions,
-				ReadSubscriptions: &t_aio.QuerySubscriptionsResult{
-					RowsReturned: 0,
-				},
-			},
-			{
-				Kind: t_aio.SearchPromises,
-				SearchPromises: &t_aio.QueryPromisesResult{
-					RowsReturned: 2,
-					LastSortId:   2,
-					Records: []*promise.PromiseRecord{
-						{
-							Id:           "baz",
-							State:        16,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							Timeout:      2,
-							CreatedOn:    util.ToPointer(int64(1)),
-							CompletedOn:  util.ToPointer(int64(2)),
-							Tags:         []byte("{}"),
-							SortId:       3,
-						},
-						{
-							Id:           "bar",
-							State:        16,
-							ParamHeaders: []byte("{}"),
-							ParamData:    []byte{},
-							Timeout:      2,
-							CreatedOn:    util.ToPointer(int64(1)),
-							CompletedOn:  util.ToPointer(int64(2)),
-							Tags:         []byte("{}"),
-							SortId:       2,
-						},
-						// foo is not here because it was resolved.
-					},
-				},
-			},
-			{
-				Kind: t_aio.ReadPromise,
-				ReadPromise: &t_aio.QueryPromisesResult{
-					RowsReturned: 1,
-					Records: []*promise.PromiseRecord{{
-						Id:           "foo",
-						State:        2,
-						ParamHeaders: []byte("{}"),
-						ParamData:    []byte{},
-						Timeout:      2,
-						Tags:         []byte("{\"resonate:timeout\":\"true\"}"),
-						CreatedOn:    util.ToPointer(int64(1)),
-						CompletedOn:  util.ToPointer(int64(2)),
+					Records: []*lock.LockRecord{{
+						ResourceId:           "foo",
+						ProcessId:            "bar",
+						ExecutionId:          "baz",
+						ExpiryInMilliseconds: 10_000,
+						Timeout:              1736571600000,
 					}},
 				},
 			},
-		},
-	},
-	{
-		name: "CreateNotifications",
-		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "foo",
-					State:   promise.Pending,
-					Timeout: 1,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "b",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/b",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 2, Attempts: 2},
-					CreatedOn:   2,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "c",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/c",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 3, Attempts: 3},
-					CreatedOn:   3,
-				},
-			},
-			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.UpdatePromiseCommand{
-					Id:    "foo",
-					State: 2,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
-				},
-			},
-			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.CreateNotificationsCommand{
-					PromiseId: "foo",
-					Time:      2,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.ReadNotificationsCommand{
-					N: 3,
-				},
-			},
-		},
-		expected: []*t_aio.Result{
-			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.AlterNotificationsResult{
-					RowsAffected: 3,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.QueryNotificationsResult{
-					RowsReturned: 3,
-					Records: []*notification.NotificationRecord{
-						{
-							Id:          "a",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/a",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-							Time:        2,
-							Attempt:     0,
-						},
-						{
-							Id:          "b",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/b",
-							RetryPolicy: []byte("{\"delay\":2,\"attempts\":2}"),
-							Time:        2,
-							Attempt:     0,
-						},
-						{
-							Id:          "c",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/c",
-							RetryPolicy: []byte("{\"delay\":3,\"attempts\":3}"),
-							Time:        2,
-							Attempt:     0,
-						},
-					},
 				},
 			},
 		},
 	},
 	{
-		name: "UpdateNotification",
+		name: "ReleaseLockNoop",
 		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "foo",
-					State:   promise.Pending,
-					Timeout: 1,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
-				},
-			},
-			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.UpdatePromiseCommand{
-					Id:    "foo",
-					State: 2,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
-				},
-			},
-			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.CreateNotificationsCommand{
-					PromiseId: "foo",
-					Time:      2,
-				},
-			},
-			{
-				Kind: t_aio.UpdateNotification,
-				UpdateNotification: &t_aio.UpdateNotificationCommand{
-					Id:        "a",
-					PromiseId: "foo",
-					Time:      4,
-					Attempt:   1,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.ReadNotificationsCommand{
-					N: 1,
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.ReleaseLockCommand{
+					ResourceId:  "foo",
+					ExecutionId: "bazOther",
 				},
 			},
 		},
 		expected: []*t_aio.Result{
 			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.AlterPromisesResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.UpdateNotification,
-				UpdateNotification: &t_aio.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.QueryNotificationsResult{
-					RowsReturned: 1,
-					Records: []*notification.NotificationRecord{
-						{
-							Id:          "a",
-							PromiseId:   "foo",
-							Url:         "https://foo.com/a",
-							RetryPolicy: []byte("{\"delay\":1,\"attempts\":1}"),
-							Time:        4,
-							Attempt:     1,
-						},
-					},
+				Kind: t_aio.ReleaseLock,
+				ReleaseLock: &t_aio.AlterLocksResult{
+					RowsAffected: 0,
 				},
 			},
 		},
 	},
 	{
-		name: "DeleteNotification",
+		name: "HeartbeatLocks",
 		commands: []*t_aio.Command{
 			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.CreatePromiseCommand{
-					Id:      "foo",
-					State:   promise.Pending,
-					Timeout: 1,
-					Param: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					Tags:      map[string]string{},
-					CreatedOn: 1,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo-1",
+					ProcessId:            "a",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.CreateSubscriptionCommand{
-					Id:          "a",
-					PromiseId:   "foo",
-					Url:         "https://foo.com/a",
-					RetryPolicy: &subscription.RetryPolicy{Delay: 1, Attempts: 1},
-					CreatedOn:   1,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo-2",
+					ProcessId:            "a",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.UpdatePromiseCommand{
-					Id:    "foo",
-					State: 2,
-					Value: promise.Value{
-						Headers: map[string]string{},
-						Data:    []byte{},
-					},
-					CompletedOn: 2,
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo-3",
+					ProcessId:            "b",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
 				},
 			},
 			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.CreateNotificationsCommand{
-					PromiseId: "foo",
-					Time:      2,
-				},
-			},
-			{
-				Kind: t_aio.DeleteNotification,
-				DeleteNotification: &t_aio.DeleteNotificationCommand{
-					Id:        "a",
-					PromiseId: "foo",
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.ReadNotificationsCommand{
-					N: 1,
+				Kind: t_aio.HeartbeatLocks,
+				HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
+					ProcessId: "a",
 				},
 			},
 		},
 		expected: []*t_aio.Result{
 			{
-				Kind: t_aio.CreatePromise,
-				CreatePromise: &t_aio.AlterPromisesResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.CreateSubscription,
-				CreateSubscription: &t_aio.AlterSubscriptionsResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.UpdatePromise,
-				UpdatePromise: &t_aio.AlterPromisesResult{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
 					RowsAffected: 1,
 				},
 			},
 			{
-				Kind: t_aio.CreateNotifications,
-				CreateNotifications: &t_aio.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.DeleteNotification,
-				DeleteNotification: &t_aio.AlterNotificationsResult{
-					RowsAffected: 1,
-				},
-			},
-			{
-				Kind: t_aio.ReadNotifications,
-				ReadNotifications: &t_aio.QueryNotificationsResult{
-					RowsReturned: 0,
+				Kind: t_aio.HeartbeatLocks,
+				HeartbeatLocks: &t_aio.AlterLocksResult{
+					RowsAffected: 2,
 				},
 			},
 		},
 	},
+	{
+		name: "TimeoutLocks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AcquireLockCommand{
+					ResourceId:           "foo",
+					ProcessId:            "bar",
+					ExecutionId:          "baz",
+					ExpiryInMilliseconds: 10_000,
+					Timeout:              1736571600000,
+				},
+			},
+			{
+				Kind: t_aio.TimeoutLocks,
+				TimeoutLocks: &t_aio.TimeoutLocksCommand{
+					Timeout: 1736571700000,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.AcquireLock,
+				AcquireLock: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.TimeoutLocks,
+				TimeoutLocks: &t_aio.AlterLocksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+
+	// OTHER
 	{
 		name:     "PanicsWhenNoCommands",
 		panic:    true,
@@ -4065,17 +2752,6 @@ var TestCases = []*testCase{
 					Headers: map[string]string{},
 					Data:    nil,
 				},
-			},
-		}},
-	},
-	{
-		name:  "PanicsWhenCreateTimeoutCommandNegativeTime",
-		panic: true,
-		commands: []*t_aio.Command{{
-			Kind: t_aio.CreateTimeout,
-			CreateTimeout: &t_aio.CreateTimeoutCommand{
-				Id:   "foo",
-				Time: -1,
 			},
 		}},
 	},

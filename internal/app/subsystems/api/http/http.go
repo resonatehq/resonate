@@ -3,11 +3,13 @@ package http
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
+
+	"log/slog"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"log/slog"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -25,6 +27,18 @@ type Http struct {
 	server *http.Server
 }
 
+var oneOfCaseInsensitive validator.Func = func(f validator.FieldLevel) bool {
+	fieldValue := f.Field().String()
+	allowedValues := strings.Split(f.Param(), " ")
+
+	for _, allowedValue := range allowedValues {
+		if strings.EqualFold(fieldValue, allowedValue) {
+			return true
+		}
+	}
+
+	return false
+}
 
 func New(api api.API, config *Config) api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
@@ -34,7 +48,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	// Register custom validators
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
-		_ = v.RegisterValidation("oneofcaseinsensitive", service.OneOfCaseInsensitive)
+		_ = v.RegisterValidation("oneofcaseinsensitive", oneOfCaseInsensitive)
 	}
 
 	// Middleware
@@ -62,10 +76,6 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.POST("/locks/acquire", s.acquireLock)
 	authorized.POST("/locks/release", s.releaseLock)
 	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
-
-	// Task API
-	authorized.POST("/tasks/claim", s.claimTask)
-	authorized.POST("/tasks/complete", s.completeTask)
 
 	return &Http{
 		config: config,

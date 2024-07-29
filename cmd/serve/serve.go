@@ -15,8 +15,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -56,18 +54,12 @@ func ServeCmd() *cobra.Command {
 			api := api.New(config.API.Size, metrics)
 			aio := aio.New(config.AIO.Size, metrics)
 
-
 			// instantiate api subsystems
 			http := http.New(api, config.API.Subsystems.Http)
 			grpc := grpc.New(api, config.API.Subsystems.Grpc)
 
 			// instantiate aio subsystems
-			network := network.New(config.AIO.Subsystems.Network.Config)
 			store, err := util.NewStore(config.AIO.Subsystems.Store)
-			if err != nil {
-				return err
-			}
-			queuing, err := queuing.New(config.API.BaseURL, config.AIO.Subsystems.Queuing.Config)
 			if err != nil {
 				return err
 			}
@@ -77,9 +69,7 @@ func ServeCmd() *cobra.Command {
 			api.AddSubsystem(grpc)
 
 			// add aio subsystems
-			aio.AddSubsystem(t_aio.Network, network, config.AIO.Subsystems.Network.Subsystem)
 			aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
-			aio.AddSubsystem(t_aio.Queuing, queuing, config.AIO.Subsystems.Queuing.Subsystem)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -101,16 +91,9 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 			system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
 			system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-			system.AddOnRequest(t_api.ReadSubscriptions, coroutines.ReadSubscriptions)
-			system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
-			system.AddOnRequest(t_api.DeleteSubscription, coroutines.DeleteSubscription)
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
-			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnTick(10*time.Second, "EnqueueTasks", coroutines.EnqueueTasks)
-			system.AddOnTick(10*time.Second, "NotifySubscriptions", coroutines.NotifySubscriptions)
 			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
 			system.AddOnTick(10*time.Second, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
@@ -201,7 +184,6 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
 
 	// aio
-	// Store
 	cmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
 	cmd.Flags().String("aio-store", "sqlite", "promise store type")
 	cmd.Flags().Int("aio-store-size", 100, "size of store submission queue buffered channel")
@@ -218,20 +200,7 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().StringToString("aio-store-postgres-query", make(map[string]string, 0), "postgres query options")
 	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 10_000*time.Millisecond, "postgres transaction timeout")
 	cmd.Flags().Bool("aio-store-postgres-reset", false, "postgres database clean on shutdown")
-	// Network
-	cmd.Flags().Int("aio-network-size", 100, "size of network submission queue buffered channel")
-	cmd.Flags().Int("aio-network-workers", 3, "number of concurrent http requests")
-	cmd.Flags().Int("aio-network-batch-size", 100, "max submissions processed each tick by a network worker")
-	cmd.Flags().Duration("aio-network-timeout", 10*time.Second, "network request timeout")
-	// Queuing
-	cmd.Flags().Int("aio-queuing-size", 100, "size of queuing submission queue buffered channel")
-	cmd.Flags().Int("aio-queuing-workers", 1, "number of queuing workers")
-	cmd.Flags().Lookup("aio-queuing-workers").Hidden = true // must be 1.
-	cmd.Flags().Int("aio-queuing-batch-size", 100, "max submissions processed each tick by a queuing worker")
-	cmd.Flags().Var(&ConnectionSlice{}, "aio-queuing-connections", "queuing subsystem connections")
-	cmd.Flags().Var(&RouteSlice{}, "aio-queuing-routes", "queuing subsystem routes")
 
-	// Store
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))
@@ -249,17 +218,6 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.query", cmd.Flags().Lookup("aio-store-postgres-query"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.txTimeout", cmd.Flags().Lookup("aio-store-postgres-tx-timeout"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.reset", cmd.Flags().Lookup("aio-store-postgres-reset"))
-	// Network
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.size", cmd.Flags().Lookup("aio-network-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.workers", cmd.Flags().Lookup("aio-network-workers"))
-	_ = viper.BindPFlag("aio.subsystems.network.subsystem.batchSize", cmd.Flags().Lookup("aio-network-batch-size"))
-	_ = viper.BindPFlag("aio.subsystems.network.config.timeout", cmd.Flags().Lookup("aio-network-timeout"))
-	// Queuing
-	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.size", cmd.Flags().Lookup("aio-queuing-size"))
-	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.workers", cmd.Flags().Lookup("aio-queuing-workers"))
-	_ = viper.BindPFlag("aio.subsystems.queuing.subsystem.batchSize", cmd.Flags().Lookup("aio-queuing-batch-size"))
-	_ = viper.BindPFlag("aio.subsystems.queuing.config.connections", cmd.Flags().Lookup("aio-queuing-connections"))
-	_ = viper.BindPFlag("aio.subsystems.queuing.config.routes", cmd.Flags().Lookup("aio-queuing-routes"))
 
 	// system
 	cmd.Flags().Int("system-coroutine-max-size", 1000, "max number of coroutines to run concurrently")

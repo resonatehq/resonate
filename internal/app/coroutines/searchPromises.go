@@ -25,18 +25,6 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
-						Kind: t_aio.TimeoutCreateNotifications,
-						TimeoutCreateNotifications: &t_aio.TimeoutCreateNotificationsCommand{
-							Time: c.Time(),
-						},
-					},
-					{
-						Kind: t_aio.TimeoutDeleteSubscriptions,
-						TimeoutDeleteSubscriptions: &t_aio.TimeoutDeleteSubscriptionsCommand{
-							Time: c.Time(),
-						},
-					},
-					{
 						Kind: t_aio.TimeoutPromises,
 						TimeoutPromises: &t_aio.TimeoutPromisesCommand{
 							Time: c.Time(),
@@ -63,9 +51,9 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	util.Assert(len(completion.Store.Results) == 4, "must have four results")
+	util.Assert(len(completion.Store.Results) == 2, "must have two results")
 
-	result := completion.Store.Results[3].SearchPromises
+	result := completion.Store.Results[1].SearchPromises
 	promises := []*promise.Promise{}
 
 	for _, record := range result.Records {

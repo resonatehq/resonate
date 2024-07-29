@@ -6,8 +6,6 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/network"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queuing"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
@@ -43,11 +41,7 @@ type APISubsystems struct {
 }
 
 type AIOSubsystems struct {
-	Store      *AIOSubsystemConfig[StoreConfig]
-	Network    *AIOSubsystemConfig[network.Config]
-	NetworkDST *AIOSubsystemConfig[network.ConfigDST]
-	Queuing    *AIOSubsystemConfig[queuing.Config]
-	QueuingDST *AIOSubsystemConfig[queuing.ConfigDST]
+	Store *AIOSubsystemConfig[StoreConfig]
 }
 
 type AIOSubsystemConfig[T any] struct {

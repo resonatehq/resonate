@@ -6,8 +6,6 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
-
-	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Request struct {
@@ -26,19 +24,10 @@ type Request struct {
 	CreateSchedule  *CreateScheduleRequest
 	DeleteSchedule  *DeleteScheduleRequest
 
-	// SUBSCRIPTIONS
-	ReadSubscriptions  *ReadSubscriptionsRequest
-	CreateSubscription *CreateSubscriptionRequest
-	DeleteSubscription *DeleteSubscriptionRequest
-
 	// LOCKS
 	AcquireLock    *AcquireLockRequest
 	ReleaseLock    *ReleaseLockRequest
 	HeartbeatLocks *HeartbeatLocksRequest
-
-	// TASKS
-	ClaimTask    *ClaimTaskRequest
-	CompleteTask *CompleteTaskRequest
 
 	// ECHO
 	Echo *EchoRequest
@@ -129,30 +118,6 @@ type DeleteScheduleRequest struct {
 	Id string `json:"id"`
 }
 
-// Subscriptions
-
-type ReadSubscriptionsRequest struct {
-	PromiseId string `json:"promiseId"`
-	Limit     int    `json:"limit"`
-	SortId    *int64 `json:"sortId"`
-}
-
-type CreateSubscriptionRequest struct {
-	Id          string                    `json:"id"`
-	PromiseId   string                    `json:"promiseId"`
-	Url         string                    `json:"url"`
-	RetryPolicy *subscription.RetryPolicy `json:"retryPolicy"`
-}
-
-type DeleteSubscriptionRequest struct {
-	Id        string `json:"id"`
-	PromiseId string `json:"promiseId"`
-}
-
-type EchoRequest struct {
-	Data string `json:"data"`
-}
-
 // Locks
 
 type AcquireLockRequest struct {
@@ -171,35 +136,10 @@ type HeartbeatLocksRequest struct {
 	ProcessId string `json:"processId"`
 }
 
-// Tasks
+// Echo
 
-// ClaimTaskRequest allows a process that received a pending task
-// to claim ownership of the task for processing. It identifies the
-// specific task to claim using the unique taskId and counter
-// originally provided with the pending task. Claiming the task locks
-// it from being claimed by other workers for a set period of time
-// so that duplicate work is avoided. Once claimed, the process should
-// carry out the task work then release the claim upon completion or
-// failure to allow the task to be retried.
-type ClaimTaskRequest struct {
-	TaskId               string `json:"taskId"`
-	Counter              int    `json:"counter"`
-	ProcessId            string `json:"processId"`
-	ExecutionId          string `json:"executionId"`
-	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
-}
-
-// CompleteTaskRequest allows a process that has claimed a task to mark
-// the task as complete (resolved or rejected). It identifies the
-// specific task to complete using the unique taskId and counter originally
-// provided with the pending task. Completing the task releases the claim
-// on the task.
-type CompleteTaskRequest struct {
-	TaskId      string        `json:"taskId"`
-	Counter     int           `json:"counter"`
-	ExecutionId string        `json:"executionId"`
-	State       promise.State `json:"state"`
-	Value       promise.Value `json:"value"`
+type EchoRequest struct {
+	Data string `json:"data"`
 }
 
 func (r *Request) String() string {
@@ -273,33 +213,6 @@ func (r *Request) String() string {
 			r.DeleteSchedule.Id,
 		)
 
-	// SUBSCRIPTIONS
-	case ReadSubscriptions:
-		sortId := "<nil>"
-		if r.ReadSubscriptions.SortId != nil {
-			sortId = strconv.FormatInt(*r.ReadSubscriptions.SortId, 10)
-		}
-
-		return fmt.Sprintf(
-			"ReadSubscriptions(promiseId=%s, limit=%d, sortId=%s)",
-			r.ReadSubscriptions.PromiseId,
-			r.ReadSubscriptions.Limit,
-			sortId,
-		)
-	case CreateSubscription:
-		return fmt.Sprintf(
-			"CreateSubscription(id=%s, promiseId=%s, url=%s)",
-			r.CreateSubscription.Id,
-			r.CreateSubscription.PromiseId,
-			r.CreateSubscription.Url,
-		)
-	case DeleteSubscription:
-		return fmt.Sprintf(
-			"DeleteSubscription(id=%s, promiseId=%s)",
-			r.DeleteSubscription.Id,
-			r.DeleteSubscription.PromiseId,
-		)
-
 	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
@@ -319,26 +232,6 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"HeartbeatLocks(processId=%s)",
 			r.HeartbeatLocks.ProcessId,
-		)
-
-	// TASKS
-	case ClaimTask:
-		return fmt.Sprintf(
-			"ClaimTask(taskId=%s, counter=%d, processId=%s, executionId=%s, expiryInMilliseconds=%d)",
-			r.ClaimTask.TaskId,
-			r.ClaimTask.Counter,
-			r.ClaimTask.ProcessId,
-			r.ClaimTask.ExecutionId,
-			r.ClaimTask.ExpiryInMilliseconds,
-		)
-	case CompleteTask:
-		return fmt.Sprintf(
-			"CompleteTask(taskId=%s, counter=%d, executionId=%s, state=%s, value=%s)",
-			r.CompleteTask.TaskId,
-			r.CompleteTask.Counter,
-			r.CompleteTask.ExecutionId,
-			r.CompleteTask.State,
-			r.CompleteTask.Value,
 		)
 
 	// ECHO

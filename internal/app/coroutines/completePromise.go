@@ -132,19 +132,6 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 										CompletedOn:    completedOn,
 									},
 								},
-								{
-									Kind: t_aio.CreateNotifications,
-									CreateNotifications: &t_aio.CreateNotificationsCommand{
-										PromiseId: r.CompletePromise.Id,
-										Time:      completedOn,
-									},
-								},
-								{
-									Kind: t_aio.DeleteSubscriptions,
-									DeleteSubscriptions: &t_aio.DeleteSubscriptionsCommand{
-										PromiseId: r.CompletePromise.Id,
-									},
-								},
 							},
 						},
 					},

@@ -6,7 +6,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/subscription"
 )
 
 type Response struct {
@@ -25,22 +24,17 @@ type Response struct {
 	ReadSchedule    *ReadScheduleResponse
 	DeleteSchedule  *DeleteScheduleResponse
 
-	// SUBSCRIPTIONS
-	ReadSubscriptions  *ReadSubscriptionsResponse
-	CreateSubscription *CreateSubscriptionResponse
-	DeleteSubscription *DeleteSubscriptionResponse
-
 	// LOCKS
 	AcquireLock    *AcquireLockResponse
 	ReleaseLock    *ReleaseLockResponse
 	HeartbeatLocks *HeartbeatLocksResponse
 
-	// TASKS
-	ClaimTask    *ClaimTaskResponse
-	CompleteTask *CompleteTaskResponse
-
 	// ECHO
 	Echo *EchoResponse
+}
+
+func (r *Response) Id() string {
+	return r.Tags["request_id"]
 }
 
 // Promises
@@ -88,27 +82,6 @@ type DeleteScheduleResponse struct {
 	Status ResponseStatus `json:"status"`
 }
 
-// Subscriptions
-
-type ReadSubscriptionsResponse struct {
-	Status        ResponseStatus                    `json:"status"`
-	Cursor        *Cursor[ReadSubscriptionsRequest] `json:"cursor,omitempty"`
-	Subscriptions []*subscription.Subscription      `json:"subscriptions,omitempty"`
-}
-
-type CreateSubscriptionResponse struct {
-	Status       ResponseStatus             `json:"status"`
-	Subscription *subscription.Subscription `json:"subscription,omitempty"`
-}
-
-type DeleteSubscriptionResponse struct {
-	Status ResponseStatus `json:"status"`
-}
-
-type EchoResponse struct {
-	Data string `json:"data"`
-}
-
 // Locks
 
 type AcquireLockResponse struct {
@@ -125,24 +98,10 @@ type HeartbeatLocksResponse struct {
 	LocksAffected int64          `json:"locksAffected"`
 }
 
-// Tasks
+// Echo
 
-// ClaimTaskResponse is a response to a ClaimTaskRequest.
-// It contains the status of the claim operation and the promise that was claimed.
-// The promise param is the input to the task. Think RPC call.
-// Promise value is the response. -- dst with claim and complete is like threst,, it;s the enuqueing that needs work..
-type ClaimTaskResponse struct {
-	Status  ResponseStatus   `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
-// CompleteTaskResponse is just an acknowledgement that the task was completed.
-type CompleteTaskResponse struct {
-	Status ResponseStatus `json:"status"`
-}
-
-func (r *Response) Id() string {
-	return r.Tags["request_id"]
+type EchoResponse struct {
+	Data string `json:"data"`
 }
 
 func (r *Response) Status() ResponseStatus {
@@ -165,13 +124,6 @@ func (r *Response) Status() ResponseStatus {
 		return r.CreateSchedule.Status
 	case DeleteSchedule:
 		return r.DeleteSchedule.Status
-	// SUBSCRIPTIONS
-	case ReadSubscriptions:
-		return r.ReadSubscriptions.Status
-	case CreateSubscription:
-		return r.CreateSubscription.Status
-	case DeleteSubscription:
-		return r.DeleteSubscription.Status
 	// LOCKS
 	case AcquireLock:
 		return r.AcquireLock.Status
@@ -239,25 +191,6 @@ func (r *Response) String() string {
 			r.DeleteSchedule.Status,
 		)
 
-	// SUBSCRIPTIONS
-	case ReadSubscriptions:
-		return fmt.Sprintf(
-			"ReadSubscriptions(status=%d, subscriptions=%s)",
-			r.ReadSubscriptions.Status,
-			r.ReadSubscriptions.Subscriptions,
-		)
-	case CreateSubscription:
-		return fmt.Sprintf(
-			"CreateSubscription(status=%d, subscriptions=%s)",
-			r.CreateSubscription.Status,
-			r.CreateSubscription.Subscription,
-		)
-	case DeleteSubscription:
-		return fmt.Sprintf(
-			"DeleteSubscription(status=%d)",
-			r.DeleteSubscription.Status,
-		)
-
 	// LOCKS
 	case AcquireLock:
 		return fmt.Sprintf(
@@ -275,19 +208,6 @@ func (r *Response) String() string {
 			"HeartbeatLocks(status=%d, locksAffected=%d)",
 			r.HeartbeatLocks.Status,
 			r.HeartbeatLocks.LocksAffected,
-		)
-
-	// TASKS
-	case ClaimTask:
-		return fmt.Sprintf(
-			"ClaimTask(status=%d, promise=%s)",
-			r.ClaimTask.Status,
-			r.ClaimTask.Promise,
-		)
-	case CompleteTask:
-		return fmt.Sprintf(
-			"CompleteTask(status=%d)",
-			r.CompleteTask.Status,
 		)
 
 	// ECHO
