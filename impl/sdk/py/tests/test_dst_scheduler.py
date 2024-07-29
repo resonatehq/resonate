@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import os
 import random
 import tempfile
@@ -13,6 +14,7 @@ from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.context import Command
 from resonate.dst.scheduler import DSTScheduler
 from resonate.events import (
+    AwaitedForPromise,
     ExecutionStarted,
     PromiseCreated,
     PromiseResolved,
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.context import Context
+    from resonate.dependency_injection import Dependencies
     from resonate.promise import Promise
     from resonate.typing import Yieldable
 
@@ -45,6 +48,11 @@ def coro_that_fails_call(ctx: Context) -> Generator[Yieldable, Any, None]:
 
 def coro_that_fails_invoke(ctx: Context) -> Generator[Yieldable, Any, None]:
     return (yield (yield ctx.invoke(failing_function)))
+
+
+def raise_inmediately(ctx: Context) -> Generator[Yieldable, Any, int]:  # noqa: ARG001
+    msg = "First thing we do is fail."
+    raise RuntimeError(msg)
 
 
 def only_call(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
@@ -94,6 +102,23 @@ def greet_with_batching_but_with_call(
     return g
 
 
+def test_raise_inmediately() -> None:
+    s = DSTScheduler(
+        seed=1,
+        mocks=None,
+        log_file=None,
+        max_failures=0,
+        failure_chance=0,
+        mode="concurrent",
+        probe=None,
+    )
+    s.add(raise_inmediately)
+    p = s.run()[0]
+    assert p.failure()
+    with pytest.raises(RuntimeError):
+        p.result()
+
+
 def test_failing_call() -> None:
     s = DSTScheduler(
         seed=1,
@@ -102,6 +127,7 @@ def test_failing_call() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s.add(coro_that_fails_call)
     promises = s.run()
@@ -115,6 +141,7 @@ def test_failing_call() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s.add(coro_that_fails_invoke)
     promises = s.run()
@@ -130,6 +157,7 @@ def test_batching_using_call() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
 
@@ -157,6 +185,7 @@ def test_batching() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
 
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
@@ -197,6 +226,7 @@ def test_mock_function() -> None:
         failure_chance=0,
         max_failures=0,
         log_file=None,
+        probe=None,
     )
     s = DSTScheduler(
         seed=1,
@@ -205,6 +235,7 @@ def test_mock_function() -> None:
         failure_chance=0,
         max_failures=0,
         log_file=None,
+        probe=None,
     )
     s.add(only_call, n=3)
     s.add(only_invocation, n=3)
@@ -217,6 +248,7 @@ def test_mock_function() -> None:
         failure_chance=0,
         max_failures=0,
         log_file=None,
+        probe=None,
     )
     s = DSTScheduler(
         seed=1,
@@ -225,6 +257,7 @@ def test_mock_function() -> None:
         failure_chance=0,
         max_failures=0,
         log_file=None,
+        probe=None,
     )
     promises = s.run()
     assert all(p.result() == 23 for p in promises)  # noqa: PLR2004
@@ -241,6 +274,7 @@ def test_dst_scheduler() -> None:
             failure_chance=0,
             mode="concurrent",
             log_file=None,
+            probe=None,
         )
         s = DSTScheduler(
             seed=seed,
@@ -249,6 +283,7 @@ def test_dst_scheduler() -> None:
             failure_chance=0,
             mode="concurrent",
             log_file=None,
+            probe=None,
         )
         s.add(only_call, n=1)
         s.add(only_call, n=2)
@@ -277,6 +312,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s = DSTScheduler(
         seed=seed,
@@ -285,6 +321,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s.add(only_call, n=1)
     s.add(only_call, n=2)
@@ -302,6 +339,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     same_seed_s = DSTScheduler(
         seed=seed,
@@ -310,6 +348,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     same_seed_s.add(only_call, n=1)
     same_seed_s.add(only_call, n=2)
@@ -327,6 +366,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     different_seed_s = DSTScheduler(
         seed=seed + 10,
@@ -335,6 +375,7 @@ def test_dst_determinitic() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     different_seed_s.add(only_call, n=1)
     different_seed_s.add(only_call, n=2)
@@ -355,6 +396,7 @@ def test_failing_asserting() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s = DSTScheduler(
         seed=1,
@@ -363,6 +405,7 @@ def test_failing_asserting() -> None:
         max_failures=0,
         failure_chance=0,
         mode="concurrent",
+        probe=None,
     )
     s.add(failing_asserting)
     p = s.run()
@@ -391,6 +434,7 @@ def test_failure() -> None:
         mocks=None,
         mode="concurrent",
         log_file=None,
+        probe=None,
     )
     scheduler = DSTScheduler(
         seed=1,
@@ -399,6 +443,7 @@ def test_failure() -> None:
         mocks=None,
         mode="concurrent",
         log_file=None,
+        probe=None,
     )
     scheduler.add(only_call, n=1)
     p = scheduler.run()
@@ -414,6 +459,7 @@ def test_failure() -> None:
         mocks=None,
         mode="concurrent",
         log_file=None,
+        probe=None,
     )
     scheduler = DSTScheduler(
         seed=1,
@@ -422,6 +468,7 @@ def test_failure() -> None:
         mocks=None,
         mode="concurrent",
         log_file=None,
+        probe=None,
     )
     scheduler.add(only_call, n=1)
     p = scheduler.run()
@@ -440,6 +487,7 @@ def test_sequential() -> None:
         max_failures=0,
         mocks=None,
         log_file=None,
+        probe=None,
     )
     seq_scheduler = DSTScheduler(
         seed=1,
@@ -448,6 +496,7 @@ def test_sequential() -> None:
         max_failures=0,
         mocks=None,
         log_file=None,
+        probe=None,
     )
     seq_scheduler.add(only_call, n=1)
     seq_scheduler.add(only_call, n=2)
@@ -458,40 +507,45 @@ def test_sequential() -> None:
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert seq_scheduler.get_events() == [
         PromiseCreated(
-            promise_id=1, tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
         PromiseCreated(
-            promise_id=2, tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
         PromiseCreated(
-            promise_id=3, tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
+            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
         PromiseCreated(
-            promise_id=4, tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
         PromiseCreated(
-            promise_id=5, tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
         ExecutionStarted(
-            promise_id=5, tick=1, fn_name="only_call", args=(), kwargs={"n": 1}
+            promise_id="5", tick=1, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        PromiseResolved(promise_id=5, tick=3),
+        AwaitedForPromise(promise_id="5.1", tick=1),
+        PromiseResolved(promise_id="5", tick=3),
         ExecutionStarted(
-            promise_id=4, tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
+            promise_id="4", tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
-        PromiseResolved(promise_id=4, tick=6),
+        AwaitedForPromise(promise_id="4.1", tick=4),
+        PromiseResolved(promise_id="4", tick=6),
         ExecutionStarted(
-            promise_id=3, tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
+            promise_id="3", tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
-        PromiseResolved(promise_id=3, tick=9),
+        AwaitedForPromise(promise_id="3.1", tick=7),
+        PromiseResolved(promise_id="3", tick=9),
         ExecutionStarted(
-            promise_id=2, tick=10, fn_name="only_call", args=(), kwargs={"n": 4}
+            promise_id="2", tick=10, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        PromiseResolved(promise_id=2, tick=12),
+        AwaitedForPromise(promise_id="2.1", tick=10),
+        PromiseResolved(promise_id="2", tick=12),
         ExecutionStarted(
-            promise_id=1, tick=13, fn_name="only_call", args=(), kwargs={"n": 5}
+            promise_id="1", tick=13, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
-        PromiseResolved(promise_id=1, tick=15),
+        AwaitedForPromise(promise_id="1.1", tick=13),
+        PromiseResolved(promise_id="1", tick=15),
     ]
 
     con_scheduler = DSTScheduler(
@@ -501,6 +555,7 @@ def test_sequential() -> None:
         failure_chance=0,
         max_failures=2,
         log_file=None,
+        probe=None,
     )
     con_scheduler = DSTScheduler(
         seed=1,
@@ -509,6 +564,7 @@ def test_sequential() -> None:
         failure_chance=0,
         max_failures=2,
         log_file=None,
+        probe=None,
     )
     con_scheduler.add(only_call, n=1)
     con_scheduler.add(only_call, n=2)
@@ -519,40 +575,45 @@ def test_sequential() -> None:
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert con_scheduler.get_events() == [
         PromiseCreated(
-            promise_id=1, tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
         PromiseCreated(
-            promise_id=2, tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
         PromiseCreated(
-            promise_id=3, tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
+            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
         PromiseCreated(
-            promise_id=4, tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
         PromiseCreated(
-            promise_id=5, tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
         ExecutionStarted(
-            promise_id=1, tick=1, fn_name="only_call", args=(), kwargs={"n": 5}
+            promise_id="1", tick=1, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
+        AwaitedForPromise(promise_id="1.1", tick=1),
         ExecutionStarted(
-            promise_id=3, tick=2, fn_name="only_call", args=(), kwargs={"n": 3}
+            promise_id="3", tick=2, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
+        AwaitedForPromise(promise_id="3.1", tick=2),
         ExecutionStarted(
-            promise_id=5, tick=3, fn_name="only_call", args=(), kwargs={"n": 1}
+            promise_id="5", tick=3, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
+        AwaitedForPromise(promise_id="5.1", tick=3),
         ExecutionStarted(
-            promise_id=4, tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
+            promise_id="4", tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
-        PromiseResolved(promise_id=5, tick=8),
+        AwaitedForPromise(promise_id="4.1", tick=4),
+        PromiseResolved(promise_id="5", tick=8),
         ExecutionStarted(
-            promise_id=2, tick=9, fn_name="only_call", args=(), kwargs={"n": 4}
+            promise_id="2", tick=9, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        PromiseResolved(promise_id=1, tick=11),
-        PromiseResolved(promise_id=3, tick=12),
-        PromiseResolved(promise_id=4, tick=13),
-        PromiseResolved(promise_id=2, tick=15),
+        AwaitedForPromise(promise_id="2.1", tick=9),
+        PromiseResolved(promise_id="1", tick=11),
+        PromiseResolved(promise_id="3", tick=12),
+        PromiseResolved(promise_id="4", tick=13),
+        PromiseResolved(promise_id="2", tick=15),
     ]
 
 
@@ -566,6 +627,7 @@ def test_dump_events() -> None:
             max_failures=1,
             failure_chance=0,
             mode="concurrent",
+            probe=None,
         )
         formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
         assert not formatted_file_path.exists()
@@ -580,3 +642,26 @@ def test_dump_events() -> None:
         assert formatted_file_path.read_text() == "".join(
             f"{e}\n" for e in s.get_events()
         )
+
+
+def _probe_function(deps: Dependencies) -> datetime.datetime:  # noqa: ARG001
+    return datetime.datetime.now(tz=datetime.timezone.utc)
+
+
+def test_probe() -> None:
+    s = DSTScheduler(
+        seed=1,
+        log_file=None,
+        mocks=None,
+        max_failures=1,
+        failure_chance=0,
+        mode="concurrent",
+        probe=_probe_function,
+    )
+    s.add(only_call, n=1)
+    s.add(only_call, n=2)
+    s.add(only_call, n=3)
+    s.add(only_call, n=4)
+    s.add(only_call, n=5)
+    s.run()
+    assert len(s._probe_results) > 0

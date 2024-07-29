@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine
 
     from resonate.context import Context
+    from resonate.dependency_injection import Dependencies
 
 
 def dst(  # noqa: PLR0913
@@ -25,6 +26,7 @@ def dst(  # noqa: PLR0913
     mode: Mode = "concurrent",
     failure_chance: float = 0,
     max_failures: int = 0,
+    probe: Callable[[Dependencies], Any] | None = None,
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 
@@ -42,6 +44,7 @@ def dst(  # noqa: PLR0913
                     failure_chance=failure_chance,
                     max_failures=max_failures,
                     log_file=log_file,
+                    probe=probe,
                 )
                 for i in seed
             )
@@ -54,6 +57,7 @@ def dst(  # noqa: PLR0913
                     failure_chance=failure_chance,
                     max_failures=max_failures,
                     log_file=log_file,
+                    probe=probe,
                 )
             )
         else:

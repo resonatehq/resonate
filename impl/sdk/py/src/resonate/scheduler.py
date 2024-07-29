@@ -67,11 +67,11 @@ class Scheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
+        ctx = Context(deps=self.deps, ctx_id=str(self._increate_promise_created()))
         p = Promise[T](
-            promise_id=self._increate_promise_created(),
+            promise_id=ctx.ctx_id,
             invocation=Invoke(FnOrCoroutine(coro, *args, **kwargs)),
         )
-        ctx = Context(deps=self.deps)
         self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p, ctx))
         self.signal()
 
@@ -174,9 +174,9 @@ class Scheduler:
         runnables: Runnables,
     ) -> None:
         logger.debug("Processing call")
-        p = Promise[Any](self._increate_promise_created(), call.to_invoke())
-        awaitables[p] = [runnable.coro_and_promise]
         child_ctx = runnable.coro_and_promise.ctx.new_child()
+        p = Promise[Any](child_ctx.ctx_id, call.to_invoke())
+        awaitables[p] = [runnable.coro_and_promise]
         assert isinstance(
             call.exec_unit, FnOrCoroutine
         ), "execution unit must be fn or coroutine at this point."
@@ -213,9 +213,9 @@ class Scheduler:
         awaitables: Awaitables,
     ) -> None:
         logger.debug("Processing invocation")
-        p = Promise[Any](self._increate_promise_created(), invocation)
-        runnables.append(Runnable(runnable.coro_and_promise, Ok(p)))
         child_ctx = runnable.coro_and_promise.ctx.new_child()
+        p = Promise[Any](child_ctx.ctx_id, invocation)
+        runnables.append(Runnable(runnable.coro_and_promise, Ok(p)))
         assert isinstance(
             invocation.exec_unit, FnOrCoroutine
         ), "execution unit must be fn or coroutine at this point."

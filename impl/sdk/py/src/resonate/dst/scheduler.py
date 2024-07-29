@@ -13,6 +13,7 @@ from resonate.contants import CWD
 from resonate.context import Call, Command, Context, FnOrCoroutine, Invoke
 from resonate.dependency_injection import Dependencies
 from resonate.events import (
+    AwaitedForPromise,
     ExecutionStarted,
     PromiseCreated,
     PromiseResolved,
@@ -107,6 +108,7 @@ class DSTScheduler:
         max_failures: int,
         failure_chance: float,
         mode: Mode,
+        probe: Callable[[Dependencies], Any] | None,
     ) -> None:
         self._failure_chance = failure_chance
         self._max_failures: int = max_failures
@@ -134,6 +136,9 @@ class DSTScheduler:
         self._handler_queues: dict[
             type[Command], _ListWithLenght[tuple[Promise[Any], Command]]
         ] = {}
+
+        self._probe = probe
+        self._probe_results: list[Any] = []
 
     def register_command(
         self,
@@ -188,8 +193,11 @@ class DSTScheduler:
             None for _ in range(len(self._top_level_invocations))
         ]
         for idx, top_level_invocation in enumerate(self._top_level_invocations):
+            ctx = Context(
+                dst=True, deps=self.deps, ctx_id=str(self._increate_promise_created())
+            )
             p = Promise[Any](
-                promise_id=self._increate_promise_created(),
+                promise_id=ctx.ctx_id,
                 invocation=top_level_invocation.to_invocation(),
             )
 
@@ -202,21 +210,27 @@ class DSTScheduler:
                     kwargs=top_level_invocation.kwargs,
                 )
             )
-            ctx = Context(dst=True, deps=self.deps)
-            self.runnables.append(
-                Runnable(
-                    coro_and_promise=CoroAndPromise(
-                        top_level_invocation.fn(
-                            ctx,
-                            *top_level_invocation.args,
-                            **top_level_invocation.kwargs,
-                        ),
-                        p,
-                        ctx,
-                    ),
-                    next_value=None,
+
+            try:
+                coro = top_level_invocation.fn(
+                    ctx,
+                    *top_level_invocation.args,
+                    **top_level_invocation.kwargs,
                 )
-            )
+            except Exception as e:  # noqa: BLE001
+                p.set_result(Err(e))
+
+            if not p.done():
+                self.runnables.append(
+                    Runnable(
+                        coro_and_promise=CoroAndPromise(
+                            coro,
+                            p,
+                            ctx,
+                        ),
+                        next_value=None,
+                    )
+                )
             init_promises[-idx - 1] = p
 
         promises: list[Promise[Any]] = []
@@ -253,13 +267,12 @@ class DSTScheduler:
         cmd: type[Command],
     ) -> None:
         cmd_buffer = self._handler_queues[cmd]
-        cmd_handler = self._handlers[cmd]
         for subbuffer in _split_array_by_max_length(
             cmd_buffer.pop_all(), cmd_buffer.max_length
         ):
             n_cmds: int = 0
             promises: list[Promise[Any]] = []
-            cmds: list[Command] = []
+            cmds_to_run: list[Command] = []
 
             assert (
                 len(subbuffer) <= cmd_buffer.max_length
@@ -267,11 +280,11 @@ class DSTScheduler:
 
             for p, c in subbuffer:
                 promises.append(p)
-                cmds.append(c)
+                cmds_to_run.append(c)
                 n_cmds += 1
 
             try:
-                results = cmd_handler(cmds)
+                results = self._handlers[cmd](cmds_to_run)
                 if results is None:
                     for p in promises:
                         callback(p, self.awaitables, self.runnables, Ok(None))
@@ -280,12 +293,12 @@ class DSTScheduler:
                     assert (
                         len(results) == n_cmds
                     ), "Numbers of commands and number of results must be the same"
-                    for idx, _ in enumerate(range(n_cmds)):
+                    for i in range(n_cmds):
                         callback(
-                            promises[idx],
+                            promises[i],
                             self.awaitables,
                             self.runnables,
-                            Ok(results[idx]),
+                            Ok(results[i]),
                         )
 
             except Exception as e:  # noqa: BLE001
@@ -294,9 +307,6 @@ class DSTScheduler:
 
     def _run(self) -> list[Promise[Any]]:
         promises = self._initialize_runnables()
-        assert all(
-            not p.done() for p in promises
-        ), "No promise should be resolved by now."
 
         while True:
             if not self._callbacks_to_run and not self.runnables:
@@ -307,6 +317,8 @@ class DSTScheduler:
                 for cmd in cmds_to_be_executed:
                     self._execute_commands(cmd)
 
+            if self._probe is not None:
+                self._probe_results.append(self._probe(self.deps))
             self.tick += 1
 
             if (
@@ -370,6 +382,9 @@ class DSTScheduler:
                 runnable=runnable,
             )
             self.awaitables[p] = [runnable.coro_and_promise]
+            self._events.append(
+                AwaitedForPromise(promise_id=p.promise_id, tick=self.tick)
+            )
 
         elif isinstance(yieldable_or_final_value, Invoke):
             p = self._handle_invocation(
@@ -401,13 +416,10 @@ class DSTScheduler:
         runnable: Runnable[T],
     ) -> Promise[Any]:
         logger.debug("Processing invocation")
-        p = Promise[Any](
-            promise_id=self._increate_promise_created(), invocation=invocation
-        )
+        child_ctx = runnable.coro_and_promise.ctx.new_child()
+        p = Promise[Any](promise_id=child_ctx.ctx_id, invocation=invocation)
 
         if isinstance(invocation.exec_unit, FnOrCoroutine):
-            child_ctx = runnable.coro_and_promise.ctx.new_child()
-
             if not isgeneratorfunction(invocation.exec_unit.fn):
                 mock_fn = self.mocks.get(invocation.exec_unit.fn)
                 if mock_fn is not None:

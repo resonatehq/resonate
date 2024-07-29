@@ -64,6 +64,7 @@ class Invoke:
 class Context:
     def __init__(
         self,
+        ctx_id: str,
         parent_ctx: Context | None = None,
         deps: Dependencies | None = None,
         *,
@@ -72,9 +73,17 @@ class Context:
         self.parent_ctx = parent_ctx
         self.dst = dst
         self.deps = deps or Dependencies()
+        self.ctx_id = ctx_id
+        self._num_children: int = 0
 
     def new_child(self) -> Context:
-        return Context(parent_ctx=self, dst=self.dst, deps=self.deps)
+        self._num_children += 1
+        return Context(
+            parent_ctx=self,
+            dst=self.dst,
+            deps=self.deps,
+            ctx_id=f"{self.ctx_id}.{self._num_children}",
+        )
 
     def assert_statement(self, stmt: bool, msg: str) -> None:  # noqa: FBT001
         if not self.dst:

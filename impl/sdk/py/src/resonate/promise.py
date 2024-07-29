@@ -16,7 +16,7 @@ T = TypeVar("T")
 class Promise(Generic[T]):
     def __init__(
         self,
-        promise_id: int,
+        promise_id: str,
         invocation: Invoke,
     ) -> None:
         self.promise_id = promise_id

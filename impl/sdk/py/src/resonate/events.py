@@ -12,7 +12,7 @@ P = ParamSpec("P")
 
 @dataclass(frozen=True)
 class PromiseCreated:
-    promise_id: int
+    promise_id: str
     tick: int
     fn_name: str
     args: tuple[Any, ...]
@@ -21,7 +21,7 @@ class PromiseCreated:
 
 @dataclass(frozen=True)
 class ExecutionStarted:
-    promise_id: int
+    promise_id: str
     tick: int
     fn_name: str
     args: tuple[Any, ...]
@@ -30,25 +30,25 @@ class ExecutionStarted:
 
 @dataclass(frozen=True)
 class PromiseResolved:
-    promise_id: int
+    promise_id: str
     tick: int
 
 
 @dataclass(frozen=True)
 class SuspendedForPromise:
-    promise_id: int
+    promise_id: str
     tick: int
 
 
 @dataclass(frozen=True)
 class AwaitedForPromise:
-    promise_id: int
+    promise_id: str
     tick: int
 
 
 @dataclass(frozen=True)
 class Resummend:
-    promise_id: int
+    promise_id: str
     tick: int
 
 
