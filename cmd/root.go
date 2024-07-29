@@ -22,7 +22,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
 	Short:   "Durable promises",
-	Version: "0.5.6", // This needs to be bumped when new versions are released.
+	Version: "0.6.0", // This needs to be bumped when new versions are released.
 }
 
 func init() {
