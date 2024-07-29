@@ -91,6 +91,7 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 
 		// replace callback with a function that emits metrics
 		Callback: func(res *t_api.Response, err error) {
+			util.Assert(res != nil && err == nil || res == nil && err != nil, "one of res/err must be set")
 			var status int
 
 			if err != nil {
@@ -107,6 +108,8 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 					status = int(res.CreatePromise.Status)
 				case t_api.CompletePromise:
 					status = int(res.CompletePromise.Status)
+				case t_api.CreateCallback:
+					status = int(res.CreateCallback.Status)
 				case t_api.ReadSchedule:
 					status = int(res.ReadSchedule.Status)
 				case t_api.SearchSchedules:
@@ -124,7 +127,7 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 				case t_api.Echo:
 					status = 2000
 				default:
-					panic(fmt.Errorf("unknown response kind: %d", res.Kind))
+					panic(fmt.Errorf("unknown response kind: %s", res.Kind))
 				}
 			}
 

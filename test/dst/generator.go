@@ -8,6 +8,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -117,7 +118,7 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors *[]*t_api.Req
 	return reqs
 }
 
-// PROMISE
+// PROMISES
 
 func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
@@ -212,7 +213,21 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	}
 }
 
-// SCHEDULE
+// CALLBACKS
+
+func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
+	promiseId := g.idSet[r.Intn(len(g.idSet))]
+
+	return &t_api.Request{
+		Kind: t_api.CreateCallback,
+		CreateCallback: &t_api.CreateCallbackRequest{
+			PromiseId: promiseId,
+			Message:   &message.Message{},
+		},
+	}
+}
+
+// SCHEDULES
 
 func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.idSet[r.Intn(len(g.idSet))]
@@ -278,7 +293,7 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
-// LOCK
+// LOCKS
 
 func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	resourceId := g.idSet[r.Intn(len(g.idSet))]

@@ -137,15 +137,14 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 
 	// add request coroutines
 	for _, sqe := range sqes {
-		if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-			if p, ok := gocoro.Add(s.scheduler, coroutine(sqe.Submission, sqe.Callback)); ok {
-				s.coroutineMetrics(p, sqe.Submission.Tags)
-			} else {
-				slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
-			}
+		coroutine, ok := s.onRequest[sqe.Submission.Kind]
+		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind))
+
+		if p, ok := gocoro.Add(s.scheduler, coroutine(sqe.Submission, sqe.Callback)); ok {
+			s.coroutineMetrics(p, sqe.Submission.Tags)
 		} else {
-			panic("invalid api request")
+			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
+			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
 		}
 	}
 

@@ -246,6 +246,41 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 	}
 }
 
+// CALLBACKS
+
+func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	p := model.promises.get(req.CreateCallback.PromiseId)
+
+	switch res.CreateCallback.Status {
+	case t_api.StatusCreated:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Pending {
+			return model, fmt.Errorf("promise '%s' must be pending", req.CreateCallback.PromiseId)
+		}
+		if model.callbacks.get(res.CreateCallback.Callback.Id) != nil {
+			return model, fmt.Errorf("callback '%d' exists", res.CreateCallback.Callback.Id)
+		}
+
+		model = model.Copy()
+		model.callbacks.set(res.CreateCallback.Callback.Id, res.CreateCallback.Callback)
+		return model, nil
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedout:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.CreateCallback.Status)
+	}
+}
+
 // SCHEDULES
 
 func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {

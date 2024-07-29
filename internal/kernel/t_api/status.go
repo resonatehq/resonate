@@ -44,7 +44,7 @@ func (s ResponseStatus) String() string {
 	case StatusPromiseAlreadyCanceled:
 		return "The promise has already been canceled"
 	case StatusPromiseAlreadyTimedout:
-		return "The promise has already timed out"
+		return "The promise has already timedout"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:

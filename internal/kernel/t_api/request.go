@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -17,6 +18,9 @@ type Request struct {
 	SearchPromises  *SearchPromisesRequest
 	CreatePromise   *CreatePromiseRequest
 	CompletePromise *CompletePromiseRequest
+
+	// CALLBACKS
+	CreateCallback *CreateCallbackRequest
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
@@ -87,6 +91,13 @@ type RejectPromiseRequest struct {
 	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
 	Strict         bool             `json:"strict"`
 	Value          promise.Value    `json:"value,omitempty"`
+}
+
+// Callbacks
+
+type CreateCallbackRequest struct {
+	PromiseId string           `json:"promiseId"`
+	Message   *message.Message `json:"message"`
 }
 
 // Schedules
@@ -180,6 +191,15 @@ func (r *Request) String() string {
 			r.CompletePromise.Strict,
 			r.CompletePromise.State,
 		)
+
+	// CALLBACKS
+	case CreateCallback:
+		return fmt.Sprintf(
+			"CreateCallback(promiseId=%s, message=%s)",
+			r.CreateCallback.PromiseId,
+			r.CreateCallback.Message,
+		)
+
 	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(

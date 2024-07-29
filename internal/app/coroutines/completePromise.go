@@ -49,7 +49,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	if result.RowsReturned == 0 {
 		res = &t_api.Response{
-			Kind: r.Kind,
+			Kind: t_api.CompletePromise,
 			Tags: r.Tags,
 			CompletePromise: &t_api.CompletePromiseResponse{
 				Status: t_api.StatusPromiseNotFound,
@@ -93,7 +93,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				}
 
 				res = &t_api.Response{
-					Kind: r.Kind,
+					Kind: t_api.CompletePromise,
 					Tags: r.Tags,
 					CompletePromise: &t_api.CompletePromiseResponse{
 						Status: status,
@@ -115,24 +115,62 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					},
 				}
 			} else {
-				completedOn := c.Time()
-				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+				readCallbacksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 					Kind: t_aio.Store,
 					Tags: r.Tags,
 					Store: &t_aio.StoreSubmission{
 						Transaction: &t_aio.Transaction{
 							Commands: []*t_aio.Command{
 								{
-									Kind: t_aio.UpdatePromise,
-									UpdatePromise: &t_aio.UpdatePromiseCommand{
-										Id:             r.CompletePromise.Id,
-										State:          r.CompletePromise.State,
-										Value:          r.CompletePromise.Value,
-										IdempotencyKey: r.CompletePromise.IdempotencyKey,
-										CompletedOn:    completedOn,
+									Kind: t_aio.ReadCallbacks,
+									ReadCallbacks: &t_aio.ReadCallbacksCommand{
+										PromiseId: r.CompletePromise.Id,
 									},
 								},
 							},
+						},
+					},
+				})
+
+				if err != nil {
+					slog.Error("failed to read callbacks", "req", r, "err", err)
+					return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read callbacks", err)
+				}
+
+				util.Assert(readCallbacksCompletion.Store != nil, "completion must not be nil")
+				util.Assert(len(readCallbacksCompletion.Store.Results) == 1, "completion must have one result")
+				util.Assert(readCallbacksCompletion.Store.Results[0].ReadCallbacks != nil, "result must not be nil")
+				readCallbacksResult := readCallbacksCompletion.Store.Results[0].ReadCallbacks
+
+				completedOn := c.Time()
+				commands := make([]*t_aio.Command, len(readCallbacksResult.Records)+1)
+				commands[0] = &t_aio.Command{
+					Kind: t_aio.UpdatePromise,
+					UpdatePromise: &t_aio.UpdatePromiseCommand{
+						Id:             r.CompletePromise.Id,
+						State:          r.CompletePromise.State,
+						Value:          r.CompletePromise.Value,
+						IdempotencyKey: r.CompletePromise.IdempotencyKey,
+						CompletedOn:    completedOn,
+					},
+				}
+
+				for i, callback := range readCallbacksResult.Records {
+					commands[i+1] = &t_aio.Command{
+						Kind: t_aio.CreateTask,
+						CreateTask: &t_aio.CreateTaskCommand{
+							Message:   callback.Message,
+							CreatedOn: c.Time(),
+						},
+					}
+				}
+
+				updatePromiseCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+					Kind: t_aio.Store,
+					Tags: r.Tags,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
+							Commands: commands,
 						},
 					},
 				})
@@ -142,14 +180,16 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err)
 				}
 
-				util.Assert(completion.Store != nil, "completion must not be nil")
+				util.Assert(updatePromiseCompletion.Store != nil, "completion must not be nil")
+				util.Assert(len(updatePromiseCompletion.Store.Results) == len(readCallbacksResult.Records)+1, "completion must have results")
+				util.Assert(updatePromiseCompletion.Store.Results[0].UpdatePromise != nil, "result must not be nil")
 
-				result := completion.Store.Results[0].UpdatePromise
-				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+				updatePromiseResult := updatePromiseCompletion.Store.Results[0].UpdatePromise
+				util.Assert(updatePromiseResult.RowsAffected == 0 || updatePromiseResult.RowsAffected == 1, "result must return 0 or 1 rows")
 
-				if result.RowsAffected == 1 {
+				if updatePromiseResult.RowsAffected == 1 {
 					res = &t_api.Response{
-						Kind: r.Kind,
+						Kind: t_api.CompletePromise,
 						Tags: r.Tags,
 						CompletePromise: &t_api.CompletePromiseResponse{
 							Status: t_api.StatusCreated,
@@ -183,7 +223,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 
 			res = &t_api.Response{
-				Kind: r.Kind,
+				Kind: t_api.CompletePromise,
 				Tags: r.Tags,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status:  status,

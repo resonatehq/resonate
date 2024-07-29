@@ -69,6 +69,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
+	// callbacks
+	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
+
 	// schedules
 	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
 	d.Add(t_api.SearchSchedules, d.generator.GenerateSearchSchedules, d.validator.ValidateSearchSchedules)
@@ -190,15 +193,16 @@ func (d *DST) Model() porcupine.Model {
 			l := []porcupine.Operation{}
 
 			for _, op := range history {
-				switch op.Input.(*Req).req.Kind {
-				case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise:
+				req := op.Input.(*Req)
+				switch req.req.Kind {
+				case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
 					p = append(p, op)
 				case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
 					s = append(s, op)
 				case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
 					l = append(l, op)
 				default:
-					panic("unknown dst request kind")
+					panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
 				}
 			}
 
@@ -241,9 +245,11 @@ func (d *DST) Model() porcupine.Model {
 		DescribeState: func(state interface{}) string {
 			model := state.(*Model)
 
-			var promises string
-			for _, p := range *model.promises {
-				promises = promises + fmt.Sprintf(`
+			switch {
+			case len(*model.promises) > 0 || len(*model.callbacks) > 0:
+				var promises string
+				for _, p := range *model.promises {
+					promises = promises + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
 						<td>%s</td>
@@ -252,21 +258,102 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%d</td>
 					</tr>
 				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout)
-			}
+				}
 
-			var schedules string
-			for _, s := range *model.schedules {
-				schedules = schedules + fmt.Sprintf(`
+				var callbacks string
+				for _, c := range *model.callbacks {
+					callbacks = callbacks + fmt.Sprintf(`
+					<tr>
+						<td align="right">%d</td>
+						<td align="right">%s</td>
+					</tr>
+				`, c.value.Id, c.value.PromiseId)
+				}
+
+				return fmt.Sprintf(`
+					<table border="0" cellspacing="0" cellpadding="5">
+						<thead>
+							<tr>
+								<td><b>Promises</b></td>
+								<td><b>Callbacks</b></td>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td valign="top">
+									<table border="1" cellspacing="0" cellpadding="5">
+										<thead>
+											<tr>
+												<td><b>id</b></td>
+												<td><b>state</b></td>
+												<td><b>ikeyCreate</b></td>
+												<td><b>ikeyComplete</b></td>
+												<td><b>timeout</b></td>
+											</tr>
+										</thead>
+										<tbody>
+											%s
+										</tbody>
+									</table>
+								</td>
+								<td valign="top">
+									<table border="1" cellspacing="0" cellpadding="5">
+										<thead>
+											<tr>
+												<td><b>id</b></td>
+												<td><b>promiseId</b></td>
+											</tr>
+										</thead>
+										<tbody>
+											%s
+										</tbody>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				`, promises, callbacks)
+			case len(*model.schedules) > 0:
+				var schedules string
+				for _, s := range *model.schedules {
+					schedules = schedules + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
 						<td align="right">%s</td>
 					</tr>
 				`, s.value.Id, s.value.IdempotencyKey)
-			}
+				}
 
-			var locks string
-			for _, s := range *model.locks {
-				locks = locks + fmt.Sprintf(`
+				return fmt.Sprintf(`
+					<table border="0" cellspacing="0" cellpadding="5">
+						<thead>
+							<tr>
+								<td><b>Schedules</b></td>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td valign="top">
+									<table border="1" cellspacing="0" cellpadding="5">
+										<thead>
+											<tr>
+												<td><b>id</b></td>
+												<td><b>ikey</b></td>
+											</tr>
+										</thead>
+										<tbody>
+											%s
+										</tbody>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				`, schedules)
+			case len(*model.locks) > 0:
+				var locks string
+				for _, s := range *model.locks {
+					locks = locks + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
 						<td align="right">%s</td>
@@ -274,67 +361,39 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%d</td>
 					</tr>
 				`, s.value.ResourceId, s.value.ExecutionId, s.value.ProcessId, s.value.ExpiresAt)
-			}
+				}
 
-			return fmt.Sprintf(`
-				<table border="0" cellspacing="0" cellpadding="5">
-					<thead>
-						<tr>
-							<td><b>Promises</b></td>
-							<td><b>Schedules</b></td>
-							<td><b>Locks</b></td>
-						</tr>
-					</thead>
-					<tbody>
-						<tr>
-							<td valign="top">
-								<table border="1" cellspacing="0" cellpadding="5">
-									<thead>
-										<tr>
-											<td><b>id</b></td>
-											<td><b>state</b></td>
-											<td><b>ikeyCreate</b></td>
-											<td><b>ikeyComplete</b></td>
-											<td><b>timeout</b></td>
-										</tr>
-									</thead>
-									<tbody>
-										%s
-									</tbody>
-								</table>
-							</td>
-							<td valign="top">
-								<table border="1" cellspacing="0" cellpadding="5">
-									<thead>
-										<tr>
-											<td><b>id</b></td>
-											<td><b>ikey</b></td>
-										</tr>
-									</thead>
-									<tbody>
-										%s
-									</tbody>
-								</table>
-							</td>
-							<td valign="top">
-								<table border="1" cellspacing="0" cellpadding="5">
-									<thead>
-										<tr>
-											<td><b>rid</b></td>
-											<td><b>eid</b></td>
-											<td><b>pid</b></td>
-											<td><b>timeout</b></td>
-										</tr>
-									</thead>
-									<tbody>
-										%s
-									</tbody>
-								</table>
-							</td>
-						</tr>
-					</tbody>
-				</table>
-			`, promises, schedules, locks)
+				return fmt.Sprintf(`
+					<table border="0" cellspacing="0" cellpadding="5">
+						<thead>
+							<tr>
+								<td><b>Locks</b></td>
+							</tr>
+						</thead>
+						<tbody>
+							<tr>
+								<td valign="top">
+									<table border="1" cellspacing="0" cellpadding="5">
+										<thead>
+											<tr>
+												<td><b>rid</b></td>
+												<td><b>eid</b></td>
+												<td><b>pid</b></td>
+												<td><b>timeout</b></td>
+											</tr>
+										</thead>
+										<tbody>
+											%s
+										</tbody>
+									</table>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				`, locks)
+			default:
+				return ""
+			}
 		},
 	}
 }

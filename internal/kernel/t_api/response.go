@@ -3,6 +3,7 @@ package t_api
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -17,6 +18,9 @@ type Response struct {
 	ReadPromise     *ReadPromiseResponse
 	SearchPromises  *SearchPromisesResponse
 	CompletePromise *CompletePromiseResponse
+
+	// CALLBACKS
+	CreateCallback *CreateCallbackResponse
 
 	// SCHEDULES
 	CreateSchedule  *CreateScheduleResponse
@@ -58,6 +62,14 @@ type SearchPromisesResponse struct {
 type CompletePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+// Callbacks
+
+type CreateCallbackResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Promise  *promise.Promise   `json:"promise,omitempty"`
+	Callback *callback.Callback `json:"callback,omitempty"`
 }
 
 // Schedules
@@ -115,6 +127,9 @@ func (r *Response) Status() ResponseStatus {
 		return r.CreatePromise.Status
 	case CompletePromise:
 		return r.CompletePromise.Status
+	// CALLBACKS
+	case CreateCallback:
+		return r.CreateCallback.Status
 	// SCHEDULES
 	case ReadSchedule:
 		return r.ReadSchedule.Status
@@ -163,6 +178,15 @@ func (r *Response) String() string {
 			"CompletePromise(status=%d, promise=%s)",
 			r.CompletePromise.Status,
 			r.CompletePromise.Promise,
+		)
+
+	// CALLBACKS
+	case CreateCallback:
+		return fmt.Sprintf(
+			"CreateCallback(status=%d, promise=%s, callback=%s)",
+			r.CreateCallback.Status,
+			r.CreateCallback.Promise,
+			r.CreateCallback.Callback,
 		)
 
 	// SCHEDULES

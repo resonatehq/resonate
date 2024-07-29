@@ -9,6 +9,9 @@ const (
 	CreatePromise
 	CompletePromise
 
+	// CALLBACKS
+	CreateCallback
+
 	// SCHEDULES
 	ReadSchedule
 	SearchSchedules
@@ -35,6 +38,9 @@ func (k Kind) String() string {
 		return "CreatePromise"
 	case CompletePromise:
 		return "CompletePromise"
+	// CALLBACKS
+	case CreateCallback:
+		return "CreateCallback"
 	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
