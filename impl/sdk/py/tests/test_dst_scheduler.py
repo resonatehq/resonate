@@ -664,4 +664,4 @@ def test_probe() -> None:
     s.add(only_call, n=4)
     s.add(only_call, n=5)
     s.run()
-    assert len(s._probe_results) > 0
+    assert len(s._probe_results) > 0  # noqa: SLF001
