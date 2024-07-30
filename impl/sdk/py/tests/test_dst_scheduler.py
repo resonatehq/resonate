@@ -594,26 +594,26 @@ def test_sequential() -> None:
         ),
         AwaitedForPromise(promise_id="1.1", tick=1),
         ExecutionStarted(
-            promise_id="3", tick=2, fn_name="only_call", args=(), kwargs={"n": 3}
+            promise_id="5", tick=2, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        AwaitedForPromise(promise_id="3.1", tick=2),
+        AwaitedForPromise(promise_id="5.1", tick=2),
         ExecutionStarted(
-            promise_id="5", tick=3, fn_name="only_call", args=(), kwargs={"n": 1}
+            promise_id="2", tick=3, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        AwaitedForPromise(promise_id="5.1", tick=3),
+        AwaitedForPromise(promise_id="2.1", tick=3),
         ExecutionStarted(
-            promise_id="4", tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
+            promise_id="3", tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
-        AwaitedForPromise(promise_id="4.1", tick=4),
-        PromiseResolved(promise_id="5", tick=8),
-        ExecutionStarted(
-            promise_id="2", tick=9, fn_name="only_call", args=(), kwargs={"n": 4}
-        ),
-        AwaitedForPromise(promise_id="2.1", tick=9),
-        PromiseResolved(promise_id="1", tick=11),
+        AwaitedForPromise(promise_id="3.1", tick=7),
+        PromiseResolved(promise_id="1", tick=9),
+        PromiseResolved(promise_id="5", tick=10),
+        PromiseResolved(promise_id="2", tick=11),
         PromiseResolved(promise_id="3", tick=12),
-        PromiseResolved(promise_id="4", tick=13),
-        PromiseResolved(promise_id="2", tick=15),
+        ExecutionStarted(
+            promise_id="4", tick=13, fn_name="only_call", args=(), kwargs={"n": 2}
+        ),
+        AwaitedForPromise(promise_id="4.1", tick=13),
+        PromiseResolved(promise_id="4", tick=15),
     ]
 
 
@@ -644,7 +644,7 @@ def test_dump_events() -> None:
         )
 
 
-def _probe_function(deps: Dependencies) -> datetime.datetime:  # noqa: ARG001
+def _probe_function(deps: Dependencies, tick: int) -> datetime.datetime:  # noqa: ARG001
     return datetime.datetime.now(tz=datetime.timezone.utc)
 
 

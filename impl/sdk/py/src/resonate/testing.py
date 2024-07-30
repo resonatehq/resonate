@@ -26,7 +26,7 @@ def dst(  # noqa: PLR0913
     mode: Mode = "concurrent",
     failure_chance: float = 0,
     max_failures: int = 0,
-    probe: Callable[[Dependencies], Any] | None = None,
+    probe: Callable[[Dependencies, int], Any] | None = None,
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 

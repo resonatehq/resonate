@@ -108,7 +108,7 @@ class DSTScheduler:
         max_failures: int,
         failure_chance: float,
         mode: Mode,
-        probe: Callable[[Dependencies], Any] | None,
+        probe: Callable[[Dependencies, int], Any] | None,
     ) -> None:
         self._failure_chance = failure_chance
         self._max_failures: int = max_failures
@@ -318,7 +318,7 @@ class DSTScheduler:
                     self._execute_commands(cmd)
 
             if self._probe is not None:
-                self._probe_results.append(self._probe(self.deps))
+                self._probe_results.append(self._probe(self.deps, self.tick))
             self.tick += 1
 
             if (
@@ -466,9 +466,10 @@ class DSTScheduler:
 
 
 def get_random_element(array: list[T], r: random.Random, mode: Mode) -> T:
+    pop_idx = -1
     if mode == "concurrent":
-        r.shuffle(array)
-    return array.pop()
+        pop_idx = r.randint(0, len(array) - 1)
+    return array.pop(pop_idx)
 
 
 def _safe_run(fn: Callable[[], T]) -> Result[T, Exception]:
