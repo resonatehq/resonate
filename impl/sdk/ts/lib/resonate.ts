@@ -138,6 +138,10 @@ export class Resonate {
     return this.store.locks;
   }
 
+  options(opts: Partial<Options>): PartialOptions {
+    return options(opts);
+  }
+
   registeredFunction(funcName: string, version: number): { func: Func; opts: Options } {
     if (!this.#registeredFunctions[funcName]?.[version]) {
       throw new Error(`Function ${funcName} version ${version} not registered`);
@@ -534,6 +538,10 @@ export class Context {
     }
 
     return this.parent ? this.parent.getResource<R>(name) : undefined;
+  }
+
+  options(opts: Partial<Options>): PartialOptions {
+    return options(opts);
   }
 
   /**
