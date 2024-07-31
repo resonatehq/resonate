@@ -15,9 +15,9 @@ from resonate.dependency_injection import Dependencies
 from resonate.itertools import (
     Awaitables,
     FinalValue,
-    Runnables,
-    callback,
+    RunnableCoroutines,
     iterate_coro,
+    resolve_promise_and_unblock_dependant_coroutines,
     unblock_depands_coros,
 )
 from resonate.logging import logger
@@ -93,7 +93,7 @@ class Scheduler:
             self._w_thread = t
 
     def _run(self) -> None:
-        runnables: Runnables = []
+        runnables: RunnableCoroutines = []
         awaitables: Awaitables = {}
 
         while True:
@@ -121,7 +121,7 @@ class Scheduler:
     def _process_each_runnable(
         self,
         runnable: Runnable[Any],
-        runnables: Runnables,
+        runnables: RunnableCoroutines,
         awaitables: Awaitables,
     ) -> None:
         yieldable_or_final_value = iterate_coro(runnable)
@@ -171,7 +171,7 @@ class Scheduler:
         call: Call,
         runnable: Runnable[T],
         awaitables: Awaitables,
-        runnables: Runnables,
+        runnables: RunnableCoroutines,
     ) -> None:
         logger.debug("Processing call")
         child_ctx = runnable.coro_and_promise.ctx.new_child()
@@ -190,7 +190,7 @@ class Scheduler:
                         **call.exec_unit.kwargs,
                     ),
                     callback=partial(
-                        callback,
+                        resolve_promise_and_unblock_dependant_coroutines,
                         p,
                         awaitables,
                         runnables,
@@ -209,7 +209,7 @@ class Scheduler:
         self,
         invocation: Invoke,
         runnable: Runnable[T],
-        runnables: Runnables,
+        runnables: RunnableCoroutines,
         awaitables: Awaitables,
     ) -> None:
         logger.debug("Processing invocation")
@@ -229,7 +229,7 @@ class Scheduler:
                         **invocation.exec_unit.kwargs,
                     ),
                     callback=partial(
-                        callback,
+                        resolve_promise_and_unblock_dependant_coroutines,
                         p,
                         awaitables,
                         runnables,
@@ -244,8 +244,8 @@ class Scheduler:
                 Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
             )
 
-    def _runnables_from_stg_q(self) -> Runnables | None:
-        new_runnables: Runnables = []
+    def _runnables_from_stg_q(self) -> RunnableCoroutines | None:
+        new_runnables: RunnableCoroutines = []
         stg_qes = utils.dequeue_batch(q=self._stg_q, batch_size=self._batch_size)
         if stg_qes is None:
             return None

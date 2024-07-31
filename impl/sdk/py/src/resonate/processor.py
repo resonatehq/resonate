@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import queue
-from abc import ABC, abstractmethod
 from asyncio import iscoroutinefunction
 from collections.abc import Coroutine
 from dataclasses import dataclass
@@ -17,18 +16,9 @@ from resonate.result import Err, Ok
 if TYPE_CHECKING:
     from resonate.result import Result
     from resonate.scheduler import Scheduler
+    from resonate.typing import IAsyncCommand, ICommand
 
 T = TypeVar("T")
-
-
-class IAsyncCommand(ABC, Generic[T]):
-    @abstractmethod
-    async def run(self) -> Result[T, Exception]: ...
-
-
-class ICommand(ABC, Generic[T]):
-    @abstractmethod
-    def run(self) -> Result[T, Exception]: ...
 
 
 @dataclass(frozen=True)

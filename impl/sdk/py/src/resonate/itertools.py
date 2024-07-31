@@ -7,7 +7,7 @@ from typing_extensions import ParamSpec, TypeVar, assert_never
 
 from resonate.logging import logger
 from resonate.result import Err, Ok, Result
-from resonate.typing import Awaitables, Runnable, Runnables
+from resonate.typing import Awaitables, Runnable, RunnableCoroutines
 
 if TYPE_CHECKING:
     from resonate.promise import Promise
@@ -53,7 +53,7 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | FinalValue[T]:
 def unblock_depands_coros(
     p: Promise[T],
     awaitables: Awaitables,
-    runnables: Runnables,
+    runnables: RunnableCoroutines,
 ) -> None:
     assert p.done(), "Promise must be done to unblock dependant coros"
 
@@ -73,10 +73,10 @@ def unblock_depands_coros(
     runnables.extend(new_runnables)
 
 
-def callback(
+def resolve_promise_and_unblock_dependant_coroutines(
     p: Promise[T],
     awaitables: Awaitables,
-    runnables: Runnables,
+    runnables: RunnableCoroutines,
     v: Result[T, Exception],
 ) -> None:
     p.set_result(v)
