@@ -27,8 +27,8 @@ def dst(  # noqa: PLR0913
     failure_chance: float = 0,
     max_failures: int = 0,
     probe: Callable[[Dependencies, int], Any] | None = None,
-    assert_always: Callable[[Dependencies, int], Any] | None = None,
-    assert_eventually: Callable[[Dependencies, int], Any] | None = None,
+    assert_always: Callable[[Dependencies, int, int], Any] | None = None,
+    assert_eventually: Callable[[Dependencies, int, int], Any] | None = None,
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 
