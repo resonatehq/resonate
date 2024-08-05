@@ -115,8 +115,8 @@ class DSTScheduler:
         failure_chance: float,
         mode: Mode,
         probe: Callable[[Dependencies, int], Any] | None,
-        assert_eventually: Callable[[Dependencies, int], None] | None,
-        assert_always: Callable[[Dependencies, int], None] | None,
+        assert_eventually: Callable[[Dependencies, int, int], None] | None,
+        assert_always: Callable[[Dependencies, int, int], None] | None,
     ) -> None:
         self._assert_eventually = assert_eventually
         self._assert_always = assert_always
@@ -353,7 +353,7 @@ class DSTScheduler:
                 self._probe_results.append(self._probe(self.deps, self.tick))
 
             if self._assert_always is not None:
-                self._assert_always(self.deps, self.tick)
+                self._assert_always(self.deps, self.seed, self.tick)
 
             self.tick += 1
 
@@ -379,7 +379,7 @@ class DSTScheduler:
                 assert_never(next_step)
 
         if self._assert_eventually is not None:
-            self._assert_eventually(self.deps, self.tick)
+            self._assert_eventually(self.deps, self.seed, self.tick)
 
         assert all(p.done() for p in promises), "All promises should be resolved."
         if self._log_file is not None:
