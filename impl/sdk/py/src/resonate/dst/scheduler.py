@@ -115,7 +115,11 @@ class DSTScheduler:
         failure_chance: float,
         mode: Mode,
         probe: Callable[[Dependencies, int], Any] | None,
+        assert_eventually: Callable[[Dependencies, int], None] | None,
+        assert_always: Callable[[Dependencies, int], None] | None,
     ) -> None:
+        self._assert_eventually = assert_eventually
+        self._assert_always = assert_always
         self._runnable_coroutines: RunnableCoroutines = []
         self._awaitables: Awaitables = {}
         self._runnable_functions: RunnableFunctions = []
@@ -333,7 +337,7 @@ class DSTScheduler:
             v=v,
         )
 
-    def _run(self) -> list[Promise[Any]]:
+    def _run(self) -> list[Promise[Any]]:  # noqa: C901
         promises = self._initialize_runnables()
 
         while True:
@@ -347,6 +351,10 @@ class DSTScheduler:
 
             if self._probe is not None:
                 self._probe_results.append(self._probe(self.deps, self.tick))
+
+            if self._assert_always is not None:
+                self._assert_always(self.deps, self.tick)
+
             self.tick += 1
 
             if (
@@ -370,10 +378,18 @@ class DSTScheduler:
             else:
                 assert_never(next_step)
 
+        if self._assert_eventually is not None:
+            self._assert_eventually(self.deps, self.tick)
+
         assert all(p.done() for p in promises), "All promises should be resolved."
         if self._log_file is not None:
             self.dump(file=self._log_file)
         return promises
+
+    def _add_coro_to_awaitables(
+        self, p: Promise[Any], coro_and_promise: CoroAndPromise[Any]
+    ) -> None:
+        self._awaitables.setdefault(p, []).append(coro_and_promise)
 
     def _process_each_runnable(
         self,
@@ -414,7 +430,9 @@ class DSTScheduler:
                 invocation=yieldable_or_final_value.to_invoke(),
                 runnable=runnable,
             )
-            self._awaitables[p] = [runnable.coro_and_promise]
+            self._add_coro_to_awaitables(
+                p=p, coro_and_promise=runnable.coro_and_promise
+            )
             self._events.append(
                 AwaitedForPromise(promise_id=p.promise_id, tick=self.tick)
             )
@@ -427,8 +445,8 @@ class DSTScheduler:
             self._runnable_coroutines.append(Runnable(runnable.coro_and_promise, Ok(p)))
 
         elif isinstance(yieldable_or_final_value, Promise):
-            self._awaitables.setdefault(yieldable_or_final_value, []).append(
-                runnable.coro_and_promise,
+            self._add_coro_to_awaitables(
+                yieldable_or_final_value, runnable.coro_and_promise
             )
             if yieldable_or_final_value.done():
                 unblock_depands_coros(
