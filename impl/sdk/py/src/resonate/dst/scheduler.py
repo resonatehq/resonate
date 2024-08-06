@@ -95,9 +95,7 @@ class _CmdBuffer(Generic[T]):
 
 
 class MultiRandom:
-    def __init__(
-        self, seed: int, checkpoints: list[tuple[int, int]] | None = None
-    ) -> None:
+    def __init__(self, seed: int, checkpoints: list[tuple[int, int]] | None) -> None:
         self._seed = seed
 
         self._checkpoint_to_choose: int = 0
@@ -169,6 +167,7 @@ class DSTScheduler:
         probe: Callable[[Dependencies, int], Any] | None,
         assert_eventually: Callable[[Dependencies, int], None] | None,
         assert_always: Callable[[Dependencies, int, int], None] | None,
+        checkpoints: list[tuple[int, int]] | None,
     ) -> None:
         self._assert_eventually = assert_eventually
         self._assert_always = assert_always
@@ -184,7 +183,7 @@ class DSTScheduler:
         self._mode: Mode = mode
 
         self.seed = seed
-        self.random = MultiRandom(seed=self.seed)  # noqa: RUF100, S311
+        self.random = MultiRandom(seed=self.seed, checkpoints=checkpoints)  # noqa: RUF100, S311
         self.deps = Dependencies()
         self.mocks = mocks or {}
 

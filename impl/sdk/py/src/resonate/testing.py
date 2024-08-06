@@ -29,6 +29,7 @@ def dst(  # noqa: PLR0913
     probe: Callable[[Dependencies, int], Any] | None = None,
     assert_always: Callable[[Dependencies, int, int], Any] | None = None,
     assert_eventually: Callable[[Dependencies, int], Any] | None = None,
+    checkpoints: list[tuple[int, int]] | None = None,
 ) -> list[DSTScheduler]:
     schedulers: list[DSTScheduler] = []
 
@@ -49,6 +50,7 @@ def dst(  # noqa: PLR0913
                     probe=probe,
                     assert_always=assert_always,
                     assert_eventually=assert_eventually,
+                    checkpoints=checkpoints,
                 )
                 for i in seed
             )
@@ -64,6 +66,7 @@ def dst(  # noqa: PLR0913
                     probe=probe,
                     assert_always=assert_always,
                     assert_eventually=assert_eventually,
+                    checkpoints=checkpoints,
                 )
             )
         else:
