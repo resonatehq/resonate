@@ -115,15 +115,36 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					},
 				}
 			} else {
-				readCallbacksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+				// Bind the current time to a variable so we can include it in
+				// the response, when the coroutine time is advanced.
+				completedOn := c.Time()
+
+				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 					Kind: t_aio.Store,
 					Tags: r.Tags,
 					Store: &t_aio.StoreSubmission{
 						Transaction: &t_aio.Transaction{
 							Commands: []*t_aio.Command{
 								{
-									Kind: t_aio.ReadCallbacks,
-									ReadCallbacks: &t_aio.ReadCallbacksCommand{
+									Kind: t_aio.UpdatePromise,
+									UpdatePromise: &t_aio.UpdatePromiseCommand{
+										Id:             r.CompletePromise.Id,
+										State:          r.CompletePromise.State,
+										Value:          r.CompletePromise.Value,
+										IdempotencyKey: r.CompletePromise.IdempotencyKey,
+										CompletedOn:    completedOn,
+									},
+								},
+								{
+									Kind: t_aio.CreateTasks,
+									CreateTasks: &t_aio.CreateTasksCommand{
+										PromiseId: r.CompletePromise.Id,
+										CreatedOn: completedOn,
+									},
+								},
+								{
+									Kind: t_aio.DeleteCallbacks,
+									DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
 										PromiseId: r.CompletePromise.Id,
 									},
 								},
@@ -133,61 +154,21 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				})
 
 				if err != nil {
-					slog.Error("failed to read callbacks", "req", r, "err", err)
-					return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read callbacks", err)
-				}
-
-				util.Assert(readCallbacksCompletion.Store != nil, "completion must not be nil")
-				util.Assert(len(readCallbacksCompletion.Store.Results) == 1, "completion must have one result")
-				util.Assert(readCallbacksCompletion.Store.Results[0].ReadCallbacks != nil, "result must not be nil")
-				readCallbacksResult := readCallbacksCompletion.Store.Results[0].ReadCallbacks
-
-				completedOn := c.Time()
-				commands := make([]*t_aio.Command, len(readCallbacksResult.Records)+1)
-				commands[0] = &t_aio.Command{
-					Kind: t_aio.UpdatePromise,
-					UpdatePromise: &t_aio.UpdatePromiseCommand{
-						Id:             r.CompletePromise.Id,
-						State:          r.CompletePromise.State,
-						Value:          r.CompletePromise.Value,
-						IdempotencyKey: r.CompletePromise.IdempotencyKey,
-						CompletedOn:    completedOn,
-					},
-				}
-
-				for i, callback := range readCallbacksResult.Records {
-					commands[i+1] = &t_aio.Command{
-						Kind: t_aio.CreateTask,
-						CreateTask: &t_aio.CreateTaskCommand{
-							Message:   callback.Message,
-							CreatedOn: c.Time(),
-						},
-					}
-				}
-
-				updatePromiseCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
-					Kind: t_aio.Store,
-					Tags: r.Tags,
-					Store: &t_aio.StoreSubmission{
-						Transaction: &t_aio.Transaction{
-							Commands: commands,
-						},
-					},
-				})
-
-				if err != nil {
 					slog.Error("failed to update promise", "req", r, "err", err)
 					return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err)
 				}
 
-				util.Assert(updatePromiseCompletion.Store != nil, "completion must not be nil")
-				util.Assert(len(updatePromiseCompletion.Store.Results) == len(readCallbacksResult.Records)+1, "completion must have results")
-				util.Assert(updatePromiseCompletion.Store.Results[0].UpdatePromise != nil, "result must not be nil")
+				util.Assert(completion.Store != nil, "completion must not be nil")
+				util.Assert(len(completion.Store.Results) == 3, "completion must have three results")
+				util.Assert(completion.Store.Results[0].UpdatePromise != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[1].CreateTasks != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[2].DeleteCallbacks != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[1].CreateTasks.RowsAffected == completion.Store.Results[2].DeleteCallbacks.RowsAffected, "created rows must equal deleted rows")
 
-				updatePromiseResult := updatePromiseCompletion.Store.Results[0].UpdatePromise
-				util.Assert(updatePromiseResult.RowsAffected == 0 || updatePromiseResult.RowsAffected == 1, "result must return 0 or 1 rows")
+				result := completion.Store.Results[0].UpdatePromise
+				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-				if updatePromiseResult.RowsAffected == 1 {
+				if result.RowsAffected == 1 {
 					res = &t_api.Response{
 						Kind: t_api.CompletePromise,
 						Tags: r.Tags,

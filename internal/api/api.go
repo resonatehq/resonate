@@ -124,6 +124,12 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 					status = int(res.ReleaseLock.Status)
 				case t_api.HeartbeatLocks:
 					status = int(res.HeartbeatLocks.Status)
+				case t_api.ClaimTask:
+					status = int(res.ClaimTask.Status)
+				case t_api.CompleteTask:
+					status = int(res.CompleteTask.Status)
+				case t_api.HeartbeatTask:
+					status = int(res.HeartbeatTask.Status)
 				case t_api.Echo:
 					status = 2000
 				default:

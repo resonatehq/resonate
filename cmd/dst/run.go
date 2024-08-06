@@ -15,11 +15,13 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/log"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -126,8 +128,11 @@ func RunDSTCmd() *cobra.Command {
 				return err
 			}
 
+			backchannel := make(chan *task.Task, 1000)
+
 			// add api subsystems
 			aio.AddSubsystem(t_aio.Store, store, nil)
+			aio.AddSubsystem(t_aio.Queue, queue.NewDST(backchannel), nil)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -151,9 +156,17 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+
+			// TODO: migrate tick to background coroutines
 			system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
 			system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
+
+			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,
@@ -170,6 +183,7 @@ func RunDSTCmd() *cobra.Command {
 				Tags:               tags.Resolve(r),
 				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
+				TaskBackchannel:    backchannel,
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -177,9 +191,9 @@ func RunDSTCmd() *cobra.Command {
 			ok := dst.Run(r, api, aio, system)
 
 			// reset store
-			if err := store.Reset(); err != nil {
-				return err
-			}
+			// if err := store.Reset(); err != nil {
+			// 	return err
+			// }
 
 			// stop api/aio
 			if err := api.Stop(); err != nil {

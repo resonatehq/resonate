@@ -78,3 +78,21 @@ type ReleaseLockBody struct {
 type HeartbeatBody struct {
 	ProcessId string `json:"processId" binding:"required"`
 }
+
+// TASKS
+
+type ClaimTaskBody struct {
+	Id        int64 `json:"id" binding:"required"`
+	Counter   int   `json:"counter" binding:"required"`
+	Frequency int   `json:"frequency" binding:"required"`
+}
+
+type CompleteTaskBody struct {
+	Id      int64 `json:"id" binding:"required"`
+	Counter int   `json:"counter" binding:"required"`
+}
+
+type HeartbeatTaskBody struct {
+	Id      int64 `json:"id" binding:"required"`
+	Counter int   `json:"counter" binding:"required"`
+}

@@ -23,6 +23,11 @@ const (
 	ReleaseLock
 	HeartbeatLocks
 
+	// TASKS
+	ClaimTask
+	CompleteTask
+	HeartbeatTask
+
 	// Echo
 	Echo
 )
@@ -57,6 +62,13 @@ func (k Kind) String() string {
 		return "ReleaseLock"
 	case HeartbeatLocks:
 		return "HeartbeatLocks"
+	// TASKS
+	case ClaimTask:
+		return "ClaimTask"
+	case CompleteTask:
+		return "CompleteTask"
+	case HeartbeatTask:
+		return "HeartbeatTask"
 	// ECHO
 	case Echo:
 		return "Echo"

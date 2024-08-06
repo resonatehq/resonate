@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 // Model
@@ -16,6 +17,7 @@ type Model struct {
 	callbacks *Store[int64, *callback.Callback]
 	schedules *Store[string, *schedule.Schedule]
 	locks     *Store[string, *lock.Lock]
+	tasks     *Store[int64, *task.Task]
 }
 
 func NewModel() *Model {
@@ -24,6 +26,7 @@ func NewModel() *Model {
 		callbacks: &Store[int64, *callback.Callback]{},
 		schedules: &Store[string, *schedule.Schedule]{},
 		locks:     &Store[string, *lock.Lock]{},
+		tasks:     &Store[int64, *task.Task]{},
 	}
 }
 
@@ -33,6 +36,7 @@ func (m *Model) Copy() *Model {
 		callbacks: m.callbacks.copy(),
 		schedules: m.schedules.copy(),
 		locks:     m.locks.copy(),
+		tasks:     m.tasks.copy(),
 	}
 }
 
@@ -40,7 +44,8 @@ func (m1 *Model) Equals(m2 *Model) bool {
 	return m1.promises.equals(m2.promises) &&
 		m1.callbacks.equals(m2.callbacks) &&
 		m1.schedules.equals(m2.schedules) &&
-		m1.locks.equals(m2.locks)
+		m1.locks.equals(m2.locks) &&
+		m1.tasks.equals(m2.tasks)
 }
 
 // Store

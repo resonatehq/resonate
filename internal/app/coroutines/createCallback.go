@@ -25,6 +25,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 						CreateCallback: &t_aio.CreateCallbackCommand{
 							PromiseId: r.CreateCallback.PromiseId,
 							Message:   r.CreateCallback.Message,
+							Timeout:   r.CreateCallback.Timeout,
 							CreatedOn: createdOn,
 						},
 					},

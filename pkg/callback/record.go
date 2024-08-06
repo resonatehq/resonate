@@ -10,6 +10,7 @@ type CallbackRecord struct {
 	Id        int64
 	PromiseId string
 	Message   []byte
+	Timeout   int64
 	CreatedOn int64
 }
 
@@ -23,6 +24,7 @@ func (r *CallbackRecord) Callback() (*Callback, error) {
 		Id:        r.Id,
 		PromiseId: r.PromiseId,
 		Message:   message,
+		Timeout:   r.Timeout,
 		CreatedOn: r.CreatedOn,
 	}, nil
 }

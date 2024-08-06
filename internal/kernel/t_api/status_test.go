@@ -51,9 +51,9 @@ func TestResponseStatusString(t *testing.T) {
 			want:   "The promise has already been canceled",
 		},
 		{
-			name:   "StatusPromiseAlreadyTimedOut",
+			name:   "StatusPromiseAlreadyTimedout",
 			status: StatusPromiseAlreadyTimedout,
-			want:   "The promise has already timed out",
+			want:   "The promise has already timedout",
 		},
 		{
 			name:   "StatusPromiseNotFound",
@@ -139,7 +139,7 @@ func TestResponseStatusGRPC(t *testing.T) {
 			want:   codes.PermissionDenied,
 		},
 		{
-			name:   "StatusPromiseAlreadyTimedOut",
+			name:   "StatusPromiseAlreadyTimedout",
 			status: StatusPromiseAlreadyTimedout,
 			want:   codes.PermissionDenied,
 		},

@@ -1,6 +1,7 @@
 package dst
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand" // nosemgrep
@@ -22,7 +23,9 @@ type Generator struct {
 	dataSet            [][]byte
 	tagsSet            []map[string]string
 	searchSet          []string
-	requests           []RequestGenerator
+	callback           uint64
+	requests           map[t_api.Kind][]*t_api.Request
+	generators         []RequestGenerator
 }
 
 type RequestGenerator func(*rand.Rand, int64) *t_api.Request
@@ -85,34 +88,39 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		dataSet:            dataSet,
 		tagsSet:            tagsSet,
 		searchSet:          searchSet,
+		requests:           map[t_api.Kind][]*t_api.Request{},
+		generators:         []RequestGenerator{},
 	}
 }
 
-func (g *Generator) AddRequest(request RequestGenerator) {
-	g.requests = append(g.requests, request)
+func (g *Generator) AddGenerator(kind t_api.Kind, generator RequestGenerator) {
+	g.generators = append(g.generators, generator)
 }
 
-func (g *Generator) Generate(r *rand.Rand, t int64, n int, cursors *[]*t_api.Request) []*t_api.Request {
+func (g *Generator) AddRequest(req *t_api.Request) {
+	g.requests[req.Kind] = append(g.requests[req.Kind], req)
+}
+
+func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*t_api.Request {
 	reqs := make([]*t_api.Request, n)
 
 	for i := 0; i < n; i++ {
-		bound := len(g.requests)
-		if cursors != nil && len(*cursors) > 0 {
-			bound++
-		}
-
-		switch j := r.Intn(bound); j {
-		case len(g.requests):
-			k := r.Intn(len(*cursors))
-			reqs[i] = (*cursors)[k]
-
-			// now remove from cursors
-			*cursors = append((*cursors)[:k], (*cursors)[k+1:]...)
-		default:
-			f := g.requests[j]
+		// some generators require "canned requests" and return nil if none
+		// are available, loop until we get a non-nil request
+		for reqs[i] == nil {
+			f := g.generators[r.Intn(len(g.generators))]
 			reqs[i] = f(r, t)
-		}
 
+			// k := RangeMap(r, g.generators)
+
+			// if len(g.requests[k]) == 0 {
+			// 	reqs[i] = g.generators[k](r, t)
+			// } else {
+			// 	j := r.Intn(len(g.requests[k]))
+			// 	reqs[i] = g.requests[k][j]
+			// 	g.requests[k] = append(g.requests[k][:j], g.requests[k][j+1:]...)
+			// }
+		}
 	}
 
 	return reqs
@@ -217,12 +225,18 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
+	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+
+	body := make([]byte, 8)
+	binary.BigEndian.PutUint64(body, g.callback)
+	g.callback++
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
 			PromiseId: promiseId,
-			Message:   &message.Message{},
+			Message:   &message.Message{Recv: "dst", Body: body},
+			Timeout:   timeout,
 		},
 	}
 }
@@ -333,5 +347,85 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 			ProcessId: processId,
 		},
+	}
+}
+
+func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
+	req := g.pop(r, t_api.ClaimTask)
+
+	if req != nil {
+		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.Counter)
+	}
+
+	return req
+}
+
+func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
+	req := g.pop(r, t_api.CompleteTask)
+
+	if req != nil {
+		g.nextTasks(r, req.CompleteTask.Id, req.CompleteTask.Counter)
+	}
+
+	return req
+}
+
+func (g *Generator) GenerateHeartbeatTask(r *rand.Rand, t int64) *t_api.Request {
+	req := g.pop(r, t_api.HeartbeatTask)
+
+	if req != nil {
+		g.nextTasks(r, req.HeartbeatTask.Id, req.HeartbeatTask.Counter)
+	}
+
+	return req
+}
+
+// Helpers
+
+func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
+	reqs := g.requests[kind]
+
+	if len(reqs) == 0 {
+		return nil
+	}
+
+	i := r.Intn(len(reqs))
+	req := reqs[i]
+	g.requests[kind] = append(reqs[:i], reqs[i+1:]...)
+
+	return req
+}
+
+func (g *Generator) nextTasks(r *rand.Rand, id int64, counter int) {
+	// seed the "next" requests,
+	// sometimes we deliberately do nothing
+	for i := 0; i < r.Intn(3); i++ {
+		switch r.Intn(3) {
+		case 0:
+			g.AddRequest(&t_api.Request{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskRequest{
+					Id:        id,
+					Counter:   counter,
+					Frequency: RangeIntn(r, 1000, 5000),
+				},
+			})
+		case 1:
+			g.AddRequest(&t_api.Request{
+				Kind: t_api.CompleteTask,
+				CompleteTask: &t_api.CompleteTaskRequest{
+					Id:      id,
+					Counter: counter,
+				},
+			})
+		case 2:
+			g.AddRequest(&t_api.Request{
+				Kind: t_api.HeartbeatTask,
+				HeartbeatTask: &t_api.HeartbeatTaskRequest{
+					Id:      id,
+					Counter: counter,
+				},
+			})
+		}
 	}
 }

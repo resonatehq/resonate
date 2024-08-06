@@ -7,28 +7,35 @@ import (
 	"google.golang.org/grpc/codes"
 )
 
+// ResponseStatus is the status code for the response.
+type ResponseStatus int
+
 // Application level status (2000-4999)
 const (
-	StatusOK                     ResponseStatus = 2000
-	StatusCreated                ResponseStatus = 2010
-	StatusNoContent              ResponseStatus = 2040
+	StatusOK        ResponseStatus = 2000
+	StatusCreated   ResponseStatus = 2010
+	StatusNoContent ResponseStatus = 2040
+
 	StatusFieldValidationFailure ResponseStatus = 4000
+
 	StatusPromiseAlreadyResolved ResponseStatus = 4030
 	StatusPromiseAlreadyRejected ResponseStatus = 4031
 	StatusPromiseAlreadyCanceled ResponseStatus = 4032
 	StatusPromiseAlreadyTimedout ResponseStatus = 4033
 	StatusLockAlreadyAcquired    ResponseStatus = 4034
+	StatusTaskAlreadyClaimed     ResponseStatus = 4035
+	StatusTaskAlreadyCompleted   ResponseStatus = 4036
+	StatusTaskInvalidCounter     ResponseStatus = 4037
+	StatusTaskInvalidState       ResponseStatus = 4038
 
 	StatusPromiseNotFound  ResponseStatus = 4040
 	StatusScheduleNotFound ResponseStatus = 4041
 	StatusLockNotFound     ResponseStatus = 4042
+	StatusTaskNotFound     ResponseStatus = 4043
 
 	StatusPromiseAlreadyExists  ResponseStatus = 4090
 	StatusScheduleAlreadyExists ResponseStatus = 4091
 )
-
-// ResponseStatus is the status code for the response.
-type ResponseStatus int
 
 // String returns the string representation of the status code.
 func (s ResponseStatus) String() string {
@@ -45,18 +52,28 @@ func (s ResponseStatus) String() string {
 		return "The promise has already been canceled"
 	case StatusPromiseAlreadyTimedout:
 		return "The promise has already timedout"
+	case StatusLockAlreadyAcquired:
+		return "The lock is already acquired"
+	case StatusTaskAlreadyClaimed:
+		return "The task is already claimed"
+	case StatusTaskAlreadyCompleted:
+		return "The task is already completed"
+	case StatusTaskInvalidCounter:
+		return "The task counter is invalid"
+	case StatusTaskInvalidState:
+		return "The lock state is invalid"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:
 		return "The specified schedule was not found"
+	case StatusLockNotFound:
+		return "The specified lock was not found"
+	case StatusTaskNotFound:
+		return "The specified task was not found"
 	case StatusPromiseAlreadyExists:
 		return "A promise with this identifier already exists"
 	case StatusScheduleAlreadyExists:
 		return "A schedule with this identifier already exists"
-	case StatusLockAlreadyAcquired:
-		return "The lock is already acquired"
-	case StatusLockNotFound:
-		return "The specified lock was not found"
 	default:
 		panic(fmt.Sprintf("unknown status code %d", s))
 	}
@@ -76,15 +93,19 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.InvalidArgument
 	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedout:
 		return codes.PermissionDenied
+	case StatusLockAlreadyAcquired:
+		return codes.PermissionDenied
+	case StatusTaskAlreadyClaimed, StatusTaskAlreadyCompleted, StatusTaskInvalidCounter, StatusTaskInvalidState:
+		return codes.PermissionDenied
 	case StatusPromiseNotFound:
 		return codes.NotFound
 	case StatusPromiseAlreadyExists:
 		return codes.AlreadyExists
 	case StatusScheduleAlreadyExists:
 		return codes.AlreadyExists
-	case StatusLockAlreadyAcquired:
-		return codes.PermissionDenied
 	case StatusLockNotFound:
+		return codes.NotFound
+	case StatusTaskNotFound:
 		return codes.NotFound
 	default:
 		panic(fmt.Sprintf("invalid status: %d", s))
