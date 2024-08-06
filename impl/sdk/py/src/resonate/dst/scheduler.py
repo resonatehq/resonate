@@ -40,7 +40,7 @@ from resonate.typing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine, Generator
+    from collections.abc import Coroutine, Generator, Sequence
 
 
 T = TypeVar("T")
@@ -96,7 +96,8 @@ class _CmdBuffer(Generic[T]):
 
 class MultiRandom:
     def __init__(self, seed: int, checkpoints: list[tuple[int, int]] | None) -> None:
-        self._seed = seed
+        self._final_seed = seed
+        self.seed: int
 
         self._checkpoint_to_choose: int = 0
         self._numbers_generated: int = 0
@@ -106,8 +107,9 @@ class MultiRandom:
         self._configure_randome_with_next_checkpoint()
 
     def _configure_random_with_final_seed(self) -> None:
-        self._random = random.Random(self._seed)  # noqa: S311, RUF100
+        self._random = random.Random(self._final_seed)  # noqa: S311, RUF100
         self._limit_next_checkpoint = None
+        self.seed = self._final_seed
 
     def _configure_randome_with_next_checkpoint(self) -> None:
         if self._checkpoints is None:
@@ -120,25 +122,29 @@ class MultiRandom:
         next_checkpoint = self._checkpoints[self._checkpoint_to_choose]
         self._checkpoint_to_choose += 1
         self._random = random.Random(next_checkpoint[0])  # noqa: S311, RUF100
+        self.seed = next_checkpoint[0]
         if self._limit_next_checkpoint is None:
             self._limit_next_checkpoint = 0
         self._limit_next_checkpoint += next_checkpoint[1]
         return None
 
-    def choice(self, steps: list[Step]) -> Step:
+    def choice(self, steps: Sequence[T]) -> T:
         return self._random.choice(steps)
 
     def uniform(self, a: float, b: float) -> float:
         return self._random.uniform(a, b)
 
     def randint(self, a: int, b: int) -> int:
+        return self._random.randint(a, b)
+
+    def take_rand_number(self, a: int, b: int) -> int:
         if (
             self._limit_next_checkpoint is not None
             and self._numbers_generated > self._limit_next_checkpoint
         ):
             self._configure_randome_with_next_checkpoint()
 
-        rand_num = self._random.randint(a, b)
+        rand_num = self.randint(a, b)
         self._numbers_generated += 1
 
         return rand_num
@@ -182,8 +188,7 @@ class DSTScheduler:
         self._top_level_invocations: deque[_TopLevelInvoke] = deque()
         self._mode: Mode = mode
 
-        self.seed = seed
-        self.random = MultiRandom(seed=self.seed, checkpoints=checkpoints)  # noqa: RUF100, S311
+        self.random = MultiRandom(seed=seed, checkpoints=checkpoints)  # noqa: RUF100, S311
         self.deps = Dependencies()
         self.mocks = mocks or {}
 
@@ -233,7 +238,7 @@ class DSTScheduler:
         self._runnable_functions.clear()
 
     def dump(self, file: str) -> None:
-        log_file = CWD / (file % (self.seed))
+        log_file = CWD / (file % (self.random.seed))
 
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -404,7 +409,11 @@ class DSTScheduler:
                 self._probe_results.append(self._probe(self.deps, self.tick))
 
             if self._assert_always is not None:
-                self._assert_always(self.deps, self.seed, self.tick)
+                self._assert_always(
+                    self.deps,
+                    self.random.seed,
+                    self.tick,
+                )
 
             self.tick += 1
 
@@ -418,23 +427,23 @@ class DSTScheduler:
             if next_step == "functions":
                 function_wrapper, p = _get_random_element(
                     self._runnable_functions,
-                    r=self.random,
-                    mode=self._mode,
+                    self.random,
+                    self._mode,
                 )
                 self._run_function_and_move_awaitables_to_runnables(function_wrapper, p)
 
             elif next_step == "coroutines":
                 runnable = _get_random_element(
                     self._runnable_coroutines,
-                    r=self.random,
-                    mode=self._mode,
+                    self.random,
+                    self._mode,
                 )
                 self._process_each_runnable(runnable=runnable)
             else:
                 assert_never(next_step)
 
         if self._assert_eventually is not None:
-            self._assert_eventually(self.deps, self.seed)
+            self._assert_eventually(self.deps, self.random.seed)
 
         assert all(p.done() for p in promises), "All promises should be resolved."
         if self._log_file is not None:
@@ -564,7 +573,7 @@ class DSTScheduler:
 def _get_random_element(array: list[T], r: MultiRandom, mode: Mode) -> T:
     pop_idx = -1
     if mode == "concurrent":
-        pop_idx = r.randint(0, len(array) - 1)
+        pop_idx = r.take_rand_number(0, len(array) - 1)
     return array.pop(pop_idx)
 
 

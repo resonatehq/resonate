@@ -170,12 +170,12 @@ def test_batching() -> None:
 @pytest.mark.dst()
 def test_pin_seed() -> None:
     s = dst(seeds=[1])[0]
-    assert s.seed == 1
+    assert s.random.seed == 1
 
     os.environ[ENV_VARIABLE_PIN_SEED] = "32"
     s = dst(seeds=[1])[0]
 
-    assert s.seed == int(os.environ.pop(ENV_VARIABLE_PIN_SEED))
+    assert s.random.seed == int(os.environ.pop(ENV_VARIABLE_PIN_SEED))
 
 
 @pytest.mark.dst()
@@ -392,11 +392,83 @@ def test_sequential() -> None:
     ]
 
 
+def test_checkpoints() -> None:
+    con_scheduler = dst(seeds=[1], max_failures=2)[0]
+    con_scheduler.add(only_call, n=1)
+    con_scheduler.add(only_call, n=2)
+    con_scheduler.add(only_call, n=3)
+    con_scheduler.add(only_call, n=4)
+    con_scheduler.add(only_call, n=5)
+    promises = con_scheduler.run()
+    assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
+    assert con_scheduler.get_events() == [
+        PromiseCreated(
+            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+        ),
+        PromiseCreated(
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
+        ),
+        PromiseCreated(
+            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
+        ),
+        PromiseCreated(
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
+        ),
+        PromiseCreated(
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
+        ),
+        ExecutionStarted(
+            promise_id="1", tick=1, fn_name="only_call", args=(), kwargs={"n": 5}
+        ),
+        AwaitedForPromise(promise_id="1.1", tick=1),
+        ExecutionStarted(
+            promise_id="5", tick=2, fn_name="only_call", args=(), kwargs={"n": 1}
+        ),
+        AwaitedForPromise(promise_id="5.1", tick=2),
+        ExecutionStarted(
+            promise_id="2", tick=3, fn_name="only_call", args=(), kwargs={"n": 4}
+        ),
+        AwaitedForPromise(promise_id="2.1", tick=3),
+        ExecutionStarted(
+            promise_id="3", tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
+        ),
+        AwaitedForPromise(promise_id="3.1", tick=7),
+        PromiseResolved(promise_id="1", tick=9),
+        PromiseResolved(promise_id="5", tick=10),
+        PromiseResolved(promise_id="2", tick=11),
+        PromiseResolved(promise_id="3", tick=12),
+        ExecutionStarted(
+            promise_id="4", tick=13, fn_name="only_call", args=(), kwargs={"n": 2}
+        ),
+        AwaitedForPromise(promise_id="4.1", tick=13),
+        PromiseResolved(promise_id="4", tick=15),
+    ]
+
+    con_scheduler_with_checkpoints = dst(
+        seeds=[3], max_failures=2, checkpoints=[(1, 10)]
+    )[0]
+    con_scheduler_with_checkpoints.add(only_call, n=1)
+    con_scheduler_with_checkpoints.add(only_call, n=2)
+    con_scheduler_with_checkpoints.add(only_call, n=3)
+    con_scheduler_with_checkpoints.add(only_call, n=4)
+    con_scheduler_with_checkpoints.add(only_call, n=5)
+    promises = con_scheduler_with_checkpoints.run()
+    assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
+    assert (
+        con_scheduler_with_checkpoints.get_events()[:16]
+        == con_scheduler.get_events()[:16]
+    )
+    assert (
+        con_scheduler_with_checkpoints.get_events()[16:]
+        != con_scheduler.get_events()[16:]
+    )
+
+
 def test_dump_events() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         log_file_path = Path(temp_dir) / "cool_log_%s.txt"
         s = dst(seeds=[1], log_file=log_file_path.as_posix())[0]
-        formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
+        formatted_file_path = Path(log_file_path.as_posix() % (s.random.seed))
         assert not formatted_file_path.exists()
         s.add(only_call, n=1)
         s.add(only_call, n=2)
@@ -433,10 +505,10 @@ def test_multi_random() -> None:
 
     numbers_to_generate = range(100)
     numbers_random_1: list[int] = [
-        multi_random_1.randint(0, 100) for _ in numbers_to_generate
+        multi_random_1.take_rand_number(0, 100) for _ in numbers_to_generate
     ]
     numbers_random_2: list[int] = [
-        multi_random_2.randint(0, 100) for _ in numbers_to_generate
+        multi_random_2.take_rand_number(0, 100) for _ in numbers_to_generate
     ]
 
     checkpoints_limit = sum(limit for _, limit in checkpoints)

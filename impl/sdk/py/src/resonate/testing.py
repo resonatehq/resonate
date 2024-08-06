@@ -73,7 +73,3 @@ def dst(  # noqa: PLR0913
             assert_never(seed)
 
     return schedulers
-
-
-def dsds(s: DSTScheduler) -> str:
-    return f"{s.seed} cause the test to fail. Re run with `PIN_RANDOM_SEED={s.seed}`"
