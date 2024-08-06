@@ -12,6 +12,7 @@ import pytest
 import resonate
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.context import Command
+from resonate.dst.scheduler import MultiRandom
 from resonate.events import (
     AwaitedForPromise,
     ExecutionStarted,
@@ -423,3 +424,31 @@ def test_probe() -> None:
     s.add(only_call, n=5)
     s.run()
     assert len(s._probe_results) > 0  # noqa: SLF001
+
+
+def test_multi_random() -> None:
+    checkpoints = [(1, 10), (17, 20)]
+    multi_random_1 = MultiRandom(seed=10, checkpoints=checkpoints)
+    multi_random_2 = MultiRandom(seed=300, checkpoints=checkpoints)
+
+    numbers_to_generate = range(100)
+    numbers_random_1: list[int] = [
+        multi_random_1.randint(0, 100) for _ in numbers_to_generate
+    ]
+    numbers_random_2: list[int] = [
+        multi_random_2.randint(0, 100) for _ in numbers_to_generate
+    ]
+
+    checkpoints_limit = sum(limit for _, limit in checkpoints)
+    assert (
+        numbers_random_1[: checkpoints_limit + 1]
+        == numbers_random_2[: checkpoints_limit + 1]
+    ), f"The first {checkpoints_limit} numbers should be equal"
+    assert (
+        numbers_random_1[checkpoints_limit + 1]
+        != numbers_random_2[checkpoints_limit + 1]
+    ), f"Number {checkpoints_limit+1} should be different"
+    assert (
+        numbers_random_1[checkpoints_limit + 1 :]
+        != numbers_random_2[checkpoints_limit + 1 :]
+    ), f"Numbers after {checkpoints_limit+1} should be different"
