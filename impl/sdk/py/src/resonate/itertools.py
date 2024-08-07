@@ -66,11 +66,7 @@ def unblock_depands_coros(
     except Exception as e:  # noqa: BLE001
         res = Err(e)
 
-    dependant_coros = awaitables.pop(p)
-    logger.debug("Unblocking `%s` pending promises", len(dependant_coros))
-
-    new_runnables = (Runnable(c_and_p, next_value=res) for c_and_p in dependant_coros)
-    runnables.extend(new_runnables)
+    runnables.extend(Runnable(c_and_p, next_value=res) for c_and_p in awaitables.pop(p))
 
 
 def resolve_promise_and_unblock_dependant_coroutines(

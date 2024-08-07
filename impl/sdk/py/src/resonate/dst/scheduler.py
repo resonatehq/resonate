@@ -178,9 +178,9 @@ class DSTScheduler:
 
     def _reset(self) -> None:
         self._runnable_coroutines.clear()
-        self._awaitables.clear()
-        self._events.clear()
         self._runnable_functions.clear()
+        self._awaitables.clear()
+        self._promise_created = 0
 
     def dump(self, file: str) -> None:
         log_file = CWD / (file % (self.seed))
@@ -204,9 +204,8 @@ class DSTScheduler:
             None for _ in range(len(self._top_level_invocations))
         ]
         for idx, top_level_invocation in enumerate(self._top_level_invocations):
-            ctx = Context(
-                dst=True, deps=self.deps, ctx_id=str(self._increate_promise_created())
-            )
+            self._promise_created += 1
+            ctx = Context(dst=True, deps=self.deps, ctx_id=str(self._promise_created))
             p = Promise[Any](
                 promise_id=ctx.ctx_id,
                 invocation=top_level_invocation.to_invocation(),
@@ -342,14 +341,6 @@ class DSTScheduler:
         promises = self._initialize_runnables()
 
         while True:
-            if not self._runnable_functions and not self._runnable_coroutines:
-                cmds_to_be_executed = self._cmds_waiting_to_be_executed()
-                if len(cmds_to_be_executed) == 0:
-                    break
-
-                for cmd in cmds_to_be_executed:
-                    self._execute_commands(cmd)
-
             if self._probe is not None:
                 self._probe_results.append(self._probe(self.deps, self.tick))
 
@@ -359,6 +350,14 @@ class DSTScheduler:
                     self.seed,
                     self.tick,
                 )
+
+            if not self._runnable_functions and not self._runnable_coroutines:
+                cmds_to_be_executed = self._cmds_waiting_to_be_executed()
+                if len(cmds_to_be_executed) == 0:
+                    break
+
+                for cmd in cmds_to_be_executed:
+                    self._execute_commands(cmd)
 
             self.tick += 1
 
@@ -467,10 +466,6 @@ class DSTScheduler:
                 )
         else:
             assert_never(yieldable_or_final_value)
-
-    def _increate_promise_created(self) -> int:
-        self._promise_created += 1
-        return self._promise_created
 
     def _handle_invocation(
         self,
