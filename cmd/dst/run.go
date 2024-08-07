@@ -159,14 +159,13 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 			system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 			// TODO: migrate tick to background coroutines
 			system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
 			system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
-
-			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
-			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,

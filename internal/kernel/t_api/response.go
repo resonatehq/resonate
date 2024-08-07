@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -119,6 +120,7 @@ type HeartbeatLocksResponse struct {
 
 type ClaimTaskResponse struct {
 	Status ResponseStatus `json:"status"`
+	Task   *task.Task     `json:"task"`
 }
 
 type CompleteTaskResponse struct {

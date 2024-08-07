@@ -66,6 +66,9 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.GET("/promises/*id", s.readPromise)
 	authorized.PATCH("/promises/*id", s.completePromise)
 
+	// Callbacks API
+	authorized.POST("/callbacks", s.createCallback)
+
 	// Schedules API
 	authorized.POST("/schedules", s.createSchedule)
 	authorized.GET("/schedules", s.searchSchedules)
@@ -78,6 +81,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
 
 	// Tasks API
+	authorized.GET("/task/claim", s.claimTask)
 	authorized.POST("/tasks/claim", s.claimTask)
 	authorized.POST("/tasks/complete", s.completeTask)
 	authorized.POST("/tasks/heartbeat", s.heartbeatTask)

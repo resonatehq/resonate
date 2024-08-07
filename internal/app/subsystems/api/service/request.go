@@ -36,7 +36,16 @@ type CompletePromiseBody struct {
 	Value promise.Value `json:"value"`
 }
 
-// SCHEDULE
+// CALLBACKS
+
+type CreateCallbackBody struct {
+	PromiseId string `json:"promiseId" binding:"required"`
+	Recv      string `json:"recv" binding:"required"`
+	Body      []byte `json:"body" binding:"required"`
+	Timeout   int64  `json:"timeout" binding:"required"`
+}
+
+// SCHEDULES
 
 type SearchSchedulesParams struct {
 	Id     *string           `form:"id" json:"id,omitempty" binding:"omitempty,min=1"`
@@ -82,9 +91,9 @@ type HeartbeatBody struct {
 // TASKS
 
 type ClaimTaskBody struct {
-	Id        int64 `json:"id" binding:"required"`
-	Counter   int   `json:"counter" binding:"required"`
-	Frequency int   `json:"frequency" binding:"required"`
+	Id        int64 `form:"id" json:"id"`
+	Counter   int   `form:"counter" json:"counter"`
+	Frequency int   `form:"frequency" json:"frequency"`
 }
 
 type CompleteTaskBody struct {

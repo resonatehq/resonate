@@ -7,7 +7,8 @@ import (
 )
 
 type QueueSubmission struct {
-	Task *task.Task
+	ClaimUrl string
+	Task     *task.Task
 }
 
 func (s *QueueSubmission) String() string {

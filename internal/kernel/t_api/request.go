@@ -102,8 +102,8 @@ type RejectPromiseRequest struct {
 
 type CreateCallbackRequest struct {
 	PromiseId string           `json:"promiseId"`
-	Message   *message.Message `json:"message"`
 	Timeout   int64            `json:"timeout"`
+	Message   *message.Message `json:"message"`
 }
 
 // Schedules

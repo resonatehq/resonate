@@ -41,6 +41,7 @@ type APISubsystems struct {
 }
 
 type AIOSubsystems struct {
+	Queue *AIOSubsystemConfig[QueueConfig]
 	Store *AIOSubsystemConfig[StoreConfig]
 }
 
@@ -117,6 +118,10 @@ func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 		ScheduleBatchSize:   c.ScheduleBatchSize.Resolve(r),
 	}
 }
+
+// Queue
+
+type QueueConfig struct{}
 
 // Store
 

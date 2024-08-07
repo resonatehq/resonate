@@ -1,14 +1,24 @@
 package queue
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"time"
+
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Queue struct{}
 
-type QueueDevice struct{}
+type QueueDevice struct {
+	client *http.Client
+}
 
 func New() aio.Subsystem {
 	return &Queue{}
@@ -35,9 +45,52 @@ func (s *Queue) Close() error {
 }
 
 func (s *Queue) NewWorker(int) aio.Worker {
-	return &QueueDevice{}
+	return &QueueDevice{
+		client: &http.Client{Timeout: 1 * time.Second},
+	}
 }
 
 func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	panic("not implemented")
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
+
+	for i, sqe := range sqes {
+		util.Assert(sqe.Submission.Queue != nil, "queue submission must not be nil")
+
+		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Completion: &t_aio.Completion{
+				Kind:  t_aio.Queue,
+				Tags:  sqe.Submission.Tags, // propagate the tags
+				Queue: &t_aio.QueueCompletion{Success: false},
+			},
+			Callback: sqe.Callback,
+		}
+
+		msg := sqe.Submission.Queue.Task.Message
+
+		body, err := json.Marshal(struct{ ClaimUrl string }{sqe.Submission.Queue.ClaimUrl})
+		if err != nil {
+			slog.Warn("json marshal failed", "err", err)
+			continue
+		}
+
+		req, err := http.NewRequest("POST", msg.Recv, bytes.NewBuffer(body))
+		if err != nil {
+			slog.Warn("http request failed", "err", err)
+			continue
+		}
+
+		req.Header.Set("Content-Type", "application/json")
+		res, err := d.client.Do(req)
+		if err != nil {
+			slog.Warn("http request failed", "err", err)
+			continue
+		}
+
+		fmt.Println("Successful", res.StatusCode, res.StatusCode == http.StatusOK)
+
+		// set success accordingly
+		cqes[i].Completion.Queue.Success = res.StatusCode == http.StatusOK
+	}
+
+	return cqes
 }

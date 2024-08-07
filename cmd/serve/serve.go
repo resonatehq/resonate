@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -70,6 +71,7 @@ func ServeCmd() *cobra.Command {
 
 			// add aio subsystems
 			aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
+			aio.AddSubsystem(t_aio.Queue, queue.New(), config.AIO.Subsystems.Queue.Subsystem)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -86,6 +88,7 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
@@ -94,6 +97,13 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+
+			// TODO: migrate to system coroutines
 			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
 			system.AddOnTick(10*time.Second, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
@@ -185,6 +195,9 @@ func ServeCmd() *cobra.Command {
 
 	// aio
 	cmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
+	cmd.Flags().Int("aio-queue-size", 100, "size of queue submission queue buffered channel")
+	cmd.Flags().Int("aio-queue-workers", 1, "number of concurrent connections to the queue")
+	cmd.Flags().Int("aio-queue-batch-size", 100, "max submissions processed each tick by a queue worker")
 	cmd.Flags().String("aio-store", "sqlite", "promise store type")
 	cmd.Flags().Int("aio-store-size", 100, "size of store submission queue buffered channel")
 	cmd.Flags().Int("aio-store-workers", 1, "number of concurrent connections to the store")
@@ -202,6 +215,9 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().Bool("aio-store-postgres-reset", false, "postgres database clean on shutdown")
 
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.size", cmd.Flags().Lookup("aio-queue-size"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.workers", cmd.Flags().Lookup("aio-queue-workers"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.batchSize", cmd.Flags().Lookup("aio-queue-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.workers", cmd.Flags().Lookup("aio-store-workers"))

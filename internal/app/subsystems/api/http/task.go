@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 // CLAIM
@@ -19,9 +21,20 @@ func (s *server) claimTask(c *gin.Context) {
 	}
 
 	var body *service.ClaimTaskBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-		return
+
+	switch c.Request.Method {
+	case "GET":
+		if err := c.ShouldBindQuery(&body); err != nil {
+			c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+			return
+		}
+	case "POST":
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+			return
+		}
+	default:
+		panic("invalid method")
 	}
 
 	resp, err := s.service.ClaimTask(&header, body)
@@ -34,7 +47,12 @@ func (s *server) claimTask(c *gin.Context) {
 		panic(err)
 	}
 
-	c.JSON(resp.Status.HTTP(), nil)
+	if resp.Status == t_api.StatusCreated {
+		util.Assert(resp.Task != nil, "task must be non nil")
+		c.Data(resp.Status.HTTP(), "application/json", resp.Task.Message.Body)
+	} else {
+		c.JSON(resp.Status.HTTP(), nil)
+	}
 }
 
 // COMPLETE
