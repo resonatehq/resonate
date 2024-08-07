@@ -235,7 +235,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
 			PromiseId: promiseId,
-			Message:   &message.Message{Recv: "dst", Body: body},
+			Message:   &message.Message{Recv: "dst", Data: body},
 			Timeout:   timeout,
 		},
 	}

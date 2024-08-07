@@ -3,7 +3,6 @@ package queue
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -50,6 +49,12 @@ func (s *Queue) NewWorker(int) aio.Worker {
 	}
 }
 
+type req struct {
+	Id       int64  `json:"id"`
+	Counter  int    `json:"counter"`
+	ClaimUrl string `json:"claimUrl"`
+}
+
 func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
@@ -65,15 +70,23 @@ func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 			Callback: sqe.Callback,
 		}
 
-		msg := sqe.Submission.Queue.Task.Message
+		var buf bytes.Buffer
 
-		body, err := json.Marshal(struct{ ClaimUrl string }{sqe.Submission.Queue.ClaimUrl})
-		if err != nil {
+		// by default golang escapes html in json, for queue requests we
+		// need to disable this
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+
+		if err := enc.Encode(&req{
+			Id:       sqe.Submission.Queue.Task.Id,
+			Counter:  sqe.Submission.Queue.Task.Counter,
+			ClaimUrl: sqe.Submission.Queue.ClaimUrl,
+		}); err != nil {
 			slog.Warn("json marshal failed", "err", err)
 			continue
 		}
 
-		req, err := http.NewRequest("POST", msg.Recv, bytes.NewBuffer(body))
+		req, err := http.NewRequest("POST", sqe.Submission.Queue.Task.Message.Recv, &buf)
 		if err != nil {
 			slog.Warn("http request failed", "err", err)
 			continue
@@ -85,8 +98,6 @@ func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 			slog.Warn("http request failed", "err", err)
 			continue
 		}
-
-		fmt.Println("Successful", res.StatusCode, res.StatusCode == http.StatusOK)
 
 		// set success accordingly
 		cqes[i].Completion.Queue.Success = res.StatusCode == http.StatusOK

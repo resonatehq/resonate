@@ -40,9 +40,9 @@ type CompletePromiseBody struct {
 
 type CreateCallbackBody struct {
 	PromiseId string `json:"promiseId" binding:"required"`
-	Recv      string `json:"recv" binding:"required"`
-	Body      []byte `json:"body" binding:"required"`
 	Timeout   int64  `json:"timeout" binding:"required"`
+	Recv      string `json:"recv" binding:"required"`
+	Data      []byte `json:"data" binding:"required"`
 }
 
 // SCHEDULES
@@ -97,11 +97,11 @@ type ClaimTaskBody struct {
 }
 
 type CompleteTaskBody struct {
-	Id      int64 `json:"id" binding:"required"`
-	Counter int   `json:"counter" binding:"required"`
+	Id      int64 `json:"id"`
+	Counter int   `json:"counter"`
 }
 
 type HeartbeatTaskBody struct {
-	Id      int64 `json:"id" binding:"required"`
-	Counter int   `json:"counter" binding:"required"`
+	Id      int64 `json:"id"`
+	Counter int   `json:"counter"`
 }

@@ -27,7 +27,7 @@ func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_a
 			Timeout:   body.Timeout,
 			Message: &message.Message{
 				Recv: body.Recv,
-				Body: body.Body,
+				Data: body.Data,
 			},
 		},
 	}

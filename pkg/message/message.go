@@ -4,13 +4,13 @@ import "fmt"
 
 type Message struct {
 	Recv string `json:"recv"`
-	Body []byte `json:"body"`
+	Data []byte `json:"data"`
 }
 
 func (m *Message) String() string {
 	return fmt.Sprintf(
-		"Message(recv=%s, body=%d)",
+		"Message(recv=%s, data=%d)",
 		m.Recv,
-		len(m.Body),
+		len(m.Data),
 	)
 }

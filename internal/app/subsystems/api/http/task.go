@@ -49,7 +49,7 @@ func (s *server) claimTask(c *gin.Context) {
 
 	if resp.Status == t_api.StatusCreated {
 		util.Assert(resp.Task != nil, "task must be non nil")
-		c.Data(resp.Status.HTTP(), "application/json", resp.Task.Message.Body)
+		c.Data(resp.Status.HTTP(), "application/json", resp.Task.Message.Data)
 	} else {
 		c.JSON(resp.Status.HTTP(), nil)
 	}

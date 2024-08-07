@@ -7,8 +7,8 @@ import (
 )
 
 type QueueSubmission struct {
-	ClaimUrl string
-	Task     *task.Task
+	ClaimUrl string     `json:"claimUrl"`
+	Task     *task.Task `json:"task"`
 }
 
 func (s *QueueSubmission) String() string {

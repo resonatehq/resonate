@@ -11,6 +11,8 @@ import (
 )
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	completedOn := c.Time()
+
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Tags,
@@ -25,6 +27,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 							Counter:        r.CompleteTask.Counter,
 							Frequency:      0,
 							Expiration:     0,
+							CompletedOn:    &completedOn,
 							CurrentStates:  []task.State{task.Claimed},
 							CurrentCounter: r.CompleteTask.Counter,
 						},

@@ -62,7 +62,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.Queue,
 					Tags: tags,
 					Queue: &t_aio.QueueSubmission{
-						ClaimUrl: fmt.Sprintf("http://localhost:8001/task/claim?id=%d&counter=%d&frequency=%d", t.Id, t.Counter, 10000),
+						ClaimUrl: fmt.Sprintf("http://localhost:8001/tasks/claim?id=%d&counter=%d&frequency=%d", t.Id, t.Counter, 10000),
 						Task:     t,
 					},
 				})
