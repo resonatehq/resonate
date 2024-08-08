@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -54,8 +55,12 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 		t.Fatal(err)
 	}
 
+	// instantiate backchannel
+	backchannel := make(chan interface{}, 100)
+
 	// add api subsystems
 	aio.AddSubsystem(t_aio.Store, store, nil)
+	aio.AddSubsystem(t_aio.Queue, queue.NewDST(backchannel), nil)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -63,6 +68,7 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
+	system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
@@ -70,6 +76,13 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
+	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+	system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+	system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+	system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+
+	// TODO: migrate tick to background coroutines
 	system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
 	system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
 	system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
@@ -93,7 +106,7 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 		VisualizationPath:  vp,
 		TimeElapsedPerTick: 1000, // ms
 		TimeoutTicks:       timeoutTicks,
-		ReqsPerTick:        func() int { return RangeIntn(r, 0, 25) },
+		ReqsPerTick:        func() int { return RangeIntn(r, 0, 15) },
 		MaxReqsPerTick:     25,
 		Ids:                10,
 		IdempotencyKeys:    10,
@@ -102,6 +115,7 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 		Tags:               10,
 		Searches:           10,
 		FaultInjection:     p != 0,
+		Backchannel:        backchannel,
 	})
 
 	ok := dst.Run(r, api, aio, system)

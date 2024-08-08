@@ -7,11 +7,12 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Validator struct {
-	responses map[t_api.Kind]ResponseValidator
-	regexes   map[string]*regexp.Regexp
+	regexes    map[string]*regexp.Regexp
+	validators map[t_api.Kind]ResponseValidator
 }
 
 type ResponseValidator func(*Model, int64, int64, *t_api.Request, *t_api.Response) (*Model, error)
@@ -24,17 +25,17 @@ func NewValidator(r *rand.Rand, config *Config) *Validator {
 	}
 
 	return &Validator{
-		responses: make(map[t_api.Kind]ResponseValidator),
-		regexes:   regexes,
+		regexes:    regexes,
+		validators: map[t_api.Kind]ResponseValidator{},
 	}
 }
 
-func (v *Validator) AddResponse(kind t_api.Kind, response ResponseValidator) {
-	v.responses[kind] = response
+func (v *Validator) AddValidator(kind t_api.Kind, validator ResponseValidator) {
+	v.validators[kind] = validator
 }
 
 func (v *Validator) Validate(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	f, ok := v.responses[res.Kind]
+	f, ok := v.validators[res.Kind]
 	if !ok {
 		return model, fmt.Errorf("unexpected response kind '%s'", res.Kind)
 	}
@@ -246,6 +247,41 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 	}
 }
 
+// CALLBACKS
+
+func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	p := model.promises.get(req.CreateCallback.PromiseId)
+
+	switch res.CreateCallback.Status {
+	case t_api.StatusCreated:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Pending {
+			return model, fmt.Errorf("promise '%s' must be pending", req.CreateCallback.PromiseId)
+		}
+		if model.callbacks.get(res.CreateCallback.Callback.Id) != nil {
+			return model, fmt.Errorf("callback '%d' exists", res.CreateCallback.Callback.Id)
+		}
+
+		model = model.Copy()
+		model.callbacks.set(res.CreateCallback.Callback.Id, res.CreateCallback.Callback)
+		return model, nil
+	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedout:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	case t_api.StatusPromiseNotFound:
+		if p != nil {
+			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.CreateCallback.Status)
+	}
+}
+
 // SCHEDULES
 
 func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
@@ -423,5 +459,176 @@ func (v *Validator) ValidateHeartbeatLocks(model *Model, reqTime int64, resTime 
 		return model, nil
 	default:
 		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatLocks.Status)
+	}
+}
+
+func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	t := model.tasks.get(req.ClaimTask.Id)
+
+	switch res.ClaimTask.Status {
+	case t_api.StatusCreated:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+		}
+		if t.State != task.Init && t.State != task.Enqueued {
+			return model, fmt.Errorf("task '%d' not claimable", req.ClaimTask.Id)
+		}
+		if req.ClaimTask.Counter != t.Counter {
+			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
+		}
+
+		model = model.Copy()
+		model.tasks.set(req.ClaimTask.Id, &task.Task{
+			Id:         t.Id,
+			State:      task.Claimed,
+			Timeout:    t.Timeout,
+			Counter:    req.ClaimTask.Counter,
+			Frequency:  req.ClaimTask.Frequency,
+			Expiration: reqTime + int64(req.ClaimTask.Frequency), // approximation
+		})
+		return model, nil
+	case t_api.StatusTaskAlreadyClaimed:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%d' not claimed", req.ClaimTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskAlreadyCompleted:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+		}
+		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
+			return model, fmt.Errorf("task '%d' not completed", req.ClaimTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidCounter:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+		}
+		if req.ClaimTask.Counter == t.Counter && t.Expiration >= resTime {
+			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%d' exists", req.ClaimTask.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
+	}
+}
+
+func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	t := model.tasks.get(req.CompleteTask.Id)
+
+	switch res.CompleteTask.Status {
+	case t_api.StatusCreated:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%d' state not claimed", req.CompleteTask.Id)
+		}
+		if req.CompleteTask.Counter != t.Counter {
+			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
+		}
+
+		model = model.Copy()
+		model.tasks.set(req.CompleteTask.Id, &task.Task{
+			Id:         t.Id,
+			State:      task.Completed,
+			Timeout:    t.Timeout,
+			Counter:    t.Counter,
+			Frequency:  t.Frequency,
+			Expiration: 0,
+		})
+		return model, nil
+	case t_api.StatusTaskAlreadyCompleted:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+		}
+		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
+			return model, fmt.Errorf("task '%d' state not completed", req.CompleteTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidCounter:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+		}
+		if req.CompleteTask.Counter == t.Counter && t.Expiration >= resTime {
+			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidState:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%d' exists", req.CompleteTask.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.CompleteTask.Status)
+	}
+}
+
+func (v *Validator) ValidateHeartbeatTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	t := model.tasks.get(req.HeartbeatTask.Id)
+
+	switch res.HeartbeatTask.Status {
+	case t_api.StatusCreated:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
+		}
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%d' state not claimed", req.HeartbeatTask.Id)
+		}
+		if req.HeartbeatTask.Counter != t.Counter {
+			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.HeartbeatTask.Id, req.HeartbeatTask.Counter, t.Counter)
+		}
+
+		model = model.Copy()
+		model.tasks.set(req.HeartbeatTask.Id, &task.Task{
+			Id:         t.Id,
+			State:      task.Claimed,
+			Timeout:    t.Timeout,
+			Counter:    t.Counter,
+			Frequency:  t.Frequency,
+			Expiration: reqTime + int64(t.Frequency), // approximation
+		})
+		return model, nil
+	case t_api.StatusTaskAlreadyCompleted:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
+		}
+		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
+			return model, fmt.Errorf("task '%d' state not completed", req.HeartbeatTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidCounter:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
+		}
+		if req.HeartbeatTask.Counter == t.Counter && t.Expiration >= resTime {
+			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.HeartbeatTask.Id, req.HeartbeatTask.Counter, t.Counter)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidState:
+		if t == nil {
+			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%d' exists", req.HeartbeatTask.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatTask.Status)
 	}
 }

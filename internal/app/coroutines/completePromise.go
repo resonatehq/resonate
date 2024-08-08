@@ -49,7 +49,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	if result.RowsReturned == 0 {
 		res = &t_api.Response{
-			Kind: r.Kind,
+			Kind: t_api.CompletePromise,
 			Tags: r.Tags,
 			CompletePromise: &t_api.CompletePromiseResponse{
 				Status: t_api.StatusPromiseNotFound,
@@ -93,7 +93,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				}
 
 				res = &t_api.Response{
-					Kind: r.Kind,
+					Kind: t_api.CompletePromise,
 					Tags: r.Tags,
 					CompletePromise: &t_api.CompletePromiseResponse{
 						Status: status,
@@ -115,7 +115,10 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					},
 				}
 			} else {
+				// Bind the current time to a variable so we can include it in
+				// the response, when the coroutine time is advanced.
 				completedOn := c.Time()
+
 				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 					Kind: t_aio.Store,
 					Tags: r.Tags,
@@ -132,6 +135,19 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 										CompletedOn:    completedOn,
 									},
 								},
+								{
+									Kind: t_aio.CreateTasks,
+									CreateTasks: &t_aio.CreateTasksCommand{
+										PromiseId: r.CompletePromise.Id,
+										CreatedOn: completedOn,
+									},
+								},
+								{
+									Kind: t_aio.DeleteCallbacks,
+									DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
+										PromiseId: r.CompletePromise.Id,
+									},
+								},
 							},
 						},
 					},
@@ -143,13 +159,18 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				}
 
 				util.Assert(completion.Store != nil, "completion must not be nil")
+				util.Assert(len(completion.Store.Results) == 3, "completion must have three results")
+				util.Assert(completion.Store.Results[0].UpdatePromise != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[1].CreateTasks != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[2].DeleteCallbacks != nil, "result must not be nil")
+				util.Assert(completion.Store.Results[1].CreateTasks.RowsAffected == completion.Store.Results[2].DeleteCallbacks.RowsAffected, "created rows must equal deleted rows")
 
 				result := completion.Store.Results[0].UpdatePromise
 				util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 				if result.RowsAffected == 1 {
 					res = &t_api.Response{
-						Kind: r.Kind,
+						Kind: t_api.CompletePromise,
 						Tags: r.Tags,
 						CompletePromise: &t_api.CompletePromiseResponse{
 							Status: t_api.StatusCreated,
@@ -183,7 +204,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 
 			res = &t_api.Response{
-				Kind: r.Kind,
+				Kind: t_api.CompletePromise,
 				Tags: r.Tags,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status:  status,

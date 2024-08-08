@@ -3,16 +3,19 @@ package t_aio
 type Kind int
 
 const (
-	Store Kind = iota
-	Echo
+	Echo Kind = iota
+	Queue
+	Store
 )
 
 func (k Kind) String() string {
 	switch k {
-	case Store:
-		return "store"
 	case Echo:
 		return "echo"
+	case Queue:
+		return "queue"
+	case Store:
+		return "store"
 	default:
 		panic("invalid aio")
 	}
@@ -22,8 +25,9 @@ type Submission struct {
 	Kind Kind
 	Tags map[string]string
 
-	Store *StoreSubmission
 	Echo  *EchoSubmission
+	Queue *QueueSubmission
+	Store *StoreSubmission
 }
 
 func (s *Submission) Id() string {
@@ -32,10 +36,12 @@ func (s *Submission) Id() string {
 
 func (s *Submission) String() string {
 	switch s.Kind {
-	case Store:
-		return s.Store.String()
 	case Echo:
 		return s.Echo.String()
+	case Queue:
+		return s.Queue.String()
+	case Store:
+		return s.Store.String()
 	default:
 		panic("invalid aio submission")
 	}
@@ -45,8 +51,9 @@ type Completion struct {
 	Kind Kind
 	Tags map[string]string
 
-	Store *StoreCompletion
 	Echo  *EchoCompletion
+	Queue *QueueCompletion
+	Store *StoreCompletion
 }
 
 func (c *Completion) Id() string {
@@ -57,6 +64,8 @@ func (c *Completion) String() string {
 	switch c.Kind {
 	case Echo:
 		return c.Echo.String()
+	case Queue:
+		return c.Queue.String()
 	case Store:
 		return c.Store.String()
 	default:
