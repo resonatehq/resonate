@@ -32,7 +32,7 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 							Kind: t_aio.ReadSchedules,
 							ReadSchedules: &t_aio.ReadSchedulesCommand{
 								NextRunTime: c.Time(),
-								Limit:       int64(config.ScheduleBatchSize),
+								Limit:       config.ScheduleBatchSize,
 							},
 						},
 					},

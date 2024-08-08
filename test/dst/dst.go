@@ -38,7 +38,7 @@ type Config struct {
 	Tags               int
 	Searches           int
 	FaultInjection     bool
-	TaskBackchannel    chan *task.Task
+	Backchannel        chan interface{}
 }
 
 type Kind int
@@ -80,9 +80,11 @@ func (d *DST) Add(kind t_api.Kind, generator RequestGenerator, validator Respons
 }
 
 func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System) bool {
+	util.Assert(d.config.Backchannel != nil, "backchannel must be non nil")
+
 	// promises
-	// d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
-	// d.Add(t_api.SearchPromises, d.generator.GenerateSearchPromises, d.validator.ValidateSearchPromises)
+	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
+	d.Add(t_api.SearchPromises, d.generator.GenerateSearchPromises, d.validator.ValidateSearchPromises)
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
@@ -90,25 +92,23 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
 	// schedules
-	// d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
-	// d.Add(t_api.SearchSchedules, d.generator.GenerateSearchSchedules, d.validator.ValidateSearchSchedules)
-	// d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
-	// d.Add(t_api.DeleteSchedule, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
+	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
+	d.Add(t_api.SearchSchedules, d.generator.GenerateSearchSchedules, d.validator.ValidateSearchSchedules)
+	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
+	d.Add(t_api.DeleteSchedule, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
 
 	// locks
-	// d.Add(t_api.AcquireLock, d.generator.GenerateAcquireLock, d.validator.ValidateAcquireLock)
-	// d.Add(t_api.ReleaseLock, d.generator.GenerateReleaseLock, d.validator.ValidateReleaseLock)
-	// d.Add(t_api.HeartbeatLocks, d.generator.GenerateHeartbeatLocks, d.validator.ValidateHeartbeatLocks)
+	d.Add(t_api.AcquireLock, d.generator.GenerateAcquireLock, d.validator.ValidateAcquireLock)
+	d.Add(t_api.ReleaseLock, d.generator.GenerateReleaseLock, d.validator.ValidateReleaseLock)
+	d.Add(t_api.HeartbeatLocks, d.generator.GenerateHeartbeatLocks, d.validator.ValidateHeartbeatLocks)
 
 	// tasks
 	d.Add(t_api.ClaimTask, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
 	d.Add(t_api.CompleteTask, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
 	d.Add(t_api.HeartbeatTask, d.generator.GenerateHeartbeatTask, d.validator.ValidateHeartbeatTask)
 
+	// porcupine ops
 	var ops []porcupine.Operation
-
-	// extra information to feed the generator
-	// var cursors []*t_api.Request
 
 	// run all requests through the server and collect responses
 	var t, i, j int64
@@ -172,30 +172,40 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		system.Tick(time, nil, nil)
 
 		// now read from the callback channel
-		for len(d.config.TaskBackchannel) > 0 {
-			task := <-d.config.TaskBackchannel
+		for len(d.config.Backchannel) > 0 {
+			var bc *Backchannel
+			obj := <-d.config.Backchannel
 
-			// randomly decrement the counter, we only decrement so that we
-			// know a successful claim task request can only occur after
-			// our model has been updated via the backchannel
-			counter := task.Counter - r.Intn(2)
+			switch obj := obj.(type) {
+			case *task.Task:
+				bc = &Backchannel{
+					Task: obj,
+				}
 
-			// add claim, complete reqs to generator
-			d.generator.AddRequest(&t_api.Request{
-				Kind: t_api.ClaimTask,
-				ClaimTask: &t_api.ClaimTaskRequest{
-					Id:        task.Id,
-					Counter:   counter,
-					Frequency: RangeIntn(r, 1000, 5000),
-				},
-			})
+				// randomly decrement the counter, we only decrement so that we
+				// know a successful claim task request can only occur after
+				// our model has been updated via the backchannel
+				counter := obj.Counter - r.Intn(2)
+
+				// add claim req to generator
+				d.generator.AddRequest(&t_api.Request{
+					Kind: t_api.ClaimTask,
+					ClaimTask: &t_api.ClaimTaskRequest{
+						Id:        obj.Id,
+						Counter:   counter,
+						Frequency: RangeIntn(r, 1000, 5000),
+					},
+				})
+			default:
+				panic("invalid backchannel type")
+			}
 
 			// add backchannel op to porcupine
 			ops = append(ops, porcupine.Operation{
 				ClientId: int(j % int64(d.config.MaxReqsPerTick)),
 				Call:     time,
 				Return:   time,
-				Input:    &Req{Bc, time, nil, &Backchannel{task}},
+				Input:    &Req{Bc, time, nil, bc},
 				Output:   &Res{Bc, time, nil, nil},
 			})
 

@@ -30,7 +30,8 @@ func setup(auth map[string]string) *httpTest {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem := New(api, &Config{
-		Addr:    "127.0.0.1:8888",
+		Host:    "127.0.0.1",
+		Port:    8888,
 		Auth:    auth,
 		Timeout: 1 * time.Second,
 	})

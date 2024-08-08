@@ -28,7 +28,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 							ReadTasks: &t_aio.ReadTasksCommand{
 								States: []task.State{task.Init},
 								Time:   c.Time(),
-								Limit:  5, // TODO
+								Limit:  config.TaskBatchSize,
 							},
 						},
 					},
@@ -62,7 +62,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.Queue,
 					Tags: tags,
 					Queue: &t_aio.QueueSubmission{
-						ClaimUrl: fmt.Sprintf("http://localhost:8001/tasks/claim?id=%d&counter=%d&frequency=%d", t.Id, t.Counter, 10000),
+						ClaimUrl: fmt.Sprintf("%s/tasks/claim?id=%d&counter=%d&frequency=%d", config.Url, t.Id, t.Counter, 10000),
 						Task:     t,
 					},
 				})
@@ -103,7 +103,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Enqueued,
 						Counter:        t.Counter,
 						Frequency:      0,
-						Expiration:     c.Time() + 10000, // time to be claimed
+						Expiration:     c.Time() + int64(config.TaskEnqueueDelay), // time to be claimed
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
@@ -116,7 +116,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Init,
 						Counter:        t.Counter,
 						Frequency:      0,
-						Expiration:     c.Time() + 10000, // time until reenqueued
+						Expiration:     c.Time() + int64(config.TaskEnqueueDelay), // time until reenqueued
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},

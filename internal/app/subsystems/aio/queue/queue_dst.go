@@ -4,18 +4,17 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type QueueDST struct {
-	backchannel chan *task.Task
+	backchannel chan interface{}
 }
 
 type QueueDSTDevice struct {
-	backchannel chan *task.Task
+	backchannel chan interface{}
 }
 
-func NewDST(backchannel chan *task.Task) aio.Subsystem {
+func NewDST(backchannel chan interface{}) aio.Subsystem {
 	return &QueueDST{
 		backchannel: backchannel,
 	}

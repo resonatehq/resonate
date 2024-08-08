@@ -19,21 +19,26 @@ import (
 )
 
 type Config struct {
+	Url                   string
 	CoroutineMaxSize      int
 	NotificationCacheSize int
 	SubmissionBatchSize   int
 	CompletionBatchSize   int
 	ScheduleBatchSize     int
+	TaskBatchSize         int
+	TaskEnqueueDelay      int
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(cms=%d, ncs=%d, sbs=%d, cbs=%d, sbs=%d)",
+		"Config(cms=%d, ncs=%d, sbs=%d, cbs=%d, sbs=%d, tbs=%d, ted=%d)",
 		c.CoroutineMaxSize,
 		c.NotificationCacheSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
 		c.ScheduleBatchSize,
+		c.TaskBatchSize,
+		c.TaskEnqueueDelay,
 	)
 }
 

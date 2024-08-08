@@ -38,6 +38,15 @@ func ServeCmd() *cobra.Command {
 				return err
 			}
 
+			// defaults
+			if config.System.Url == "" {
+				host := config.API.Subsystems.Http.Host
+				if host == "0.0.0.0" {
+					host = "127.0.0.1"
+				}
+				config.System.Url = fmt.Sprintf("http://%s:%d", host, config.API.Subsystems.Http.Port)
+			}
+
 			// logger
 			logLevel, err := log.ParseLevel(config.Log.Level)
 			if err != nil {
@@ -180,18 +189,20 @@ func ServeCmd() *cobra.Command {
 
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
-	cmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
+	cmd.Flags().String("api-http-host", "0.0.0.0", "http server host")
+	cmd.Flags().Int("api-http-port", 8001, "http server port")
 	cmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
-	cmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
-	cmd.Flags().String("api-base-url", "http://localhost:8001", "base url to automatically generate absolute URLs for the server's resources")
 	cmd.Flags().StringToString("api-http-auth", map[string]string{}, "basic auth username/password pairs")
+	cmd.Flags().String("api-grpc-host", "0.0.0.0", "grpc server host")
+	cmd.Flags().Int("api-grpc-port", 50051, "grpc server port")
 
-	_ = viper.BindPFlag("api.subsystems.http.auth", cmd.Flags().Lookup("api-http-auth"))
 	_ = viper.BindPFlag("api.size", cmd.Flags().Lookup("api-size"))
-	_ = viper.BindPFlag("api.subsystems.http.addr", cmd.Flags().Lookup("api-http-addr"))
+	_ = viper.BindPFlag("api.subsystems.http.host", cmd.Flags().Lookup("api-http-host"))
+	_ = viper.BindPFlag("api.subsystems.http.port", cmd.Flags().Lookup("api-http-port"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", cmd.Flags().Lookup("api-http-timeout"))
-	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
-	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
+	_ = viper.BindPFlag("api.subsystems.http.auth", cmd.Flags().Lookup("api-http-auth"))
+	_ = viper.BindPFlag("api.subsystems.grpc.host", cmd.Flags().Lookup("api-grpc-host"))
+	_ = viper.BindPFlag("api.subsystems.grpc.port", cmd.Flags().Lookup("api-grpc-port"))
 
 	// aio
 	cmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
@@ -236,17 +247,23 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.reset", cmd.Flags().Lookup("aio-store-postgres-reset"))
 
 	// system
+	cmd.Flags().String("system-url", "", "resonate server url")
 	cmd.Flags().Int("system-coroutine-max-size", 1000, "max number of coroutines to run concurrently")
 	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	cmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	cmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
 	cmd.Flags().Int("system-schedule-batch-size", 1000, "max number of schedules to process on each tick")
+	cmd.Flags().Int("system-task-batch-size", 1000, "max number of tasks to process on each iteration")
+	cmd.Flags().Int("system-task-enqueue-delay", 10000, "ms to wait before attempting to reenqueue a task")
 
+	_ = viper.BindPFlag("system.url", cmd.Flags().Lookup("system-url"))
 	_ = viper.BindPFlag("system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
 	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+	_ = viper.BindPFlag("system.taskBatchSize", cmd.Flags().Lookup("system-task-batch-size"))
+	_ = viper.BindPFlag("system.taskEnqueueDelay", cmd.Flags().Lookup("system-task-enqueue-delay"))
 
 	// metrics
 	cmd.Flags().Int("metrics-port", 9090, "prometheus metrics server port")

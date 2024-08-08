@@ -21,7 +21,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/log"
-	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -50,6 +49,10 @@ func RunDSTCmd() *cobra.Command {
 		submissionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		completionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		scheduleBatchSize   = util.RangeIntFlag{Min: 1, Max: 1000}
+		taskBatchSize       = util.RangeIntFlag{Min: 1, Max: 1000}
+		taskEnqueueDelay    = util.RangeIntFlag{Min: 1000, Max: 10000}
+
+		backchannelSize = util.RangeIntFlag{Min: 1, Max: 1000}
 	)
 
 	cmd := &cobra.Command{
@@ -128,7 +131,8 @@ func RunDSTCmd() *cobra.Command {
 				return err
 			}
 
-			backchannel := make(chan *task.Task, 1000)
+			// instantiate backchannel
+			backchannel := make(chan interface{}, backchannelSize.Resolve(r))
 
 			// add api subsystems
 			aio.AddSubsystem(t_aio.Store, store, nil)
@@ -182,7 +186,7 @@ func RunDSTCmd() *cobra.Command {
 				Tags:               tags.Resolve(r),
 				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
-				TaskBackchannel:    backchannel,
+				Backchannel:        backchannel,
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -265,11 +269,15 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&submissionBatchSize, "system-submission-batch-size", "size of the completion queue buffered channel")
 	cmd.Flags().Var(&completionBatchSize, "system-completion-batch-size", "max number of completions to process on each tick")
 	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each tick")
+	cmd.Flags().Var(&taskBatchSize, "system-task-batch-size", "max number of tasks to process on each iteration")
+	cmd.Flags().Var(&taskEnqueueDelay, "system-task-enqueue-delay", "ms to wait before attempting to reenqueue a task")
 
 	_ = viper.BindPFlag("dst.system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
 	_ = viper.BindPFlag("dst.system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+	_ = viper.BindPFlag("dst.system.taskBatchSize", cmd.Flags().Lookup("system-task-batch-size"))
+	_ = viper.BindPFlag("dst.system.taskEnqueueDelay", cmd.Flags().Lookup("system-task-enqueue-delay"))
 
 	cmd.Flags().SortFlags = false
 

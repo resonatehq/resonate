@@ -140,6 +140,11 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request {
+	// grab a cursor if one is available
+	if req := g.pop(r, t_api.SearchPromises); req != nil {
+		return req
+	}
+
 	id := g.searchSet[r.Intn(len(g.searchSet))]
 	limit := RangeIntn(r, 1, 11)
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
@@ -255,6 +260,11 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 }
 
 func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Request {
+	// grab a cursor if one is available
+	if req := g.pop(r, t_api.SearchSchedules); req != nil {
+		return req
+	}
+
 	id := g.searchSet[r.Intn(len(g.searchSet))]
 	limit := RangeIntn(r, 1, 11)
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]

@@ -300,7 +300,7 @@ type ReadScheduleCommand struct {
 
 type ReadSchedulesCommand struct {
 	NextRunTime int64
-	Limit       int64
+	Limit       int
 }
 
 type SearchSchedulesCommand struct {
@@ -355,7 +355,7 @@ type ReadTaskCommand struct {
 type ReadTasksCommand struct {
 	States []task.State
 	Time   int64
-	Limit  int64
+	Limit  int
 }
 
 type CreateTasksCommand struct {

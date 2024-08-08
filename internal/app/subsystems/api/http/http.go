@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -17,12 +18,14 @@ import (
 )
 
 type Config struct {
-	Addr    string
+	Host    string
+	Port    int
 	Auth    map[string]string
 	Timeout time.Duration
 }
 
 type Http struct {
+	addr   string
 	config *Config
 	server *http.Server
 }
@@ -45,6 +48,8 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	r := gin.New()
 	s := &server{service: service.New(api, "http")}
+
+	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 
 	// Register custom validators
 	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
@@ -87,16 +92,17 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.POST("/tasks/heartbeat", s.heartbeatTask)
 
 	return &Http{
+		addr:   addr,
 		config: config,
 		server: &http.Server{
-			Addr:    config.Addr,
+			Addr:    addr,
 			Handler: r,
 		},
 	}
 }
 
 func (h *Http) Start(errors chan<- error) {
-	slog.Info("starting http server", "addr", h.config.Addr)
+	slog.Info("starting http server", "addr", h.addr)
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		errors <- err
 	}

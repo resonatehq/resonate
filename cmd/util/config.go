@@ -25,7 +25,6 @@ type Config struct {
 }
 
 type APIConfig struct {
-	BaseURL    string
 	Size       int
 	Subsystems *APISubsystems
 }
@@ -108,6 +107,8 @@ type SystemConfigDST struct {
 	SubmissionBatchSize   *RangeIntFlag
 	CompletionBatchSize   *RangeIntFlag
 	ScheduleBatchSize     *RangeIntFlag
+	TaskBatchSize         *RangeIntFlag
+	TaskEnqueueDelay      *RangeIntFlag
 }
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
@@ -116,6 +117,8 @@ func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 		SubmissionBatchSize: c.SubmissionBatchSize.Resolve(r),
 		CompletionBatchSize: c.CompletionBatchSize.Resolve(r),
 		ScheduleBatchSize:   c.ScheduleBatchSize.Resolve(r),
+		TaskBatchSize:       c.TaskBatchSize.Resolve(r),
+		TaskEnqueueDelay:    c.TaskEnqueueDelay.Resolve(r),
 	}
 }
 
