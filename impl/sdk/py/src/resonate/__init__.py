@@ -1,5 +1,5 @@
 from __future__ import annotations
 
-from . import testing
+from . import random, testing
 
-__all__ = ["testing"]
+__all__ = ["testing", "random"]

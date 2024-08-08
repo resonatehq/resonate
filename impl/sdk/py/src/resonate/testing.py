@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from typing_extensions import Concatenate, assert_never
 
+from resonate import random
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.dst.scheduler import DSTScheduler, Mode
 
@@ -40,7 +41,7 @@ def dst(  # noqa: PLR0913
         if isinstance(seed, range):
             schedulers.extend(
                 DSTScheduler(
-                    i,
+                    random=random.Random(i),
                     mocks=mocks,
                     mode=mode,
                     failure_chance=failure_chance,
@@ -55,7 +56,7 @@ def dst(  # noqa: PLR0913
         elif isinstance(seed, int):
             schedulers.append(
                 DSTScheduler(
-                    seed=seed,
+                    random=random.Random(seed),
                     mocks=mocks,
                     mode=mode,
                     failure_chance=failure_chance,

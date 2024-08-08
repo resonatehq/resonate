@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import random
 from collections import deque
 from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
@@ -41,6 +40,8 @@ from resonate.typing import (
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
+
+    from resonate import random
 
 
 T = TypeVar("T")
@@ -104,7 +105,7 @@ class DSTScheduler:
 
     def __init__(  # noqa: PLR0913
         self,
-        seed: int,
+        random: random.Random,
         mocks: dict[
             Callable[Concatenate[Context, ...], Any | Coroutine[Any, Any, Any]],
             Callable[[], Any],
@@ -131,8 +132,8 @@ class DSTScheduler:
         self._top_level_invocations: deque[_TopLevelInvoke] = deque()
         self._mode: Mode = mode
 
-        self.seed = seed
-        self.random = random.Random(seed)  # noqa: RUF100, S311
+        self.random = random
+        self.seed = random.seed
 
         self.deps = Dependencies()
         self.mocks = mocks or {}
@@ -268,7 +269,7 @@ class DSTScheduler:
             ), "There should something in runnable functions"
 
         else:
-            next_step = self.random.choice(["functions", "coroutines"])
+            next_step = self.random.choice(("functions", "coroutines"))
 
         return next_step
 
@@ -369,18 +370,12 @@ class DSTScheduler:
 
             next_step = self._next_step()
             if next_step == "functions":
-                function_wrapper, p = _get_random_element(
-                    self._runnable_functions,
-                    self.random,
-                    self._mode,
-                )
+                function_wrapper, p = self._get_random_element(self._runnable_functions)
                 self._run_function_and_move_awaitables_to_runnables(function_wrapper, p)
 
             elif next_step == "coroutines":
-                runnable = _get_random_element(
+                runnable = self._get_random_element(
                     self._runnable_coroutines,
-                    self.random,
-                    self._mode,
                 )
                 self._process_each_runnable(runnable=runnable)
             else:
@@ -511,12 +506,15 @@ class DSTScheduler:
     def get_events(self) -> list[SchedulerEvents]:
         return self._events
 
-
-def _get_random_element(array: list[T], r: random.Random, mode: Mode) -> T:
-    pop_idx = -1
-    if mode == "concurrent":
-        pop_idx = r.randint(0, len(array) - 1)
-    return array.pop(pop_idx)
+    def _get_random_element(self, array: list[T]) -> T:
+        pop_idx: int
+        if self._mode == "sequential":
+            pop_idx = -1
+        elif self._mode == "concurrent":
+            pop_idx = self.random.randint(0, len(array) - 1)
+        else:
+            assert_never(self._mode)
+        return array.pop(pop_idx)
 
 
 def _safe_run(fn: Callable[[], T]) -> Result[T, Exception]:
