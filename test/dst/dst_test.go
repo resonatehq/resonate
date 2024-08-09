@@ -79,12 +79,13 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+
+	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 	system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 	system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 	// TODO: migrate tick to background coroutines
 	system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
-	system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
 	system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
 
 	// start api/aio

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
+	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -25,12 +26,6 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
-						Kind: t_aio.TimeoutPromises,
-						TimeoutPromises: &t_aio.TimeoutPromisesCommand{
-							Time: c.Time(),
-						},
-					},
-					{
 						Kind: t_aio.SearchPromises,
 						SearchPromises: &t_aio.SearchPromisesCommand{
 							Id:     r.SearchPromises.Id,
@@ -51,19 +46,44 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	util.Assert(len(completion.Store.Results) == 2, "must have two results")
+	util.Assert(len(completion.Store.Results) == 1, "must have two results")
 
-	result := completion.Store.Results[1].SearchPromises
+	result := completion.Store.Results[0].SearchPromises
 	promises := []*promise.Promise{}
+	awaiting := []gocoroPromise.Awaitable[bool]{}
 
 	for _, record := range result.Records {
-		promise, err := record.Promise()
+		p, err := record.Promise()
 		if err != nil {
 			slog.Warn("failed to parse promise record", "record", record, "err", err)
 			continue
 		}
 
-		promises = append(promises, promise)
+		if p.State == promise.Pending && c.Time() >= p.Timeout {
+			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(p.Timeout, &t_api.Request{
+				Kind: t_api.CompletePromise,
+				Tags: r.Tags,
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:    p.Id,
+					State: promise.GetTimedoutState(p),
+				},
+			})))
+
+			continue
+		}
+
+		promises = append(promises, p)
+	}
+
+	for _, p := range awaiting {
+		if _, err := gocoro.Await(c, p); err != nil {
+			return nil, err
+		}
+	}
+
+	if len(awaiting) > 0 {
+		// If we lazily timeout promises we need to search again
+		return SearchPromises(c, r)
 	}
 
 	// set cursor only if there are more results

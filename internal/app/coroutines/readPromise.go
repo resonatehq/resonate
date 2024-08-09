@@ -56,12 +56,19 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		}
 
 		if p.State == promise.Pending && c.Time() >= p.Timeout {
-			success, err := gocoro.SpawnAndAwait(c, TimeoutPromise(p))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(p.Timeout, &t_api.Request{
+				Kind: t_api.CompletePromise,
+				Tags: r.Tags,
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:    p.Id,
+					State: promise.GetTimedoutState(p),
+				},
+			}))
 			if err != nil {
 				return nil, err
 			}
 
-			if !success {
+			if !ok {
 				// It's possible that the promise was completed by another coroutine
 				// while we were timing out. In that case, we should just retry.
 				return ReadPromise(c, r)
@@ -73,16 +80,13 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 				ReadPromise: &t_api.ReadPromiseResponse{
 					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
-						Id:    p.Id,
-						State: promise.GetTimedoutState(p),
-						Param: p.Param,
-						Value: promise.Value{
-							Headers: map[string]string{},
-							Data:    nil,
-						},
+						Id:                        p.Id,
+						State:                     promise.GetTimedoutState(p),
+						Param:                     p.Param,
+						Value:                     promise.Value{Headers: map[string]string{}, Data: nil},
 						Timeout:                   p.Timeout,
 						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
+						IdempotencyKeyForComplete: nil,
 						Tags:                      p.Tags,
 						CreatedOn:                 p.CreatedOn,
 						CompletedOn:               &p.Timeout,

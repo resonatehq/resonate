@@ -200,13 +200,17 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 				panic("invalid backchannel type")
 			}
 
+			// backchannel messages occur on the "last" tick
+			reqTime := d.Time(t - 1)
+			resTime := time - 1
+
 			// add backchannel op to porcupine
 			ops = append(ops, porcupine.Operation{
 				ClientId: int(j % int64(d.config.MaxReqsPerTick)),
-				Call:     time,
-				Return:   time,
-				Input:    &Req{Bc, time, nil, bc},
-				Output:   &Res{Bc, time, nil, nil},
+				Call:     reqTime,
+				Return:   resTime,
+				Input:    &Req{Bc, reqTime, nil, bc},
+				Output:   &Res{Bc, resTime, nil, nil},
 			})
 
 			j++

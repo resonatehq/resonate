@@ -17,10 +17,10 @@ type StoreKind int
 const (
 	// PROMISES
 	ReadPromise StoreKind = iota
+	ReadPromises
 	SearchPromises
 	CreatePromise
 	UpdatePromise
-	TimeoutPromises
 
 	// CALLBACKS
 	ReadCallbacks
@@ -55,14 +55,14 @@ func (k StoreKind) String() string {
 	// PROMISES
 	case ReadPromise:
 		return "ReadPromise"
+	case ReadPromises:
+		return "ReadPromises"
 	case SearchPromises:
 		return "SearchPromises"
 	case CreatePromise:
 		return "CreatePromise"
 	case UpdatePromise:
 		return "UpdatePromise"
-	case TimeoutPromises:
-		return "TimeoutPromises"
 	// CALLBACKS
 	case ReadCallbacks:
 		return "ReadCallbacks"
@@ -135,11 +135,11 @@ type Command struct {
 	Kind StoreKind
 
 	// PROMISES
-	ReadPromise     *ReadPromiseCommand
-	SearchPromises  *SearchPromisesCommand
-	CreatePromise   *CreatePromiseCommand
-	UpdatePromise   *UpdatePromiseCommand
-	TimeoutPromises *TimeoutPromisesCommand
+	ReadPromise    *ReadPromiseCommand
+	ReadPromises   *ReadPromisesCommand
+	SearchPromises *SearchPromisesCommand
+	CreatePromise  *CreatePromiseCommand
+	UpdatePromise  *UpdatePromiseCommand
 
 	// CALLBACKS
 	ReadCallbacks   *ReadCallbacksCommand
@@ -177,11 +177,11 @@ type Result struct {
 	Kind StoreKind
 
 	// PROMISES
-	ReadPromise     *QueryPromisesResult
-	SearchPromises  *QueryPromisesResult
-	CreatePromise   *AlterPromisesResult
-	UpdatePromise   *AlterPromisesResult
-	TimeoutPromises *AlterPromisesResult
+	ReadPromise    *QueryPromisesResult
+	ReadPromises   *QueryPromisesResult
+	SearchPromises *QueryPromisesResult
+	CreatePromise  *AlterPromisesResult
+	UpdatePromise  *AlterPromisesResult
 
 	// CALLBACKS
 	ReadCallbacks   *QueryCallbacksResult
@@ -221,6 +221,11 @@ type ReadPromiseCommand struct {
 	Id string
 }
 
+type ReadPromisesCommand struct {
+	Time  int64
+	Limit int
+}
+
 type SearchPromisesCommand struct {
 	Id     string
 	States []promise.State
@@ -245,10 +250,6 @@ type UpdatePromiseCommand struct {
 	Value          promise.Value
 	IdempotencyKey *idempotency.Key
 	CompletedOn    int64
-}
-
-type TimeoutPromisesCommand struct {
-	Time int64
 }
 
 // Promise results

@@ -48,7 +48,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		util.Assert(result != nil, "result must not be nil")
 
 		commands := []*t_aio.Command{}
-		promises := make([]promise.Awaitable[*t_aio.Completion], len(result.Records))
+		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(result.Records))
 
 		for i, t := range result.Records {
 			t, err := t.Task()
@@ -58,7 +58,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 			}
 
 			if c.Time() < t.Timeout {
-				promises[i] = gocoro.Yield(c, &t_aio.Submission{
+				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
 					Kind: t_aio.Queue,
 					Tags: tags,
 					Queue: &t_aio.QueueSubmission{
@@ -85,11 +85,11 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		}
 
 		for i, t := range result.Records {
-			if promises[i] == nil {
+			if awaiting[i] == nil {
 				continue
 			}
 
-			completion, err := gocoro.Await(c, promises[i])
+			completion, err := gocoro.Await(c, awaiting[i])
 			if err != nil {
 				slog.Error("failed to enqueue task", "err", err)
 				continue

@@ -112,6 +112,16 @@ const (
 	WHERE
 		id = ?`
 
+	PROMISE_SELECT_ALL_STATEMENT = `
+	SELECT
+		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
+	FROM
+		promises
+	WHERE
+		state = 1 AND timeout <= ?
+	LIMIT
+		?`
+
 	PROMISE_SEARCH_STATEMENT = `
 	SELECT
 		id, state, param_headers, param_data, value_headers, value_data, timeout, idempotency_key_for_create, idempotency_key_for_complete, tags, created_on, completed_on, sort_id
@@ -141,18 +151,6 @@ const (
 		state = ?, value_headers = ?, value_data = ?, idempotency_key_for_complete = ?, completed_on = ?
 	WHERE
 		id = ? AND state = 1`
-
-	PROMISE_UPDATE_TIMEOUT_STATEMENT = `
-	UPDATE
-		promises
-	SET
-		state = CASE
-					WHEN json_extract(tags, '$.resonate:timeout') IS NOT NULL AND json_extract(tags, '$.resonate:timeout') = 'true' THEN 2
-					ELSE 16
-				END,
-		completed_on = timeout
-	WHERE
-		state = 1 AND timeout <= ?`
 
 	CALLBACK_SELECT_STATEMENT = `
 	SELECT
@@ -398,7 +396,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	// lazily instantiate prepared statements
 	var promiseInsertStmt *sql.Stmt
 	var promiseUpdateStmt *sql.Stmt
-	var promiseUpdateTimeoutStmt *sql.Stmt
 	var callbackInsertStmt *sql.Stmt
 	var callbackDeleteStmt *sql.Stmt
 	var scheduleInsertStmt *sql.Stmt
@@ -427,6 +424,9 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 			case t_aio.ReadPromise:
 				util.Assert(command.ReadPromise != nil, "command must not be nil")
 				results[i][j], err = w.readPromise(tx, command.ReadPromise)
+			case t_aio.ReadPromises:
+				util.Assert(command.ReadPromises != nil, "command must not be nil")
+				results[i][j], err = w.readPromises(tx, command.ReadPromises)
 			case t_aio.SearchPromises:
 				util.Assert(command.SearchPromises != nil, "command must not be nil")
 				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
@@ -452,17 +452,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
-			case t_aio.TimeoutPromises:
-				if promiseUpdateTimeoutStmt == nil {
-					promiseUpdateTimeoutStmt, err = tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-					defer promiseUpdateTimeoutStmt.Close()
-				}
-
-				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
-				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
 			// Callbacks
 			case t_aio.ReadCallbacks:
@@ -681,6 +670,53 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComman
 	}, nil
 }
 
+func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCommand) (*t_aio.Result, error) {
+	// select
+	rows, err := tx.Query(PROMISE_SELECT_ALL_STATEMENT, cmd.Time, cmd.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*promise.PromiseRecord
+	var lastSortId int64
+
+	for rows.Next() {
+		record := &promise.PromiseRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.State,
+			&record.ParamHeaders,
+			&record.ParamData,
+			&record.ValueHeaders,
+			&record.ValueData,
+			&record.Timeout,
+			&record.IdempotencyKeyForCreate,
+			&record.IdempotencyKeyForComplete,
+			&record.Tags,
+			&record.CreatedOn,
+			&record.CompletedOn,
+			&record.SortId,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadPromises,
+		ReadPromises: &t_aio.QueryPromisesResult{
+			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
+			Records:      records,
+		},
+	}, nil
+}
+
 func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
@@ -824,28 +860,6 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	return &t_aio.Result{
 		Kind: t_aio.UpdatePromise,
 		UpdatePromise: &t_aio.AlterPromisesResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *SqliteStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutPromisesCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Time >= 0, "time must be non-negative")
-
-	// udpate promises
-	res, err := stmt.Exec(cmd.Time)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.TimeoutPromises,
-		TimeoutPromises: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

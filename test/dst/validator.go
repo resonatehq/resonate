@@ -53,6 +53,9 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", req.ReadPromise.Id)
 		}
+		if res.ReadPromise.Promise.State == promise.Pending && reqTime > p.Timeout {
+			return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
+		}
 		if p.State != res.ReadPromise.Promise.State {
 			// the only way this can happen is if the promise timedout
 			if res.ReadPromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
@@ -88,6 +91,9 @@ func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime 
 				return model, fmt.Errorf("promise '%s' does not exist", p.Id)
 			}
 
+			if p.State == promise.Pending && reqTime > p.Timeout {
+				return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
+			}
 			if !regex.MatchString(p.Id) {
 				return model, fmt.Errorf("promise id '%s' does not match search query '%s'", p.Id, req.SearchPromises.Id)
 			}

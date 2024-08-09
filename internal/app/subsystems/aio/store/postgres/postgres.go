@@ -130,18 +130,6 @@ const (
 	WHERE
 		id = $6 AND state = 1`
 
-	PROMISE_UPDATE_TIMEOUT_STATEMENT = `
-	UPDATE
-		promises
-	SET
-		state = CASE
-					WHEN tags ->> 'resonate:timeout' IS NOT NULL AND tags ->> 'resonate:timeout' = 'true' THEN 2
-					ELSE 16
-				END,
-		completed_on = timeout
-	WHERE
-		state = 1 AND timeout <= $1`
-
 	SCHEDULE_SELECT_STATEMENT = `
 	SELECT
 		id, description, cron, tags, promise_id, promise_timeout, promise_param_headers, promise_param_data, promise_tags, last_run_time, next_run_time, idempotency_key, created_on
@@ -350,7 +338,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	// Lazily defined prepared statements
 	var promiseInsertStmt *sql.Stmt
 	var promiseUpdateStmt *sql.Stmt
-	var promiseUpdateTimeoutStmt *sql.Stmt
 	var scheduleInsertStmt *sql.Stmt
 	var scheduleUpdateStmt *sql.Stmt
 	var scheduleDeleteStmt *sql.Stmt
@@ -399,17 +386,6 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
-			case t_aio.TimeoutPromises:
-				if promiseUpdateTimeoutStmt == nil {
-					promiseUpdateTimeoutStmt, err = tx.Prepare(PROMISE_UPDATE_TIMEOUT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-					defer promiseUpdateTimeoutStmt.Close()
-				}
-
-				util.Assert(command.TimeoutPromises != nil, "command must not be nil")
-				results[i][j], err = w.timeoutPromises(tx, promiseUpdateTimeoutStmt, command.TimeoutPromises)
 
 			// Schedule
 			case t_aio.ReadSchedule:
@@ -699,28 +675,6 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 	return &t_aio.Result{
 		Kind: t_aio.UpdatePromise,
 		UpdatePromise: &t_aio.AlterPromisesResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *PostgresStoreWorker) timeoutPromises(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutPromisesCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Time >= 0, "time must be non-negative")
-
-	// udpate promises
-	res, err := stmt.Exec(cmd.Time)
-	if err != nil {
-		return nil, err
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.TimeoutPromises,
-		TimeoutPromises: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

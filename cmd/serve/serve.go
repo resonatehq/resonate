@@ -109,12 +109,13 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 			system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+
+			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 			// TODO: migrate to system coroutines
 			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
-			system.AddOnTick(10*time.Second, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			// metrics server
