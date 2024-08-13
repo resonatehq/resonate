@@ -262,7 +262,6 @@ type AlterPromisesResult struct {
 // Callback commands
 
 type CreateCallbackCommand struct {
-	Id        string
 	PromiseId string
 	Message   *message.Message
 	Timeout   int64

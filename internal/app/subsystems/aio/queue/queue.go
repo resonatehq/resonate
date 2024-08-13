@@ -59,6 +59,7 @@ func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 
 	for i, sqe := range sqes {
 		util.Assert(sqe.Submission.Queue != nil, "queue submission must not be nil")
+		util.Assert(sqe.Submission.Queue.Task != nil, "task must not be nil")
 
 		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
 			Completion: &t_aio.Completion{

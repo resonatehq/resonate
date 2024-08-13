@@ -879,11 +879,16 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
+	var lastInsertIdStr string
+	if rowsAffected != 0 {
+		lastInsertIdStr = strconv.FormatInt(lastInsertId, 10)
+	}
+
 	return &t_aio.Result{
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.AlterCallbacksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: strconv.FormatInt(lastInsertId, 10),
+			LastInsertId: lastInsertIdStr,
 		},
 	}, nil
 }
