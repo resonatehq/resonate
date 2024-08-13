@@ -221,6 +221,7 @@ class DSTScheduler:
                 parent_ctx=None,
                 deps=self.deps,
                 dst=True,
+                seed=self.seed,
             )
             p = self._create_promise(ctx, top_level_invocation)
 

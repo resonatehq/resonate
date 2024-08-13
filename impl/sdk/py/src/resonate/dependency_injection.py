@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-@dataclass
+@dataclass(frozen=True)
 class Dependencies:
     deps: dict[str, Any] = field(default_factory=dict)
 

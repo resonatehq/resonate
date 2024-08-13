@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, TypeVar, Union
 
 from typing_extensions import Concatenate, ParamSpec, TypeAlias
@@ -61,24 +62,23 @@ class Invoke:
         self.exec_unit = exec_unit
 
 
+def _new_deps() -> Dependencies:
+    return Dependencies()
+
+
+@dataclass
 class Context:
-    def __init__(
-        self,
-        ctx_id: str,
-        parent_ctx: Context | None = None,
-        deps: Dependencies | None = None,
-        *,
-        dst: bool = False,
-    ) -> None:
-        self.parent_ctx = parent_ctx
-        self.dst = dst
-        self.deps = deps or Dependencies()
-        self.ctx_id = ctx_id
-        self._num_children: int = 0
+    ctx_id: str
+    seed: int | None
+    parent_ctx: Context | None = None
+    deps: Dependencies = field(default_factory=_new_deps)
+    _num_children: int = field(init=False, default=0)
+    dst: bool = False
 
     def new_child(self) -> Context:
         self._num_children += 1
         return Context(
+            seed=self.seed,
             parent_ctx=self,
             dst=self.dst,
             deps=self.deps,

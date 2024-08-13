@@ -63,7 +63,9 @@ class Scheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
-        ctx = Context(deps=self.deps, ctx_id=str(self._increate_promise_created()))
+        ctx = Context(
+            deps=self.deps, ctx_id=str(self._increate_promise_created()), seed=None
+        )
         p = Promise[T](
             promise_id=ctx.ctx_id,
             invocation=Invoke(FnOrCoroutine(coro, *args, **kwargs)),
