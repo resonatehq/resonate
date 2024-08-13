@@ -13,11 +13,14 @@ import resonate
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.context import Command
 from resonate.events import (
-    AwaitedForPromise,
-    ExecutionStarted,
+    ExecutionAwaited,
+    ExecutionInvoked,
+    ExecutionResumed,
+    ExecutionTerminated,
+    PromiseCompleted,
     PromiseCreated,
-    PromiseResolved,
 )
+from resonate.result import Ok
 from resonate.testing import dst
 from typing_extensions import TypeVar
 
@@ -297,46 +300,81 @@ def test_sequential() -> None:
     promises = seq_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert seq_scheduler.get_events() == [
-        PromiseCreated(
-            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+        PromiseCreated(promise_id="5", tick=0),
+        ExecutionInvoked(
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
-        PromiseCreated(
-            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
+        ExecutionResumed(promise_id="5", tick=0),
+        PromiseCreated(promise_id="4", tick=0),
+        ExecutionInvoked(
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        PromiseCreated(
+        ExecutionResumed(promise_id="4", tick=0),
+        PromiseCreated(promise_id="3", tick=0),
+        ExecutionInvoked(
             promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
-        PromiseCreated(
-            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
+        ExecutionResumed(promise_id="3", tick=0),
+        PromiseCreated(promise_id="2", tick=0),
+        ExecutionInvoked(
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
-        PromiseCreated(
-            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
+        ExecutionResumed(promise_id="2", tick=0),
+        PromiseCreated(promise_id="1", tick=0),
+        ExecutionInvoked(
+            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        ExecutionStarted(
-            promise_id="5", tick=1, fn_name="only_call", args=(), kwargs={"n": 1}
+        ExecutionResumed(promise_id="1", tick=0),
+        PromiseCreated(promise_id="1.1", tick=1),
+        ExecutionInvoked(
+            promise_id="1.1", tick=1, fn_name="number", args=(), kwargs={"n": 1}
         ),
-        AwaitedForPromise(promise_id="5.1", tick=1),
-        PromiseResolved(promise_id="5", tick=3),
-        ExecutionStarted(
-            promise_id="4", tick=4, fn_name="only_call", args=(), kwargs={"n": 2}
+        ExecutionAwaited(promise_id="1.1", tick=1),
+        ExecutionTerminated(promise_id="1.1", tick=2),
+        PromiseCompleted(promise_id="1.1", tick=2, value=Ok(1)),
+        ExecutionResumed(promise_id="1", tick=2),
+        ExecutionTerminated(promise_id="1", tick=3),
+        PromiseCompleted(promise_id="1", tick=3, value=Ok(1)),
+        PromiseCreated(promise_id="2.1", tick=4),
+        ExecutionInvoked(
+            promise_id="2.1", tick=4, fn_name="number", args=(), kwargs={"n": 2}
         ),
-        AwaitedForPromise(promise_id="4.1", tick=4),
-        PromiseResolved(promise_id="4", tick=6),
-        ExecutionStarted(
-            promise_id="3", tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
+        ExecutionAwaited(promise_id="2.1", tick=4),
+        ExecutionTerminated(promise_id="2.1", tick=5),
+        PromiseCompleted(promise_id="2.1", tick=5, value=Ok(2)),
+        ExecutionResumed(promise_id="2", tick=5),
+        ExecutionTerminated(promise_id="2", tick=6),
+        PromiseCompleted(promise_id="2", tick=6, value=Ok(2)),
+        PromiseCreated(promise_id="3.1", tick=7),
+        ExecutionInvoked(
+            promise_id="3.1", tick=7, fn_name="number", args=(), kwargs={"n": 3}
         ),
-        AwaitedForPromise(promise_id="3.1", tick=7),
-        PromiseResolved(promise_id="3", tick=9),
-        ExecutionStarted(
-            promise_id="2", tick=10, fn_name="only_call", args=(), kwargs={"n": 4}
+        ExecutionAwaited(promise_id="3.1", tick=7),
+        ExecutionTerminated(promise_id="3.1", tick=8),
+        PromiseCompleted(promise_id="3.1", tick=8, value=Ok(3)),
+        ExecutionResumed(promise_id="3", tick=8),
+        ExecutionTerminated(promise_id="3", tick=9),
+        PromiseCompleted(promise_id="3", tick=9, value=Ok(3)),
+        PromiseCreated(promise_id="4.1", tick=10),
+        ExecutionInvoked(
+            promise_id="4.1", tick=10, fn_name="number", args=(), kwargs={"n": 4}
         ),
-        AwaitedForPromise(promise_id="2.1", tick=10),
-        PromiseResolved(promise_id="2", tick=12),
-        ExecutionStarted(
-            promise_id="1", tick=13, fn_name="only_call", args=(), kwargs={"n": 5}
+        ExecutionAwaited(promise_id="4.1", tick=10),
+        ExecutionTerminated(promise_id="4.1", tick=11),
+        PromiseCompleted(promise_id="4.1", tick=11, value=Ok(4)),
+        ExecutionResumed(promise_id="4", tick=11),
+        ExecutionTerminated(promise_id="4", tick=12),
+        PromiseCompleted(promise_id="4", tick=12, value=Ok(4)),
+        PromiseCreated(promise_id="5.1", tick=13),
+        ExecutionInvoked(
+            promise_id="5.1", tick=13, fn_name="number", args=(), kwargs={"n": 5}
         ),
-        AwaitedForPromise(promise_id="1.1", tick=13),
-        PromiseResolved(promise_id="1", tick=15),
+        ExecutionAwaited(promise_id="5.1", tick=13),
+        ExecutionTerminated(promise_id="5.1", tick=14),
+        PromiseCompleted(promise_id="5.1", tick=14, value=Ok(5)),
+        ExecutionResumed(promise_id="5", tick=14),
+        ExecutionTerminated(promise_id="5", tick=15),
+        PromiseCompleted(promise_id="5", tick=15, value=Ok(5)),
     ]
 
     con_scheduler = dst(seeds=[1], max_failures=2)[0]
@@ -348,47 +386,84 @@ def test_sequential() -> None:
     promises = con_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert con_scheduler.get_events() == [
-        PromiseCreated(
-            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+        PromiseCreated(promise_id="5", tick=0),
+        ExecutionInvoked(
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
         ),
-        PromiseCreated(
-            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
+        ExecutionResumed(promise_id="5", tick=0),
+        PromiseCreated(promise_id="4", tick=0),
+        ExecutionInvoked(
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        PromiseCreated(
+        ExecutionResumed(promise_id="4", tick=0),
+        PromiseCreated(promise_id="3", tick=0),
+        ExecutionInvoked(
             promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
-        PromiseCreated(
-            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
+        ExecutionResumed(promise_id="3", tick=0),
+        PromiseCreated(promise_id="2", tick=0),
+        ExecutionInvoked(
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
-        PromiseCreated(
-            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
+        ExecutionResumed(promise_id="2", tick=0),
+        PromiseCreated(promise_id="1", tick=0),
+        ExecutionInvoked(
+            promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        ExecutionStarted(
-            promise_id="1", tick=1, fn_name="only_call", args=(), kwargs={"n": 5}
+        ExecutionResumed(promise_id="1", tick=0),
+        PromiseCreated(promise_id="5.1", tick=1),
+        ExecutionInvoked(
+            promise_id="5.1", tick=1, fn_name="number", args=(), kwargs={"n": 5}
         ),
-        AwaitedForPromise(promise_id="1.1", tick=1),
-        ExecutionStarted(
-            promise_id="5", tick=2, fn_name="only_call", args=(), kwargs={"n": 1}
+        ExecutionAwaited(promise_id="5.1", tick=1),
+        PromiseCreated(promise_id="1.1", tick=2),
+        ExecutionInvoked(
+            promise_id="1.1", tick=2, fn_name="number", args=(), kwargs={"n": 1}
         ),
-        AwaitedForPromise(promise_id="5.1", tick=2),
-        ExecutionStarted(
-            promise_id="2", tick=3, fn_name="only_call", args=(), kwargs={"n": 4}
+        ExecutionAwaited(promise_id="1.1", tick=2),
+        PromiseCreated(promise_id="4.1", tick=3),
+        ExecutionInvoked(
+            promise_id="4.1", tick=3, fn_name="number", args=(), kwargs={"n": 4}
         ),
-        AwaitedForPromise(promise_id="2.1", tick=3),
-        ExecutionStarted(
-            promise_id="3", tick=7, fn_name="only_call", args=(), kwargs={"n": 3}
+        ExecutionAwaited(promise_id="4.1", tick=3),
+        ExecutionTerminated(promise_id="1.1", tick=4),
+        PromiseCompleted(promise_id="1.1", tick=4, value=Ok(1)),
+        ExecutionResumed(promise_id="1", tick=4),
+        ExecutionTerminated(promise_id="4.1", tick=5),
+        PromiseCompleted(promise_id="4.1", tick=5, value=Ok(4)),
+        ExecutionResumed(promise_id="4", tick=5),
+        ExecutionTerminated(promise_id="5.1", tick=6),
+        PromiseCompleted(promise_id="5.1", tick=6, value=Ok(5)),
+        ExecutionResumed(promise_id="5", tick=6),
+        PromiseCreated(promise_id="3.1", tick=7),
+        ExecutionInvoked(
+            promise_id="3.1", tick=7, fn_name="number", args=(), kwargs={"n": 3}
         ),
-        AwaitedForPromise(promise_id="3.1", tick=7),
-        PromiseResolved(promise_id="1", tick=9),
-        PromiseResolved(promise_id="5", tick=10),
-        PromiseResolved(promise_id="2", tick=11),
-        PromiseResolved(promise_id="3", tick=12),
-        ExecutionStarted(
-            promise_id="4", tick=13, fn_name="only_call", args=(), kwargs={"n": 2}
+        ExecutionAwaited(promise_id="3.1", tick=7),
+        ExecutionTerminated(promise_id="3.1", tick=8),
+        PromiseCompleted(promise_id="3.1", tick=8, value=Ok(3)),
+        ExecutionResumed(promise_id="3", tick=8),
+        ExecutionTerminated(promise_id="5", tick=9),
+        PromiseCompleted(promise_id="5", tick=9, value=Ok(5)),
+        ExecutionTerminated(promise_id="1", tick=10),
+        PromiseCompleted(promise_id="1", tick=10, value=Ok(1)),
+        ExecutionTerminated(promise_id="4", tick=11),
+        PromiseCompleted(promise_id="4", tick=11, value=Ok(4)),
+        ExecutionTerminated(promise_id="3", tick=12),
+        PromiseCompleted(promise_id="3", tick=12, value=Ok(3)),
+        PromiseCreated(promise_id="2.1", tick=13),
+        ExecutionInvoked(
+            promise_id="2.1", tick=13, fn_name="number", args=(), kwargs={"n": 2}
         ),
-        AwaitedForPromise(promise_id="4.1", tick=13),
-        PromiseResolved(promise_id="4", tick=15),
+        ExecutionAwaited(promise_id="2.1", tick=13),
+        ExecutionTerminated(promise_id="2.1", tick=14),
+        PromiseCompleted(promise_id="2.1", tick=14, value=Ok(2)),
+        ExecutionResumed(promise_id="2", tick=14),
+        ExecutionTerminated(promise_id="2", tick=15),
+        PromiseCompleted(promise_id="2", tick=15, value=Ok(2)),
     ]
+
+    assert len(con_scheduler.get_events()) == len(seq_scheduler.get_events())
 
 
 def test_dump_events() -> None:

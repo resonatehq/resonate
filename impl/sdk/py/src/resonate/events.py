@@ -3,24 +3,35 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from typing_extensions import ParamSpec, TypeAlias
+
+if TYPE_CHECKING:
+    from resonate.result import Result
 
 P = ParamSpec("P")
 
 
+# Promise Events
 @dataclass(frozen=True)
 class PromiseCreated:
     promise_id: str
     tick: int
-    fn_name: str
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any]
 
 
 @dataclass(frozen=True)
-class ExecutionStarted:
+class PromiseCompleted:
+    promise_id: str
+    tick: int
+    value: Result[Any, Exception]
+
+
+# Execution Events
+
+
+@dataclass(frozen=True)
+class ExecutionInvoked:
     promise_id: str
     tick: int
     fn_name: str
@@ -29,34 +40,28 @@ class ExecutionStarted:
 
 
 @dataclass(frozen=True)
-class PromiseResolved:
+class ExecutionTerminated:
     promise_id: str
     tick: int
 
 
 @dataclass(frozen=True)
-class SuspendedForPromise:
+class ExecutionResumed:
     promise_id: str
     tick: int
 
 
 @dataclass(frozen=True)
-class AwaitedForPromise:
-    promise_id: str
-    tick: int
-
-
-@dataclass(frozen=True)
-class Resummend:
+class ExecutionAwaited:
     promise_id: str
     tick: int
 
 
 SchedulerEvents: TypeAlias = Union[
     PromiseCreated,
-    ExecutionStarted,
-    PromiseResolved,
-    SuspendedForPromise,
-    AwaitedForPromise,
-    Resummend,
+    PromiseCompleted,
+    ExecutionInvoked,
+    ExecutionTerminated,
+    ExecutionResumed,
+    ExecutionAwaited,
 ]

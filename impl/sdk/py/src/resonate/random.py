@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, TypeVar, Union
 
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, TypeAlias
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -11,19 +11,21 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 P = ParamSpec("P")
 
+FloatOrInt: TypeAlias = Union[float, int]
+
 
 class Random:
-    def __init__(self, seed: int, prefix: list[float | int] | None = None) -> None:
+    def __init__(self, seed: int, prefix: list[FloatOrInt] | None = None) -> None:
         self.seed = seed
-        self._prefix: list[float | int] = []
+        self._prefix: list[FloatOrInt] = []
         if prefix is not None:
             self._prefix.extend(prefix)
         self._count = 0
         self._random = random.Random(seed)  # noqa: RUF100, S311
 
     def _take_number(
-        self, fn: Callable[P, float], *args: P.args, **kwargs: P.kwargs
-    ) -> float | int:
+        self, fn: Callable[P, FloatOrInt], *args: P.args, **kwargs: P.kwargs
+    ) -> FloatOrInt:
         self._count += 1
         if self._count <= len(self._prefix):
             return self._prefix[self._count - 1]

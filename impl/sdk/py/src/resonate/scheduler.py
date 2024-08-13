@@ -13,18 +13,14 @@ from resonate import utils
 from resonate.context import Call, Context, FnOrCoroutine, Invoke
 from resonate.dependency_injection import Dependencies
 from resonate.itertools import (
-    Awaitables,
     FinalValue,
-    RunnableCoroutines,
     iterate_coro,
-    resolve_promise_and_unblock_dependant_coroutines,
-    unblock_depands_coros,
 )
 from resonate.logging import logger
 from resonate.processor import SQE, Processor
 from resonate.promise import Promise
-from resonate.result import Ok
-from resonate.typing import CoroAndPromise, Runnable
+from resonate.result import Err, Ok, Result
+from resonate.typing import Awaitables, CoroAndPromise, Runnable, RunnableCoroutines
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -265,3 +261,49 @@ class Scheduler:
         logger.debug("%s elements popped from the completion queue", len(cqes))
         for cqe in cqes:
             cqe.callback(cqe.cmd_result)
+
+
+def unblock_depands_coros(
+    p: Promise[T],
+    awaitables: Awaitables,
+    runnables: RunnableCoroutines,
+) -> None:
+    assert p.done(), "Promise must be done to unblock dependant coros"
+
+    if awaitables.get(p) is None:
+        return
+
+    res: Result[T, Exception]
+    try:
+        res = Ok(p.result())
+    except Exception as e:  # noqa: BLE001
+        res = Err(e)
+
+    runnables.extend(Runnable(c_and_p, next_value=res) for c_and_p in awaitables.pop(p))
+
+
+def resolve_promise_and_unblock_dependant_coroutines(
+    p: Promise[T],
+    awaitables: Awaitables,
+    runnables: RunnableCoroutines,
+    v: Result[T, Exception],
+) -> None:
+    p.set_result(v)
+    unblock_depands_coros(p=p, awaitables=awaitables, runnables=runnables)
+
+
+def handle_return_promise(
+    running: Runnable[T],
+    prom: Promise[T],
+    awaitables: Awaitables,
+    runnables: list[Runnable[Any]],
+) -> None:
+    if prom.done():
+        unblock_depands_coros(
+            p=prom,
+            awaitables=awaitables,
+            runnables=runnables,
+        )
+    else:
+        waiting_for_expired_prom = awaitables.pop(running.coro_and_promise.prom)
+        awaitables[prom].extend(waiting_for_expired_prom)

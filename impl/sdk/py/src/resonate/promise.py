@@ -26,6 +26,14 @@ class Promise(Generic[T]):
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)
 
+    def safe_result(self, timeout: float | None = None) -> Result[T, Exception]:
+        res: Result[T, Exception]
+        try:
+            res = Ok(self.f.result(timeout=timeout))
+        except Exception as e:  # noqa: BLE001
+            res = Err(e)
+        return res
+
     def set_result(self, result: Result[T, Exception]) -> None:
         if isinstance(result, Ok):
             self.f.set_result(result.unwrap())
