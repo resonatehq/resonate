@@ -48,6 +48,7 @@ func RunDSTCmd() *cobra.Command {
 		coroutineMaxSize    = util.RangeIntFlag{Min: 1, Max: 1000}
 		submissionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		completionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
+		promiseBatchSize    = util.RangeIntFlag{Min: 1, Max: 1000}
 		scheduleBatchSize   = util.RangeIntFlag{Min: 1, Max: 1000}
 		taskBatchSize       = util.RangeIntFlag{Min: 1, Max: 1000}
 		taskEnqueueDelay    = util.RangeIntFlag{Min: 1000, Max: 10000}
@@ -162,7 +163,7 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnRequest(t_api.HeartbeatTask, coroutines.HeartbeatTask)
+			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
 
 			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
@@ -269,13 +270,15 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&coroutineMaxSize, "system-coroutine-max-size", "max number of coroutines to run concurrently")
 	cmd.Flags().Var(&submissionBatchSize, "system-submission-batch-size", "size of the completion queue buffered channel")
 	cmd.Flags().Var(&completionBatchSize, "system-completion-batch-size", "max number of completions to process on each tick")
-	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each tick")
+	cmd.Flags().Var(&promiseBatchSize, "system-promise-batch-size", "max number of promises to process on each iteration")
+	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each iteration")
 	cmd.Flags().Var(&taskBatchSize, "system-task-batch-size", "max number of tasks to process on each iteration")
 	cmd.Flags().Var(&taskEnqueueDelay, "system-task-enqueue-delay", "ms to wait before attempting to reenqueue a task")
 
 	_ = viper.BindPFlag("dst.system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
+	_ = viper.BindPFlag("dst.system.promiseBatchSize", cmd.Flags().Lookup("system-promise-batch-size"))
 	_ = viper.BindPFlag("dst.system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
 	_ = viper.BindPFlag("dst.system.taskBatchSize", cmd.Flags().Lookup("system-task-batch-size"))
 	_ = viper.BindPFlag("dst.system.taskEnqueueDelay", cmd.Flags().Lookup("system-task-enqueue-delay"))

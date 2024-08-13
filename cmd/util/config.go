@@ -3,6 +3,7 @@ package util
 import (
 	"fmt"
 	"math/rand" // nosemgrep
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/internal/aio"
@@ -102,13 +103,13 @@ func (c *AIOConfigDST) Resolve(r *rand.Rand) *AIOConfig {
 }
 
 type SystemConfigDST struct {
-	CoroutineMaxSize      *RangeIntFlag
-	NotificationCacheSize *RangeIntFlag
-	SubmissionBatchSize   *RangeIntFlag
-	CompletionBatchSize   *RangeIntFlag
-	ScheduleBatchSize     *RangeIntFlag
-	TaskBatchSize         *RangeIntFlag
-	TaskEnqueueDelay      *RangeIntFlag
+	CoroutineMaxSize    *RangeIntFlag
+	SubmissionBatchSize *RangeIntFlag
+	CompletionBatchSize *RangeIntFlag
+	PromiseBatchSize    *RangeIntFlag
+	ScheduleBatchSize   *RangeIntFlag
+	TaskBatchSize       *RangeIntFlag
+	TaskEnqueueDelay    *RangeIntFlag
 }
 
 func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
@@ -116,9 +117,10 @@ func (c *SystemConfigDST) Resolve(r *rand.Rand) *system.Config {
 		CoroutineMaxSize:    c.CoroutineMaxSize.Resolve(r),
 		SubmissionBatchSize: c.SubmissionBatchSize.Resolve(r),
 		CompletionBatchSize: c.CompletionBatchSize.Resolve(r),
+		PromiseBatchSize:    c.PromiseBatchSize.Resolve(r),
 		ScheduleBatchSize:   c.ScheduleBatchSize.Resolve(r),
 		TaskBatchSize:       c.TaskBatchSize.Resolve(r),
-		TaskEnqueueDelay:    c.TaskEnqueueDelay.Resolve(r),
+		TaskEnqueueDelay:    time.Duration(c.TaskEnqueueDelay.Resolve(r)) * time.Millisecond,
 	}
 }
 

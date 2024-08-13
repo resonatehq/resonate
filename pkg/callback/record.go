@@ -7,7 +7,7 @@ import (
 )
 
 type CallbackRecord struct {
-	Id        int64
+	Id        string
 	PromiseId string
 	Message   []byte
 	Timeout   int64

@@ -26,7 +26,7 @@ const (
 	// TASKS
 	ClaimTask
 	CompleteTask
-	HeartbeatTask
+	HeartbeatTasks
 
 	// Echo
 	Echo
@@ -67,8 +67,8 @@ func (k Kind) String() string {
 		return "ClaimTask"
 	case CompleteTask:
 		return "CompleteTask"
-	case HeartbeatTask:
-		return "HeartbeatTask"
+	case HeartbeatTasks:
+		return "HeartbeatTasks"
 	// ECHO
 	case Echo:
 		return "Echo"

@@ -26,7 +26,7 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 							ReadTasks: &t_aio.ReadTasksCommand{
 								States: []task.State{task.Enqueued, task.Claimed},
 								Time:   c.Time(),
-								Limit:  5, // TODO
+								Limit:  config.TaskBatchSize,
 							},
 						},
 					},
@@ -55,8 +55,10 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
+						ProcessId:      nil,
 						State:          task.Init,
 						Counter:        t.Counter + 1,
+						Attempt:        0,
 						Frequency:      0,
 						Expiration:     0, // time until reenqueued
 						CurrentStates:  []task.State{t.State},
@@ -68,8 +70,10 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
+						ProcessId:      nil,
 						State:          task.Timedout,
 						Counter:        t.Counter,
+						Attempt:        t.Attempt,
 						Frequency:      0,
 						Expiration:     0,
 						CompletedOn:    &t.Timeout,

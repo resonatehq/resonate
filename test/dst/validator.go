@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
@@ -267,7 +268,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 			return model, fmt.Errorf("promise '%s' must be pending", req.CreateCallback.PromiseId)
 		}
 		if model.callbacks.get(res.CreateCallback.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%d' exists", res.CreateCallback.Callback.Id)
+			return model, fmt.Errorf("callback '%s' exists", res.CreateCallback.Callback.Id)
 		}
 
 		model = model.Copy()
@@ -474,18 +475,19 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 	switch res.ClaimTask.Status {
 	case t_api.StatusCreated:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
 		if t.State != task.Init && t.State != task.Enqueued {
-			return model, fmt.Errorf("task '%d' not claimable", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' not claimable", req.ClaimTask.Id)
 		}
 		if req.ClaimTask.Counter != t.Counter {
-			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
+			return model, fmt.Errorf("task '%s' counter mismatch (%d != %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
 		}
 
 		model = model.Copy()
 		model.tasks.set(req.ClaimTask.Id, &task.Task{
 			Id:         t.Id,
+			ProcessId:  &req.ClaimTask.ProcessId,
 			State:      task.Claimed,
 			Timeout:    t.Timeout,
 			Counter:    req.ClaimTask.Counter,
@@ -495,31 +497,31 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		return model, nil
 	case t_api.StatusTaskAlreadyClaimed:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
 		if t.State != task.Claimed {
-			return model, fmt.Errorf("task '%d' not claimed", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' not claimed", req.ClaimTask.Id)
 		}
 		return model, nil
 	case t_api.StatusTaskAlreadyCompleted:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			return model, fmt.Errorf("task '%d' not completed", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' not completed", req.ClaimTask.Id)
 		}
 		return model, nil
 	case t_api.StatusTaskInvalidCounter:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
 		if req.ClaimTask.Counter == t.Counter && t.Expiration >= resTime {
-			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
+			return model, fmt.Errorf("task '%s' counter match (%d == %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
 		}
 		return model, nil
 	case t_api.StatusTaskNotFound:
 		if t != nil {
-			return model, fmt.Errorf("task '%d' exists", req.ClaimTask.Id)
+			return model, fmt.Errorf("task '%s' exists", req.ClaimTask.Id)
 		}
 		return model, nil
 	default:
@@ -533,18 +535,19 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 	switch res.CompleteTask.Status {
 	case t_api.StatusCreated:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		if t.State != task.Claimed {
-			return model, fmt.Errorf("task '%d' state not claimed", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' state not claimed", req.CompleteTask.Id)
 		}
 		if req.CompleteTask.Counter != t.Counter {
-			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
+			return model, fmt.Errorf("task '%s' counter mismatch (%d != %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
 		}
 
 		model = model.Copy()
 		model.tasks.set(req.CompleteTask.Id, &task.Task{
 			Id:         t.Id,
+			ProcessId:  nil,
 			State:      task.Completed,
 			Timeout:    t.Timeout,
 			Counter:    t.Counter,
@@ -554,28 +557,28 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		return model, nil
 	case t_api.StatusTaskAlreadyCompleted:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			return model, fmt.Errorf("task '%d' state not completed", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' state not completed", req.CompleteTask.Id)
 		}
 		return model, nil
 	case t_api.StatusTaskInvalidCounter:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		if req.CompleteTask.Counter == t.Counter && t.Expiration >= resTime {
-			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
+			return model, fmt.Errorf("task '%s' counter match (%d == %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
 		}
 		return model, nil
 	case t_api.StatusTaskInvalidState:
 		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		return model, nil
 	case t_api.StatusTaskNotFound:
 		if t != nil {
-			return model, fmt.Errorf("task '%d' exists", req.CompleteTask.Id)
+			return model, fmt.Errorf("task '%s' exists", req.CompleteTask.Id)
 		}
 		return model, nil
 	default:
@@ -583,58 +586,48 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 	}
 }
 
-func (v *Validator) ValidateHeartbeatTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	t := model.tasks.get(req.HeartbeatTask.Id)
+func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	switch res.HeartbeatTasks.Status {
+	case t_api.StatusOK:
+		var tasks []*task.Task
+		var lb, ub int64
 
-	switch res.HeartbeatTask.Status {
-	case t_api.StatusCreated:
-		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
-		}
-		if t.State != task.Claimed {
-			return model, fmt.Errorf("task '%d' state not claimed", req.HeartbeatTask.Id)
-		}
-		if req.HeartbeatTask.Counter != t.Counter {
-			return model, fmt.Errorf("task '%d' counter mismatch (%d != %d)", req.HeartbeatTask.Id, req.HeartbeatTask.Counter, t.Counter)
+		for _, t := range *model.tasks {
+			util.Assert(t.value.State != task.Claimed || t.value.ProcessId != nil, "process id must be set if claimed")
+			if t.value.State == task.Claimed && *t.value.ProcessId == req.HeartbeatTasks.ProcessId {
+				ub++
+				if t.value.Expiration > resTime && t.value.Timeout > resTime {
+					lb++
+					tasks = append(tasks, t.value)
+				}
+			}
 		}
 
-		model = model.Copy()
-		model.tasks.set(req.HeartbeatTask.Id, &task.Task{
-			Id:         t.Id,
-			State:      task.Claimed,
-			Timeout:    t.Timeout,
-			Counter:    t.Counter,
-			Frequency:  t.Frequency,
-			Expiration: reqTime + int64(t.Frequency), // approximation
-		})
-		return model, nil
-	case t_api.StatusTaskAlreadyCompleted:
-		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
+		if res.HeartbeatTasks.TasksAffected < lb || res.HeartbeatTasks.TasksAffected > ub {
+			return model, fmt.Errorf("tasks affected (%d) must be between [%d, %d] for pid '%s'", res.HeartbeatTasks.TasksAffected, lb, ub, req.HeartbeatTasks.ProcessId)
 		}
-		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			return model, fmt.Errorf("task '%d' state not completed", req.HeartbeatTask.Id)
+
+		for i, t := range tasks {
+			if i == 0 {
+				// copy the model only once
+				model = model.Copy()
+			}
+
+			// we can only update the model for tasks that are unambiguously
+			// heartbeated
+			model.tasks.set(t.Id, &task.Task{
+				Id:         t.Id,
+				ProcessId:  t.ProcessId,
+				State:      task.Claimed,
+				Timeout:    t.Timeout,
+				Counter:    t.Counter,
+				Frequency:  t.Frequency,
+				Expiration: reqTime + int64(t.Frequency), // approximation
+			})
 		}
-		return model, nil
-	case t_api.StatusTaskInvalidCounter:
-		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
-		}
-		if req.HeartbeatTask.Counter == t.Counter && t.Expiration >= resTime {
-			return model, fmt.Errorf("task '%d' counter match (%d == %d)", req.HeartbeatTask.Id, req.HeartbeatTask.Counter, t.Counter)
-		}
-		return model, nil
-	case t_api.StatusTaskInvalidState:
-		if t == nil {
-			return model, fmt.Errorf("task '%d' does not exist", req.HeartbeatTask.Id)
-		}
-		return model, nil
-	case t_api.StatusTaskNotFound:
-		if t != nil {
-			return model, fmt.Errorf("task '%d' exists", req.HeartbeatTask.Id)
-		}
+
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatTask.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatTasks.Status)
 	}
 }

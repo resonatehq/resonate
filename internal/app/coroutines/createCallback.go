@@ -12,8 +12,9 @@ import (
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	createdOn := c.Time()
+	var res *t_api.Response
 
+	// read the promise to see if it exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Tags,
@@ -21,12 +22,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
-						Kind: t_aio.CreateCallback,
-						CreateCallback: &t_aio.CreateCallbackCommand{
-							PromiseId: r.CreateCallback.PromiseId,
-							Message:   r.CreateCallback.Message,
-							Timeout:   r.CreateCallback.Timeout,
-							CreatedOn: createdOn,
+						Kind: t_aio.ReadPromise,
+						ReadPromise: &t_aio.ReadPromiseCommand{
+							Id: r.CreateCallback.PromiseId,
 						},
 					},
 				},
@@ -35,74 +33,77 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	})
 
 	if err != nil {
-		slog.Error("failed to create callback", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create callback", err)
+		slog.Error("failed to read promise", "req", r, "err", err)
+		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
 	util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-	result := completion.Store.Results[0].CreateCallback
+	result := completion.Store.Results[0].ReadPromise
 	util.Assert(result != nil, "result must not be nil")
-	util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
-	var res *t_api.Response
-	if result.RowsAffected == 1 {
-		res = &t_api.Response{
-			Kind: t_api.CreateCallback,
-			Tags: r.Tags,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-				Callback: &callback.Callback{
-					Id:        result.LastInsertId,
-					PromiseId: r.CreateCallback.PromiseId,
-					Message:   r.CreateCallback.Message,
-					CreatedOn: createdOn,
-				},
-			},
+	if result.RowsReturned == 1 {
+		p, err := result.Records[0].Promise()
+		if err != nil {
+			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
+			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
 		}
-	} else {
-		// read the promise to see if it exists
-		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
-			Kind: t_aio.Store,
-			Tags: r.Tags,
-			Store: &t_aio.StoreSubmission{
-				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.ReadPromise,
-							ReadPromise: &t_aio.ReadPromiseCommand{
-								Id: r.CreateCallback.PromiseId,
+
+		if p.State == promise.Pending {
+			createdOn := c.Time()
+			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+				Kind: t_aio.Store,
+				Tags: r.Tags,
+				Store: &t_aio.StoreSubmission{
+					Transaction: &t_aio.Transaction{
+						Commands: []*t_aio.Command{
+							{
+								Kind: t_aio.CreateCallback,
+								CreateCallback: &t_aio.CreateCallbackCommand{
+									PromiseId: r.CreateCallback.PromiseId,
+									Message:   r.CreateCallback.Message,
+									Timeout:   r.CreateCallback.Timeout,
+									CreatedOn: createdOn,
+								},
 							},
 						},
 					},
 				},
-			},
-		})
+			})
 
-		if err != nil {
-			slog.Error("failed to read promise", "req", r, "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
-		}
-
-		util.Assert(completion.Store != nil, "completion must not be nil")
-		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
-
-		result := completion.Store.Results[0].ReadPromise
-		util.Assert(result != nil, "result must not be nil")
-		util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
-
-		if result.RowsReturned == 1 {
-			p, err := result.Records[0].Promise()
 			if err != nil {
-				slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-				return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
+				slog.Error("failed to create callback", "req", r, "err", err)
+				return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create callback", err)
 			}
 
-			if p.State == promise.Pending {
+			util.Assert(completion.Store != nil, "completion must not be nil")
+			util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
+
+			result := completion.Store.Results[0].CreateCallback
+			util.Assert(result != nil, "result must not be nil")
+			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
+			if result.RowsAffected == 1 {
+				res = &t_api.Response{
+					Kind: t_api.CreateCallback,
+					Tags: r.Tags,
+					CreateCallback: &t_api.CreateCallbackResponse{
+						Status: t_api.StatusCreated,
+						Callback: &callback.Callback{
+							Id:        result.LastInsertId,
+							PromiseId: r.CreateCallback.PromiseId,
+							Message:   r.CreateCallback.Message,
+							CreatedOn: createdOn,
+						},
+						Promise: p,
+					},
+				}
+			} else {
 				return CreateCallback(c, r)
 			}
-
+		} else {
 			res = &t_api.Response{
 				Kind: t_api.CreateCallback,
 				Tags: r.Tags,
@@ -111,14 +112,14 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					Promise: p,
 				},
 			}
-		} else {
-			res = &t_api.Response{
-				Kind: t_api.CreateCallback,
-				Tags: r.Tags,
-				CreateCallback: &t_api.CreateCallbackResponse{
-					Status: t_api.StatusPromiseNotFound,
-				},
-			}
+		}
+	} else {
+		res = &t_api.Response{
+			Kind: t_api.CreateCallback,
+			Tags: r.Tags,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
 		}
 	}
 

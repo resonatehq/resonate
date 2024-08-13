@@ -35,9 +35,9 @@ type Response struct {
 	HeartbeatLocks *HeartbeatLocksResponse
 
 	// TASKS
-	ClaimTask     *ClaimTaskResponse
-	CompleteTask  *CompleteTaskResponse
-	HeartbeatTask *HeartbeatTaskResponse
+	ClaimTask      *ClaimTaskResponse
+	CompleteTask   *CompleteTaskResponse
+	HeartbeatTasks *HeartbeatTasksResponse
 
 	// ECHO
 	Echo *EchoResponse
@@ -125,10 +125,12 @@ type ClaimTaskResponse struct {
 
 type CompleteTaskResponse struct {
 	Status ResponseStatus `json:"status"`
+	Task   *task.Task     `json:"task"`
 }
 
-type HeartbeatTaskResponse struct {
-	Status ResponseStatus `json:"status"`
+type HeartbeatTasksResponse struct {
+	Status        ResponseStatus `json:"status"`
+	TasksAffected int64          `json:"tasksAffected"`
 }
 
 // Echo
@@ -172,8 +174,8 @@ func (r *Response) Status() ResponseStatus {
 		return r.ClaimTask.Status
 	case CompleteTask:
 		return r.CompleteTask.Status
-	case HeartbeatTask:
-		return r.HeartbeatTask.Status
+	case HeartbeatTasks:
+		return r.HeartbeatTasks.Status
 	default:
 		return 0
 	}
@@ -265,18 +267,21 @@ func (r *Response) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(status=%d)",
+			"ClaimTask(status=%d, task=%s)",
 			r.ClaimTask.Status,
+			r.ClaimTask.Task,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(
-			"CompleteTask(status=%d)",
+			"CompleteTask(status=%d, task=%s)",
 			r.CompleteTask.Status,
+			r.CompleteTask.Task,
 		)
-	case HeartbeatTask:
+	case HeartbeatTasks:
 		return fmt.Sprintf(
-			"HeartbeatTask(status=%d)",
-			r.HeartbeatTask.Status,
+			"HeartbeatTasks(status=%d, tasksAffected=%d)",
+			r.HeartbeatTasks.Status,
+			r.HeartbeatTasks.TasksAffected,
 		)
 
 	// ECHO

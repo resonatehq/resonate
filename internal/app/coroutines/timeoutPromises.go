@@ -26,7 +26,7 @@ func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.Corou
 							Kind: t_aio.ReadPromises,
 							ReadPromises: &t_aio.ReadPromisesCommand{
 								Time:  c.Time(),
-								Limit: 5, // TODO
+								Limit: config.PromiseBatchSize,
 							},
 						},
 					},

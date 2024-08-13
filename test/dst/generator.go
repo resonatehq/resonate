@@ -364,30 +364,18 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.pop(r, t_api.ClaimTask)
 
 	if req != nil {
-		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.Counter)
+		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.ProcessId, req.ClaimTask.Counter)
 	}
 
 	return req
 }
 
 func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
-	req := g.pop(r, t_api.CompleteTask)
-
-	if req != nil {
-		g.nextTasks(r, req.CompleteTask.Id, req.CompleteTask.Counter)
-	}
-
-	return req
+	return g.pop(r, t_api.CompleteTask)
 }
 
-func (g *Generator) GenerateHeartbeatTask(r *rand.Rand, t int64) *t_api.Request {
-	req := g.pop(r, t_api.HeartbeatTask)
-
-	if req != nil {
-		g.nextTasks(r, req.HeartbeatTask.Id, req.HeartbeatTask.Counter)
-	}
-
-	return req
+func (g *Generator) GenerateHeartbeatTasks(r *rand.Rand, t int64) *t_api.Request {
+	return g.pop(r, t_api.HeartbeatTasks)
 }
 
 // Helpers
@@ -406,7 +394,7 @@ func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
 	return req
 }
 
-func (g *Generator) nextTasks(r *rand.Rand, id int64, counter int) {
+func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) {
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(3); i++ {
@@ -416,6 +404,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id int64, counter int) {
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskRequest{
 					Id:        id,
+					ProcessId: pid,
 					Counter:   counter,
 					Frequency: RangeIntn(r, 1000, 5000),
 				},
@@ -430,10 +419,9 @@ func (g *Generator) nextTasks(r *rand.Rand, id int64, counter int) {
 			})
 		case 2:
 			g.AddRequest(&t_api.Request{
-				Kind: t_api.HeartbeatTask,
-				HeartbeatTask: &t_api.HeartbeatTaskRequest{
-					Id:      id,
-					Counter: counter,
+				Kind: t_api.HeartbeatTasks,
+				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+					ProcessId: pid,
 				},
 			})
 		}

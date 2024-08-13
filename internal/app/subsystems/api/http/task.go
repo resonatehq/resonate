@@ -21,20 +21,9 @@ func (s *server) claimTask(c *gin.Context) {
 	}
 
 	var body *service.ClaimTaskBody
-
-	switch c.Request.Method {
-	case "GET":
-		if err := c.ShouldBindQuery(&body); err != nil {
-			c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-			return
-		}
-	case "POST":
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
-			return
-		}
-	default:
-		panic("invalid method")
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		return
 	}
 
 	resp, err := s.service.ClaimTask(&header, body)

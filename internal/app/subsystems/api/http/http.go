@@ -86,7 +86,6 @@ func New(api api.API, config *Config) api.Subsystem {
 	authorized.POST("/locks/heartbeat", s.heartbeatLocks)
 
 	// Tasks API
-	authorized.GET("/tasks/claim", s.claimTask)
 	authorized.POST("/tasks/claim", s.claimTask)
 	authorized.POST("/tasks/complete", s.completeTask)
 	authorized.POST("/tasks/heartbeat", s.heartbeatTask)

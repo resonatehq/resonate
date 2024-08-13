@@ -7,7 +7,7 @@ import (
 )
 
 type Callback struct {
-	Id        int64            `json:"id"`
+	Id        string           `json:"id"`
 	PromiseId string           `json:"promiseId"`
 	Message   *message.Message `json:"commands,omitempty"`
 	Timeout   int64            `json:"timeout"`
@@ -16,7 +16,7 @@ type Callback struct {
 
 func (c *Callback) String() string {
 	return fmt.Sprintf(
-		"Callback(id=%d, promiseId=%s, message=%s, timeout=%d)",
+		"Callback(id=%s, promiseId=%s, message=%s, timeout=%d)",
 		c.Id,
 		c.PromiseId,
 		c.Message,

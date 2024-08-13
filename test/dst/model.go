@@ -14,19 +14,19 @@ import (
 
 type Model struct {
 	promises  *Store[string, *promise.Promise]
-	callbacks *Store[int64, *callback.Callback]
+	callbacks *Store[string, *callback.Callback]
 	schedules *Store[string, *schedule.Schedule]
 	locks     *Store[string, *lock.Lock]
-	tasks     *Store[int64, *task.Task]
+	tasks     *Store[string, *task.Task]
 }
 
 func NewModel() *Model {
 	return &Model{
 		promises:  &Store[string, *promise.Promise]{},
-		callbacks: &Store[int64, *callback.Callback]{},
+		callbacks: &Store[string, *callback.Callback]{},
 		schedules: &Store[string, *schedule.Schedule]{},
 		locks:     &Store[string, *lock.Lock]{},
-		tasks:     &Store[int64, *task.Task]{},
+		tasks:     &Store[string, *task.Task]{},
 	}
 }
 

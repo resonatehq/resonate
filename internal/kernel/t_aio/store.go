@@ -23,7 +23,6 @@ const (
 	UpdatePromise
 
 	// CALLBACKS
-	ReadCallbacks
 	CreateCallback
 	DeleteCallbacks
 
@@ -40,7 +39,7 @@ const (
 	ReadTasks
 	CreateTasks
 	UpdateTask
-	HeartbeatTask
+	HeartbeatTasks
 
 	// LOCKS
 	ReadLock
@@ -64,8 +63,6 @@ func (k StoreKind) String() string {
 	case UpdatePromise:
 		return "UpdatePromise"
 	// CALLBACKS
-	case ReadCallbacks:
-		return "ReadCallbacks"
 	case CreateCallback:
 		return "CreateCallback"
 	case DeleteCallbacks:
@@ -92,8 +89,8 @@ func (k StoreKind) String() string {
 		return "CreateTasks"
 	case UpdateTask:
 		return "UpdateTask"
-	case HeartbeatTask:
-		return "HeartbeatTask"
+	case HeartbeatTasks:
+		return "HeartbeatTasks"
 	// LOCKS
 	case ReadLock:
 		return "ReadLock"
@@ -142,7 +139,6 @@ type Command struct {
 	UpdatePromise  *UpdatePromiseCommand
 
 	// CALLBACKS
-	ReadCallbacks   *ReadCallbacksCommand
 	CreateCallback  *CreateCallbackCommand
 	DeleteCallbacks *DeleteCallbacksCommand
 
@@ -155,11 +151,11 @@ type Command struct {
 	DeleteSchedule  *DeleteScheduleCommand
 
 	// TASKS
-	ReadTask      *ReadTaskCommand
-	ReadTasks     *ReadTasksCommand
-	CreateTasks   *CreateTasksCommand
-	UpdateTask    *UpdateTaskCommand
-	HeartbeatTask *HeartbeatTaskCommand
+	ReadTask       *ReadTaskCommand
+	ReadTasks      *ReadTasksCommand
+	CreateTasks    *CreateTasksCommand
+	UpdateTask     *UpdateTaskCommand
+	HeartbeatTasks *HeartbeatTasksCommand
 
 	// LOCKS
 	ReadLock       *ReadLockCommand
@@ -184,7 +180,6 @@ type Result struct {
 	UpdatePromise  *AlterPromisesResult
 
 	// CALLBACKS
-	ReadCallbacks   *QueryCallbacksResult
 	CreateCallback  *AlterCallbacksResult
 	DeleteCallbacks *AlterCallbacksResult
 
@@ -197,11 +192,11 @@ type Result struct {
 	DeleteSchedule  *AlterSchedulesResult
 
 	// TASKS
-	ReadTask      *QueryTasksResult
-	ReadTasks     *QueryTasksResult
-	CreateTasks   *AlterTasksResult
-	UpdateTask    *AlterTasksResult
-	HeartbeatTask *AlterTasksResult
+	ReadTask       *QueryTasksResult
+	ReadTasks      *QueryTasksResult
+	CreateTasks    *AlterTasksResult
+	UpdateTask     *AlterTasksResult
+	HeartbeatTasks *AlterTasksResult
 
 	// LOCKS
 	ReadLock       *QueryLocksResult
@@ -266,11 +261,8 @@ type AlterPromisesResult struct {
 
 // Callback commands
 
-type ReadCallbacksCommand struct {
-	PromiseId string
-}
-
 type CreateCallbackCommand struct {
+	Id        string
 	PromiseId string
 	Message   *message.Message
 	Timeout   int64
@@ -290,7 +282,7 @@ type QueryCallbacksResult struct {
 
 type AlterCallbacksResult struct {
 	RowsAffected int64
-	LastInsertId int64
+	LastInsertId string
 }
 
 // Schedule commands
@@ -350,7 +342,7 @@ type AlterSchedulesResult struct {
 // Task commands
 
 type ReadTaskCommand struct {
-	Id int64
+	Id string
 }
 
 type ReadTasksCommand struct {
@@ -365,9 +357,11 @@ type CreateTasksCommand struct {
 }
 
 type UpdateTaskCommand struct {
-	Id             int64
+	Id             string
+	ProcessId      *string
 	State          task.State
 	Counter        int
+	Attempt        int
 	Frequency      int
 	Expiration     int64
 	CompletedOn    *int64
@@ -375,10 +369,9 @@ type UpdateTaskCommand struct {
 	CurrentCounter int
 }
 
-type HeartbeatTaskCommand struct {
-	Id      int64
-	Counter int
-	Time    int64
+type HeartbeatTasksCommand struct {
+	ProcessId string
+	Time      int64
 }
 
 // Task results

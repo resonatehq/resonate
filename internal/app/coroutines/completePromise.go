@@ -40,15 +40,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	var res *t_api.Response
 
-	if result.RowsReturned == 0 {
-		res = &t_api.Response{
-			Kind: t_api.CompletePromise,
-			Tags: r.Tags,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
-		}
-	} else {
+	if result.RowsReturned == 1 {
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
@@ -133,6 +125,14 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					Promise: p,
 				},
 			}
+		}
+	} else {
+		res = &t_api.Response{
+			Kind: t_api.CompletePromise,
+			Tags: r.Tags,
+			CompletePromise: &t_api.CompletePromiseResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
 		}
 	}
 

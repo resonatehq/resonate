@@ -40,15 +40,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 	var res *t_api.Response
 
-	if result.RowsReturned == 0 {
-		res = &t_api.Response{
-			Kind: t_api.ReadPromise,
-			Tags: r.Tags,
-			ReadPromise: &t_api.ReadPromiseResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
-		}
-	} else {
+	if result.RowsReturned == 1 {
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
@@ -102,6 +94,14 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					Promise: p,
 				},
 			}
+		}
+	} else {
+		res = &t_api.Response{
+			Kind: t_api.ReadPromise,
+			Tags: r.Tags,
+			ReadPromise: &t_api.ReadPromiseResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
 		}
 	}
 

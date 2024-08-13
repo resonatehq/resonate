@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -62,8 +61,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.Queue,
 					Tags: tags,
 					Queue: &t_aio.QueueSubmission{
-						ClaimUrl: fmt.Sprintf("%s/tasks/claim?id=%d&counter=%d&frequency=%d", config.Url, t.Id, t.Counter, 10000),
-						Task:     t,
+						Task: t,
 					},
 				})
 			} else {
@@ -72,8 +70,10 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
+						ProcessId:      nil,
 						State:          task.Timedout,
 						Counter:        t.Counter,
+						Attempt:        t.Attempt,
 						Frequency:      0,
 						Expiration:     0,
 						CompletedOn:    &t.Timeout,
@@ -100,10 +100,12 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
+						ProcessId:      nil,
 						State:          task.Enqueued,
 						Counter:        t.Counter,
+						Attempt:        t.Attempt,
 						Frequency:      0,
-						Expiration:     c.Time() + int64(config.TaskEnqueueDelay), // time to be claimed
+						Expiration:     c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time to be claimed
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
@@ -115,8 +117,9 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						Id:             t.Id,
 						State:          task.Init,
 						Counter:        t.Counter,
+						Attempt:        t.Attempt + 1,
 						Frequency:      0,
-						Expiration:     c.Time() + int64(config.TaskEnqueueDelay), // time until reenqueued
+						Expiration:     c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time until reenqueued
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},

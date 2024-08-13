@@ -3,15 +3,18 @@ package task
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 )
 
 type Task struct {
-	Id          int64            `json:"id"`
+	Id          string           `json:"id"`
+	ProcessId   *string          `json:"processId"`
 	State       State            `json:"state"`
 	Message     *message.Message `json:"message"`
 	Timeout     int64            `json:"timeout"`
 	Counter     int              `json:"counter"`
+	Attempt     int              `json:"attempt"`
 	Frequency   int              `json:"frequency"`
 	Expiration  int64            `json:"expiration"`
 	CreatedOn   *int64           `json:"createdOn"`
@@ -20,12 +23,14 @@ type Task struct {
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%d, state=%s, message=%s, timeout=%d, counter=%d, frequency=%d, expiration=%d)",
+		"Task(id=%s, processId=%s, state=%s, message=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
 		t.Id,
+		util.SafeDeref(t.ProcessId),
 		t.State,
 		t.Message,
 		t.Timeout,
 		t.Counter,
+		t.Attempt,
 		t.Frequency,
 		t.Expiration,
 	)
@@ -33,7 +38,7 @@ func (t *Task) String() string {
 
 func (t1 *Task) Equals(t2 *Task) bool {
 	// for dst only
-	return t1.Id == t2.Id && t1.State == t2.State
+	return t1.Id == t2.Id && t1.State == t2.State && t1.Counter == t2.Counter
 }
 
 type State int

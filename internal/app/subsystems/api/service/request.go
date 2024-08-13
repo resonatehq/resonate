@@ -91,17 +91,17 @@ type HeartbeatBody struct {
 // TASKS
 
 type ClaimTaskBody struct {
-	Id        int64 `form:"id" json:"id"`
-	Counter   int   `form:"counter" json:"counter"`
-	Frequency int   `form:"frequency" json:"frequency"`
+	Id        string `json:"id" binding:"required"`
+	ProcessId string `json:"processId" binding:"required"`
+	Counter   int    `json:"counter"`
+	Frequency int    `json:"frequency" binding:"required"`
 }
 
 type CompleteTaskBody struct {
-	Id      int64 `json:"id"`
-	Counter int   `json:"counter"`
+	Id      string `json:"id" binding:"required"`
+	Counter int    `json:"counter"`
 }
 
 type HeartbeatTaskBody struct {
-	Id      int64 `json:"id"`
-	Counter int   `json:"counter"`
+	ProcessId string `json:"processId" binding:"required"`
 }

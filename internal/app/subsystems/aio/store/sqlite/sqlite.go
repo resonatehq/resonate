@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +16,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
@@ -43,8 +43,6 @@ const (
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
-	CREATE INDEX IF NOT EXISTS idx_promises_invocation ON promises(json_extract(tags, '$.resonate:invocation'));
-	CREATE INDEX IF NOT EXISTS idx_promises_timeout ON promises(json_extract(tags, '$.resonate:timeout'));
 
 	CREATE TABLE IF NOT EXISTS callbacks (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,10 +86,12 @@ const (
 
 	CREATE TABLE IF NOT EXISTS tasks (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
+		pid          TEXT,
 		state 	     INTEGER DEFAULT 1,
 		message      BLOB,
 		timeout      INTEGER,
 		counter      INTEGER,
+		attempt      INTEGER,
 		frequency    INTEGER,
 		expiration   INTEGER,
 		created_on   INTEGER,
@@ -151,14 +151,6 @@ const (
 		state = ?, value_headers = ?, value_data = ?, idempotency_key_for_complete = ?, completed_on = ?
 	WHERE
 		id = ? AND state = 1`
-
-	CALLBACK_SELECT_STATEMENT = `
-	SELECT
-		id, promise_id, message, timeout, created_on
-	FROM
-		callbacks
-	WHERE
-		promise_id = ?`
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
@@ -260,7 +252,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, state, message, timeout, counter, frequency, expiration, created_on, completed_on
+		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -268,7 +260,7 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, state, message, timeout, counter, frequency, expiration, created_on, completed_on
+		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -278,9 +270,9 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(message, timeout, counter, frequency, expiration, created_on)
+		(message, timeout, counter, attempt, frequency, expiration, created_on)
 	SELECT
-		message, timeout, 0, 0, 0, ?
+		message, timeout, 0, 0, 0, 0, ?
 	FROM
 		callbacks
 	WHERE
@@ -290,7 +282,7 @@ const (
 	UPDATE
 		tasks
 	SET
-		state = ?, counter = ?, frequency = ?, expiration = ?, completed_on = ?
+		pid = ?, state = ?, counter = ?, attempt = ?, frequency = ?, expiration = ?, completed_on = ?
 	WHERE
 		id = ? AND state & ? != 0 AND counter = ?`
 
@@ -300,7 +292,7 @@ const (
 	SET
 		expiration = ? + frequency
 	WHERE
-		id = ? AND state == 4 AND counter = ?`
+		pid = ? AND state = 4`
 )
 
 type Config struct {
@@ -454,9 +446,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
 
 			// Callbacks
-			case t_aio.ReadCallbacks:
-				util.Assert(command.ReadCallbacks != nil, "command must not be nil")
-				results[i][j], err = w.readCallbacks(tx, command.ReadCallbacks)
 			case t_aio.CreateCallback:
 				if callbackInsertStmt == nil {
 					callbackInsertStmt, err = tx.Prepare(CALLBACK_INSERT_STATEMENT)
@@ -602,7 +591,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
 				results[i][j], err = w.updateTask(tx, taskUpdateStmt, command.UpdateTask)
-			case t_aio.HeartbeatTask:
+			case t_aio.HeartbeatTasks:
 				if taskHeartbeatStmt == nil {
 					taskHeartbeatStmt, err = tx.Prepare(TASK_HEARTBEAT_STATEMENT)
 					if err != nil {
@@ -611,8 +600,8 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					defer taskHeartbeatStmt.Close()
 				}
 
-				util.Assert(command.HeartbeatTask != nil, "command must not be nil")
-				results[i][j], err = w.heartbeatTask(tx, taskHeartbeatStmt, command.HeartbeatTask)
+				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
+				results[i][j], err = w.heartbeatTask(tx, taskHeartbeatStmt, command.HeartbeatTasks)
 
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
@@ -867,42 +856,6 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 
 // Callbacks
 
-func (w *SqliteStoreWorker) readCallbacks(tx *sql.Tx, cmd *t_aio.ReadCallbacksCommand) (*t_aio.Result, error) {
-	// select
-	rows, err := tx.Query(CALLBACK_SELECT_STATEMENT, cmd.PromiseId)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	rowsReturned := int64(0)
-	var records []*callback.CallbackRecord
-
-	for rows.Next() {
-		record := &callback.CallbackRecord{}
-		if err := rows.Scan(
-			&record.Id,
-			&record.PromiseId,
-			&record.Message,
-			&record.Timeout,
-			&record.CreatedOn,
-		); err != nil {
-			return nil, err
-		}
-
-		records = append(records, record)
-		rowsReturned++
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.ReadCallbacks,
-		ReadCallbacks: &t_aio.QueryCallbacksResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
-	}, nil
-}
-
 func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Message != nil, "message must not be nil")
 
@@ -930,7 +883,7 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.AlterCallbacksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
+			LastInsertId: strconv.FormatInt(lastInsertId, 10),
 		},
 	}, nil
 }
@@ -1317,10 +1270,12 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 
 	if err := row.Scan(
 		&record.Id,
+		&record.ProcessId,
 		&record.State,
 		&record.Message,
 		&record.Timeout,
 		&record.Counter,
+		&record.Attempt,
 		&record.Frequency,
 		&record.Expiration,
 		&record.CreatedOn,
@@ -1368,10 +1323,12 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 		record := &task.TaskRecord{}
 		if err := rows.Scan(
 			&record.Id,
+			&record.ProcessId,
 			&record.State,
 			&record.Message,
 			&record.Timeout,
 			&record.Counter,
+			&record.Attempt,
 			&record.Frequency,
 			&record.Expiration,
 			&record.CreatedOn,
@@ -1420,7 +1377,18 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 		currentStates |= state
 	}
 
-	res, err := stmt.Exec(cmd.State, cmd.Counter, cmd.Frequency, cmd.Expiration, cmd.CompletedOn, cmd.Id, currentStates, cmd.CurrentCounter)
+	res, err := stmt.Exec(
+		cmd.ProcessId,
+		cmd.State,
+		cmd.Counter,
+		cmd.Attempt,
+		cmd.Frequency,
+		cmd.Expiration,
+		cmd.CompletedOn,
+		cmd.Id,
+		currentStates,
+		cmd.CurrentCounter,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1438,8 +1406,8 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 	}, nil
 }
 
-func (w *SqliteStoreWorker) heartbeatTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTaskCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Time, cmd.Id, cmd.Counter)
+func (w *SqliteStoreWorker) heartbeatTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
 		return nil, err
 	}
@@ -1450,8 +1418,8 @@ func (w *SqliteStoreWorker) heartbeatTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.UpdateTask,
-		UpdateTask: &t_aio.AlterTasksResult{
+		Kind: t_aio.HeartbeatTasks,
+		HeartbeatTasks: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

@@ -50,9 +50,8 @@ func (s *Queue) NewWorker(int) aio.Worker {
 }
 
 type req struct {
-	Id       int64  `json:"id"`
-	Counter  int    `json:"counter"`
-	ClaimUrl string `json:"claimUrl"`
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
 }
 
 func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
@@ -78,9 +77,8 @@ func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 		enc.SetEscapeHTML(false)
 
 		if err := enc.Encode(&req{
-			Id:       sqe.Submission.Queue.Task.Id,
-			Counter:  sqe.Submission.Queue.Task.Counter,
-			ClaimUrl: sqe.Submission.Queue.ClaimUrl,
+			Id:      sqe.Submission.Queue.Task.Id,
+			Counter: sqe.Submission.Queue.Task.Counter,
 		}); err != nil {
 			slog.Warn("json marshal failed", "err", err)
 			continue

@@ -105,7 +105,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// tasks
 	d.Add(t_api.ClaimTask, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
 	d.Add(t_api.CompleteTask, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
-	d.Add(t_api.HeartbeatTask, d.generator.GenerateHeartbeatTask, d.validator.ValidateHeartbeatTask)
+	d.Add(t_api.HeartbeatTasks, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
 
 	// porcupine ops
 	var ops []porcupine.Operation
@@ -192,6 +192,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					Kind: t_api.ClaimTask,
 					ClaimTask: &t_api.ClaimTaskRequest{
 						Id:        obj.Id,
+						ProcessId: obj.Id,
 						Counter:   counter,
 						Frequency: RangeIntn(r, 1000, 5000),
 					},
@@ -274,7 +275,7 @@ func (d *DST) Model() porcupine.Model {
 						s = append(s, op)
 					case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
 						l = append(l, op)
-					case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTask:
+					case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks:
 						t = append(t, op)
 					default:
 						panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
@@ -365,7 +366,7 @@ func (d *DST) Model() porcupine.Model {
 				for _, c := range *model.callbacks {
 					callbacks = callbacks + fmt.Sprintf(`
 					<tr>
-						<td align="right">%d</td>
+						<td align="right">%s</td>
 						<td align="right">%s</td>
 					</tr>
 				`, c.value.Id, c.value.PromiseId)
@@ -497,12 +498,14 @@ func (d *DST) Model() porcupine.Model {
 				for _, t := range *model.tasks {
 					tasks = tasks + fmt.Sprintf(`
 						<tr>
-							<td align="right">%d</td>
+							<td align="right">%s</td>
+							<td align="right">%s</td>
 							<td>%s</td>
 							<td align="right">%d</td>
 							<td align="right">%d</td>
+							<td align="right">%d</td>
 						</tr>
-					`, t.value.Id, t.value.State, t.value.Counter, t.value.Timeout)
+					`, t.value.Id, util.SafeDeref(t.value.ProcessId), t.value.State, t.value.Counter, t.value.Expiration, t.value.Timeout)
 				}
 
 				return fmt.Sprintf(`
@@ -519,8 +522,10 @@ func (d *DST) Model() porcupine.Model {
 											<thead>
 												<tr>
 													<td><b>id</b></td>
+													<td><b>processId</b></td>
 													<td><b>state</b></td>
 													<td><b>counter</b></td>
+													<td><b>expiration</b></td>
 													<td><b>timeout</b></td>
 												</tr>
 											</thead>

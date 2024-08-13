@@ -34,9 +34,9 @@ type Request struct {
 	HeartbeatLocks *HeartbeatLocksRequest
 
 	// TASKS
-	ClaimTask     *ClaimTaskRequest
-	CompleteTask  *CompleteTaskRequest
-	HeartbeatTask *HeartbeatTaskRequest
+	ClaimTask      *ClaimTaskRequest
+	CompleteTask   *CompleteTaskRequest
+	HeartbeatTasks *HeartbeatTasksRequest
 
 	// ECHO
 	Echo *EchoRequest
@@ -156,19 +156,19 @@ type HeartbeatLocksRequest struct {
 // Tasks
 
 type ClaimTaskRequest struct {
-	Id        int64 `json:"id"`
-	Counter   int   `json:"counter"`
-	Frequency int   `json:"frequency"`
+	Id        string `json:"id"`
+	ProcessId string `json:"processId"`
+	Counter   int    `json:"counter"`
+	Frequency int    `json:"frequency"`
 }
 
 type CompleteTaskRequest struct {
-	Id      int64 `json:"id"`
-	Counter int   `json:"counter"`
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
 }
 
-type HeartbeatTaskRequest struct {
-	Id      int64 `json:"id"`
-	Counter int   `json:"counter"`
+type HeartbeatTasksRequest struct {
+	ProcessId string `json:"processId"`
 }
 
 // Echo
@@ -281,22 +281,22 @@ func (r *Request) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(id=%d, counter=%d, frequency=%d)",
+			"ClaimTask(id=%s, processId=%s, counter=%d, frequency=%d)",
 			r.ClaimTask.Id,
+			r.ClaimTask.ProcessId,
 			r.ClaimTask.Counter,
 			r.ClaimTask.Frequency,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(
-			"CompleteTask(id=%d, counter=%d)",
+			"CompleteTask(id=%s, counter=%d)",
 			r.CompleteTask.Id,
 			r.CompleteTask.Counter,
 		)
-	case HeartbeatTask:
+	case HeartbeatTasks:
 		return fmt.Sprintf(
-			"HeartbeatTask(id=%d, counter=%d)",
-			r.HeartbeatTask.Id,
-			r.HeartbeatTask.Counter,
+			"HeartbeatTasks(processId=%s)",
+			r.HeartbeatTasks.ProcessId,
 		)
 
 	// ECHO
