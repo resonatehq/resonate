@@ -88,7 +88,7 @@ func New(api api.API, config *Config) api.Subsystem {
 	// Tasks API
 	authorized.POST("/tasks/claim", s.claimTask)
 	authorized.POST("/tasks/complete", s.completeTask)
-	authorized.POST("/tasks/heartbeat", s.heartbeatTask)
+	authorized.POST("/tasks/heartbeat", s.heartbeatTasks)
 
 	return &Http{
 		addr:   addr,

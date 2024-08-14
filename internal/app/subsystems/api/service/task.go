@@ -77,12 +77,12 @@ func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.C
 
 // HEARTBEAT
 
-func (s *Service) HeartbeatTask(header *Header, body *HeartbeatTaskBody) (*t_api.HeartbeatTasksResponse, error) {
+func (s *Service) HeartbeatTasks(header *Header, body *HeartbeatTaskBody) (*t_api.HeartbeatTasksResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	req := &t_api.Request{
 		Kind: t_api.HeartbeatTasks,
-		Tags: s.tags(header.RequestId, "HeartbeatTask"),
+		Tags: s.tags(header.RequestId, "HeartbeatTasks"),
 		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 			ProcessId: body.ProcessId,
 		},

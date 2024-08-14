@@ -14,8 +14,10 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -90,6 +92,7 @@ func TestHttpServer(t *testing.T) {
 				res     *t_api.Response
 				status  int
 			}{
+				// Promises
 				{
 					name:   "ReadPromise",
 					path:   "promises/foo",
@@ -766,6 +769,84 @@ func TestHttpServer(t *testing.T) {
 					},
 					status: 201,
 				},
+
+				// Callbacks
+				{
+					name:   "CreateCallback",
+					path:   "callbacks",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CreateCallback",
+					},
+					body: []byte(`{
+						"promiseId": "foo",
+						"timeout": 1,
+						"recv": "http://localhost:3000",
+						"data": "e30="
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.CreateCallback,
+						Tags: map[string]string{
+							"request_id": "CreateCallback",
+							"name":       "CreateCallback",
+							"protocol":   "http",
+						},
+						CreateCallback: &t_api.CreateCallbackRequest{
+							PromiseId: "foo",
+							Timeout:   1,
+							Message: &message.Message{
+								Recv: "http://localhost:3000",
+								Data: []byte("{}"),
+							},
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.CreateCallback,
+						CreateCallback: &t_api.CreateCallbackResponse{
+							Status: t_api.StatusCreated,
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "CreateCallbackNotFound",
+					path:   "callbacks",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CreateCallback",
+					},
+					body: []byte(`{
+						"promiseId": "foo",
+						"timeout": 1,
+						"recv": "http://localhost:3000",
+						"data": "e30="
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.CreateCallback,
+						Tags: map[string]string{
+							"request_id": "CreateCallback",
+							"name":       "CreateCallback",
+							"protocol":   "http",
+						},
+						CreateCallback: &t_api.CreateCallbackRequest{
+							PromiseId: "foo",
+							Timeout:   1,
+							Message: &message.Message{
+								Recv: "http://localhost:3000",
+								Data: []byte("{}"),
+							},
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.CreateCallback,
+						CreateCallback: &t_api.CreateCallbackResponse{
+							Status: t_api.StatusPromiseNotFound,
+						},
+					},
+					status: 404,
+				},
+
+				// Schedules
 				{
 					name:   "ReadSchedule",
 					path:   "schedules/foo",
@@ -957,7 +1038,183 @@ func TestHttpServer(t *testing.T) {
 					status: 204,
 				},
 
-				// Distributed Locks API
+				// Tasks
+				{
+					name:   "ClaimTask",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTask",
+					},
+					body: []byte(`{
+						"id": "foo",
+						"processId": "bar",
+						"counter": 0,
+						"frequency": 1
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.ClaimTask,
+						Tags: map[string]string{
+							"request_id": "ClaimTask",
+							"name":       "ClaimTask",
+							"protocol":   "http",
+						},
+						ClaimTask: &t_api.ClaimTaskRequest{
+							Id:        "foo",
+							ProcessId: "bar",
+							Counter:   0,
+							Frequency: 1,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.ClaimTask,
+						ClaimTask: &t_api.ClaimTaskResponse{
+							Status: t_api.StatusCreated,
+							Task: &task.Task{
+								Message: &message.Message{},
+							},
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "ClaimTaskNoId",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTask",
+					},
+					body: []byte(`{
+						"processId": "bar",
+						"counter": 0,
+						"frequency": 1
+					}`),
+					req:    nil,
+					res:    nil,
+					status: 400,
+				},
+				{
+					name:   "ClaimTaskNoProcessId",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTask",
+					},
+					body: []byte(`{
+						"id": "foo",
+						"counter": 0,
+						"frequency": 1
+					}`),
+					req:    nil,
+					res:    nil,
+					status: 400,
+				},
+				{
+					name:   "ClaimTaskNoFrequency",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTask",
+					},
+					body: []byte(`{
+						"id": "foo",
+						"counter": 0,
+						"frequency": 0
+					}`),
+					req:    nil,
+					res:    nil,
+					status: 400,
+				},
+				{
+					name:   "CompleteTask",
+					path:   "tasks/complete",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CompleteTask",
+					},
+					body: []byte(`{
+						"id": "foo",
+						"counter": 0
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.CompleteTask,
+						Tags: map[string]string{
+							"request_id": "CompleteTask",
+							"name":       "CompleteTask",
+							"protocol":   "http",
+						},
+						CompleteTask: &t_api.CompleteTaskRequest{
+							Id:      "foo",
+							Counter: 0,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.CompleteTask,
+						CompleteTask: &t_api.CompleteTaskResponse{
+							Status: t_api.StatusCreated,
+							Task:   &task.Task{},
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "CompleteTaskNoId",
+					path:   "tasks/complete",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CompleteTask",
+					},
+					body: []byte(`{
+						"counter": 0
+					}`),
+					req:    nil,
+					res:    nil,
+					status: 400,
+				},
+				{
+					name:   "HeartbeatTasks",
+					path:   "tasks/heartbeat",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "HeartbeatTasks",
+					},
+					body: []byte(`{
+						"processId": "bar"
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.HeartbeatTasks,
+						Tags: map[string]string{
+							"request_id": "HeartbeatTasks",
+							"name":       "HeartbeatTasks",
+							"protocol":   "http",
+						},
+						HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+							ProcessId: "bar",
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.HeartbeatTasks,
+						HeartbeatTasks: &t_api.HeartbeatTasksResponse{
+							Status:        t_api.StatusOK,
+							TasksAffected: 1,
+						},
+					},
+					status: 200,
+				},
+				{
+					name:   "HeartbeatTasksNoProcessId",
+					path:   "tasks/heartbeat",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "HeartbeatTasks",
+					},
+					body:   []byte(`{}`),
+					req:    nil,
+					res:    nil,
+					status: 400,
+				},
+
+				// Locks
 				{
 					name:   "AcquireLock",
 					path:   "locks/acquire",

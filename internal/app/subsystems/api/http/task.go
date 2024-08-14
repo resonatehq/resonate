@@ -74,7 +74,7 @@ func (s *server) completeTask(c *gin.Context) {
 
 // HEARTBEAT
 
-func (s *server) heartbeatTask(c *gin.Context) {
+func (s *server) heartbeatTasks(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
 		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
@@ -87,7 +87,7 @@ func (s *server) heartbeatTask(c *gin.Context) {
 		return
 	}
 
-	resp, err := s.service.HeartbeatTask(&header, body)
+	resp, err := s.service.HeartbeatTasks(&header, body)
 	if err != nil {
 		var apiErr *api.APIErrorResponse
 		if errors.As(err, &apiErr) {

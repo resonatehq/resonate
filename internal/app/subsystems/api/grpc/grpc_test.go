@@ -12,8 +12,10 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -25,13 +27,14 @@ import (
 
 type grpcTest struct {
 	*test.API
-	subsystem      api.Subsystem
-	errors         chan error
-	conn           *grpc.ClientConn
-	client         grpcApi.PromisesClient
-	scheduleClient grpcApi.SchedulesClient
-	lockClient     grpcApi.LocksClient
-	taskClient     grpcApi.TasksClient
+	subsystem api.Subsystem
+	errors    chan error
+	conn      *grpc.ClientConn
+	promises  grpcApi.PromisesClient
+	callbacks grpcApi.CallbacksClient
+	schedules grpcApi.SchedulesClient
+	locks     grpcApi.LocksClient
+	tasks     grpcApi.TasksClient
 }
 
 func setup() (*grpcTest, error) {
@@ -52,14 +55,15 @@ func setup() (*grpcTest, error) {
 	}
 
 	return &grpcTest{
-		API:            api,
-		subsystem:      subsystem,
-		errors:         errors,
-		conn:           conn,
-		client:         grpcApi.NewPromisesClient(conn),
-		scheduleClient: grpcApi.NewSchedulesClient(conn),
-		lockClient:     grpcApi.NewLocksClient(conn),
-		taskClient:     grpcApi.NewTasksClient(conn),
+		API:       api,
+		subsystem: subsystem,
+		errors:    errors,
+		conn:      conn,
+		promises:  grpcApi.NewPromisesClient(conn),
+		callbacks: grpcApi.NewCallbacksClient(conn),
+		schedules: grpcApi.NewSchedulesClient(conn),
+		locks:     grpcApi.NewLocksClient(conn),
+		tasks:     grpcApi.NewTasksClient(conn),
 	}, nil
 }
 
@@ -73,7 +77,7 @@ func (t *grpcTest) teardown() error {
 	return t.subsystem.Stop()
 }
 
-// PROMISE
+// Promises
 
 func TestReadPromise(t *testing.T) {
 	grpcTest, err := setup()
@@ -150,7 +154,7 @@ func TestReadPromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.client.ReadPromise(ctx, tc.grpcReq)
+			_, err := grpcTest.promises.ReadPromise(ctx, tc.grpcReq)
 			if err != nil {
 				// actual grpc error
 				s, ok := status.FromError(err)
@@ -401,7 +405,7 @@ func TestSearchPromises(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.client.SearchPromises(ctx, tc.grpcReq)
+			_, err := grpcTest.promises.SearchPromises(ctx, tc.grpcReq)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -557,7 +561,7 @@ func TestCreatePromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.CreatePromise(ctx, tc.grpcReq)
+			res, err := grpcTest.promises.CreatePromise(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -718,7 +722,7 @@ func TestCancelPromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.CancelPromise(ctx, tc.grpcReq)
+			res, err := grpcTest.promises.CancelPromise(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -879,7 +883,7 @@ func TestResolvePromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.ResolvePromise(ctx, tc.grpcReq)
+			res, err := grpcTest.promises.ResolvePromise(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1040,7 +1044,7 @@ func TestRejectPromise(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			res, err := grpcTest.client.RejectPromise(ctx, tc.grpcReq)
+			res, err := grpcTest.promises.RejectPromise(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1065,7 +1069,122 @@ func TestRejectPromise(t *testing.T) {
 	}
 }
 
-// SCHEDULE
+// Callbacks
+
+func TestCreateCallback(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.CreateCallbackRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "CreateCallback",
+			grpcReq: &grpcApi.CreateCallbackRequest{
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      "http://localhost:3000",
+				Data:      []byte("{}"),
+				RequestId: "CreateCallback",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreateCallback,
+				Tags: map[string]string{
+					"request_id": "CreateCallback",
+					"name":       "CreateCallback",
+					"protocol":   "grpc",
+				},
+				CreateCallback: &t_api.CreateCallbackRequest{
+					PromiseId: "foo",
+					Timeout:   1,
+					Message: &message.Message{
+						Recv: "http://localhost:3000",
+						Data: []byte("{}"),
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateCallback,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					Status: t_api.StatusCreated,
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "CreateCallbackNotFound",
+			grpcReq: &grpcApi.CreateCallbackRequest{
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      "http://localhost:3000",
+				Data:      []byte("{}"),
+				RequestId: "CreateCallback",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreateCallback,
+				Tags: map[string]string{
+					"request_id": "CreateCallback",
+					"name":       "CreateCallback",
+					"protocol":   "grpc",
+				},
+				CreateCallback: &t_api.CreateCallbackRequest{
+					PromiseId: "foo",
+					Timeout:   1,
+					Message: &message.Message{
+						Recv: "http://localhost:3000",
+						Data: []byte("{}"),
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateCallback,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					Status: t_api.StatusPromiseNotFound,
+				},
+			},
+			code: codes.NotFound,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.callbacks.CreateCallback(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Schedules
 
 func TestCreateSchedule(t *testing.T) {
 	grpcTest, err := setup()
@@ -1141,7 +1260,7 @@ func TestCreateSchedule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			resp, err := grpcTest.scheduleClient.CreateSchedule(ctx, tc.grpcReq)
+			resp, err := grpcTest.schedules.CreateSchedule(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1217,7 +1336,7 @@ func TestReadSchedule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.scheduleClient.ReadSchedule(ctx, tc.grpcReq)
+			_, err := grpcTest.schedules.ReadSchedule(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1291,7 +1410,7 @@ func TestSearchSchedule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.scheduleClient.SearchSchedules(ctx, tc.grpcReq)
+			_, err := grpcTest.schedules.SearchSchedules(ctx, tc.grpcReq)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1356,7 +1475,7 @@ func TestDeleteSchedule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.scheduleClient.DeleteSchedule(ctx, tc.grpcReq)
+			_, err := grpcTest.schedules.DeleteSchedule(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1381,7 +1500,7 @@ func TestDeleteSchedule(t *testing.T) {
 	}
 }
 
-// LOCKS
+// Locks
 
 func TestAcquireLock(t *testing.T) {
 	grpcTest, err := setup()
@@ -1489,7 +1608,7 @@ func TestAcquireLock(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.lockClient.AcquireLock(ctx, tc.grpcReq)
+			_, err := grpcTest.locks.AcquireLock(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1582,7 +1701,7 @@ func TestReleaseLock(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.lockClient.ReleaseLock(ctx, tc.grpcReq)
+			_, err := grpcTest.locks.ReleaseLock(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1663,7 +1782,287 @@ func TestHeartbeatLocks(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.lockClient.HeartbeatLocks(ctx, tc.grpcReq)
+			_, err := grpcTest.locks.HeartbeatLocks(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Tasks
+
+func TestClaimTask(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.ClaimTaskRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "ClaimTask",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				Id:        "foo",
+				ProcessId: "bar",
+				Counter:   0,
+				Frequency: 1,
+				RequestId: "ClaimTask",
+			},
+			req: &t_api.Request{
+				Kind: t_api.ClaimTask,
+				Tags: map[string]string{
+					"request_id": "ClaimTask",
+					"name":       "ClaimTask",
+					"protocol":   "grpc",
+				},
+				ClaimTask: &t_api.ClaimTaskRequest{
+					Id:        "foo",
+					ProcessId: "bar",
+					Counter:   0,
+					Frequency: 1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskResponse{
+					Status: t_api.StatusCreated,
+					Task: &task.Task{
+						Message: &message.Message{},
+					},
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "ClaimTaskNoId",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				ProcessId: "bar",
+				Counter:   0,
+				Frequency: 1,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "ClaimTaskNoProcessId",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				Id:        "foo",
+				Counter:   0,
+				Frequency: 1,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "ClaimTaskNoFrequency",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				Id:        "foo",
+				ProcessId: "bar",
+				Counter:   0,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.tasks.ClaimTask(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCompleteTask(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.CompleteTaskRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "CompleteTask",
+			grpcReq: &grpcApi.CompleteTaskRequest{
+				Id:        "foo",
+				Counter:   0,
+				RequestId: "CompleteTask",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CompleteTask,
+				Tags: map[string]string{
+					"request_id": "CompleteTask",
+					"name":       "CompleteTask",
+					"protocol":   "grpc",
+				},
+				CompleteTask: &t_api.CompleteTaskRequest{
+					Id:      "foo",
+					Counter: 0,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompleteTask,
+				CompleteTask: &t_api.CompleteTaskResponse{
+					Status: t_api.StatusCreated,
+					Task:   &task.Task{},
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "CompleteTaskNoId",
+			grpcReq: &grpcApi.CompleteTaskRequest{
+				Counter: 0,
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.tasks.CompleteTask(ctx, tc.grpcReq)
+			if err != nil {
+				s, ok := status.FromError(err)
+				if !ok {
+					t.Fatal(err)
+				}
+				assert.Equal(t, tc.code, s.Code())
+				return
+			}
+
+			assert.Equal(t, tc.code, codes.OK)
+
+			select {
+			case err := <-grpcTest.errors:
+				t.Fatal(err)
+			default:
+			}
+		})
+	}
+
+	if err := grpcTest.teardown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHeartbeatTasks(t *testing.T) {
+	grpcTest, err := setup()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tcs := []struct {
+		name    string
+		grpcReq *grpcApi.HeartbeatTasksRequest
+		req     *t_api.Request
+		res     *t_api.Response
+		code    codes.Code
+	}{
+		{
+			name: "HeartbeatTasks",
+			grpcReq: &grpcApi.HeartbeatTasksRequest{
+				ProcessId: "bar",
+				RequestId: "HeartbeatTasks",
+			},
+			req: &t_api.Request{
+				Kind: t_api.HeartbeatTasks,
+				Tags: map[string]string{
+					"request_id": "HeartbeatTasks",
+					"name":       "HeartbeatTasks",
+					"protocol":   "grpc",
+				},
+				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+					ProcessId: "bar",
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.HeartbeatTasks,
+				HeartbeatTasks: &t_api.HeartbeatTasksResponse{
+					Status:        t_api.StatusOK,
+					TasksAffected: 1,
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name:    "HeartbeatTasksNoProcessId",
+			grpcReq: &grpcApi.HeartbeatTasksRequest{},
+			req:     nil,
+			res:     nil,
+			code:    codes.InvalidArgument,
+		},
+	}
+
+	for _, tc := range tcs {
+		t.Run(tc.name, func(t *testing.T) {
+			grpcTest.Load(t, tc.req, tc.res)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+
+			_, err := grpcTest.tasks.HeartbeatTasks(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {

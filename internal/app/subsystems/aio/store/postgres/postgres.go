@@ -628,7 +628,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				}
 
 				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
-				results[i][j], err = w.heartbeatTask(tx, taskHeartbeatStmt, command.HeartbeatTasks)
+				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, command.HeartbeatTasks)
 
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
@@ -1367,7 +1367,7 @@ func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 	}, nil
 }
 
-func (w *PostgresStoreWorker) heartbeatTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
 		return nil, err

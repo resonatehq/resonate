@@ -97,15 +97,9 @@ func (s ResponseStatus) GRPC() codes.Code {
 		return codes.PermissionDenied
 	case StatusTaskAlreadyClaimed, StatusTaskAlreadyCompleted, StatusTaskInvalidCounter, StatusTaskInvalidState:
 		return codes.PermissionDenied
-	case StatusPromiseNotFound:
-		return codes.NotFound
-	case StatusPromiseAlreadyExists:
+	case StatusPromiseAlreadyExists, StatusScheduleAlreadyExists:
 		return codes.AlreadyExists
-	case StatusScheduleAlreadyExists:
-		return codes.AlreadyExists
-	case StatusLockNotFound:
-		return codes.NotFound
-	case StatusTaskNotFound:
+	case StatusPromiseNotFound, StatusLockNotFound, StatusTaskNotFound:
 		return codes.NotFound
 	default:
 		panic(fmt.Sprintf("invalid status: %d", s))

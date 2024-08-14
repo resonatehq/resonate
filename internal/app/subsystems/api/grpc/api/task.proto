@@ -7,56 +7,34 @@ option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/
 service Tasks {
     rpc ClaimTask (ClaimTaskRequest) returns (ClaimTaskResponse) {}
     rpc CompleteTask (CompleteTaskRequest) returns (CompleteTaskResponse) {}
+    rpc HeartbeatTasks (HeartbeatTasksRequest) returns (HeartbeatTasksResponse) {}
 }
-  
+
 message ClaimTaskRequest {
-    string requestId = 1; 
-    string task_id = 2; 
+    string id = 1;
+    string processId = 2;
     int32 counter = 3;
-    string process_id = 4; 
-    string execution_id = 5;
-    int64 expiry_in_milliseconds = 6;  
+    int32 frequency = 4;
+    string requestId = 5;
 }
 
 message ClaimTaskResponse {
-    TaskPromise promise = 1;
+    bytes data = 1;
 }
 
 message CompleteTaskRequest {
-    string requestId = 1; 
-    string task_id = 2; 
-    int32 counter = 3;
-    string execution_id = 4;
-    TaskState state = 5;
-    TaskValue value = 6;
+    string id = 1;
+    int32 counter = 2;
+    string requestId = 3;
 }
 
 message CompleteTaskResponse {}
 
-// Task is a high-level abstraction of a pending promise that can be claimed and completed by a worker.
-
-message TaskPromise {
-    string id = 1;
-    TaskState state = 2;
-    TaskValue param = 3;
-    TaskValue value = 4;
-    int64 timeout = 5;
-    string idempotencyKeyForCreate = 6;
-    string idempotencyKeyForComplete = 7;
-    int64 createdOn = 8;
-    int64 completedOn = 9;
-    map<string, string> tags = 10;
+message HeartbeatTasksRequest {
+    string processId = 1;
+    string requestId = 2;
 }
 
-enum TaskState {
-    PENDING = 0;
-    RESOLVED = 1;
-    REJECTED = 2;
-    REJECTED_TIMEDOUT = 3;
-    REJECTED_CANCELED = 4;
-}
-
-message TaskValue {
-    map<string, string> headers = 1;
-    bytes data = 3;
+message HeartbeatTasksResponse {
+    int32 tasksAffected = 1;
 }

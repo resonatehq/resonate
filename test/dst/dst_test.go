@@ -19,18 +19,18 @@ import (
 )
 
 func TestDST(t *testing.T) {
-	dst(t, 0, 1*time.Second, "dst.html")
+	dst(t, 0, false, "dst.html")
 }
 
 func TestDSTFault(t *testing.T) {
-	dst(t, 0.5, 1*time.Second, "dst-fault.html")
+	dst(t, 0.5, false, "dst-fault.html")
 }
 
 func TestDSTLazy(t *testing.T) {
-	dst(t, 0, 0, "dst-lazy.html")
+	dst(t, 0, true, "dst-lazy.html")
 }
 
-func dst(t *testing.T, p float64, d time.Duration, vp string) {
+func dst(t *testing.T, p float64, l bool, vp string) {
 	r := rand.New(rand.NewSource(0))
 
 	// instantiate metrics
@@ -80,13 +80,15 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
 
-	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
-	system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
-	system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+	if !l {
+		system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+		system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+		system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
-	// TODO: migrate tick to background coroutines
-	system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
-	system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
+		// TODO: migrate tick to background coroutines
+		system.AddOnTick(1*time.Second, "SchedulePromises", coroutines.SchedulePromises)
+		system.AddOnTick(1*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
+	}
 
 	// start api/aio
 	if err := api.Start(); err != nil {
@@ -98,7 +100,7 @@ func dst(t *testing.T, p float64, d time.Duration, vp string) {
 
 	ticks := int64(1000)
 	timeoutTicks := ticks
-	if d == 0 {
+	if l {
 		timeoutTicks = 5
 	}
 
