@@ -19,8 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Tasks_ClaimTask_FullMethodName    = "/task.Tasks/ClaimTask"
-	Tasks_CompleteTask_FullMethodName = "/task.Tasks/CompleteTask"
+	Tasks_ClaimTask_FullMethodName      = "/task.Tasks/ClaimTask"
+	Tasks_CompleteTask_FullMethodName   = "/task.Tasks/CompleteTask"
+	Tasks_HeartbeatTasks_FullMethodName = "/task.Tasks/HeartbeatTasks"
 )
 
 // TasksClient is the client API for Tasks service.
@@ -29,6 +30,7 @@ const (
 type TasksClient interface {
 	ClaimTask(ctx context.Context, in *ClaimTaskRequest, opts ...grpc.CallOption) (*ClaimTaskResponse, error)
 	CompleteTask(ctx context.Context, in *CompleteTaskRequest, opts ...grpc.CallOption) (*CompleteTaskResponse, error)
+	HeartbeatTasks(ctx context.Context, in *HeartbeatTasksRequest, opts ...grpc.CallOption) (*HeartbeatTasksResponse, error)
 }
 
 type tasksClient struct {
@@ -57,12 +59,22 @@ func (c *tasksClient) CompleteTask(ctx context.Context, in *CompleteTaskRequest,
 	return out, nil
 }
 
+func (c *tasksClient) HeartbeatTasks(ctx context.Context, in *HeartbeatTasksRequest, opts ...grpc.CallOption) (*HeartbeatTasksResponse, error) {
+	out := new(HeartbeatTasksResponse)
+	err := c.cc.Invoke(ctx, Tasks_HeartbeatTasks_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TasksServer is the server API for Tasks service.
 // All implementations must embed UnimplementedTasksServer
 // for forward compatibility
 type TasksServer interface {
 	ClaimTask(context.Context, *ClaimTaskRequest) (*ClaimTaskResponse, error)
 	CompleteTask(context.Context, *CompleteTaskRequest) (*CompleteTaskResponse, error)
+	HeartbeatTasks(context.Context, *HeartbeatTasksRequest) (*HeartbeatTasksResponse, error)
 	mustEmbedUnimplementedTasksServer()
 }
 
@@ -75,6 +87,9 @@ func (UnimplementedTasksServer) ClaimTask(context.Context, *ClaimTaskRequest) (*
 }
 func (UnimplementedTasksServer) CompleteTask(context.Context, *CompleteTaskRequest) (*CompleteTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CompleteTask not implemented")
+}
+func (UnimplementedTasksServer) HeartbeatTasks(context.Context, *HeartbeatTasksRequest) (*HeartbeatTasksResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HeartbeatTasks not implemented")
 }
 func (UnimplementedTasksServer) mustEmbedUnimplementedTasksServer() {}
 
@@ -125,6 +140,24 @@ func _Tasks_CompleteTask_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Tasks_HeartbeatTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatTasksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TasksServer).HeartbeatTasks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Tasks_HeartbeatTasks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TasksServer).HeartbeatTasks(ctx, req.(*HeartbeatTasksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Tasks_ServiceDesc is the grpc.ServiceDesc for Tasks service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -139,6 +172,10 @@ var Tasks_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteTask",
 			Handler:    _Tasks_CompleteTask_Handler,
+		},
+		{
+			MethodName: "HeartbeatTasks",
+			Handler:    _Tasks_HeartbeatTasks_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

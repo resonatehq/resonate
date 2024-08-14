@@ -1,25 +1,24 @@
-version: '3'
 services:
   resonate:
     build: .
     container_name: resonate
     command:
-    - serve
-    - --aio-store-postgres-host
-    - postgres
-    - --aio-store-postgres-username
-    - username
-    - --aio-store-postgres-password
-    - password
-    - --aio-store-postgres-database
-    - resonate
+      - serve
+      - --aio-store-postgres-host
+      - postgres
+      - --aio-store-postgres-username
+      - username
+      - --aio-store-postgres-password
+      - password
+      - --aio-store-postgres-database
+      - resonate
     volumes:
-    - ./resonate.yml:/root/resonate.yml
+      - ./resonate.yml:/root/resonate.yml
     ports:
-    - "8001:8001"
-    - "50051:50051"
+      - "8001:8001"
+      - "50051:50051"
     depends_on:
-    - postgres
+      - postgres
   postgres:
     image: postgres:15
     container_name: postgres
@@ -28,11 +27,11 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: resonate
     ports:
-    - "5432:5432"
+      - "5432:5432"
     read_only: true
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
-    - no-new-privileges:true
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U username -d resonate"]
       interval: 10s
@@ -45,22 +44,22 @@ services:
     profiles: ["dst"]
     container_name: resonate-dst
     command:
-    - dst
-    - run
-    - --aio-store
-    - postgres
-    - --aio-store-postgres-host
-    - postgres-dst
-    - --aio-store-postgres-username
-    - username
-    - --aio-store-postgres-password
-    - password
-    - --aio-store-postgres-database
-    - resonate_dst
+      - dst
+      - run
+      - --aio-store
+      - postgres
+      - --aio-store-postgres-host
+      - postgres-dst
+      - --aio-store-postgres-username
+      - username
+      - --aio-store-postgres-password
+      - password
+      - --aio-store-postgres-database
+      - resonate_dst
     volumes:
-    - ./resonate.yml:/root/resonate.yml
+      - ./resonate.yml:/root/resonate.yml
     depends_on:
-    - postgres-dst
+      - postgres-dst
   postgres-dst:
     image: postgres:15
     profiles: ["dst"]
@@ -72,7 +71,7 @@ services:
     read_only: true
     tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
     security_opt:
-    - no-new-privileges:true
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U username -d resonate_dst"]
       interval: 10s

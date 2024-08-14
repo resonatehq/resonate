@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net"
 
@@ -13,7 +14,8 @@ import (
 )
 
 type Config struct {
-	Addr string
+	Host string
+	Port int
 }
 
 type Grpc struct {
@@ -26,6 +28,7 @@ func New(api api.API, config *Config) api.Subsystem {
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromisesServer(server, s)
+	grpcApi.RegisterCallbacksServer(server, s)
 	grpcApi.RegisterSchedulesServer(server, s)
 	grpcApi.RegisterLocksServer(server, s)
 	grpcApi.RegisterTasksServer(server, s)
@@ -37,15 +40,17 @@ func New(api api.API, config *Config) api.Subsystem {
 }
 
 func (g *Grpc) Start(errors chan<- error) {
+	addr := fmt.Sprintf("%s:%d", g.config.Host, g.config.Port)
+
 	// Create a listener on a specific port
-	listen, err := net.Listen("tcp", g.config.Addr)
+	listen, err := net.Listen("tcp", addr)
 	if err != nil {
 		errors <- err
 		return
 	}
 
 	// Start the gRPC server
-	slog.Info("starting grpc server", "addr", g.config.Addr)
+	slog.Info("starting grpc server", "addr", addr)
 	if err := g.server.Serve(listen); err != nil {
 		errors <- err
 	}
@@ -62,6 +67,7 @@ func (g *Grpc) String() string {
 
 type server struct {
 	grpcApi.UnimplementedPromisesServer
+	grpcApi.UnimplementedCallbacksServer
 	grpcApi.UnimplementedSchedulesServer
 	grpcApi.UnimplementedLocksServer
 	grpcApi.UnimplementedTasksServer

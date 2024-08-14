@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -47,7 +48,12 @@ func RunDSTCmd() *cobra.Command {
 		coroutineMaxSize    = util.RangeIntFlag{Min: 1, Max: 1000}
 		submissionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
 		completionBatchSize = util.RangeIntFlag{Min: 1, Max: 1000}
+		promiseBatchSize    = util.RangeIntFlag{Min: 1, Max: 1000}
 		scheduleBatchSize   = util.RangeIntFlag{Min: 1, Max: 1000}
+		taskBatchSize       = util.RangeIntFlag{Min: 1, Max: 1000}
+		taskEnqueueDelay    = util.RangeIntFlag{Min: 1000, Max: 10000}
+
+		backchannelSize = util.RangeIntFlag{Min: 1, Max: 1000}
 	)
 
 	cmd := &cobra.Command{
@@ -126,8 +132,12 @@ func RunDSTCmd() *cobra.Command {
 				return err
 			}
 
+			// instantiate backchannel
+			backchannel := make(chan interface{}, backchannelSize.Resolve(r))
+
 			// add api subsystems
 			aio.AddSubsystem(t_aio.Store, store, nil)
+			aio.AddSubsystem(t_aio.Queue, queue.NewDST(backchannel), nil)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -143,6 +153,7 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
+			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 			system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
@@ -150,8 +161,16 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+
+			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+
+			// TODO: migrate tick to background coroutines
 			system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
-			system.AddOnTick(d, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			dst := dst.New(r, &dst.Config{
@@ -169,6 +188,7 @@ func RunDSTCmd() *cobra.Command {
 				Tags:               tags.Resolve(r),
 				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
+				Backchannel:        backchannel,
 			})
 
 			slog.Info("DST", "seed", seed, "ticks", ticks, "reqsPerTick", reqsPerTick.String(), "dst", dst, "system", system)
@@ -250,12 +270,18 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(&coroutineMaxSize, "system-coroutine-max-size", "max number of coroutines to run concurrently")
 	cmd.Flags().Var(&submissionBatchSize, "system-submission-batch-size", "size of the completion queue buffered channel")
 	cmd.Flags().Var(&completionBatchSize, "system-completion-batch-size", "max number of completions to process on each tick")
-	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each tick")
+	cmd.Flags().Var(&promiseBatchSize, "system-promise-batch-size", "max number of promises to process on each iteration")
+	cmd.Flags().Var(&scheduleBatchSize, "system-schedule-batch-size", "max number of schedules to process on each iteration")
+	cmd.Flags().Var(&taskBatchSize, "system-task-batch-size", "max number of tasks to process on each iteration")
+	cmd.Flags().Var(&taskEnqueueDelay, "system-task-enqueue-delay", "ms to wait before attempting to reenqueue a task")
 
 	_ = viper.BindPFlag("dst.system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
 	_ = viper.BindPFlag("dst.system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("dst.system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
+	_ = viper.BindPFlag("dst.system.promiseBatchSize", cmd.Flags().Lookup("system-promise-batch-size"))
 	_ = viper.BindPFlag("dst.system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+	_ = viper.BindPFlag("dst.system.taskBatchSize", cmd.Flags().Lookup("system-task-batch-size"))
+	_ = viper.BindPFlag("dst.system.taskEnqueueDelay", cmd.Flags().Lookup("system-task-enqueue-delay"))
 
 	cmd.Flags().SortFlags = false
 

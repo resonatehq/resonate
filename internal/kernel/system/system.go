@@ -19,21 +19,26 @@ import (
 )
 
 type Config struct {
-	CoroutineMaxSize      int
-	NotificationCacheSize int
-	SubmissionBatchSize   int
-	CompletionBatchSize   int
-	ScheduleBatchSize     int
+	Url                 string
+	CoroutineMaxSize    int
+	SubmissionBatchSize int
+	CompletionBatchSize int
+	PromiseBatchSize    int
+	ScheduleBatchSize   int
+	TaskBatchSize       int
+	TaskEnqueueDelay    time.Duration
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(cms=%d, ncs=%d, sbs=%d, cbs=%d, sbs=%d)",
+		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%d)",
 		c.CoroutineMaxSize,
-		c.NotificationCacheSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
+		c.PromiseBatchSize,
 		c.ScheduleBatchSize,
+		c.TaskBatchSize,
+		c.TaskEnqueueDelay.Milliseconds(),
 	)
 }
 
@@ -44,15 +49,22 @@ type coroutineTick struct {
 	every     time.Duration
 }
 
+type backgroundCoroutine struct {
+	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
+	name      string
+	promise   promise.Promise[any]
+}
+
 type System struct {
-	api       api.API
-	aio       aio.AIO
-	config    *Config
-	metrics   *metrics.Metrics
-	scheduler gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
-	onRequest map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
-	onTick    []*coroutineTick
-	shutdown  chan interface{}
+	api        api.API
+	aio        aio.AIO
+	config     *Config
+	metrics    *metrics.Metrics
+	scheduler  gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
+	onRequest  map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
+	onTick     []*coroutineTick
+	background []*backgroundCoroutine
+	shutdown   chan interface{}
 }
 
 func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *System {
@@ -135,17 +147,33 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 		}
 	}
 
-	// add request coroutines
-	for _, sqe := range sqes {
-		if coroutine, ok := s.onRequest[sqe.Submission.Kind]; ok {
-			if p, ok := gocoro.Add(s.scheduler, coroutine(sqe.Submission, sqe.Callback)); ok {
-				s.coroutineMetrics(p, sqe.Submission.Tags)
+	// add background coroutines
+	for _, bg := range s.background {
+		if !s.api.Done() && (bg.promise == nil || bg.promise.Completed()) {
+			tags := map[string]string{
+				"request_id": fmt.Sprintf("%s:%d", bg.name, t),
+				"name":       bg.name,
+			}
+
+			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(s.config, tags)); ok {
+				bg.promise = p
+				s.coroutineMetrics(p, tags)
 			} else {
 				slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-				sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
 			}
+		}
+	}
+
+	// add request coroutines
+	for _, sqe := range sqes {
+		coroutine, ok := s.onRequest[sqe.Submission.Kind]
+		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind))
+
+		if p, ok := gocoro.Add(s.scheduler, coroutine(sqe.Submission, sqe.Callback)); ok {
+			s.coroutineMetrics(p, sqe.Submission.Tags)
 		} else {
-			panic("invalid api request")
+			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
+			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
 		}
 	}
 
@@ -183,6 +211,17 @@ func (s *System) AddOnTick(every time.Duration, name string, constructor func(*C
 		coroutine: constructor,
 		name:      name,
 		every:     every,
+	})
+}
+
+func (s *System) AddForever(constructor func() gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
+	gocoro.Add(s.scheduler, constructor())
+}
+
+func (s *System) AddBackground(name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
+	s.background = append(s.background, &backgroundCoroutine{
+		coroutine: constructor,
+		name:      name,
 	})
 }
 

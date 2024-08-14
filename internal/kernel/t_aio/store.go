@@ -3,10 +3,13 @@ package t_aio
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type StoreKind int
@@ -14,10 +17,14 @@ type StoreKind int
 const (
 	// PROMISES
 	ReadPromise StoreKind = iota
+	ReadPromises
 	SearchPromises
 	CreatePromise
 	UpdatePromise
-	TimeoutPromises
+
+	// CALLBACKS
+	CreateCallback
+	DeleteCallbacks
 
 	// SCHEDULES
 	ReadSchedule
@@ -26,6 +33,13 @@ const (
 	CreateSchedule
 	UpdateSchedule
 	DeleteSchedule
+
+	// TASKS
+	ReadTask
+	ReadTasks
+	CreateTasks
+	UpdateTask
+	HeartbeatTasks
 
 	// LOCKS
 	ReadLock
@@ -40,15 +54,19 @@ func (k StoreKind) String() string {
 	// PROMISES
 	case ReadPromise:
 		return "ReadPromise"
+	case ReadPromises:
+		return "ReadPromises"
 	case SearchPromises:
 		return "SearchPromises"
 	case CreatePromise:
 		return "CreatePromise"
 	case UpdatePromise:
 		return "UpdatePromise"
-	case TimeoutPromises:
-		return "TimeoutPromises"
-
+	// CALLBACKS
+	case CreateCallback:
+		return "CreateCallback"
+	case DeleteCallbacks:
+		return "DeleteCallbacks"
 	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
@@ -62,7 +80,17 @@ func (k StoreKind) String() string {
 		return "UpdateSchedule"
 	case DeleteSchedule:
 		return "DeleteSchedule"
-
+	// TASKS
+	case ReadTask:
+		return "ReadTask"
+	case ReadTasks:
+		return "ReadTasks"
+	case CreateTasks:
+		return "CreateTasks"
+	case UpdateTask:
+		return "UpdateTask"
+	case HeartbeatTasks:
+		return "HeartbeatTasks"
 	// LOCKS
 	case ReadLock:
 		return "ReadLock"
@@ -104,11 +132,15 @@ type Command struct {
 	Kind StoreKind
 
 	// PROMISES
-	ReadPromise     *ReadPromiseCommand
-	SearchPromises  *SearchPromisesCommand
-	CreatePromise   *CreatePromiseCommand
-	UpdatePromise   *UpdatePromiseCommand
-	TimeoutPromises *TimeoutPromisesCommand
+	ReadPromise    *ReadPromiseCommand
+	ReadPromises   *ReadPromisesCommand
+	SearchPromises *SearchPromisesCommand
+	CreatePromise  *CreatePromiseCommand
+	UpdatePromise  *UpdatePromiseCommand
+
+	// CALLBACKS
+	CreateCallback  *CreateCallbackCommand
+	DeleteCallbacks *DeleteCallbacksCommand
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleCommand
@@ -117,6 +149,13 @@ type Command struct {
 	CreateSchedule  *CreateScheduleCommand
 	UpdateSchedule  *UpdateScheduleCommand
 	DeleteSchedule  *DeleteScheduleCommand
+
+	// TASKS
+	ReadTask       *ReadTaskCommand
+	ReadTasks      *ReadTasksCommand
+	CreateTasks    *CreateTasksCommand
+	UpdateTask     *UpdateTaskCommand
+	HeartbeatTasks *HeartbeatTasksCommand
 
 	// LOCKS
 	ReadLock       *ReadLockCommand
@@ -134,11 +173,15 @@ type Result struct {
 	Kind StoreKind
 
 	// PROMISES
-	ReadPromise     *QueryPromisesResult
-	SearchPromises  *QueryPromisesResult
-	CreatePromise   *AlterPromisesResult
-	UpdatePromise   *AlterPromisesResult
-	TimeoutPromises *AlterPromisesResult
+	ReadPromise    *QueryPromisesResult
+	ReadPromises   *QueryPromisesResult
+	SearchPromises *QueryPromisesResult
+	CreatePromise  *AlterPromisesResult
+	UpdatePromise  *AlterPromisesResult
+
+	// CALLBACKS
+	CreateCallback  *AlterCallbacksResult
+	DeleteCallbacks *AlterCallbacksResult
 
 	// SCHEDULES
 	ReadSchedule    *QuerySchedulesResult
@@ -147,6 +190,13 @@ type Result struct {
 	CreateSchedule  *AlterSchedulesResult
 	UpdateSchedule  *AlterSchedulesResult
 	DeleteSchedule  *AlterSchedulesResult
+
+	// TASKS
+	ReadTask       *QueryTasksResult
+	ReadTasks      *QueryTasksResult
+	CreateTasks    *AlterTasksResult
+	UpdateTask     *AlterTasksResult
+	HeartbeatTasks *AlterTasksResult
 
 	// LOCKS
 	ReadLock       *QueryLocksResult
@@ -164,6 +214,11 @@ func (r *Result) String() string {
 
 type ReadPromiseCommand struct {
 	Id string
+}
+
+type ReadPromisesCommand struct {
+	Time  int64
+	Limit int
 }
 
 type SearchPromisesCommand struct {
@@ -192,10 +247,6 @@ type UpdatePromiseCommand struct {
 	CompletedOn    int64
 }
 
-type TimeoutPromisesCommand struct {
-	Time int64
-}
-
 // Promise results
 
 type QueryPromisesResult struct {
@@ -208,6 +259,31 @@ type AlterPromisesResult struct {
 	RowsAffected int64
 }
 
+// Callback commands
+
+type CreateCallbackCommand struct {
+	PromiseId string
+	Message   *message.Message
+	Timeout   int64
+	CreatedOn int64
+}
+
+type DeleteCallbacksCommand struct {
+	PromiseId string
+}
+
+// Callback results
+
+type QueryCallbacksResult struct {
+	RowsReturned int64
+	Records      []*callback.CallbackRecord
+}
+
+type AlterCallbacksResult struct {
+	RowsAffected int64
+	LastInsertId string
+}
+
 // Schedule commands
 
 type ReadScheduleCommand struct {
@@ -216,7 +292,7 @@ type ReadScheduleCommand struct {
 
 type ReadSchedulesCommand struct {
 	NextRunTime int64
-	Limit       int64
+	Limit       int
 }
 
 type SearchSchedulesCommand struct {
@@ -259,6 +335,52 @@ type QuerySchedulesResult struct {
 }
 
 type AlterSchedulesResult struct {
+	RowsAffected int64
+}
+
+// Task commands
+
+type ReadTaskCommand struct {
+	Id string
+}
+
+type ReadTasksCommand struct {
+	States []task.State
+	Time   int64
+	Limit  int
+}
+
+type CreateTasksCommand struct {
+	PromiseId string
+	CreatedOn int64
+}
+
+type UpdateTaskCommand struct {
+	Id             string
+	ProcessId      *string
+	State          task.State
+	Counter        int
+	Attempt        int
+	Frequency      int
+	Expiration     int64
+	CompletedOn    *int64
+	CurrentStates  []task.State
+	CurrentCounter int
+}
+
+type HeartbeatTasksCommand struct {
+	ProcessId string
+	Time      int64
+}
+
+// Task results
+
+type QueryTasksResult struct {
+	RowsReturned int64
+	Records      []*task.TaskRecord
+}
+
+type AlterTasksResult struct {
 	RowsAffected int64
 }
 

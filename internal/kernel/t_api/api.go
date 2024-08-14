@@ -9,6 +9,9 @@ const (
 	CreatePromise
 	CompletePromise
 
+	// CALLBACKS
+	CreateCallback
+
 	// SCHEDULES
 	ReadSchedule
 	SearchSchedules
@@ -19,6 +22,11 @@ const (
 	AcquireLock
 	ReleaseLock
 	HeartbeatLocks
+
+	// TASKS
+	ClaimTask
+	CompleteTask
+	HeartbeatTasks
 
 	// Echo
 	Echo
@@ -35,6 +43,9 @@ func (k Kind) String() string {
 		return "CreatePromise"
 	case CompletePromise:
 		return "CompletePromise"
+	// CALLBACKS
+	case CreateCallback:
+		return "CreateCallback"
 	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
@@ -51,6 +62,13 @@ func (k Kind) String() string {
 		return "ReleaseLock"
 	case HeartbeatLocks:
 		return "HeartbeatLocks"
+	// TASKS
+	case ClaimTask:
+		return "ClaimTask"
+	case CompleteTask:
+		return "CompleteTask"
+	case HeartbeatTasks:
+		return "HeartbeatTasks"
 	// ECHO
 	case Echo:
 		return "Echo"

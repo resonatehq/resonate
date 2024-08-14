@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -18,6 +19,9 @@ type Request struct {
 	CreatePromise   *CreatePromiseRequest
 	CompletePromise *CompletePromiseRequest
 
+	// CALLBACKS
+	CreateCallback *CreateCallbackRequest
+
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
 	SearchSchedules *SearchSchedulesRequest
@@ -28,6 +32,11 @@ type Request struct {
 	AcquireLock    *AcquireLockRequest
 	ReleaseLock    *ReleaseLockRequest
 	HeartbeatLocks *HeartbeatLocksRequest
+
+	// TASKS
+	ClaimTask      *ClaimTaskRequest
+	CompleteTask   *CompleteTaskRequest
+	HeartbeatTasks *HeartbeatTasksRequest
 
 	// ECHO
 	Echo *EchoRequest
@@ -89,6 +98,14 @@ type RejectPromiseRequest struct {
 	Value          promise.Value    `json:"value,omitempty"`
 }
 
+// Callbacks
+
+type CreateCallbackRequest struct {
+	PromiseId string           `json:"promiseId"`
+	Timeout   int64            `json:"timeout"`
+	Message   *message.Message `json:"message"`
+}
+
 // Schedules
 
 type ReadScheduleRequest struct {
@@ -136,6 +153,24 @@ type HeartbeatLocksRequest struct {
 	ProcessId string `json:"processId"`
 }
 
+// Tasks
+
+type ClaimTaskRequest struct {
+	Id        string `json:"id"`
+	ProcessId string `json:"processId"`
+	Counter   int    `json:"counter"`
+	Frequency int    `json:"frequency"`
+}
+
+type CompleteTaskRequest struct {
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
+}
+
+type HeartbeatTasksRequest struct {
+	ProcessId string `json:"processId"`
+}
+
 // Echo
 
 type EchoRequest struct {
@@ -180,6 +215,15 @@ func (r *Request) String() string {
 			r.CompletePromise.Strict,
 			r.CompletePromise.State,
 		)
+
+	// CALLBACKS
+	case CreateCallback:
+		return fmt.Sprintf(
+			"CreateCallback(promiseId=%s, message=%s)",
+			r.CreateCallback.PromiseId,
+			r.CreateCallback.Message,
+		)
+
 	// SCHEDULES
 	case ReadSchedule:
 		return fmt.Sprintf(
@@ -232,6 +276,27 @@ func (r *Request) String() string {
 		return fmt.Sprintf(
 			"HeartbeatLocks(processId=%s)",
 			r.HeartbeatLocks.ProcessId,
+		)
+
+	// TASKS
+	case ClaimTask:
+		return fmt.Sprintf(
+			"ClaimTask(id=%s, processId=%s, counter=%d, frequency=%d)",
+			r.ClaimTask.Id,
+			r.ClaimTask.ProcessId,
+			r.ClaimTask.Counter,
+			r.ClaimTask.Frequency,
+		)
+	case CompleteTask:
+		return fmt.Sprintf(
+			"CompleteTask(id=%s, counter=%d)",
+			r.CompleteTask.Id,
+			r.CompleteTask.Counter,
+		)
+	case HeartbeatTasks:
+		return fmt.Sprintf(
+			"HeartbeatTasks(processId=%s)",
+			r.HeartbeatTasks.ProcessId,
 		)
 
 	// ECHO

@@ -9,8 +9,10 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -1974,6 +1976,354 @@ var TestCases = []*testCase{
 		},
 	},
 
+	// CALLBACKS
+	{
+		name: "CreateCallback",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+		},
+	},
+	{
+		name: "CreateCallbackNoPromise",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "CreateCallbackCompletedPromise",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
+					Id:    "foo",
+					State: promise.Resolved,
+					Value: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "bar",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
+					Id:    "bar",
+					State: promise.Rejected,
+					Value: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "bar",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "baz",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
+					Id:    "baz",
+					State: promise.Canceled,
+					Value: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "baz",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "qux",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.UpdatePromiseCommand{
+					Id:    "qux",
+					State: promise.Timedout,
+					Value: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "qux",
+					Message:   &message.Message{},
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdatePromise,
+				UpdatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "DeleteCallbacks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "bar",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "bar",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
+					PromiseId: "bar",
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
+					PromiseId: "baz",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.AlterCallbacksResult{
+					RowsAffected: 2,
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.DeleteCallbacks,
+				DeleteCallbacks: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+
 	// SCHEDULES
 	{
 		name: "CreateUpdateDeleteSchedule",
@@ -2323,6 +2673,444 @@ var TestCases = []*testCase{
 							SortId:      1,
 						},
 					},
+				},
+			},
+		},
+	},
+
+	// TASKS
+	{
+		name: "CreateTasks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					States: []task.State{task.Init},
+					Limit:  10,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 3,
+					Records: []*task.TaskRecord{
+						{
+							Id:        "1",
+							State:     task.Init,
+							Message:   []byte(`{"recv":"","data":null}`),
+							CreatedOn: util.ToPointer[int64](0),
+						},
+						{
+							Id:        "2",
+							State:     task.Init,
+							Message:   []byte(`{"recv":"","data":null}`),
+							CreatedOn: util.ToPointer[int64](0),
+						},
+						{
+							Id:        "3",
+							State:     task.Init,
+							Message:   []byte(`{"recv":"","data":null}`),
+							CreatedOn: util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "UpdateTask",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Enqueued,
+					Counter:        1,
+					Attempt:        1,
+					Frequency:      1,
+					Expiration:     1,
+					CompletedOn:    util.ToPointer[int64](1),
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 0,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Claimed,
+					Counter:        2,
+					Attempt:        2,
+					Frequency:      2,
+					Expiration:     2,
+					CompletedOn:    util.ToPointer[int64](2),
+					CurrentStates:  []task.State{task.Enqueued},
+					CurrentCounter: 0, // mimatch
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Claimed,
+					Counter:        3,
+					Attempt:        3,
+					Frequency:      3,
+					Expiration:     3,
+					CompletedOn:    util.ToPointer[int64](3),
+					CurrentStates:  []task.State{task.Enqueued},
+					CurrentCounter: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Completed,
+					Counter:        4,
+					Attempt:        4,
+					Frequency:      4,
+					Expiration:     4,
+					CompletedOn:    util.ToPointer[int64](4),
+					CurrentStates:  []task.State{task.Enqueued}, // mismatch
+					CurrentCounter: 3,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Completed,
+					Counter:        5,
+					Attempt:        5,
+					Frequency:      5,
+					Expiration:     5,
+					CompletedOn:    util.ToPointer[int64](5),
+					CurrentStates:  []task.State{task.Claimed},
+					CurrentCounter: 3,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "1",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 0,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 0,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:          "1",
+							ProcessId:   util.ToPointer("pid"),
+							State:       task.Completed,
+							Message:     []byte(`{"recv":"","data":null}`),
+							Counter:     5,
+							Attempt:     5,
+							Frequency:   5,
+							Expiration:  5,
+							CreatedOn:   util.ToPointer[int64](0),
+							CompletedOn: util.ToPointer[int64](5),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "HeartbeatTasks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					State: promise.Pending,
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Message:   &message.Message{},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("bar"),
+					State:          task.Claimed,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 0,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "2",
+					ProcessId:      util.ToPointer("bar"),
+					State:          task.Claimed,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 0,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "3",
+					ProcessId:      util.ToPointer("bar"),
+					State:          task.Completed,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 0,
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatTasks,
+				HeartbeatTasks: &t_aio.HeartbeatTasksCommand{
+					ProcessId: "bar",
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatTasks,
+				HeartbeatTasks: &t_aio.HeartbeatTasksCommand{
+					ProcessId: "baz",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatTasks,
+				HeartbeatTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 2,
+				},
+			},
+			{
+				Kind: t_aio.HeartbeatTasks,
+				HeartbeatTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 0,
 				},
 			},
 		},

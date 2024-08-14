@@ -3,9 +3,11 @@ package t_api
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -18,6 +20,9 @@ type Response struct {
 	SearchPromises  *SearchPromisesResponse
 	CompletePromise *CompletePromiseResponse
 
+	// CALLBACKS
+	CreateCallback *CreateCallbackResponse
+
 	// SCHEDULES
 	CreateSchedule  *CreateScheduleResponse
 	SearchSchedules *SearchSchedulesResponse
@@ -28,6 +33,11 @@ type Response struct {
 	AcquireLock    *AcquireLockResponse
 	ReleaseLock    *ReleaseLockResponse
 	HeartbeatLocks *HeartbeatLocksResponse
+
+	// TASKS
+	ClaimTask      *ClaimTaskResponse
+	CompleteTask   *CompleteTaskResponse
+	HeartbeatTasks *HeartbeatTasksResponse
 
 	// ECHO
 	Echo *EchoResponse
@@ -58,6 +68,14 @@ type SearchPromisesResponse struct {
 type CompletePromiseResponse struct {
 	Status  ResponseStatus   `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+// Callbacks
+
+type CreateCallbackResponse struct {
+	Status   ResponseStatus     `json:"status"`
+	Promise  *promise.Promise   `json:"promise,omitempty"`
+	Callback *callback.Callback `json:"callback,omitempty"`
 }
 
 // Schedules
@@ -98,6 +116,23 @@ type HeartbeatLocksResponse struct {
 	LocksAffected int64          `json:"locksAffected"`
 }
 
+// Tasks
+
+type ClaimTaskResponse struct {
+	Status ResponseStatus `json:"status"`
+	Task   *task.Task     `json:"task"`
+}
+
+type CompleteTaskResponse struct {
+	Status ResponseStatus `json:"status"`
+	Task   *task.Task     `json:"task"`
+}
+
+type HeartbeatTasksResponse struct {
+	Status        ResponseStatus `json:"status"`
+	TasksAffected int64          `json:"tasksAffected"`
+}
+
 // Echo
 
 type EchoResponse struct {
@@ -115,6 +150,9 @@ func (r *Response) Status() ResponseStatus {
 		return r.CreatePromise.Status
 	case CompletePromise:
 		return r.CompletePromise.Status
+	// CALLBACKS
+	case CreateCallback:
+		return r.CreateCallback.Status
 	// SCHEDULES
 	case ReadSchedule:
 		return r.ReadSchedule.Status
@@ -131,6 +169,13 @@ func (r *Response) Status() ResponseStatus {
 		return r.ReleaseLock.Status
 	case HeartbeatLocks:
 		return r.HeartbeatLocks.Status
+	// TASKS
+	case ClaimTask:
+		return r.ClaimTask.Status
+	case CompleteTask:
+		return r.CompleteTask.Status
+	case HeartbeatTasks:
+		return r.HeartbeatTasks.Status
 	default:
 		return 0
 	}
@@ -163,6 +208,15 @@ func (r *Response) String() string {
 			"CompletePromise(status=%d, promise=%s)",
 			r.CompletePromise.Status,
 			r.CompletePromise.Promise,
+		)
+
+	// CALLBACKS
+	case CreateCallback:
+		return fmt.Sprintf(
+			"CreateCallback(status=%d, promise=%s, callback=%s)",
+			r.CreateCallback.Status,
+			r.CreateCallback.Promise,
+			r.CreateCallback.Callback,
 		)
 
 	// SCHEDULES
@@ -208,6 +262,26 @@ func (r *Response) String() string {
 			"HeartbeatLocks(status=%d, locksAffected=%d)",
 			r.HeartbeatLocks.Status,
 			r.HeartbeatLocks.LocksAffected,
+		)
+
+	// TASKS
+	case ClaimTask:
+		return fmt.Sprintf(
+			"ClaimTask(status=%d, task=%s)",
+			r.ClaimTask.Status,
+			r.ClaimTask.Task,
+		)
+	case CompleteTask:
+		return fmt.Sprintf(
+			"CompleteTask(status=%d, task=%s)",
+			r.CompleteTask.Status,
+			r.CompleteTask.Task,
+		)
+	case HeartbeatTasks:
+		return fmt.Sprintf(
+			"HeartbeatTasks(status=%d, tasksAffected=%d)",
+			r.HeartbeatTasks.Status,
+			r.HeartbeatTasks.TasksAffected,
 		)
 
 	// ECHO

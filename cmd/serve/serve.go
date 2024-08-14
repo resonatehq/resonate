@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -35,6 +36,15 @@ func ServeCmd() *cobra.Command {
 			config, err := util.NewConfig()
 			if err != nil {
 				return err
+			}
+
+			// defaults
+			if config.System.Url == "" {
+				host := config.API.Subsystems.Http.Host
+				if host == "0.0.0.0" {
+					host = "127.0.0.1"
+				}
+				config.System.Url = fmt.Sprintf("http://%s:%d", host, config.API.Subsystems.Http.Port)
 			}
 
 			// logger
@@ -70,6 +80,7 @@ func ServeCmd() *cobra.Command {
 
 			// add aio subsystems
 			aio.AddSubsystem(t_aio.Store, store, config.AIO.Subsystems.Store.Subsystem)
+			aio.AddSubsystem(t_aio.Queue, queue.New(), config.AIO.Subsystems.Queue.Subsystem)
 
 			// start api/aio
 			if err := api.Start(); err != nil {
@@ -86,6 +97,7 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
@@ -94,8 +106,16 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
 			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
 			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+
+			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+
+			// TODO: migrate to system coroutines
 			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
-			system.AddOnTick(10*time.Second, "TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			// metrics server
@@ -170,27 +190,32 @@ func ServeCmd() *cobra.Command {
 
 	// api
 	cmd.Flags().Int("api-size", 100, "size of the submission queue buffered channel")
-	cmd.Flags().String("api-http-addr", "0.0.0.0:8001", "http server address")
+	cmd.Flags().String("api-http-host", "0.0.0.0", "http server host")
+	cmd.Flags().Int("api-http-port", 8001, "http server port")
 	cmd.Flags().Duration("api-http-timeout", 10*time.Second, "http server graceful shutdown timeout")
-	cmd.Flags().String("api-grpc-addr", "0.0.0.0:50051", "grpc server address")
-	cmd.Flags().String("api-base-url", "http://localhost:8001", "base url to automatically generate absolute URLs for the server's resources")
 	cmd.Flags().StringToString("api-http-auth", map[string]string{}, "basic auth username/password pairs")
+	cmd.Flags().String("api-grpc-host", "0.0.0.0", "grpc server host")
+	cmd.Flags().Int("api-grpc-port", 50051, "grpc server port")
 
-	_ = viper.BindPFlag("api.subsystems.http.auth", cmd.Flags().Lookup("api-http-auth"))
 	_ = viper.BindPFlag("api.size", cmd.Flags().Lookup("api-size"))
-	_ = viper.BindPFlag("api.subsystems.http.addr", cmd.Flags().Lookup("api-http-addr"))
+	_ = viper.BindPFlag("api.subsystems.http.host", cmd.Flags().Lookup("api-http-host"))
+	_ = viper.BindPFlag("api.subsystems.http.port", cmd.Flags().Lookup("api-http-port"))
 	_ = viper.BindPFlag("api.subsystems.http.timeout", cmd.Flags().Lookup("api-http-timeout"))
-	_ = viper.BindPFlag("api.subsystems.grpc.addr", cmd.Flags().Lookup("api-grpc-addr"))
-	_ = viper.BindPFlag("api.baseUrl", cmd.Flags().Lookup("api-base-url"))
+	_ = viper.BindPFlag("api.subsystems.http.auth", cmd.Flags().Lookup("api-http-auth"))
+	_ = viper.BindPFlag("api.subsystems.grpc.host", cmd.Flags().Lookup("api-grpc-host"))
+	_ = viper.BindPFlag("api.subsystems.grpc.port", cmd.Flags().Lookup("api-grpc-port"))
 
 	// aio
 	cmd.Flags().Int("aio-size", 100, "size of the completion queue buffered channel")
+	cmd.Flags().Int("aio-queue-size", 100, "size of queue submission queue buffered channel")
+	cmd.Flags().Int("aio-queue-workers", 1, "number of concurrent connections to the queue")
+	cmd.Flags().Int("aio-queue-batch-size", 100, "max submissions processed each tick by a queue worker")
 	cmd.Flags().String("aio-store", "sqlite", "promise store type")
 	cmd.Flags().Int("aio-store-size", 100, "size of store submission queue buffered channel")
 	cmd.Flags().Int("aio-store-workers", 1, "number of concurrent connections to the store")
 	cmd.Flags().Int("aio-store-batch-size", 100, "max submissions processed each tick by a store worker")
 	cmd.Flags().String("aio-store-sqlite-path", "resonate.db", "sqlite database path")
-	cmd.Flags().Duration("aio-store-sqlite-tx-timeout", 10_000*time.Millisecond, "sqlite transaction timeout")
+	cmd.Flags().Duration("aio-store-sqlite-tx-timeout", 10*time.Second, "sqlite transaction timeout")
 	cmd.Flags().Bool("aio-store-sqlite-reset", false, "sqlite database clean on shutdown")
 	cmd.Flags().String("aio-store-postgres-host", "localhost", "postgres host")
 	cmd.Flags().String("aio-store-postgres-port", "5432", "postgres port")
@@ -198,10 +223,13 @@ func ServeCmd() *cobra.Command {
 	cmd.Flags().String("aio-store-postgres-password", "", "postgres password")
 	cmd.Flags().String("aio-store-postgres-database", "resonate", "postgres database name")
 	cmd.Flags().StringToString("aio-store-postgres-query", make(map[string]string, 0), "postgres query options")
-	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 10_000*time.Millisecond, "postgres transaction timeout")
+	cmd.Flags().Duration("aio-store-postgres-tx-timeout", 10*time.Second, "postgres transaction timeout")
 	cmd.Flags().Bool("aio-store-postgres-reset", false, "postgres database clean on shutdown")
 
 	_ = viper.BindPFlag("aio.size", cmd.Flags().Lookup("aio-size"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.size", cmd.Flags().Lookup("aio-queue-size"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.workers", cmd.Flags().Lookup("aio-queue-workers"))
+	_ = viper.BindPFlag("aio.subsystems.queue.subsystem.batchSize", cmd.Flags().Lookup("aio-queue-batch-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.config.kind", cmd.Flags().Lookup("aio-store"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.size", cmd.Flags().Lookup("aio-store-size"))
 	_ = viper.BindPFlag("aio.subsystems.store.subsystem.workers", cmd.Flags().Lookup("aio-store-workers"))
@@ -220,17 +248,23 @@ func ServeCmd() *cobra.Command {
 	_ = viper.BindPFlag("aio.subsystems.store.config.postgres.reset", cmd.Flags().Lookup("aio-store-postgres-reset"))
 
 	// system
+	cmd.Flags().String("system-url", "", "resonate server url")
 	cmd.Flags().Int("system-coroutine-max-size", 1000, "max number of coroutines to run concurrently")
-	cmd.Flags().Int("system-notification-cache-size", 100, "max number of notifications to keep in cache")
 	cmd.Flags().Int("system-submission-batch-size", 100, "max number of submissions to process on each tick")
 	cmd.Flags().Int("system-completion-batch-size", 100, "max number of completions to process on each tick")
-	cmd.Flags().Int("system-schedule-batch-size", 1000, "max number of schedules to process on each tick")
+	cmd.Flags().Int("system-promise-batch-size", 1000, "max number of promises to process on each iteration")
+	cmd.Flags().Int("system-schedule-batch-size", 1000, "max number of schedules to process on each iteration")
+	cmd.Flags().Int("system-task-batch-size", 1000, "max number of tasks to process on each iteration")
+	cmd.Flags().Duration("system-task-enqueue-delay", 10*time.Second, "time to wait before attempting to reenqueue a task")
 
+	_ = viper.BindPFlag("system.url", cmd.Flags().Lookup("system-url"))
 	_ = viper.BindPFlag("system.coroutineMaxSize", cmd.Flags().Lookup("system-coroutine-max-size"))
-	_ = viper.BindPFlag("system.notificationCacheSize", cmd.Flags().Lookup("system-notification-cache-size"))
 	_ = viper.BindPFlag("system.submissionBatchSize", cmd.Flags().Lookup("system-submission-batch-size"))
 	_ = viper.BindPFlag("system.completionBatchSize", cmd.Flags().Lookup("system-completion-batch-size"))
+	_ = viper.BindPFlag("system.promiseBatchSize", cmd.Flags().Lookup("system-promise-batch-size"))
 	_ = viper.BindPFlag("system.scheduleBatchSize", cmd.Flags().Lookup("system-schedule-batch-size"))
+	_ = viper.BindPFlag("system.taskBatchSize", cmd.Flags().Lookup("system-task-batch-size"))
+	_ = viper.BindPFlag("system.taskEnqueueDelay", cmd.Flags().Lookup("system-task-enqueue-delay"))
 
 	// metrics
 	cmd.Flags().Int("metrics-port", 9090, "prometheus metrics server port")
