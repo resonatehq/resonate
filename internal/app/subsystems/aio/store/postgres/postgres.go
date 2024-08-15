@@ -276,6 +276,8 @@ const (
 		tasks
 	WHERE
 		state & $1 != 0 AND (expiration <= $2 OR timeout <= $2)
+	ORDER BY
+		id
 	LIMIT
 		$3`
 
@@ -287,7 +289,9 @@ const (
 	FROM
 		callbacks
 	WHERE
-		promise_id = $2`
+		promise_id = $2
+	ORDER BY
+		id`
 
 	TASK_UPDATE_STATEMENT = `
 	UPDATE
