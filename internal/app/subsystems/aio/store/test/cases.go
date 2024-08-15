@@ -1126,6 +1126,111 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "ReadPromisesTimedout",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "foo",
+					State:   promise.Pending,
+					Timeout: 1,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "bar",
+					State:   promise.Pending,
+					Timeout: 2,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:      "baz",
+					State:   promise.Pending,
+					Timeout: 3,
+					Param: promise.Value{
+						Headers: map[string]string{},
+						Data:    []byte{},
+					},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadPromises,
+				ReadPromises: &t_aio.ReadPromisesCommand{
+					Time:  2,
+					Limit: 3,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadPromises,
+				ReadPromises: &t_aio.QueryPromisesResult{
+					RowsReturned: 2,
+					LastSortId:   2,
+					Records: []*promise.PromiseRecord{
+						{
+							Id:           "foo",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      1,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer[int64](1),
+							CompletedOn:  nil,
+							SortId:       1,
+						},
+						{
+							Id:           "bar",
+							State:        1,
+							ParamHeaders: []byte("{}"),
+							ParamData:    []byte{},
+							Timeout:      2,
+							Tags:         []byte("{}"),
+							CreatedOn:    util.ToPointer[int64](1),
+							CompletedOn:  nil,
+							SortId:       2,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "SearchPromisesById",
 		commands: []*t_aio.Command{
 			{

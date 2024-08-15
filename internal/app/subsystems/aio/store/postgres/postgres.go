@@ -276,6 +276,8 @@ const (
 		tasks
 	WHERE
 		state & $1 != 0 AND (expiration <= $2 OR timeout <= $2)
+	ORDER BY
+		id
 	LIMIT
 		$3`
 
@@ -287,7 +289,9 @@ const (
 	FROM
 		callbacks
 	WHERE
-		promise_id = $2`
+		promise_id = $2
+	ORDER BY
+		id`
 
 	TASK_UPDATE_STATEMENT = `
 	UPDATE
@@ -454,6 +458,9 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			case t_aio.ReadPromise:
 				util.Assert(command.ReadPromise != nil, "command must not be nil")
 				results[i][j], err = w.readPromise(tx, command.ReadPromise)
+			case t_aio.ReadPromises:
+				util.Assert(command.ReadPromises != nil, "command must not be nil")
+				results[i][j], err = w.readPromises(tx, command.ReadPromises)
 			case t_aio.SearchPromises:
 				util.Assert(command.SearchPromises != nil, "command must not be nil")
 				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
@@ -681,6 +688,53 @@ func (w *PostgresStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComm
 		Kind: t_aio.ReadPromise,
 		ReadPromise: &t_aio.QueryPromisesResult{
 			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCommand) (*t_aio.Result, error) {
+	// select
+	rows, err := tx.Query(PROMISE_SELECT_ALL_STATEMENT, cmd.Time, cmd.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*promise.PromiseRecord
+	var lastSortId int64
+
+	for rows.Next() {
+		record := &promise.PromiseRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.State,
+			&record.ParamHeaders,
+			&record.ParamData,
+			&record.ValueHeaders,
+			&record.ValueData,
+			&record.Timeout,
+			&record.IdempotencyKeyForCreate,
+			&record.IdempotencyKeyForComplete,
+			&record.Tags,
+			&record.CreatedOn,
+			&record.CompletedOn,
+			&record.SortId,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		lastSortId = record.SortId
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadPromises,
+		ReadPromises: &t_aio.QueryPromisesResult{
+			RowsReturned: rowsReturned,
+			LastSortId:   lastSortId,
 			Records:      records,
 		},
 	}, nil
