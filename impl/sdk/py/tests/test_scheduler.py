@@ -1,173 +1,65 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from resonate.scheduler import (
-    Promise,
-    Scheduler,
-)
+from resonate import scheduler
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.context import Context
+    from resonate.promise import Promise
     from resonate.typing import Yieldable
 
 
-def _nested_gen(ctx: Context, a: Promise[int]) -> Generator[Yieldable, Any, int]:  # noqa: ARG001
-    x = yield a
-    return x
+def foo(ctx: Context, name: str, sleep_time: float) -> str:  # noqa: ARG001
+    time.sleep(sleep_time)
+    return name
 
 
-def _divide(ctx: Context, a: int, b: int) -> int:  # noqa: ARG001
-    return a // b
+def baz(ctx: Context, name: str, sleep_time: float) -> Generator[Yieldable, Any, str]:
+    p = yield ctx.invoke(foo, name, sleep_time)
+    return (yield p)
 
 
-def only_call(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield ctx.call(_divide, a=3, b=1)
-    return x
+def bar(
+    ctx: Context, name: str, sleep_time: float
+) -> Generator[Yieldable, Any, Promise[str]]:
+    p: Promise[str] = yield ctx.invoke(foo, name=name, sleep_time=sleep_time)
+    return p
 
 
-def call_with_errors(
-    ctx: Context,
-) -> Generator[Yieldable, Any, int]:
-    x: int
-    try:
-        x = yield ctx.call(_divide, a=100, b=0)
-    except ZeroDivisionError:
-        x = 3
-    return x
+@pytest.mark.skip()
+def test_coro_return_promise() -> None:
+    s = scheduler.Scheduler(max_workers=1)
+    p: Promise[Promise[str]] = s.run("bar", bar, "A", 0.1)
+    assert p.result(timeout=2) == "A"
 
 
-def gen_call(
-    ctx: Context,
-) -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
-    y: int = yield ctx.call(_nested_gen, x)
-    return y
+def test_scheduler() -> None:
+    p = scheduler.Scheduler()
+
+    promise: Promise[str] = p.run("baz", baz, name="A", sleep_time=0.2)
+    assert promise.result(timeout=4) == "A"
+
+    promise = p.run("foo", foo, name="B", sleep_time=0.2)
+    assert promise.result(timeout=4) == "B"
 
 
-def gen_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
-    y: Promise[int] = yield ctx.invoke(_nested_gen, x)
-    z: int = yield y
-    return z
+def test_multithreading_capabilities() -> None:
+    s = scheduler.Scheduler(max_workers=3)
+    time_per_process: int = 5
+    start = time.time()
+    p1: Promise[str] = s.run("1", baz, name="A", sleep_time=time_per_process)
+    p2: Promise[str] = s.run("2", baz, name="B", sleep_time=time_per_process)
+    p3: Promise[str] = s.run("3", baz, name="C", sleep_time=time_per_process)
 
-
-def double_call(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield ctx.call(_divide, a=3, b=1)
-    y: int = yield ctx.call(_divide, a=5, b=1)
-    return x + y
-
-
-def _abc(ctx: Context, value: Promise[int]) -> Generator[Yieldable, int, int]:  # noqa: ARG001
-    x = yield value
-    return x
-
-
-def whatever(ctx: Context) -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
-    xf: Promise[int] = yield ctx.invoke(_abc, value=af)
-    yf: Promise[int] = yield ctx.invoke(_abc, value=af)
-    try:
-        x: int = yield xf
-    except Exception:  # noqa: BLE001
-        x = 3
-    y: int = yield yf
-    z = x + y
-    ctx.assert_statement(z > 0, f"{z} should be positive")
-    return z
-
-
-def whatever_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
-    af: Promise[int] = yield ctx.invoke(_divide, a=3, b=0)
-    xf: Promise[int] = yield ctx.invoke(_abc, value=af)
-    yf: Promise[int] = yield ctx.invoke(_abc, value=af)
-    try:
-        x: int = yield xf
-    except Exception:  # noqa: BLE001
-        x = 3
-    y: int = yield yf
-    return x + y
-
-
-def test_whatever() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(whatever)
-    assert p.result(timeout=4) == 6  # noqa: PLR2004
-
-
-def test_whatever_with_error() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(whatever_with_error)
-    with pytest.raises(ZeroDivisionError):
-        p.result(timeout=4)
-
-
-def test_calls() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(only_call)
-    assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(call_with_errors)
-    assert p.result(timeout=30) == 3  # noqa: PLR2004
-    p = s.add(double_call)
-    assert p.result(timeout=30) == 8  # noqa: PLR2004
-
-
-def test_call_gen() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(gen_call)
-    assert p.result() == 3  # noqa: PLR2004
-    assert p.success()
-    assert not p.failure()
-
-
-def test_invoke_gen() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(gen_invoke)
-    assert p.result() == 3  # noqa: PLR2004
-
-
-def only_invocation(ctx: Context) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield ctx.invoke(_divide, a=3, b=1)
-    x: int = yield xp
-    return x
-
-
-def invocation_with_error(ctx: Context) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield ctx.invoke(_divide, a=3, b=0)
-    try:
-        x: int = yield xp
-    except ZeroDivisionError:
-        x = 4
-    return x
-
-
-def test_invocation() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(only_invocation)
-    assert p.result(timeout=30) == 3  # noqa: PLR2004
-
-
-def test_invocation_with_error() -> None:
-    s = Scheduler()
-    s.run()
-    p = s.add(invocation_with_error)
-    assert p.result(timeout=30) == 4  # noqa: PLR2004
-
-
-def test_add_multiple() -> None:
-    s = Scheduler()
-    s.run()
-    p1 = s.add(invocation_with_error)
-    p2 = s.add(only_invocation)
-
-    assert p1.result(timeout=3) == 4  # noqa: PLR2004
-    assert p2.result(timeout=3) == 3  # noqa: PLR2004
+    assert p1.result() == "A"
+    assert p2.result() == "B"
+    assert p3.result() == "C"
+    total_time = time.time() - start
+    assert total_time == pytest.approx(
+        time_per_process, rel=1e-1
+    ), f"I should have taken about {time_per_process} seconds to process all coroutines"

@@ -12,6 +12,7 @@ import pytest
 import resonate
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.context import Command
+from resonate.dst.scheduler import DSTScheduler
 from resonate.events import (
     ExecutionAwaited,
     ExecutionInvoked,
@@ -149,10 +150,9 @@ def test_batching_using_call() -> None:
 
 
 def test_batching() -> None:
-    s = dst(seeds=[1])[0]
+    s: DSTScheduler = dst(seeds=[1])[0]
 
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
-    assert s.get_handler(GreetCommand) == batch_greeting
     s.add(greet_with_batching, name="Ging")
     s.add(greet_with_batching, name="Razor")
     s.add(greet_with_batching, name="Eta")

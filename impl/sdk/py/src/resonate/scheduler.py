@@ -1,311 +1,297 @@
 from __future__ import annotations
 
-from collections.abc import Generator
-from functools import partial
-from inspect import isgeneratorfunction
-from queue import Queue
-from threading import Event, Lock, Thread
-from typing import TYPE_CHECKING, Any, Callable
+import asyncio
+import os
+import queue
+from inspect import isgenerator, isgeneratorfunction
+from threading import Event, Thread
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from typing_extensions import Concatenate, ParamSpec, TypeVar, assert_never
+from typing_extensions import ParamSpec, assert_never
 
 from resonate import utils
-from resonate.context import Call, Context, FnOrCoroutine, Invoke
-from resonate.dependency_injection import Dependencies
-from resonate.itertools import (
-    FinalValue,
-    iterate_coro,
+from resonate.actions import TopLevelInvoke
+from resonate.context import (
+    Call,
+    Context,
+    FnOrCoroutine,
+    Invoke,
 )
-from resonate.logging import logger
-from resonate.processor import SQE, Processor
+from resonate.dataclasses import Command, CoroAndPromise, Runnable
+from resonate.dependency_injection import Dependencies
+from resonate.itertools import FinalValue, iterate_coro
 from resonate.promise import Promise
-from resonate.result import Err, Ok, Result
-from resonate.typing import Awaitables, CoroAndPromise, Runnable, RunnableCoroutines
+from resonate.result import Err, Ok
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Coroutine
 
-    from resonate.typing import Yieldable
-
+    from resonate.result import Result
+    from resonate.typing import (
+        Awaitables,
+        DurableCoro,
+        DurableFn,
+        RunnableCoroutines,
+    )
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
 
+class _SQE(Generic[T]):
+    def __init__(
+        self,
+        promise: Promise[T],
+        fn: Callable[P, T | Coroutine[Any, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> None:
+        self.promise = promise
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+
+
+class _CQE(Generic[T]):
+    def __init__(self, promise: Promise[T], fn_result: Result[T, Exception]) -> None:
+        self.fn_result = fn_result
+        self.promise = promise
+
+
+class _Processor:
+    def __init__(self, max_workers: int | None, scheduler: Scheduler) -> None:
+        if max_workers is None:
+            max_workers = min(32, (os.cpu_count() or 1) + 4)
+        assert max_workers > 0, "`max_workers` must be positive."
+        self._max_workers = max_workers
+        self._submission_queue = queue.Queue[_SQE[Any]]()
+        self._completion_queue = queue.Queue[_CQE[Any]]()
+        self._threads = set[Thread]()
+        self._scheduler = scheduler
+
+    def enqueue(self, sqe: _SQE[Any]) -> None:
+        self._submission_queue.put(sqe)
+        self._adjust_thread_count()
+
+    def dequeue(self) -> _CQE[Any]:
+        return utils.dequeue(self._completion_queue)
+
+    def dequeue_batch(self, batch_size: int) -> list[_CQE[Any]]:
+        return utils.dequeue_batch(self._completion_queue, batch_size)
+
+    def _run(self) -> None:
+        loop = asyncio.new_event_loop()
+        while True:
+            fn_result: Result[Any, Exception]
+            sqe = utils.dequeue(self._submission_queue)
+            if asyncio.iscoroutinefunction(sqe.fn):
+                try:
+                    fn_result = Ok(
+                        loop.run_until_complete(sqe.fn(*sqe.args, **sqe.kwargs))
+                    )
+                except Exception as e:  # noqa: BLE001
+                    fn_result = Err(e)
+            else:
+                try:
+                    fn_result = Ok(sqe.fn(*sqe.args, **sqe.kwargs))
+                except Exception as e:  # noqa: BLE001
+                    fn_result = Err(e)
+            self._completion_queue.put(
+                _CQE(
+                    sqe.promise,
+                    fn_result,
+                )
+            )
+            self._scheduler.signal()
+
+    def _adjust_thread_count(self) -> None:
+        num_threads = len(self._threads)
+        if num_threads < self._max_workers:
+            t = Thread(target=self._run, daemon=True)
+            t.start()
+            self._threads.add(t)
+
+
 class Scheduler:
-    def __init__(self, batch_size: int = 5, max_wokers: int | None = None) -> None:
-        self._stg_q = Queue[CoroAndPromise[Any]]()
-        self._w_thread: Thread | None = None
-        self._w_continue = Event()
-        self._lock = Lock()
+    def __init__(self, max_workers: int | None = None) -> None:
+        self._stg_queue = queue.Queue[tuple[TopLevelInvoke, Promise[Any]]]()
+        self._worker_thread: Thread | None = None
+        self._worker_continue = Event()
 
-        self._processor = Processor(
-            max_workers=max_wokers,
-            scheduler=self,
-        )
-        self._batch_size = batch_size
-        self.deps = Dependencies()
+        self._deps = Dependencies()
 
-        self._promise_created = 0
+        self.runnable_coros: RunnableCoroutines = []
+        self.awaitables: Awaitables = {}
+
+        self._processor = _Processor(max_workers, self)
 
     def signal(self) -> None:
-        with self._lock:
-            self._w_continue.set()
+        self._worker_continue.set()
 
-    def _increate_promise_created(self) -> int:
-        self._promise_created += 1
-        return self._promise_created
-
-    def add(
+    def run(
         self,
-        coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]],
+        promise_id: str,
+        coro: DurableCoro[P, T] | DurableFn[P, T],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
-        ctx = Context(
-            deps=self.deps, ctx_id=str(self._increate_promise_created()), seed=None
-        )
-        p = Promise[T](
-            promise_id=ctx.ctx_id,
-            invocation=Invoke(FnOrCoroutine(coro, *args, **kwargs)),
-        )
-        self._stg_q.put(item=CoroAndPromise(coro(ctx, *args, **kwargs), p, ctx))
+        top_lvl = TopLevelInvoke(coro, *args, **kwargs)
+        p = Promise[T](promise_id, top_lvl.to_invoke())
+        self._stg_queue.put_nowait((top_lvl, p))
         self.signal()
+
+        if self._worker_thread is None:
+            self._worker_thread = Thread(target=self._run, daemon=True)
+            self._worker_thread.start()
 
         return p
 
-    def run(self) -> None:
-        if self._w_thread is None:
-            self._run_worker()
-
-    def _run_worker(self) -> None:
-        assert self._w_thread is None, "Worker thread already exists"
-        if self._w_thread is None:
-            t = Thread(
-                target=self._run,
-                daemon=True,
-            )
-            t.start()
-
-            self._w_thread = t
-
     def _run(self) -> None:
-        runnables: RunnableCoroutines = []
-        awaitables: Awaitables = {}
+        while self._worker_continue.wait():
+            self._worker_continue.clear()
 
-        while True:
-            n_pending_to_run = len(runnables)
-            if n_pending_to_run == 0:
-                self._w_continue.wait()
-                with self._lock:
-                    self._w_continue.clear()
-
-            self._run_cqe_callbacks()
-
-            new_r = self._runnables_from_stg_q()
-
-            if new_r is not None:
-                runnables.extend(new_r)
-
-            for _ in range(n_pending_to_run):
-                runnable = runnables.pop()
-                self._process_each_runnable(
-                    runnable=runnable,
-                    awaitables=awaitables,
-                    runnables=runnables,
+            top_lvls: list[tuple[TopLevelInvoke, Promise[Any]]] = utils.dequeue_batch(
+                self._stg_queue,
+                batch_size=20,
+            )
+            for top_lvl, p in top_lvls:
+                parent_ctx = Context(
+                    ctx_id=p.promise_id, seed=None, parent_ctx=None, deps=self._deps
                 )
+                if isgeneratorfunction(top_lvl.exec_unit):
+                    # Within a try/except in case the coroutine raises an error before
+                    # yielding anything.
+                    try:
+                        coro = top_lvl.exec_unit(
+                            parent_ctx, *top_lvl.args, **top_lvl.kwargs
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        p.set_result(Err(e))
+                    self._add_coro_to_runnables(
+                        CoroAndPromise(coro, p, parent_ctx),
+                        None,
+                    )
 
-    def _process_each_runnable(
-        self,
-        runnable: Runnable[Any],
-        runnables: RunnableCoroutines,
-        awaitables: Awaitables,
+                else:
+                    # If is not a generator, but a function. Submit the execution
+                    # to the processor.
+                    self._processor.enqueue(
+                        _SQE(
+                            p,
+                            top_lvl.exec_unit,
+                            parent_ctx,
+                            *top_lvl.args,
+                            **top_lvl.kwargs,
+                        )
+                    )
+
+            cqes = self._processor.dequeue_batch(batch_size=10)
+            for cqe in cqes:
+                cqe.promise.set_result(cqe.fn_result)
+                self._unblock_coros_waiting_on_promise(cqe.promise)
+
+            while self.runnable_coros:
+                self._advance_runnable_span(self.runnable_coros.pop())
+
+            assert not self.runnable_coros, "Runnables should have been all exhausted"
+
+    def _add_coro_to_awaitables(
+        self, p: Promise[Any], coro_and_promise: CoroAndPromise[Any]
     ) -> None:
-        yieldable_or_final_value = iterate_coro(runnable)
+        assert (
+            not p.done()
+        ), "If the promise is resolved already it makes no sense to block coroutine"
+        self.awaitables.setdefault(p, []).append(coro_and_promise)
+
+    def _add_coro_to_runnables(
+        self,
+        coro_and_promise: CoroAndPromise[Any],
+        value_to_yield_back: Result[Any, Exception] | None,
+    ) -> None:
+        self.runnable_coros.append(Runnable(coro_and_promise, value_to_yield_back))
+
+    def _unblock_coros_waiting_on_promise(self, p: Promise[Any]) -> None:
+        assert p.done(), "Promise must be done to unblock waiting coroutines."
+
+        if self.awaitables.get(p) is None:
+            return
+
+        for coro_and_promise in self.awaitables.pop(p):
+            self._add_coro_to_runnables(coro_and_promise, p.safe_result())
+
+    def _advance_runnable_span(self, runnable: Runnable[Any]) -> None:
+        assert isgenerator(
+            runnable.coro_and_promise.coro
+        ), "Only coroutines can be advanced"
+
+        yieldable_or_final_value: Call | Invoke | Promise[Any] | FinalValue[Any] = (
+            iterate_coro(runnable=runnable)
+        )
 
         if isinstance(yieldable_or_final_value, FinalValue):
-            value = yieldable_or_final_value.v
-            logger.debug("Processing final value `%s`", value)
-            runnable.coro_and_promise.prom.set_result(value)
-            unblock_depands_coros(
-                p=runnable.coro_and_promise.prom,
-                awaitables=awaitables,
-                runnables=runnables,
-            )
+            v = yieldable_or_final_value.v
+            runnable.coro_and_promise.prom.set_result(v)
+            self._unblock_coros_waiting_on_promise(runnable.coro_and_promise.prom)
 
         elif isinstance(yieldable_or_final_value, Call):
-            self._handle_call(
-                call=yieldable_or_final_value,
-                runnable=runnable,
-                runnables=runnables,
-                awaitables=awaitables,
-            )
+            called = yieldable_or_final_value
+            p = self._process_invokation(called.to_invoke(), runnable)
+            if not p.done():
+                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
+            else:
+                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
 
         elif isinstance(yieldable_or_final_value, Invoke):
-            self._handle_invocation(
-                invocation=yieldable_or_final_value,
-                runnable=runnable,
-                runnables=runnables,
-                awaitables=awaitables,
-            )
+            invokation = yieldable_or_final_value
+            p = self._process_invokation(invokation, runnable)
+            self._add_coro_to_runnables(runnable.coro_and_promise, Ok(p))
 
         elif isinstance(yieldable_or_final_value, Promise):
-            awaitables.setdefault(yieldable_or_final_value, []).append(
-                runnable.coro_and_promise,
-            )
-            if yieldable_or_final_value.done():
-                unblock_depands_coros(
-                    p=yieldable_or_final_value,
-                    awaitables=awaitables,
-                    runnables=runnables,
-                )
+            p = yieldable_or_final_value
+            if p.done():
+                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
+                self._unblock_coros_waiting_on_promise(p)
+            else:
+                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
         else:
             assert_never(yieldable_or_final_value)
 
-    def _handle_call(
-        self,
-        call: Call,
-        runnable: Runnable[T],
-        awaitables: Awaitables,
-        runnables: RunnableCoroutines,
-    ) -> None:
-        logger.debug("Processing call")
-        child_ctx = runnable.coro_and_promise.ctx.new_child()
-        p = Promise[Any](child_ctx.ctx_id, call.to_invoke())
-        awaitables[p] = [runnable.coro_and_promise]
-        assert isinstance(
-            call.exec_unit, FnOrCoroutine
-        ), "execution unit must be fn or coroutine at this point."
-        if not isgeneratorfunction(call.exec_unit.fn):
-            self._processor.enqueue(
-                SQE(
-                    cmd=utils.wrap_fn_into_cmd(
+    def _process_invokation(
+        self, invokation: Invoke, runnable: Runnable[Any]
+    ) -> Promise[Any]:
+        parent_ctx = runnable.coro_and_promise.ctx
+        child_ctx = parent_ctx.new_child()
+        p = Promise[Any](child_ctx.ctx_id, invokation)
+        if isinstance(invokation.exec_unit, Command):
+            raise NotImplementedError
+        if isinstance(invokation.exec_unit, FnOrCoroutine):
+            coro_or_function = invokation.exec_unit.exec_unit
+            if isgeneratorfunction(coro_or_function):
+                try:
+                    coro = coro_or_function(
                         child_ctx,
-                        call.exec_unit.fn,
-                        *call.exec_unit.args,
-                        **call.exec_unit.kwargs,
-                    ),
-                    callback=partial(
-                        resolve_promise_and_unblock_dependant_coroutines,
-                        p,
-                        awaitables,
-                        runnables,
-                    ),
+                        *invokation.exec_unit.args,
+                        **invokation.exec_unit.kwargs,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    p.set_result(Err(e))
+                self._add_coro_to_runnables(
+                    CoroAndPromise(coro, p, child_ctx),
+                    None,
                 )
-            )
-        else:
-            coro = call.exec_unit.fn(
-                child_ctx, *call.exec_unit.args, **call.exec_unit.kwargs
-            )
-            runnables.append(
-                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
-            )
-
-    def _handle_invocation(
-        self,
-        invocation: Invoke,
-        runnable: Runnable[T],
-        runnables: RunnableCoroutines,
-        awaitables: Awaitables,
-    ) -> None:
-        logger.debug("Processing invocation")
-        child_ctx = runnable.coro_and_promise.ctx.new_child()
-        p = Promise[Any](child_ctx.ctx_id, invocation)
-        runnables.append(Runnable(runnable.coro_and_promise, Ok(p)))
-        assert isinstance(
-            invocation.exec_unit, FnOrCoroutine
-        ), "execution unit must be fn or coroutine at this point."
-        if not isgeneratorfunction(invocation.exec_unit.fn):
-            self._processor.enqueue(
-                SQE(
-                    cmd=utils.wrap_fn_into_cmd(
+            else:
+                self._processor.enqueue(
+                    _SQE(
+                        p,
+                        coro_or_function,
                         child_ctx,
-                        invocation.exec_unit.fn,
-                        *invocation.exec_unit.args,
-                        **invocation.exec_unit.kwargs,
-                    ),
-                    callback=partial(
-                        resolve_promise_and_unblock_dependant_coroutines,
-                        p,
-                        awaitables,
-                        runnables,
-                    ),
+                        *invokation.exec_unit.args,
+                        **invokation.exec_unit.kwargs,
+                    )
                 )
-            )
         else:
-            coro = invocation.exec_unit.fn(
-                child_ctx, *invocation.exec_unit.args, **invocation.exec_unit.kwargs
-            )
-            runnables.append(
-                Runnable(CoroAndPromise(coro, p, child_ctx), next_value=None)
-            )
-
-    def _runnables_from_stg_q(self) -> RunnableCoroutines | None:
-        new_runnables: RunnableCoroutines = []
-        stg_qes = utils.dequeue_batch(q=self._stg_q, batch_size=self._batch_size)
-        if stg_qes is None:
-            return None
-
-        logger.debug("%s elements popped from the staging queue", len(stg_qes))
-        for coro_and_prom in stg_qes:
-            new_runnables.append(
-                Runnable(coro_and_promise=coro_and_prom, next_value=None)
-            )
-
-        return new_runnables
-
-    def _run_cqe_callbacks(self) -> None:
-        cqes = self._processor.dequeue_batch(batch_size=self._batch_size)
-        if cqes is None:
-            return
-        logger.debug("%s elements popped from the completion queue", len(cqes))
-        for cqe in cqes:
-            cqe.callback(cqe.cmd_result)
-
-
-def unblock_depands_coros(
-    p: Promise[T],
-    awaitables: Awaitables,
-    runnables: RunnableCoroutines,
-) -> None:
-    assert p.done(), "Promise must be done to unblock dependant coros"
-
-    if awaitables.get(p) is None:
-        return
-
-    res: Result[T, Exception]
-    try:
-        res = Ok(p.result())
-    except Exception as e:  # noqa: BLE001
-        res = Err(e)
-
-    runnables.extend(Runnable(c_and_p, next_value=res) for c_and_p in awaitables.pop(p))
-
-
-def resolve_promise_and_unblock_dependant_coroutines(
-    p: Promise[T],
-    awaitables: Awaitables,
-    runnables: RunnableCoroutines,
-    v: Result[T, Exception],
-) -> None:
-    p.set_result(v)
-    unblock_depands_coros(p=p, awaitables=awaitables, runnables=runnables)
-
-
-def handle_return_promise(
-    running: Runnable[T],
-    prom: Promise[T],
-    awaitables: Awaitables,
-    runnables: list[Runnable[Any]],
-) -> None:
-    if prom.done():
-        unblock_depands_coros(
-            p=prom,
-            awaitables=awaitables,
-            runnables=runnables,
-        )
-    else:
-        waiting_for_expired_prom = awaitables.pop(running.coro_and_promise.prom)
-        awaitables[prom].extend(waiting_for_expired_prom)
+            assert_never(invokation.exec_unit)
+        return p

@@ -3,26 +3,22 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any, Callable
 
-from typing_extensions import Concatenate, assert_never
+from typing_extensions import ParamSpec, assert_never
 
 from resonate import random
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.dst.scheduler import DSTScheduler, Mode
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
-
-    from resonate.context import Context
     from resonate.dependency_injection import Dependencies
+    from resonate.typing import DurableCoro, DurableFn, MockFn
+
+P = ParamSpec("P")
 
 
 def dst(  # noqa: PLR0913
     seeds: list[range | int],
-    mocks: dict[
-        Callable[Concatenate[Context, ...], Any | Coroutine[None, None, Any]],
-        Callable[[], Any],
-    ]
-    | None = None,
+    mocks: dict[DurableCoro[P, Any] | DurableFn[P, Any], MockFn[Any]] | None = None,
     log_file: str | None = None,
     mode: Mode = "concurrent",
     failure_chance: float = 0,

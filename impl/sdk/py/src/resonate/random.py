@@ -15,6 +15,8 @@ FloatOrInt: TypeAlias = Union[float, int]
 
 
 class Random:
+    """Random class implementation that allows to enforce a prefixable behaviour."""
+
     def __init__(self, seed: int, prefix: list[FloatOrInt] | None = None) -> None:
         self.seed = seed
         self._prefix: list[FloatOrInt] = []
