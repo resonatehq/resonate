@@ -33,7 +33,7 @@ def bar(
 
 @pytest.mark.skip()
 def test_coro_return_promise() -> None:
-    s = scheduler.Scheduler(max_workers=1)
+    s = scheduler.Scheduler(processor_threads=1)
     p: Promise[Promise[str]] = s.run("bar", bar, "A", 0.1)
     assert p.result(timeout=2) == "A"
 
@@ -49,7 +49,7 @@ def test_scheduler() -> None:
 
 
 def test_multithreading_capabilities() -> None:
-    s = scheduler.Scheduler(max_workers=3)
+    s = scheduler.Scheduler(processor_threads=3)
     time_per_process: int = 5
     start = time.time()
     p1: Promise[str] = s.run("1", baz, name="A", sleep_time=time_per_process)

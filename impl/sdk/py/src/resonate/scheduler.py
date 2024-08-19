@@ -10,14 +10,12 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from typing_extensions import ParamSpec, assert_never
 
 from resonate import utils
-from resonate.actions import TopLevelInvoke
 from resonate.context import (
     Call,
     Context,
-    FnOrCoroutine,
     Invoke,
 )
-from resonate.dataclasses import Command, CoroAndPromise, Runnable
+from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.promise import Promise
@@ -114,9 +112,8 @@ class _Processor:
 
 
 class Scheduler:
-    def __init__(self, max_workers: int | None = None) -> None:
-        self._stg_queue = queue.Queue[tuple[TopLevelInvoke, Promise[Any]]]()
-        self._worker_thread: Thread | None = None
+    def __init__(self, processor_threads: int | None = None) -> None:
+        self._stg_queue = queue.Queue[tuple[Invoke, Promise[Any]]]()
         self._worker_continue = Event()
 
         self._deps = Dependencies()
@@ -124,7 +121,10 @@ class Scheduler:
         self.runnable_coros: RunnableCoroutines = []
         self.awaitables: Awaitables = {}
 
-        self._processor = _Processor(max_workers, self)
+        self._processor = _Processor(processor_threads, self)
+
+        self._worker_thread = Thread(target=self._run, daemon=True)
+        self._worker_thread.start()
 
     def signal(self) -> None:
         self._worker_continue.set()
@@ -137,22 +137,36 @@ class Scheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
-        top_lvl = TopLevelInvoke(coro, *args, **kwargs)
-        p = Promise[T](promise_id, top_lvl.to_invoke())
+        top_lvl = Invoke(FnOrCoroutine(coro, *args, **kwargs))
+        p = Promise[T](promise_id, top_lvl)
         self._stg_queue.put_nowait((top_lvl, p))
         self.signal()
-
-        if self._worker_thread is None:
-            self._worker_thread = Thread(target=self._run, daemon=True)
-            self._worker_thread.start()
-
         return p
+
+    def _route_fn_or_coroutine(
+        self, ctx: Context, promise: Promise[Any], fn_or_coroutine: FnOrCoroutine
+    ) -> None:
+        if isgeneratorfunction(fn_or_coroutine.exec_unit):
+            coro = fn_or_coroutine.exec_unit(
+                ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
+            )
+            self._add_coro_to_runnables(CoroAndPromise(coro, promise, ctx), None)
+        else:
+            self._processor.enqueue(
+                _SQE(
+                    promise,
+                    fn_or_coroutine.exec_unit,
+                    ctx,
+                    *fn_or_coroutine.args,
+                    **fn_or_coroutine.kwargs,
+                )
+            )
 
     def _run(self) -> None:
         while self._worker_continue.wait():
             self._worker_continue.clear()
 
-            top_lvls: list[tuple[TopLevelInvoke, Promise[Any]]] = utils.dequeue_batch(
+            top_lvls: list[tuple[Invoke, Promise[Any]]] = utils.dequeue_batch(
                 self._stg_queue,
                 batch_size=20,
             )
@@ -160,32 +174,8 @@ class Scheduler:
                 parent_ctx = Context(
                     ctx_id=p.promise_id, seed=None, parent_ctx=None, deps=self._deps
                 )
-                if isgeneratorfunction(top_lvl.exec_unit):
-                    # Within a try/except in case the coroutine raises an error before
-                    # yielding anything.
-                    try:
-                        coro = top_lvl.exec_unit(
-                            parent_ctx, *top_lvl.args, **top_lvl.kwargs
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        p.set_result(Err(e))
-                    self._add_coro_to_runnables(
-                        CoroAndPromise(coro, p, parent_ctx),
-                        None,
-                    )
-
-                else:
-                    # If is not a generator, but a function. Submit the execution
-                    # to the processor.
-                    self._processor.enqueue(
-                        _SQE(
-                            p,
-                            top_lvl.exec_unit,
-                            parent_ctx,
-                            *top_lvl.args,
-                            **top_lvl.kwargs,
-                        )
-                    )
+                assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
+                self._route_fn_or_coroutine(parent_ctx, p, top_lvl.exec_unit)
 
             cqes = self._processor.dequeue_batch(batch_size=10)
             for cqe in cqes:
@@ -268,30 +258,7 @@ class Scheduler:
         if isinstance(invokation.exec_unit, Command):
             raise NotImplementedError
         if isinstance(invokation.exec_unit, FnOrCoroutine):
-            coro_or_function = invokation.exec_unit.exec_unit
-            if isgeneratorfunction(coro_or_function):
-                try:
-                    coro = coro_or_function(
-                        child_ctx,
-                        *invokation.exec_unit.args,
-                        **invokation.exec_unit.kwargs,
-                    )
-                except Exception as e:  # noqa: BLE001
-                    p.set_result(Err(e))
-                self._add_coro_to_runnables(
-                    CoroAndPromise(coro, p, child_ctx),
-                    None,
-                )
-            else:
-                self._processor.enqueue(
-                    _SQE(
-                        p,
-                        coro_or_function,
-                        child_ctx,
-                        *invokation.exec_unit.args,
-                        **invokation.exec_unit.kwargs,
-                    )
-                )
+            self._route_fn_or_coroutine(child_ctx, p, invokation.exec_unit)
         else:
             assert_never(invokation.exec_unit)
         return p
