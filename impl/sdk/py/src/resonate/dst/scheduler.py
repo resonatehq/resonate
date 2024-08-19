@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, Union
 
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
-from resonate.actions import Call, Invoke, TopLevelInvoke
+from resonate.actions import Call, Invoke
 from resonate.batching import CmdBuffer
 from resonate.contants import CWD
 from resonate.context import (
@@ -167,7 +167,7 @@ class DSTScheduler:
         self._max_failures: int = max_failures
         self.current_failures: int = 0
         self.tick: int = 0
-        self._top_level_invokations: deque[TopLevelInvoke] = deque()
+        self._top_level_invokations: deque[Invoke] = deque()
         self._mode: Mode = mode
 
         self.random = random
@@ -203,7 +203,9 @@ class DSTScheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        self._top_level_invokations.appendleft(TopLevelInvoke(coro, *args, **kwargs))
+        self._top_level_invokations.appendleft(
+            Invoke(FnOrCoroutine(coro, *args, **kwargs))
+        )
 
     def _reset(self) -> None:
         self._runnable_coroutines.clear()
@@ -228,12 +230,7 @@ class DSTScheduler:
                 self.current_failures += 1
                 self._reset()
 
-    def _create_promise(
-        self, ctx: Context, invokation: Invoke | TopLevelInvoke
-    ) -> Promise[Any]:
-        if isinstance(invokation, TopLevelInvoke):
-            invokation = invokation.to_invoke()
-
+    def _create_promise(self, ctx: Context, invokation: Invoke) -> Promise[Any]:
         p = Promise[Any](ctx.ctx_id, invokation)
         self._events.append(PromiseCreated(promise_id=p.promise_id, tick=self.tick))
         return p
@@ -251,21 +248,21 @@ class DSTScheduler:
                 seed=self.seed,
             )
             p = self._create_promise(ctx, top_level_invokation)
-
+            assert isinstance(top_level_invokation.exec_unit, FnOrCoroutine)
             try:
                 self._events.append(
                     ExecutionInvoked(
                         promise_id=p.promise_id,
                         tick=self.tick,
-                        fn_name=top_level_invokation.exec_unit.__name__,
-                        args=top_level_invokation.args,
-                        kwargs=top_level_invokation.kwargs,
+                        fn_name=top_level_invokation.exec_unit.exec_unit.__name__,
+                        args=top_level_invokation.exec_unit.args,
+                        kwargs=top_level_invokation.exec_unit.kwargs,
                     )
                 )
-                coro = top_level_invokation.exec_unit(
+                coro = top_level_invokation.exec_unit.exec_unit(
                     ctx,
-                    *top_level_invokation.args,
-                    **top_level_invokation.kwargs,
+                    *top_level_invokation.exec_unit.args,
+                    **top_level_invokation.exec_unit.kwargs,
                 )
             except Exception as e:  # noqa: BLE001
                 self._complete_promise(p, Err(e))
