@@ -17,7 +17,7 @@
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://twitter.com/resonatehqio">Twitter</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://resonatehqcommunity.slack.com">Slack</a>
+  <a href="https://resonatehq.io/discord">Discord</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://github.com/resonatehq/resonate-sdk-ts/issues">Issues</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
