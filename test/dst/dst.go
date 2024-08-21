@@ -30,7 +30,7 @@ type Config struct {
 	TimeElapsedPerTick int64
 	TimeoutTicks       int64
 	ReqsPerTick        func() int
-	MaxReqsPerTick     int
+	MaxReqsPerTick     int64
 	Ids                int
 	IdempotencyKeys    int
 	Headers            int
@@ -156,7 +156,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 				// add operation to porcupine
 				ops = append(ops, porcupine.Operation{
-					ClientId: int(j % int64(d.config.MaxReqsPerTick)),
+					ClientId: int(j % d.config.MaxReqsPerTick),
 					Call:     reqTime,
 					Return:   resTime,
 					Input:    &Req{Op, reqTime, req, nil},
@@ -207,7 +207,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 			// add backchannel op to porcupine
 			ops = append(ops, porcupine.Operation{
-				ClientId: int(j % int64(d.config.MaxReqsPerTick)),
+				ClientId: int(j % d.config.MaxReqsPerTick),
 				Call:     reqTime,
 				Return:   resTime,
 				Input:    &Req{Bc, reqTime, nil, bc},
@@ -577,12 +577,13 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, searches=%d)",
+		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, searches=%d, backchannel=%d)",
 		d.config.Ids,
 		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,
 		d.config.Searches,
+		cap(d.config.Backchannel),
 	)
 }

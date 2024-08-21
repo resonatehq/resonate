@@ -12,7 +12,7 @@ import (
 
 var completePromiseExample = `
 # %s a promise
-resonate promises %s foo 
+resonate promises %s foo
 
 # %s a promise with data and headers
 resonate promises %s foo --data foo --header bar=bar`
@@ -41,7 +41,7 @@ func CompletePromiseCmds(c client.ResonateClient) []*cobra.Command {
 		state := s
 		cmd := &cobra.Command{
 			Use:     fmt.Sprintf("%s <id>", state.Short),
-			Short:   fmt.Sprintf("%s a durable promise", state.Title),
+			Short:   fmt.Sprintf("%s a promise", state.Title),
 			Example: fmt.Sprintf(completePromiseExample, state.Title, state.Short, state.Title, state.Short),
 			Run: func(cmd *cobra.Command, args []string) {
 				if len(args) != 1 {

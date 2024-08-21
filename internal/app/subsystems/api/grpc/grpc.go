@@ -14,8 +14,8 @@ import (
 )
 
 type Config struct {
-	Host string
-	Port int
+	Host string `flag:"host" desc:"grpc server host" default:"0.0.0.0"`
+	Port int    `flag:"port" desc:"grpc server port" default:"50051"`
 }
 
 type Grpc struct {

@@ -7,45 +7,117 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-type Queue struct{}
+// Config
 
-type QueueDevice struct {
-	client *http.Client
+type Config struct {
+	Size      int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"100"`
+	Workers   int           `flag:"workers" desc:"number of workers" default:"1"`
+	Timeout   time.Duration `flag:"timeout" desc:"http request timeout" default:"5s"`
 }
 
-func New() aio.Subsystem {
-	return &Queue{}
+// Subsystem
+
+type Queue struct {
+	config  *Config
+	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	workers []*QueueWorker
 }
 
-func (s *Queue) String() string {
+func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (*Queue, error) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*QueueWorker, config.Workers)
+
+	for i := 0; i < config.Workers; i++ {
+		workers[i] = &QueueWorker{
+			config: config,
+			client: &http.Client{Timeout: config.Timeout},
+			sq:     sq,
+			cq:     cq,
+			flush:  make(chan int64, 1),
+		}
+	}
+
+	return &Queue{
+		config:  config,
+		sq:      sq,
+		workers: workers,
+	}, nil
+}
+
+func (q *Queue) Kind() t_aio.Kind {
+	return t_aio.Queue
+}
+
+func (q *Queue) String() string {
 	return "queue"
 }
 
-func (s *Queue) Start() error {
+func (q *Queue) Start() error {
+	for _, worker := range q.workers {
+		go worker.Start()
+	}
 	return nil
 }
 
-func (s *Queue) Stop() error {
+func (q *Queue) Stop() error {
 	return nil
 }
 
-func (s *Queue) Reset() error {
+func (q *Queue) Reset() error {
 	return nil
 }
 
-func (s *Queue) Close() error {
-	return nil
+func (q *Queue) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
+	return q.sq
 }
 
-func (s *Queue) NewWorker(int) aio.Worker {
-	return &QueueDevice{
-		client: &http.Client{Timeout: 1 * time.Second},
+func (q *Queue) Flush(t int64) {
+	for _, worker := range q.workers {
+		worker.Flush(t)
+	}
+}
+
+func (q *Queue) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	util.Assert(len(q.workers) > 0, "must be at least one worker")
+	return q.workers[0].Process(sqes)
+}
+
+// Worker
+
+type QueueWorker struct {
+	config *Config
+	client *http.Client
+	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	cq     chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	flush  chan int64
+}
+
+func (w *QueueWorker) Start() {
+	for {
+		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		if len(sqes) > 0 {
+			for _, cqe := range w.Process(sqes) {
+				w.cq <- cqe
+			}
+		}
+		if !ok {
+			return
+		}
+	}
+}
+
+func (w *QueueWorker) Flush(t int64) {
+	// ignore case where flush channel is full,
+	// this means the flush is waiting on the cq
+	select {
+	case w.flush <- t:
+	default:
 	}
 }
 
@@ -54,7 +126,7 @@ type req struct {
 	Counter int    `json:"counter"`
 }
 
-func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (w *QueueWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
@@ -93,7 +165,7 @@ func (d *QueueDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 		}
 
 		req.Header.Set("Content-Type", "application/json")
-		res, err := d.client.Do(req)
+		res, err := w.client.Do(req)
 		if err != nil {
 			slog.Warn("http request failed", "err", err)
 			continue

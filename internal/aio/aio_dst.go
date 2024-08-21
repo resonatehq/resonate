@@ -44,8 +44,8 @@ func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	}
 }
 
-func (a *aioDST) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig) {
-	a.subsystems[kind] = subsystem
+func (a *aioDST) AddSubsystem(subsystem Subsystem) {
+	a.subsystems[subsystem.Kind()] = subsystem
 }
 
 func (a *aioDST) Start() error {
@@ -150,7 +150,7 @@ func (a *aioDST) Flush(t int64) {
 			}
 
 			// Process the SQE
-			for i, cqe := range subsystem.NewWorker(0).Process(toProcess) {
+			for i, cqe := range subsystem.Process(toProcess) {
 				if postFailure[i] {
 					// Simulate failure after processing
 					cqe.Completion = nil

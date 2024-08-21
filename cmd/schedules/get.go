@@ -20,7 +20,7 @@ func GetScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "get <id>",
-		Short:   "Get a durable schedule",
+		Short:   "Get a schedule",
 		Example: getScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

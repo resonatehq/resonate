@@ -1,59 +1,62 @@
 package queue
 
 import (
-	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 )
 
+// Config
+
+type ConfigDST struct{}
+
+// Subsystem
+
 type QueueDST struct {
+	config      *ConfigDST
 	backchannel chan interface{}
 }
 
-type QueueDSTDevice struct {
-	backchannel chan interface{}
-}
-
-func NewDST(backchannel chan interface{}) aio.Subsystem {
+func NewDST(backchannel chan interface{}, config *ConfigDST) (*QueueDST, error) {
 	return &QueueDST{
+		config:      config,
 		backchannel: backchannel,
-	}
+	}, nil
 }
 
-func (s *QueueDST) String() string {
+func (q *QueueDST) Kind() t_aio.Kind {
+	return t_aio.Queue
+}
+
+func (q *QueueDST) String() string {
 	return "queue:dst"
 }
 
-func (s *QueueDST) Start() error {
+func (q *QueueDST) Start() error {
 	return nil
 }
 
-func (s *QueueDST) Stop() error {
+func (q *QueueDST) Stop() error {
 	return nil
 }
 
-func (s *QueueDST) Reset() error {
+func (q *QueueDST) Reset() error {
 	return nil
 }
 
-func (s *QueueDST) Close() error {
+func (q *QueueDST) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
 	return nil
 }
 
-func (s *QueueDST) NewWorker(int) aio.Worker {
-	return &QueueDSTDevice{
-		backchannel: s.backchannel,
-	}
-}
+func (q *QueueDST) Flush(int64) {}
 
-func (d *QueueDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (q *QueueDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
 		var completion *t_aio.QueueCompletion
 
 		select {
-		case d.backchannel <- sqe.Submission.Queue.Task:
+		case q.backchannel <- sqe.Submission.Queue.Task:
 			completion = &t_aio.QueueCompletion{
 				Success: true,
 			}

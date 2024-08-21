@@ -32,7 +32,7 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create a durable schedule",
+		Short:   "Create a schedule",
 		Example: createScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

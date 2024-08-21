@@ -34,9 +34,9 @@ type api struct {
 	metrics    *metrics.Metrics
 }
 
-func New(size int, metrics *metrics.Metrics) API {
+func New(sq chan *bus.SQE[t_api.Request, t_api.Response], metrics *metrics.Metrics) API {
 	return &api{
-		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
+		sq:      sq,
 		errors:  make(chan error),
 		metrics: metrics,
 	}

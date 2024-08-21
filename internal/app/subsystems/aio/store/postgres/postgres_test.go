@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPostgresStore(t *testing.T) {
@@ -20,7 +21,8 @@ func TestPostgresStore(t *testing.T) {
 	}
 
 	for _, tc := range test.TestCases {
-		store, err := New(&Config{
+		store, err := New(nil, &Config{
+			Workers:   1,
 			Host:      host,
 			Port:      port,
 			Username:  username,
@@ -28,7 +30,7 @@ func TestPostgresStore(t *testing.T) {
 			Database:  database,
 			Query:     map[string]string{"sslmode": "disable"},
 			TxTimeout: 250 * time.Millisecond,
-		}, 1)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +39,8 @@ func TestPostgresStore(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tc.Run(t, store)
+		assert.Len(t, store.workers, 1)
+		tc.Run(t, store.workers[0])
 
 		if err := store.Reset(); err != nil {
 			t.Fatal(err)

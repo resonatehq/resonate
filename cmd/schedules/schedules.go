@@ -20,7 +20,7 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "schedules",
 		Aliases: []string{"schedule"},
-		Short:   "Manage durable schedules",
+		Short:   "Resonate schedules",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},

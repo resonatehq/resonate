@@ -18,10 +18,10 @@ import (
 )
 
 type Config struct {
-	Host    string
-	Port    int
-	Auth    map[string]string
-	Timeout time.Duration
+	Host    string            `flag:"host" desc:"http server host" default:"0.0.0.0"`
+	Port    int               `flag:"port" desc:"http server port" default:"8001"`
+	Timeout time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	Auth    map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
 }
 
 type Http struct {

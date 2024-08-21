@@ -90,3 +90,21 @@ func unixMilliToTime(unixMilli int64) time.Time {
 func ParseCron(cronExp string) (cron.Schedule, error) {
 	return cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
 }
+
+func Collect[T any](c <-chan T, f <-chan int64, n int) ([]T, bool) {
+	batch := []T{}
+
+	for i := 0; i < n; i++ {
+		select {
+		case sqe, ok := <-c:
+			if !ok {
+				return batch, false
+			}
+			batch = append(batch, sqe)
+		case <-f:
+			return batch, true
+		}
+	}
+
+	return batch, true
+}

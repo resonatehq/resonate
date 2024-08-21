@@ -7,18 +7,15 @@ import (
 
 type Subsystem interface {
 	String() string
-	NewWorker(int) Worker
+	Kind() t_aio.Kind
+
 	Start() error
 	Stop() error
 	Reset() error
-}
 
-type SubsystemConfig struct {
-	Size      int
-	Workers   int
-	BatchSize int
-}
+	SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
+	Flush(int64)
 
-type Worker interface {
-	Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	// for dst only
+	Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 }

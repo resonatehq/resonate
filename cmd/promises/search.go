@@ -36,7 +36,7 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "search <id>",
-		Short:   "Search for durables promises",
+		Short:   "Search for promises",
 		Example: searchPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

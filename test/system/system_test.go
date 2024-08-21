@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
+	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -18,17 +19,18 @@ import (
 )
 
 func TestSystemLoop(t *testing.T) {
+	sq := make(chan *bus.SQE[t_api.Request, t_api.Response], 100)
+	cq := make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], 100)
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	subsystemConfig := &aio.SubsystemConfig{
-		Size:      100,
-		Workers:   1,
-		BatchSize: 1,
-	}
+	api := api.New(sq, metrics)
+	aio := aio.New(cq, metrics)
 
-	api := api.New(100, metrics)
-	aio := aio.New(100, metrics)
-	aio.AddSubsystem(t_aio.Echo, echo.New(), subsystemConfig)
+	echo, err := echo.New(cq, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	aio.AddSubsystem(echo)
 
 	if err := api.Start(); err != nil {
 		t.Fatal(err)

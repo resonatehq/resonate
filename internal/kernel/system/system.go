@@ -19,26 +19,26 @@ import (
 )
 
 type Config struct {
-	Url                 string
-	CoroutineMaxSize    int
-	SubmissionBatchSize int
-	CompletionBatchSize int
-	PromiseBatchSize    int
-	ScheduleBatchSize   int
-	TaskBatchSize       int
-	TaskEnqueueDelay    time.Duration
+	Url                 string        `flag:"url" desc:"resonate server url"`
+	CoroutineMaxSize    int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" dst:"1:1000"`
+	SubmissionBatchSize int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" dst:"1:1000"`
+	CompletionBatchSize int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" dst:"1:1000"`
+	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
+	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
+	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
+	TaskEnqueueDelay    time.Duration `flag:"task-enqueue-delay" desc:"time delay before attempting to reenqueue tasks" default:"10s" dst:"1s:10s"`
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%d)",
+		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%s)",
 		c.CoroutineMaxSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
 		c.PromiseBatchSize,
 		c.ScheduleBatchSize,
 		c.TaskBatchSize,
-		c.TaskEnqueueDelay.Milliseconds(),
+		c.TaskEnqueueDelay.String(),
 	)
 }
 
