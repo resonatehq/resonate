@@ -15,9 +15,9 @@
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://twitter.com/resonatehqio">Twitter</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://discord.gg/rkRbrDsp">Discord</a>
+  <a href="https://resonatehq.io/discord">Discord</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://github.com/resonatehq/resonate-sdk-ts/issues">Issues</a>
+  <a href="https://github.com/resonatehq/resonate-sdk-py/issues">Issues</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://github.com/resonatehq/resonate/issues/131">Roadmap</a>
   <br /><br />
