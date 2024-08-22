@@ -79,12 +79,12 @@ func (c *ConfigDST) Parse(r *rand.Rand) error {
 
 type API[T any] struct {
 	Size       int `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems T   `flag:"subsystems"`
+	Subsystems T   `flag:"-"`
 }
 
 type AIO[T any] struct {
 	Size       int `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems T   `flag:"subsystems"`
+	Subsystems T   `flag:"-"`
 }
 
 type EnabledSubsystem[T any] struct {
