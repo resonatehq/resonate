@@ -8,7 +8,7 @@ from typing_extensions import assert_never
 from resonate.result import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from resonate.actions import Invoke
+    from resonate.actions import Invoke, Sleep
 
 T = TypeVar("T")
 
@@ -17,11 +17,11 @@ class Promise(Generic[T]):
     def __init__(
         self,
         promise_id: str,
-        invokation: Invoke,
+        action: Invoke | Sleep,
     ) -> None:
         self.promise_id = promise_id
         self.f = Future[T]()
-        self.invokation = invokation
+        self.action = action
 
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)

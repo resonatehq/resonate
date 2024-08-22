@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import heapq
 import os
 import queue
+import time
 from inspect import isgenerator, isgeneratorfunction
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
@@ -10,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from typing_extensions import ParamSpec, assert_never
 
 from resonate import utils
+from resonate.actions import Sleep
 from resonate.context import (
     Call,
     Context,
@@ -58,31 +61,31 @@ class _CQE(Generic[T]):
 
 
 class _Processor:
-    def __init__(self, max_workers: int | None, scheduler: Scheduler) -> None:
+    def __init__(
+        self,
+        max_workers: int | None,
+        sq: queue.Queue[_SQE[Any]],
+        cq: queue.Queue[_CQE[Any]],
+        continue_event: Event | None,
+    ) -> None:
         if max_workers is None:
             max_workers = min(32, (os.cpu_count() or 1) + 4)
         assert max_workers > 0, "`max_workers` must be positive."
         self._max_workers = max_workers
-        self._submission_queue = queue.Queue[_SQE[Any]]()
-        self._completion_queue = queue.Queue[_CQE[Any]]()
+        self._sq = sq
+        self._cq = cq
+        self._continue_event = continue_event
         self._threads = set[Thread]()
-        self._scheduler = scheduler
 
     def enqueue(self, sqe: _SQE[Any]) -> None:
-        self._submission_queue.put(sqe)
+        self._sq.put_nowait(sqe)
         self._adjust_thread_count()
-
-    def dequeue(self) -> _CQE[Any]:
-        return utils.dequeue(self._completion_queue)
-
-    def dequeue_batch(self, batch_size: int) -> list[_CQE[Any]]:
-        return utils.dequeue_batch(self._completion_queue, batch_size)
 
     def _run(self) -> None:
         loop = asyncio.new_event_loop()
         while True:
             fn_result: Result[Any, Exception]
-            sqe = utils.dequeue(self._submission_queue)
+            sqe = utils.dequeue(self._sq)
             if asyncio.iscoroutinefunction(sqe.fn):
                 try:
                     fn_result = Ok(
@@ -95,13 +98,10 @@ class _Processor:
                     fn_result = Ok(sqe.fn(*sqe.args, **sqe.kwargs))
                 except Exception as e:  # noqa: BLE001
                     fn_result = Err(e)
-            self._completion_queue.put(
-                _CQE(
-                    sqe.promise,
-                    fn_result,
-                )
-            )
-            self._scheduler.signal()
+
+            self._cq.put_nowait(_CQE(sqe.promise, fn_result))
+            if self._continue_event is not None:
+                self._continue_event.set()
 
     def _adjust_thread_count(self) -> None:
         num_threads = len(self._threads)
@@ -111,9 +111,69 @@ class _Processor:
             self._threads.add(t)
 
 
+class _SleepE(Generic[T]):
+    def __init__(self, promise: Promise[T], sleep_time: int) -> None:
+        self.promise = promise
+        self.sleep_time = sleep_time
+
+
+class _Metronome:
+    def __init__(
+        self,
+        sq: queue.Queue[_SleepE[None]],
+        cq: queue.Queue[_CQE[Any]],
+        continue_event: Event | None,
+    ) -> None:
+        self._sq = sq
+        self._cq = cq
+        self._continue_event = continue_event
+
+        self._sleeping: list[tuple[int, int, Promise[None]]] = []
+
+        self._worker_continue = Event()
+
+        self._worker_thread = Thread(target=self._run, daemon=True)
+        self._worker_thread.start()
+
+    def _signal(self) -> None:
+        self._worker_continue.set()
+
+    def enqueue(self, sleep_e: _SleepE[None]) -> None:
+        self._sq.put_nowait(sleep_e)
+        self._signal()
+
+    def _run(self) -> None:
+        while self._worker_continue.wait():
+            self._worker_continue.clear()
+
+            current_time = int(time.time())
+            sleep_e = utils.dequeue_batch(self._sq, batch_size=self._sq.qsize())
+            for idx, e in enumerate(sleep_e):
+                heapq.heappush(
+                    self._sleeping, (current_time + e.sleep_time, idx, e.promise)
+                )
+
+            while self._sleeping and self._sleeping[0][0] <= current_time:
+                se = heapq.heappop(self._sleeping)
+                self._cq.put_nowait(_CQE(se[-1], Ok(None)))
+                if self._continue_event:
+                    self._continue_event.set()
+
+            time_to_sleep = (
+                (self._sleeping[0][0] - current_time) if self._sleeping else 0
+            )
+            if time_to_sleep > 0:
+                time.sleep(time_to_sleep)
+                self._signal()
+
+
 class Scheduler:
     def __init__(self, processor_threads: int | None = None) -> None:
         self._stg_queue = queue.Queue[tuple[Invoke, Promise[Any]]]()
+        self._completion_queue = queue.Queue[_CQE[Any]]()
+        self._sleep_submission_queue = queue.Queue[_SleepE[None]]()
+        self._function_submission_queue = queue.Queue[_SQE[Any]]()
+
         self._worker_continue = Event()
 
         self._deps = Dependencies()
@@ -121,12 +181,26 @@ class Scheduler:
         self.runnable_coros: RunnableCoroutines = []
         self.awaitables: Awaitables = {}
 
-        self._processor = _Processor(processor_threads, self)
+        self._processor = _Processor(
+            processor_threads,
+            self._function_submission_queue,
+            self._completion_queue,
+            self._worker_continue,
+        )
+        self._metronome = _Metronome(
+            self._sleep_submission_queue,
+            self._completion_queue,
+            self._worker_continue,
+        )
 
         self._worker_thread = Thread(target=self._run, daemon=True)
         self._worker_thread.start()
 
-    def signal(self) -> None:
+    def enqueue_cqe(self, cqe: _CQE[Any]) -> None:
+        self._completion_queue.put(cqe)
+        self._signal()
+
+    def _signal(self) -> None:
         self._worker_continue.set()
 
     def run(
@@ -140,7 +214,7 @@ class Scheduler:
         top_lvl = Invoke(FnOrCoroutine(coro, *args, **kwargs))
         p = Promise[T](promise_id, top_lvl)
         self._stg_queue.put_nowait((top_lvl, p))
-        self.signal()
+        self._signal()
         return p
 
     def _route_fn_or_coroutine(
@@ -168,7 +242,7 @@ class Scheduler:
 
             top_lvls: list[tuple[Invoke, Promise[Any]]] = utils.dequeue_batch(
                 self._stg_queue,
-                batch_size=20,
+                batch_size=self._stg_queue.qsize(),
             )
             for top_lvl, p in top_lvls:
                 parent_ctx = Context(
@@ -177,7 +251,10 @@ class Scheduler:
                 assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
                 self._route_fn_or_coroutine(parent_ctx, p, top_lvl.exec_unit)
 
-            cqes = self._processor.dequeue_batch(batch_size=10)
+            cqes = utils.dequeue_batch(
+                q=self._completion_queue,
+                batch_size=self._completion_queue.qsize(),
+            )
             for cqe in cqes:
                 cqe.promise.set_result(cqe.fn_result)
                 self._unblock_coros_waiting_on_promise(cqe.promise)
@@ -216,9 +293,7 @@ class Scheduler:
             runnable.coro_and_promise.coro
         ), "Only coroutines can be advanced"
 
-        yieldable_or_final_value: Call | Invoke | Promise[Any] | FinalValue[Any] = (
-            iterate_coro(runnable=runnable)
-        )
+        yieldable_or_final_value = iterate_coro(runnable=runnable)
 
         if isinstance(yieldable_or_final_value, FinalValue):
             v = yieldable_or_final_value.v
@@ -246,6 +321,15 @@ class Scheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
+        elif isinstance(yieldable_or_final_value, Sleep):
+            p = Promise[None](
+                promise_id=runnable.coro_and_promise.ctx.new_child().ctx_id,
+                action=yieldable_or_final_value,
+            )
+            self._metronome.enqueue(
+                sleep_e=_SleepE(p, sleep_time=yieldable_or_final_value.seconds)
+            )
+            self._add_coro_to_awaitables(p, runnable.coro_and_promise)
         else:
             assert_never(yieldable_or_final_value)
 

@@ -63,3 +63,25 @@ def test_multithreading_capabilities() -> None:
     assert total_time == pytest.approx(
         time_per_process, rel=1e-1
     ), f"I should have taken about {time_per_process} seconds to process all coroutines"
+
+
+def sleep_coroutine(
+    ctx: Context, sleep_time: int, name: str
+) -> Generator[Yieldable, Any, str]:
+    yield ctx.sleep(sleep_time)
+    return name
+
+
+def test_sleep_on_coroutines() -> None:
+    s = scheduler.Scheduler(processor_threads=1)
+    start = time.time()
+    sleep_time = 4
+    p1: Promise[str] = s.run("1", sleep_coroutine, sleep_time, "A")
+    p2: Promise[str] = s.run("2", sleep_coroutine, sleep_time, "B")
+    p3: Promise[str] = s.run("3", sleep_coroutine, sleep_time, "C")
+    assert p1.result() == "A"
+    assert p2.result() == "B"
+    assert p3.result() == "C"
+    assert time.time() - start == pytest.approx(
+        sleep_time, rel=1e-1
+    ), f"I should have taken about {sleep_time} seconds to process all coroutines"

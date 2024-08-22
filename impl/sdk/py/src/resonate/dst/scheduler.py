@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, Union
 
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
-from resonate.actions import Call, Invoke
+from resonate.actions import Call, Invoke, Sleep
 from resonate.batching import CmdBuffer
 from resonate.contants import CWD
 from resonate.context import (
@@ -123,14 +123,9 @@ def _wrap_fn(
     return cmd
 
 
-class DSTFailureError(Exception):
+class _DSTFailureError(Exception):
     def __init__(self) -> None:
         super().__init__()
-
-
-class MaxCapacityReachedError(Exception):
-    def __init__(self) -> None:
-        super().__init__("Max capacity has been reached")
 
 
 class DSTScheduler:
@@ -226,7 +221,7 @@ class DSTScheduler:
         while True:
             try:
                 return self._run()
-            except DSTFailureError:  # noqa: PERF203
+            except _DSTFailureError:  # noqa: PERF203
                 self.current_failures += 1
                 self._reset()
 
@@ -402,7 +397,7 @@ class DSTScheduler:
                 self.current_failures < self._max_failures
                 and self.random.uniform(0, 100) < self._failure_chance
             ):
-                raise DSTFailureError
+                raise _DSTFailureError
 
             next_step = self._next_step()
             if next_step == "functions":
@@ -448,9 +443,7 @@ class DSTScheduler:
         self,
         runnable: Runnable[Any],
     ) -> None:
-        yieldable_or_final_value: Call | Invoke | Promise[Any] | FinalValue[Any] = (
-            iterate_coro(runnable)
-        )
+        yieldable_or_final_value = iterate_coro(runnable)
 
         if isinstance(yieldable_or_final_value, FinalValue):
             value = yieldable_or_final_value.v
@@ -489,6 +482,8 @@ class DSTScheduler:
                     value_to_yield=yieldable_or_final_value.safe_result(),
                 )
                 self._unblock_dependant_coros(yieldable_or_final_value)
+        elif isinstance(yieldable_or_final_value, Sleep):
+            raise NotImplementedError
         else:
             assert_never(yieldable_or_final_value)
 

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from typing_extensions import ParamSpec
 
-from resonate.actions import Call, Invoke
+from resonate.actions import Call, Invoke, Sleep
 from resonate.dataclasses import Command, FnOrCoroutine
 from resonate.dependency_injection import Dependencies
 
@@ -73,3 +73,6 @@ class Context:
         **kwargs: P.kwargs,
     ) -> Call:
         return Call(_wrap_into_execution_unit(invokable, *args, **kwargs))
+
+    def sleep(self, seconds: int) -> Sleep:
+        return Sleep(seconds)

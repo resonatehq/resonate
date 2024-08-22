@@ -23,3 +23,9 @@ class Call:
 class Invoke:
     def __init__(self, exec_unit: ExecutionUnit) -> None:
         self.exec_unit = exec_unit
+
+
+@final
+class Sleep:
+    def __init__(self, seconds: int) -> None:
+        self.seconds = seconds
