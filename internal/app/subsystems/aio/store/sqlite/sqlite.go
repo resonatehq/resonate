@@ -359,6 +359,8 @@ func (s *SqliteStore) Start() error {
 }
 
 func (s *SqliteStore) Stop() error {
+	close(s.sq)
+
 	if s.config.Reset {
 		if err := s.Reset(); err != nil {
 			return err

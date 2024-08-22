@@ -16,18 +16,24 @@ import (
 type AIO interface {
 	String() string
 	AddSubsystem(subsystem Subsystem)
+
 	Start() error
 	Stop() error
 	Shutdown()
+	Errors() <-chan error
+
+	Signal(<-chan interface{}) <-chan interface{}
 	CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion]
 	Enqueue(*t_aio.Submission, func(*t_aio.Completion, error))
 	Dequeue(int) []io.QE
 	Flush(int64)
-	Errors() <-chan error
 }
+
+// AIO
 
 type aio struct {
 	cq         chan *bus.CQE[t_aio.Submission, t_aio.Completion]
+	buffer     *bus.CQE[t_aio.Submission, t_aio.Completion]
 	subsystems map[t_aio.Kind]Subsystem
 	errors     chan error
 	metrics    *metrics.Metrics
@@ -42,9 +48,19 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], metrics *metrics.
 	}
 }
 
+func (a *aio) String() string {
+	return fmt.Sprintf(
+		"AIO(size=%d, subsystems=%s)",
+		cap(a.cq),
+		a.subsystems,
+	)
+}
+
 func (a *aio) AddSubsystem(subsystem Subsystem) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
+
+// Lifecycle functions
 
 func (a *aio) Start() error {
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
@@ -63,8 +79,6 @@ func (a *aio) Stop() error {
 		if err := subsystem.Stop(); err != nil {
 			return err
 		}
-
-		close(subsystem.SQ())
 	}
 
 	return nil
@@ -74,6 +88,31 @@ func (a *aio) Shutdown() {}
 
 func (a *aio) Errors() <-chan error {
 	return a.errors
+}
+
+// IO functions
+
+func (a *aio) Signal(cancel <-chan interface{}) <-chan interface{} {
+	ch := make(chan interface{})
+
+	if a.buffer != nil {
+		close(ch)
+		return ch
+	}
+
+	go func() {
+		defer close(ch)
+
+		select {
+		case cqe := <-a.cq:
+			util.Assert(a.buffer == nil, "buffer must be nil")
+			a.buffer = cqe
+		case <-cancel:
+			break
+		}
+	}()
+
+	return ch
 }
 
 func (a *aio) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
@@ -118,9 +157,15 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 func (a *aio) Dequeue(n int) []io.QE {
 	cqes := []io.QE{}
 
-	// collects n entries or until the channel is
-	// exhausted, whichever happens first
-	for i := 0; i < n; i++ {
+	// insert the buffered sqe
+	if a.buffer != nil {
+		slog.Debug("aio:dequeue", "id", a.buffer.Completion.Id(), "cqe", a.buffer)
+		cqes = append(cqes, a.buffer)
+		a.buffer = nil
+	}
+
+	// collects n entries (if immediately available)
+	for i := 0; i < n-len(cqes); i++ {
 		select {
 		case cqe, ok := <-a.cq:
 			if !ok {
@@ -141,12 +186,4 @@ func (a *aio) Flush(t int64) {
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
 		subsystem.Flush(t)
 	}
-}
-
-func (a *aio) String() string {
-	return fmt.Sprintf(
-		"AIO(size=%d, subsystems=%s)",
-		cap(a.cq),
-		a.subsystems,
-	)
 }

@@ -169,7 +169,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			i++
 		}
 
-		system.Tick(time, nil, nil)
+		system.Tick(time)
 
 		// now read from the callback channel
 		for len(d.config.Backchannel) > 0 {
@@ -224,7 +224,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// keep ticking until all submissions have been processed
 	for !system.Done() {
 		t++
-		system.Tick(d.Time(t), nil, nil)
+		system.Tick(d.Time(t))
 	}
 
 	if d.config.FaultInjection {

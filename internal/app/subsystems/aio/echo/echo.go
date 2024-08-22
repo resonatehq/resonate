@@ -58,6 +58,7 @@ func (e *Echo) Start() error {
 }
 
 func (e *Echo) Stop() error {
+	close(e.sq)
 	return nil
 }
 

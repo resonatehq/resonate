@@ -395,6 +395,8 @@ func (s *PostgresStore) Start() error {
 }
 
 func (s *PostgresStore) Stop() error {
+	close(s.sq)
+
 	if s.config.Reset {
 		if err := s.Reset(); err != nil {
 			return err

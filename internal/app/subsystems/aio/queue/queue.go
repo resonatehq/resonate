@@ -66,6 +66,7 @@ func (q *Queue) Start() error {
 }
 
 func (q *Queue) Stop() error {
+	close(q.sq)
 	return nil
 }
 

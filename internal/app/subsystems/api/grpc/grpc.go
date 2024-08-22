@@ -39,6 +39,10 @@ func New(api api.API, config *Config) api.Subsystem {
 	}
 }
 
+func (g *Grpc) String() string {
+	return "grpc"
+}
+
 func (g *Grpc) Start(errors chan<- error) {
 	addr := fmt.Sprintf("%s:%d", g.config.Host, g.config.Port)
 
@@ -59,10 +63,6 @@ func (g *Grpc) Start(errors chan<- error) {
 func (g *Grpc) Stop() error {
 	g.server.GracefulStop()
 	return nil
-}
-
-func (g *Grpc) String() string {
-	return "grpc"
 }
 
 type server struct {

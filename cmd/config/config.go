@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand" // nosemgrep
 	"reflect"
 	"strconv"
 	"strings"

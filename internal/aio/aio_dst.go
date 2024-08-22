@@ -74,6 +74,10 @@ func (a *aioDST) Errors() <-chan error {
 	return nil
 }
 
+func (a *aioDST) Signal(cancel <-chan interface{}) <-chan interface{} {
+	panic("not implemented")
+}
+
 func (a *aioDST) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
 	panic("not implemented")
 }

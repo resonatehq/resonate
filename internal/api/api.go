@@ -16,18 +16,24 @@ import (
 type API interface {
 	String() string
 	AddSubsystem(subsystem Subsystem)
-	SQ() <-chan *bus.SQE[t_api.Request, t_api.Response]
-	Enqueue(*t_api.Request, func(*t_api.Response, error))
-	Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response]
+
 	Start() error
 	Stop() error
 	Shutdown()
 	Done() bool
 	Errors() <-chan error
+
+	Signal(<-chan interface{}) <-chan interface{}
+	SQ() <-chan *bus.SQE[t_api.Request, t_api.Response]
+	Enqueue(*t_api.Request, func(*t_api.Response, error))
+	Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response]
 }
+
+// API
 
 type api struct {
 	sq         chan *bus.SQE[t_api.Request, t_api.Response]
+	buffer     *bus.SQE[t_api.Request, t_api.Response]
 	subsystems []Subsystem
 	done       bool
 	errors     chan error
@@ -42,9 +48,19 @@ func New(sq chan *bus.SQE[t_api.Request, t_api.Response], metrics *metrics.Metri
 	}
 }
 
+func (a *api) String() string {
+	return fmt.Sprintf(
+		"API(size=%d, subsystems=%s)",
+		cap(a.sq),
+		a.subsystems,
+	)
+}
+
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
 }
+
+// Lifecycle functions
 
 func (a *api) Start() error {
 	for _, subsystem := range a.subsystems {
@@ -76,6 +92,31 @@ func (a *api) Done() bool {
 
 func (a *api) Errors() <-chan error {
 	return a.errors
+}
+
+// IO functions
+
+func (a *api) Signal(cancel <-chan interface{}) <-chan interface{} {
+	ch := make(chan interface{})
+
+	if a.buffer != nil {
+		close(ch)
+		return ch
+	}
+
+	go func() {
+		defer close(ch)
+
+		select {
+		case sqe := <-a.sq:
+			util.Assert(a.buffer == nil, "buffer must be nil")
+			a.buffer = sqe
+		case <-cancel:
+			break
+		}
+	}()
+
+	return ch
 }
 
 func (a *api) SQ() <-chan *bus.SQE[t_api.Request, t_api.Response] {
@@ -162,9 +203,15 @@ func (a *api) Enqueue(request *t_api.Request, callback func(*t_api.Response, err
 func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 	sqes := []*bus.SQE[t_api.Request, t_api.Response]{}
 
-	// collects n entries (if immediately available) or until a timeout occurs,
-	// whichever happens first
-	for i := 0; i < n-1; i++ {
+	// insert the buffered sqe
+	if a.buffer != nil {
+		slog.Debug("api:dequeue", "id", a.buffer.Submission.Id(), "sqe", a.buffer)
+		sqes = append(sqes, a.buffer)
+		a.buffer = nil
+	}
+
+	// collects n entries (if immediately available)
+	for i := 0; i < n-len(sqes); i++ {
 		select {
 		case sqe, ok := <-a.sq:
 			if !ok {
@@ -178,12 +225,4 @@ func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 	}
 
 	return sqes
-}
-
-func (a *api) String() string {
-	return fmt.Sprintf(
-		"API(size=%d, subsystems=%s)",
-		cap(a.sq),
-		a.subsystems,
-	)
 }

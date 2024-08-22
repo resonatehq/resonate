@@ -85,6 +85,8 @@ func ServeCmd() *cobra.Command {
 
 			// instantiate system
 			system := system.New(api, aio, &config.System, metrics)
+
+			// request coroutines
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
@@ -101,6 +103,7 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
 
+			// background coroutines
 			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
 			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
