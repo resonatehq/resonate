@@ -10,7 +10,7 @@ import (
 
 var deleteScheduleExample = `
 # Delete a schedule
-resonate schedule delete foo`
+resonate schedules delete foo`
 
 func DeleteScheduleCmd(c client.ResonateClient) *cobra.Command {
 	var id string

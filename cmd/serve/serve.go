@@ -99,12 +99,10 @@ func ServeCmd() *cobra.Command {
 
 			// background coroutines
 			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+			system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
+			system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
 			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
-
-			// TODO: migrate to system coroutines
-			system.AddOnTick(10*time.Second, "SchedulePromises", coroutines.SchedulePromises)
-			system.AddOnTick(10*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
 
 			// metrics server
 			mux := netHttp.NewServeMux()

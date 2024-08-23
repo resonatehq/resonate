@@ -13,7 +13,7 @@ func TimeoutLocks(config *system.Config, tags map[string]string) gocoro.Coroutin
 	util.Assert(tags != nil, "tags must be set")
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
-		// Try to timeout all expired locks.
+		// try to timeout all expired locks
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: tags,
@@ -35,10 +35,8 @@ func TimeoutLocks(config *system.Config, tags map[string]string) gocoro.Coroutin
 			return nil, nil
 		}
 
-		// up the asserts !
 		util.Assert(completion.Store != nil, "completion must not be nil")
-		util.Assert(len(completion.Store.Results) == 1, "completion must have three results")
-
+		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 		return nil, nil
 	}
 }

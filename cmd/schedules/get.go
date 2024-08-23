@@ -10,7 +10,7 @@ import (
 
 var getScheduleExample = `
 # Get a schedule
-resonate schedule get foo`
+resonate schedules get foo`
 
 func GetScheduleCmd(c client.ResonateClient) *cobra.Command {
 	var (

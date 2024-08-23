@@ -11,7 +11,7 @@ import (
 
 var searchPromiseExample = `
 # Search for all promises
-resonate promise search "*"
+resonate promises search "*"
 
 # Search for promises that start with foo
 resonate promises search "foo.*"

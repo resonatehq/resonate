@@ -41,13 +41,6 @@ func (c *Config) String() string {
 	)
 }
 
-type coroutineTick struct {
-	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
-	name      string
-	last      int64
-	every     time.Duration
-}
-
 type backgroundCoroutine struct {
 	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	name      string
@@ -62,7 +55,6 @@ type System struct {
 	metrics      *metrics.Metrics
 	scheduler    gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
 	onRequest    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
-	onTick       []*coroutineTick
 	background   []*backgroundCoroutine
 	shutdown     chan interface{}
 	shortCircuit chan interface{}
@@ -76,7 +68,7 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		metrics:      metrics,
 		scheduler:    gocoro.New(aio, config.CoroutineMaxSize),
 		onRequest:    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]{},
-		onTick:       []*coroutineTick{},
+		background:   []*backgroundCoroutine{},
 		shutdown:     make(chan interface{}),
 		shortCircuit: make(chan interface{}),
 	}
@@ -131,37 +123,10 @@ func (s *System) Tick(t int64) {
 	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
-	// dequeue sqes
-	sqes := s.api.Dequeue(s.config.SubmissionBatchSize)
-	util.Assert(len(sqes) <= s.config.SubmissionBatchSize, "sqes must be no greater than the submission batch size")
-
 	// dequeue cqes
-	for _, cqe := range s.aio.Dequeue(s.config.CompletionBatchSize) {
+	for i, cqe := range s.aio.Dequeue(s.config.CompletionBatchSize) {
+		util.Assert(i < s.config.CompletionBatchSize, "cqes length be no greater than the completion batch size")
 		cqe.Callback(cqe.Completion, cqe.Error)
-	}
-
-	// cqes := s.aio.Dequeue(s.config.CompletionBatchSize)
-	// util.Assert(len(cqes) <= s.config.CompletionBatchSize, "cqes must be no greater than the completion batch size")
-
-	// add tick coroutines
-	for _, tick := range s.onTick {
-		// add the coroutine if the interval has elapsed and the api sq is
-		// not done (which means we are shutting down)
-		// if every is set to 0 never add the coroutine
-		if tick.every != 0 && (t-tick.last) > int64(tick.every.Milliseconds()) && !s.api.Done() {
-			tick.last = t
-
-			tags := map[string]string{
-				"request_id": fmt.Sprintf("%s:%d", tick.name, t),
-				"name":       tick.name,
-			}
-
-			if p, ok := gocoro.Add(s.scheduler, tick.coroutine(s.config, tags)); ok {
-				s.coroutineMetrics(p, tags)
-			} else {
-				slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-			}
-		}
 	}
 
 	// add background coroutines
@@ -183,8 +148,10 @@ func (s *System) Tick(t int64) {
 		}
 	}
 
-	// add request coroutines
-	for _, sqe := range sqes {
+	// dequeue sqes
+	for i, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize) {
+		util.Assert(i < s.config.SubmissionBatchSize, "sqes length be no greater than the submission batch size")
+
 		coroutine, ok := s.onRequest[sqe.Submission.Kind]
 		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind))
 
@@ -226,15 +193,6 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			return nil, nil
 		}
 	}
-}
-
-func (s *System) AddOnTick(every time.Duration, name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
-	util.Assert(every >= 0, "frequency must be non negative")
-	s.onTick = append(s.onTick, &coroutineTick{
-		coroutine: constructor,
-		name:      name,
-		every:     every,
-	})
 }
 
 func (s *System) AddBackground(name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {

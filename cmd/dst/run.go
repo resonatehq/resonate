@@ -89,22 +89,18 @@ func RunDSTCmd() *cobra.Command {
 
 			var p float64
 			var t int64
-			var d time.Duration
 
 			// set up scenarios
 			switch scenario {
 			case "default":
 				p = 0
 				t = ticks
-				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
 			case "fault":
 				p = r.Float64()
 				t = ticks
-				d = time.Duration(dst.RangeIntn(r, 1, 60)) * time.Second
 			case "lazy":
 				p = 0
 				t = 10
-				d = 0
 			default:
 				return fmt.Errorf("invalid scenario %s", scenario)
 			}
@@ -140,6 +136,8 @@ func RunDSTCmd() *cobra.Command {
 
 			// instantiate system
 			system := system.New(api, aio, &config.System, metrics)
+
+			// request coroutines
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
@@ -156,13 +154,14 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
 			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
 
-			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
-			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
-			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
-
-			// TODO: migrate tick to background coroutines
-			system.AddOnTick(d, "SchedulePromises", coroutines.SchedulePromises)
-			system.AddOnTick(d, "TimeoutLocks", coroutines.TimeoutLocks)
+			// background coroutines
+			if scenario != "lazy" {
+				system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+				system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
+				system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
+				system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+				system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+			}
 
 			dst := dst.New(r, &dst.Config{
 				Ticks:              ticks,
