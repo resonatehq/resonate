@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -334,7 +335,7 @@ type PostgresStore struct {
 	workers []*PostgresStoreWorker
 }
 
-func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (*PostgresStore, error) {
+func New(aio aio.AIO, config *Config) (*PostgresStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*PostgresStoreWorker, config.Workers)
 
@@ -365,7 +366,7 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 			config: config,
 			db:     db,
 			sq:     sq,
-			cq:     cq,
+			aio:    aio,
 			flush:  make(chan int64, 1),
 		}
 	}
@@ -378,12 +379,12 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 	}, nil
 }
 
-func (s *PostgresStore) Kind() t_aio.Kind {
-	return t_aio.Store
-}
-
 func (s *PostgresStore) String() string {
 	return "store:postgres"
+}
+
+func (s *PostgresStore) Kind() t_aio.Kind {
+	return t_aio.Store
 }
 
 func (s *PostgresStore) Start() error {
@@ -435,7 +436,7 @@ type PostgresStoreWorker struct {
 	config *Config
 	db     *sql.DB
 	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	cq     chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	aio    aio.AIO
 	flush  chan int64
 }
 
@@ -444,7 +445,7 @@ func (w *PostgresStoreWorker) Start() {
 		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
 			for _, cqe := range w.Process(sqes) {
-				w.cq <- cqe
+				w.aio.Enqueue(cqe)
 			}
 		}
 		if !ok {

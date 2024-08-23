@@ -23,12 +23,12 @@ func NewDST(backchannel chan interface{}, config *ConfigDST) (*QueueDST, error) 
 	}, nil
 }
 
-func (q *QueueDST) Kind() t_aio.Kind {
-	return t_aio.Queue
-}
-
 func (q *QueueDST) String() string {
 	return "queue:dst"
+}
+
+func (q *QueueDST) Kind() t_aio.Kind {
+	return t_aio.Queue
 }
 
 func (q *QueueDST) Start() error {
@@ -36,10 +36,6 @@ func (q *QueueDST) Start() error {
 }
 
 func (q *QueueDST) Stop() error {
-	return nil
-}
-
-func (q *QueueDST) Reset() error {
 	return nil
 }
 

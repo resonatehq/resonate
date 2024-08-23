@@ -16,7 +16,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -110,15 +109,11 @@ func RunDSTCmd() *cobra.Command {
 				return fmt.Errorf("invalid scenario %s", scenario)
 			}
 
-			// sq/cq
-			sq := make(chan *bus.SQE[t_api.Request, t_api.Response], config.API.Size)
-			// cq := make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], config.AIO.Size)
-
 			// instantiate backchannel
 			backchannel := make(chan interface{}, backchannelSize.Int(r))
 
 			// api/aio
-			api := api.New(sq, metrics)
+			api := api.New(config.API.Size, metrics)
 			aio := aio.NewDST(r, p, metrics)
 
 			// api subsystems

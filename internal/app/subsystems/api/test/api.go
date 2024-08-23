@@ -55,12 +55,12 @@ func (a *API) SQ() <-chan *bus.SQE[t_api.Request, t_api.Response] {
 	panic("not implemented")
 }
 
-func (a *API) Enqueue(submission *t_api.Request, callback func(*t_api.Response, error)) {
+func (a *API) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// assert
-	assert.Equal(a.t, a.req, submission)
+	assert.Equal(a.t, a.req, sqe.Submission)
 
 	// immediately call callback
-	go callback(a.res, nil)
+	go sqe.Callback(a.res, nil)
 }
 
 func (a *API) Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response] {

@@ -11,7 +11,6 @@ type Subsystem interface {
 
 	Start() error
 	Stop() error
-	Reset() error
 
 	SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	Flush(int64)

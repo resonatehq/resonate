@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/resonatehq/gocoro/pkg/io"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -23,10 +22,11 @@ type AIO interface {
 	Errors() <-chan error
 
 	Signal(<-chan interface{}) <-chan interface{}
-	CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion]
-	Enqueue(*t_aio.Submission, func(*t_aio.Completion, error))
-	Dequeue(int) []io.QE
 	Flush(int64)
+
+	Dispatch(*t_aio.Submission, func(*t_aio.Completion, error))
+	Enqueue(*bus.CQE[t_aio.Submission, t_aio.Completion])
+	Dequeue(int) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 }
 
 // AIO
@@ -39,9 +39,9 @@ type aio struct {
 	metrics    *metrics.Metrics
 }
 
-func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], metrics *metrics.Metrics) *aio {
+func New(size int, metrics *metrics.Metrics) *aio {
 	return &aio{
-		cq:         cq,
+		cq:         make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], size),
 		subsystems: map[t_aio.Kind]Subsystem{},
 		errors:     make(chan error),
 		metrics:    metrics,
@@ -115,11 +115,7 @@ func (a *aio) Signal(cancel <-chan interface{}) <-chan interface{} {
 	return ch
 }
 
-func (a *aio) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
-	return a.cq
-}
-
-func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
+func (a *aio) Dispatch(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
 	util.Assert(submission.Tags != nil, "submission tags must be set")
 
 	if subsystem, ok := a.subsystems[submission.Kind]; ok {
@@ -144,7 +140,6 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 
 		select {
 		case subsystem.SQ() <- sqe:
-			slog.Debug("aio:enqueue", "id", submission.Id(), "sqe", sqe)
 			a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 		default:
 			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, fmt.Sprintf("aio:subsytem:%s submission queue full", subsystem), nil))
@@ -154,8 +149,16 @@ func (a *aio) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Complet
 	}
 }
 
-func (a *aio) Dequeue(n int) []io.QE {
-	cqes := []io.QE{}
+func (a *aio) Enqueue(cqe *bus.CQE[t_aio.Submission, t_aio.Completion]) {
+	util.Assert(cqe != nil, "cqe must not be nil")
+
+	// block until the completion queue has space
+	a.cq <- cqe
+	slog.Debug("aio:enqueue", "id", cqe.Completion.Id(), "cqe", cqe)
+}
+
+func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	cqes := []*bus.CQE[t_aio.Submission, t_aio.Completion]{}
 
 	// insert the buffered sqe
 	if a.buffer != nil {

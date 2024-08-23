@@ -136,8 +136,12 @@ func (s *System) Tick(t int64) {
 	util.Assert(len(sqes) <= s.config.SubmissionBatchSize, "sqes must be no greater than the submission batch size")
 
 	// dequeue cqes
-	cqes := s.aio.Dequeue(s.config.CompletionBatchSize)
-	util.Assert(len(cqes) <= s.config.CompletionBatchSize, "cqes must be no greater than the completion batch size")
+	for _, cqe := range s.aio.Dequeue(s.config.CompletionBatchSize) {
+		cqe.Callback(cqe.Completion, cqe.Error)
+	}
+
+	// cqes := s.aio.Dequeue(s.config.CompletionBatchSize)
+	// util.Assert(len(cqes) <= s.config.CompletionBatchSize, "cqes must be no greater than the completion batch size")
 
 	// add tick coroutines
 	for _, tick := range s.onTick {
@@ -193,9 +197,9 @@ func (s *System) Tick(t int64) {
 	}
 
 	// tick scheduler
-	s.scheduler.RunUntilBlocked(t, cqes)
+	s.scheduler.RunUntilBlocked(t)
 
-	// the system is now responsible for flushing the aio
+	// flush aio
 	s.aio.Flush(t)
 }
 

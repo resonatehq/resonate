@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
@@ -29,7 +30,7 @@ type Queue struct {
 	workers []*QueueWorker
 }
 
-func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (*Queue, error) {
+func New(aio aio.AIO, config *Config) (*Queue, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*QueueWorker, config.Workers)
 
@@ -38,7 +39,7 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 			config: config,
 			client: &http.Client{Timeout: config.Timeout},
 			sq:     sq,
-			cq:     cq,
+			aio:    aio,
 			flush:  make(chan int64, 1),
 		}
 	}
@@ -50,12 +51,12 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 	}, nil
 }
 
-func (q *Queue) Kind() t_aio.Kind {
-	return t_aio.Queue
-}
-
 func (q *Queue) String() string {
 	return "queue"
+}
+
+func (q *Queue) Kind() t_aio.Kind {
+	return t_aio.Queue
 }
 
 func (q *Queue) Start() error {
@@ -70,10 +71,6 @@ func (q *Queue) Stop() error {
 	return nil
 }
 
-func (q *Queue) Reset() error {
-	return nil
-}
-
 func (q *Queue) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
 	return q.sq
 }
@@ -85,8 +82,7 @@ func (q *Queue) Flush(t int64) {
 }
 
 func (q *Queue) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	util.Assert(len(q.workers) > 0, "must be at least one worker")
-	return q.workers[0].Process(sqes)
+	panic("not implemented")
 }
 
 // Worker
@@ -95,7 +91,7 @@ type QueueWorker struct {
 	config *Config
 	client *http.Client
 	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	cq     chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	aio    aio.AIO
 	flush  chan int64
 }
 
@@ -104,7 +100,7 @@ func (w *QueueWorker) Start() {
 		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
 			for _, cqe := range w.Process(sqes) {
-				w.cq <- cqe
+				w.aio.Enqueue(cqe)
 			}
 		}
 		if !ok {

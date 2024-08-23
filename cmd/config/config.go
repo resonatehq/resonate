@@ -18,9 +18,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -121,10 +119,10 @@ func (s *APISubsystems) Instantiate(a api.API) []api.Subsystem {
 	return subsystems
 }
 
-func (s *AIOSubsystems) Instantiate(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion]) ([]aio.Subsystem, error) {
+func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 	subsystems := []aio.Subsystem{}
 	if s.Echo.Enabled {
-		subsystem, err := echo.New(cq, &s.Echo.Config)
+		subsystem, err := echo.New(a, &s.Echo.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +130,7 @@ func (s *AIOSubsystems) Instantiate(cq chan *bus.CQE[t_aio.Submission, t_aio.Com
 		subsystems = append(subsystems, subsystem)
 	}
 	if s.Queue.Enabled {
-		subsystem, err := queue.New(cq, &s.Queue.Config)
+		subsystem, err := queue.New(a, &s.Queue.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -140,7 +138,7 @@ func (s *AIOSubsystems) Instantiate(cq chan *bus.CQE[t_aio.Submission, t_aio.Com
 		subsystems = append(subsystems, subsystem)
 	}
 
-	subsystem, err := s.instantiateStore(cq)
+	subsystem, err := s.instantiateStore(a)
 	if err != nil {
 		return nil, err
 	}
@@ -149,11 +147,11 @@ func (s *AIOSubsystems) Instantiate(cq chan *bus.CQE[t_aio.Submission, t_aio.Com
 	return subsystems, nil
 }
 
-func (s *AIOSubsystems) instantiateStore(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion]) (aio.Subsystem, error) {
+func (s *AIOSubsystems) instantiateStore(a aio.AIO) (aio.Subsystem, error) {
 	if s.StorePostgres.Enabled {
-		return postgres.New(cq, &s.StorePostgres.Config)
+		return postgres.New(a, &s.StorePostgres.Config)
 	} else if s.StoreSqlite.Enabled {
-		return sqlite.New(cq, &s.StoreSqlite.Config)
+		return sqlite.New(a, &s.StoreSqlite.Config)
 	}
 	return nil, fmt.Errorf("no store enabled")
 }

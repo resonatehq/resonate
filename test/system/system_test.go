@@ -12,24 +12,22 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestSystemLoop(t *testing.T) {
-	sq := make(chan *bus.SQE[t_api.Request, t_api.Response], 100)
-	cq := make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], 100)
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	api := api.New(sq, metrics)
-	aio := aio.New(cq, metrics)
+	api := api.New(100, metrics)
+	aio := aio.New(100, metrics)
 
-	echo, err := echo.New(cq, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
+	echo, err := echo.New(aio, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	aio.AddSubsystem(echo)
 
 	if err := api.Start(); err != nil {
@@ -55,19 +53,19 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		data := strconv.Itoa(i)
 
-		submission := &t_api.Request{
-			Kind: t_api.Echo,
-			Tags: map[string]string{},
-			Echo: &t_api.EchoRequest{
-				Data: data,
+		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+			Submission: &t_api.Request{
+				Kind: t_api.Echo,
+				Tags: map[string]string{},
+				Echo: &t_api.EchoRequest{
+					Data: data,
+				},
 			},
-		}
-
-		api.Enqueue(submission, func(res *t_api.Response, err error) {
-			received <- 1
-
-			assert.Nil(t, err)
-			assert.Equal(t, data, res.Echo.Data)
+			Callback: func(res *t_api.Response, err error) {
+				received <- 1
+				assert.Nil(t, err)
+				assert.Equal(t, data, res.Echo.Data)
+			},
 		})
 	}
 
@@ -76,21 +74,22 @@ func TestSystemLoop(t *testing.T) {
 
 	// all requests made after shutdown should fail
 	for i := 0; i < 5; i++ {
-		submission := &t_api.Request{
-			Kind: t_api.Echo,
-			Tags: map[string]string{},
-			Echo: &t_api.EchoRequest{
-				Data: "nope",
+		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+			Submission: &t_api.Request{
+				Kind: t_api.Echo,
+				Tags: map[string]string{},
+				Echo: &t_api.EchoRequest{
+					Data: "nope",
+				},
 			},
-		}
+			Callback: func(res *t_api.Response, err error) {
+				received <- 1
 
-		api.Enqueue(submission, func(res *t_api.Response, err error) {
-			received <- 1
-
-			var apiErr *t_api.ResonateError
-			assert.True(t, errors.As(err, &apiErr))
-			assert.NotNil(t, err)
-			assert.ErrorContains(t, apiErr, "system is shutting down")
+				var apiErr *t_api.ResonateError
+				assert.True(t, errors.As(err, &apiErr))
+				assert.NotNil(t, err)
+				assert.ErrorContains(t, apiErr, "system is shutting down")
+			},
 		})
 	}
 

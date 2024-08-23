@@ -15,9 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/pkg/log"
@@ -51,13 +49,9 @@ func ServeCmd() *cobra.Command {
 			reg := prometheus.NewRegistry()
 			metrics := metrics.New(reg)
 
-			// sq/cq
-			sq := make(chan *bus.SQE[t_api.Request, t_api.Response], config.API.Size)
-			cq := make(chan *bus.CQE[t_aio.Submission, t_aio.Completion], config.AIO.Size)
-
 			// api/aio
-			api := api.New(sq, metrics)
-			aio := aio.New(cq, metrics)
+			api := api.New(config.API.Size, metrics)
+			aio := aio.New(config.AIO.Size, metrics)
 
 			// api subsystems
 			for _, subsystem := range config.API.Subsystems.Instantiate(api) {
@@ -65,7 +59,7 @@ func ServeCmd() *cobra.Command {
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(cq)
+			subsystems, err := config.AIO.Subsystems.Instantiate(aio)
 			if err != nil {
 				return err
 			}

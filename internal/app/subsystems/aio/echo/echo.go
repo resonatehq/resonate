@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
@@ -22,7 +23,7 @@ type Echo struct {
 	workers []*EchoWorker
 }
 
-func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (*Echo, error) {
+func New(aio aio.AIO, config *Config) (*Echo, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*EchoWorker, config.Workers)
 
@@ -30,7 +31,7 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 		workers[i] = &EchoWorker{
 			config: config,
 			sq:     sq,
-			cq:     cq,
+			aio:    aio,
 			flush:  make(chan int64, 1),
 		}
 	}
@@ -42,12 +43,12 @@ func New(cq chan *bus.CQE[t_aio.Submission, t_aio.Completion], config *Config) (
 	}, nil
 }
 
-func (e *Echo) Kind() t_aio.Kind {
-	return t_aio.Echo
-}
-
 func (e *Echo) String() string {
 	return "echo"
+}
+
+func (e *Echo) Kind() t_aio.Kind {
+	return t_aio.Echo
 }
 
 func (e *Echo) Start() error {
@@ -59,10 +60,6 @@ func (e *Echo) Start() error {
 
 func (e *Echo) Stop() error {
 	close(e.sq)
-	return nil
-}
-
-func (e *Echo) Reset() error {
 	return nil
 }
 
@@ -86,7 +83,7 @@ func (e *Echo) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*b
 type EchoWorker struct {
 	config *Config
 	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	cq     chan<- *bus.CQE[t_aio.Submission, t_aio.Completion]
+	aio    aio.AIO
 	flush  chan int64
 }
 
@@ -95,7 +92,7 @@ func (w *EchoWorker) Start() {
 		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
 			for _, cqe := range w.Process(sqes) {
-				w.cq <- cqe
+				w.aio.Enqueue(cqe)
 			}
 		}
 		if !ok {

@@ -11,6 +11,7 @@ import (
 	"github.com/anishathalye/porcupine"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -125,47 +126,49 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 				"name":       req.Kind.String(),
 			}
 
-			api.Enqueue(req, func(res *t_api.Response, err error) {
-				resTime := d.Time(t)
-				if reqTime != resTime {
-					resTime = resTime - 1 // subtract 1 to ensure tick timeframes don't overlap
-				}
+			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+				Submission: req,
+				Callback: func(res *t_api.Response, err error) {
+					resTime := d.Time(t)
+					if reqTime != resTime {
+						resTime = resTime - 1 // subtract 1 to ensure tick timeframes don't overlap
+					}
 
-				// log
-				slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", tid, "req", req, "res", res, "err", err)
+					// log
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", tid, "req", req, "res", res, "err", err)
 
-				// extract cursors for subsequent requests
-				if err == nil {
-					switch res.Kind {
-					case t_api.SearchPromises:
-						if res.SearchPromises.Cursor != nil {
-							d.generator.AddRequest(&t_api.Request{
-								Kind:           t_api.SearchPromises,
-								SearchPromises: res.SearchPromises.Cursor.Next,
-							})
-						}
-					case t_api.SearchSchedules:
-						if res.SearchSchedules.Cursor != nil {
-							d.generator.AddRequest(&t_api.Request{
-								Kind:            t_api.SearchSchedules,
-								SearchSchedules: res.SearchSchedules.Cursor.Next,
-							})
+					// extract cursors for subsequent requests
+					if err == nil {
+						switch res.Kind {
+						case t_api.SearchPromises:
+							if res.SearchPromises.Cursor != nil {
+								d.generator.AddRequest(&t_api.Request{
+									Kind:           t_api.SearchPromises,
+									SearchPromises: res.SearchPromises.Cursor.Next,
+								})
+							}
+						case t_api.SearchSchedules:
+							if res.SearchSchedules.Cursor != nil {
+								d.generator.AddRequest(&t_api.Request{
+									Kind:            t_api.SearchSchedules,
+									SearchSchedules: res.SearchSchedules.Cursor.Next,
+								})
+							}
 						}
 					}
-				}
 
-				// add operation to porcupine
-				ops = append(ops, porcupine.Operation{
-					ClientId: int(j % d.config.MaxReqsPerTick),
-					Call:     reqTime,
-					Return:   resTime,
-					Input:    &Req{Op, reqTime, req, nil},
-					Output:   &Res{Op, resTime, res, err},
-				})
+					// add operation to porcupine
+					ops = append(ops, porcupine.Operation{
+						ClientId: int(j % d.config.MaxReqsPerTick),
+						Call:     reqTime,
+						Return:   resTime,
+						Input:    &Req{Op, reqTime, req, nil},
+						Output:   &Res{Op, resTime, res, err},
+					})
 
-				j++
+					j++
+				},
 			})
-
 			i++
 		}
 
