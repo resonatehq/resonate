@@ -67,7 +67,7 @@ describe("Options", () => {
       expect(opts.version).toBe(1);
     }
 
-    expect(top.shouldLock).toBe(true);
+    expect(top.shouldLock).toBe(false);
     expect(middle.shouldLock).toBe(false);
     expect(bottom.shouldLock).toBe(false);
 
@@ -107,7 +107,7 @@ describe("Options", () => {
     expect(top.eidFn).toBe(overrides.eidFn);
     expect(top.encoder).toBe(resonateOpts.encoder);
     expect(top.idempotencyKeyFn).toBe(overrides.idempotencyKeyFn);
-    expect(top.shouldLock).toBe(true);
+    expect(top.shouldLock).toBe(false);
     expect(top.pollFrequency).toBe(resonateOpts.pollFrequency);
     expect(top.retryPolicy).toBe(overrides.retryPolicy);
     expect(top.tags).toEqual({ ...resonateOpts.tags, ...overrides.tags, "resonate:invocation": "true" });
@@ -157,14 +157,12 @@ describe("Options", () => {
       expect(opts.pollFrequency).toBe(resonateOpts.pollFrequency);
       expect(opts.retryPolicy).toBe(resonateOpts.retryPolicy);
       expect(opts.timeout).toBe(resonateOpts.timeout);
+      expect(opts.shouldLock).toBe(false);
     }
 
     expect(top.version).toBe(1);
     expect(middle.version).toBeDefined();
     expect(bottom.version).toBeDefined();
-
-    expect(top.shouldLock).toBe(true);
-    expect(bottom.shouldLock).toBe(false);
 
     expect(top.tags).toEqual({ ...resonateOpts.tags, "resonate:invocation": "true" });
     expect(bottom.tags).toEqual(resonateOpts.tags);

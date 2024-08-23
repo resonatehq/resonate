@@ -195,7 +195,8 @@ export class Resonate {
    */
   async start(delay: number = 5000) {
     clearInterval(this.#interval);
-    this.#_start();
+    // await the first run of the recovery path to avoid races with the normal flow of the program
+    await this.#_start();
     this.#interval = setInterval(this.#_start.bind(this), delay);
   }
 
@@ -293,8 +294,8 @@ export class Resonate {
     // resonate:invocation tag to identify a top level invocation
     opts.tags = { ...registeredOpts.tags, ...tags, "resonate:invocation": "true" };
 
-    // lock on top level is true by default
-    opts.shouldLock = opts.shouldLock ?? true;
+    // locking is false by default
+    opts.shouldLock = opts.shouldLock ?? false;
 
     const param = {
       func: name,
