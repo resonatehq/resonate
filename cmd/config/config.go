@@ -23,13 +23,21 @@ import (
 	"github.com/spf13/viper"
 )
 
-type Config config[APISubsystems, AIOSubsystems]
-type ConfigDST config[APIDSTSubsystems, AIODSTSubsystems]
+type Config config[API, AIO]
+type ConfigDST config[APIDST, AIODST]
 
-type config[T, U any] struct {
+type t_api interface {
+	API | APIDST
+}
+
+type t_aio interface {
+	AIO | AIODST
+}
+
+type config[T t_api, U t_aio] struct {
 	System      system.Config `flag:"system"`
-	API         API[T]        `flag:"api"`
-	AIO         AIO[U]        `flag:"aio"`
+	API         T             `flag:"api"`
+	AIO         U             `flag:"aio"`
 	MetricsPort int           `flag:"metrics-port" desc:"prometheus metrics server port" default:"9090"`
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
@@ -75,14 +83,24 @@ func (c *ConfigDST) Parse(r *rand.Rand) error {
 	return nil
 }
 
-type API[T any] struct {
-	Size       int `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems T   `flag:"-"`
+type API struct {
+	Size       int           `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	Subsystems APISubsystems `flag:"-"`
 }
 
-type AIO[T any] struct {
-	Size       int `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
-	Subsystems T   `flag:"-"`
+type APIDST struct {
+	Size       int              `flag:"size" desc:"submission buffered channel size" default:"1000" dst:"1:1000"`
+	Subsystems APIDSTSubsystems `flag:"-"`
+}
+
+type AIO struct {
+	Size       int           `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
+	Subsystems AIOSubsystems `flag:"-"`
+}
+
+type AIODST struct {
+	Size       int              `flag:"size" desc:"completion buffered channel size" default:"1000" dst:"1:1000"`
+	Subsystems AIODSTSubsystems `flag:"-"`
 }
 
 type EnabledSubsystem[T any] struct {
@@ -179,10 +197,10 @@ func (s *APIDSTSubsystems) Instantiate(a api.API) []api.Subsystem {
 	return subsystems
 }
 
-func (s *AIODSTSubsystems) Instantiate(backchannel chan interface{}) ([]aio.Subsystem, error) {
-	subsystems := []aio.Subsystem{}
+func (s *AIODSTSubsystems) Instantiate(r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
+	subsystems := []aio.SubsystemDST{}
 	if s.Queue.Enabled {
-		subsystem, err := queue.NewDST(backchannel, &s.Queue.Config)
+		subsystem, err := queue.NewDST(r, backchannel, &s.Queue.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -199,7 +217,7 @@ func (s *AIODSTSubsystems) Instantiate(backchannel chan interface{}) ([]aio.Subs
 	return subsystems, nil
 }
 
-func (s *AIODSTSubsystems) instantiateStore() (aio.Subsystem, error) {
+func (s *AIODSTSubsystems) instantiateStore() (aio.SubsystemDST, error) {
 	if s.StorePostgres.Enabled {
 		return postgres.New(nil, &s.StorePostgres.Config)
 	} else if s.StoreSqlite.Enabled {
@@ -243,6 +261,12 @@ func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix
 		}
 
 		switch field.Type.Kind() {
+		case reflect.String:
+			cmd.Flags().String(n, value, desc)
+			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+		case reflect.Bool:
+			cmd.Flags().Bool(n, value == "true", desc)
+			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Int:
 			if strings.Contains(value, ":") {
 				flag := util.NewRangeIntFlag(0, 0)
@@ -287,12 +311,20 @@ func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix
 					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 				}
 			}
-		case reflect.String:
-			cmd.Flags().String(n, value, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
-		case reflect.Bool:
-			cmd.Flags().Bool(n, value == "true", desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+		case reflect.Float64:
+			if strings.Contains(value, ":") {
+				flag := util.NewRangeFloat64Flag(0, 0)
+				if err := flag.Set(value); err != nil {
+					return err
+				}
+
+				cmd.Flags().Var(flag, n, desc)
+				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			} else {
+				v, _ := strconv.ParseFloat(value, 64)
+				cmd.Flags().Float64(n, v, desc)
+				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			}
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))

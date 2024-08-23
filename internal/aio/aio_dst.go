@@ -17,8 +17,17 @@ type aioDST struct {
 	p          float64
 	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
 	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
-	subsystems map[t_aio.Kind]Subsystem
+	subsystems map[t_aio.Kind]SubsystemDST
 	metrics    *metrics.Metrics
+}
+
+func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
+	return &aioDST{
+		r:          r,
+		p:          p,
+		subsystems: map[t_aio.Kind]SubsystemDST{},
+		metrics:    metrics,
+	}
 }
 
 func (a *aioDST) String() string {
@@ -31,16 +40,7 @@ func (a *aioDST) String() string {
 	return fmt.Sprintf("AIODST(subsystems=%s)", subsystems)
 }
 
-func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
-	return &aioDST{
-		r:          r,
-		p:          p,
-		subsystems: map[t_aio.Kind]Subsystem{},
-		metrics:    metrics,
-	}
-}
-
-func (a *aioDST) AddSubsystem(subsystem Subsystem) {
+func (a *aioDST) AddSubsystem(subsystem SubsystemDST) {
 	a.subsystems[subsystem.Kind()] = subsystem
 }
 
@@ -136,7 +136,7 @@ func (a *aioDST) Flush(t int64) {
 				}
 
 				if preFailure[i] {
-					// Simulate failure before processing
+					// simulate failure before processing
 					a.Enqueue(&bus.CQE[t_aio.Submission, t_aio.Completion]{
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
@@ -148,10 +148,10 @@ func (a *aioDST) Flush(t int64) {
 				}
 			}
 
-			// Process the SQE
+			// process the SQE
 			for i, cqe := range subsystem.Process(toProcess) {
 				if postFailure[i] {
-					// Simulate failure after processing
+					// simulate failure after processing
 					cqe.Completion = nil
 					cqe.Error = errors.New("simulated failure after processing")
 				}

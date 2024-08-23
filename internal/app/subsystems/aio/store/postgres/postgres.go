@@ -315,7 +315,7 @@ const (
 type Config struct {
 	Size      int               `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int               `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Workers   int               `flag:"workers" desc:"number of workers" default:"1"`
+	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
 	Host      string            `flag:"host" desc:"postgres host"`
 	Port      string            `flag:"port" desc:"postgres port"`
 	Username  string            `flag:"username" desc:"postgres username" default:"localhost"`

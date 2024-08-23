@@ -14,7 +14,6 @@ import (
 
 type AIO interface {
 	String() string
-	AddSubsystem(subsystem Subsystem)
 
 	Start() error
 	Stop() error

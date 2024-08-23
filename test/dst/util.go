@@ -12,6 +12,10 @@ func RangeInt63n(r *rand.Rand, min int64, max int64) int64 {
 	return r.Int63n(max-min) + min
 }
 
+func RangeFloat63n(r *rand.Rand, min float64, max float64) float64 {
+	return r.Float64()*(max-min) + min
+}
+
 func RangeMap[K comparable, V any](r *rand.Rand, m map[K]V) K {
 	i := r.Intn(len(m))
 	for k := range m {

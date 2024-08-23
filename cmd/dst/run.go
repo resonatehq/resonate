@@ -110,7 +110,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			// instantiate backchannel
-			backchannel := make(chan interface{}, backchannelSize.Int(r))
+			backchannel := make(chan interface{}, backchannelSize.Resolve(r))
 
 			// api/aio
 			api := api.New(config.API.Size, metrics)
@@ -122,7 +122,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(backchannel)
+			subsystems, err := config.AIO.Subsystems.Instantiate(r, backchannel)
 			if err != nil {
 				return err
 			}
@@ -170,14 +170,14 @@ func RunDSTCmd() *cobra.Command {
 				VisualizationPath:  visualizationPath,
 				TimeElapsedPerTick: 1000, // ms
 				TimeoutTicks:       t,
-				ReqsPerTick:        func() int { return reqsPerTick.Int(r) },
-				MaxReqsPerTick:     reqsPerTick.Max,
-				Ids:                ids.Int(r),
-				IdempotencyKeys:    idempotencyKeys.Int(r),
-				Headers:            headers.Int(r),
-				Data:               data.Int(r),
-				Tags:               tags.Int(r),
-				Searches:           searches.Int(r),
+				ReqsPerTick:        func() int { return reqsPerTick.Resolve(r) },
+				MaxReqsPerTick:     int64(reqsPerTick.Max()),
+				Ids:                ids.Resolve(r),
+				IdempotencyKeys:    idempotencyKeys.Resolve(r),
+				Headers:            headers.Resolve(r),
+				Data:               data.Resolve(r),
+				Tags:               tags.Resolve(r),
+				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
 				Backchannel:        backchannel,
 			})

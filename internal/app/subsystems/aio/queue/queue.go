@@ -81,10 +81,6 @@ func (q *Queue) Flush(t int64) {
 	}
 }
 
-func (q *Queue) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	panic("not implemented")
-}
-
 // Worker
 
 type QueueWorker struct {

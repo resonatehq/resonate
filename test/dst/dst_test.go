@@ -52,7 +52,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	backchannel := make(chan interface{}, 100)
 
 	// instatiate aio subsystems
-	queue, err := queue.NewDST(backchannel, &queue.ConfigDST{})
+	queue, err := queue.NewDST(r, backchannel, &queue.ConfigDST{})
 	if err != nil {
 		t.Fatal(err)
 	}
