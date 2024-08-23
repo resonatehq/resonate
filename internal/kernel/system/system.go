@@ -110,7 +110,7 @@ func (s *System) Loop() error {
 		apiSignal := s.api.Signal(cancel)
 		aioSignal := s.aio.Signal(cancel)
 
-		// wait for a signal, short circuit, or timeout, whichever occurs
+		// wait for a signal, short circuit, or timeout; whichever occurs
 		// first
 		select {
 		case <-apiSignal:
