@@ -19,7 +19,7 @@ func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "get <id>",
-		Short:   "Get a durable promise",
+		Short:   "Get a promise",
 		Example: getPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

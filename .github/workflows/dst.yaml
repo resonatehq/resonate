@@ -4,8 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       seed:
+        description: "seed"
         type: number
       ticks:
+        description: "ticks"
         type: number
   schedule:
     - cron: "0 * * * *" # every hour
@@ -61,11 +63,11 @@ jobs:
         run: [1, 2]
 
     env:
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST: "localhost"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT: "5432"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME: "username"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD: "password"
-      DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE: "resonate_dst"
+      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
+      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
+      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
+      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
+      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_dst"
 
     services:
       postgres:
@@ -74,9 +76,9 @@ jobs:
         # see: https://github.com/actions/runner/issues/822
         image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
-          POSTGRES_USER: ${{ env.DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD }}
-          POSTGRES_DB: ${{ env.DST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE }}
+          POSTGRES_USER: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -99,7 +101,7 @@ jobs:
             --ticks ${{ needs.values.outputs.ticks }} \
             --timeout 2h \
             --scenario ${{ matrix.scenario }} \
-            --aio-store ${{ matrix.store }} \
+            --aio-store-${{ matrix.store }}-enable true \
             > logs.txt 2>&1
       - name: Create issue if dst failed
         env:

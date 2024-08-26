@@ -299,22 +299,28 @@ const (
 		pid = ? AND state = 4`
 )
 
+// Config
+
 type Config struct {
-	Path      string
-	TxTimeout time.Duration
-	Reset     bool
+	Size      int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
+	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
+	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:"`
+	TxTimeout time.Duration `flag:"tx-timeout" desc:"sqlite transaction timeout" default:"10s"`
+	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" dst:"true"`
 }
+
+// Subsystem
 
 type SqliteStore struct {
 	config *Config
+	sq     chan *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db     *sql.DB
+	worker *SqliteStoreWorker
 }
 
-type SqliteStoreWorker struct {
-	*SqliteStore
-}
+func New(aio aio.AIO, config *Config) (*SqliteStore, error) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
-func New(config *Config) (aio.Subsystem, error) {
 	db, err := sql.Open("sqlite3", config.Path)
 	if err != nil {
 		return nil, err
@@ -322,7 +328,15 @@ func New(config *Config) (aio.Subsystem, error) {
 
 	return &SqliteStore{
 		config: config,
+		sq:     sq,
 		db:     db,
+		worker: &SqliteStoreWorker{
+			config: config,
+			db:     db,
+			sq:     sq,
+			aio:    aio,
+			flush:  make(chan int64, 1),
+		},
 	}, nil
 }
 
@@ -330,15 +344,24 @@ func (s *SqliteStore) String() string {
 	return "store:sqlite"
 }
 
+func (s *SqliteStore) Kind() t_aio.Kind {
+	return t_aio.Store
+}
+
 func (s *SqliteStore) Start() error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
 
+	// start worker on a goroutine
+	go s.worker.Start()
+
 	return nil
 }
 
 func (s *SqliteStore) Stop() error {
+	close(s.sq)
+
 	if s.config.Reset {
 		if err := s.Reset(); err != nil {
 			return err
@@ -356,8 +379,49 @@ func (s *SqliteStore) Reset() error {
 	return os.Remove(s.config.Path)
 }
 
-func (s *SqliteStore) NewWorker(int) aio.Worker {
-	return &SqliteStoreWorker{s}
+func (s *SqliteStore) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
+	return s.sq
+}
+
+func (s *SqliteStore) Flush(t int64) {
+	s.worker.Flush(t)
+}
+
+func (s *SqliteStore) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	return s.worker.Process(sqes)
+}
+
+// Worker
+
+type SqliteStoreWorker struct {
+	config *Config
+	db     *sql.DB
+	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	aio    aio.AIO
+	flush  chan int64
+}
+
+func (w *SqliteStoreWorker) Start() {
+	for {
+		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		if len(sqes) > 0 {
+			for _, cqe := range w.Process(sqes) {
+				w.aio.Enqueue(cqe)
+			}
+		}
+		if !ok {
+			return
+		}
+	}
+}
+
+func (w *SqliteStoreWorker) Flush(t int64) {
+	// ignore case where flush channel is full,
+	// this means the flush is waiting on the cq
+	select {
+	case w.flush <- t:
+	default:
+	}
 }
 
 func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {

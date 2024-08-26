@@ -6,150 +6,134 @@ import (
 	"time"
 
 	"github.com/resonatehq/gocoro"
-	"github.com/resonatehq/gocoro/pkg/io"
 	"github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/metrics"
 
-	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Config struct {
-	Url                 string
-	CoroutineMaxSize    int
-	SubmissionBatchSize int
-	CompletionBatchSize int
-	PromiseBatchSize    int
-	ScheduleBatchSize   int
-	TaskBatchSize       int
-	TaskEnqueueDelay    time.Duration
+	Url                 string        `flag:"url" desc:"resonate server url"`
+	CoroutineMaxSize    int           `flag:"coroutine-max-size" desc:"max concurrent coroutines" default:"1000" dst:"1:1000"`
+	SubmissionBatchSize int           `flag:"submission-batch-size" desc:"max submissions processed per tick" default:"1000" dst:"1:1000"`
+	CompletionBatchSize int           `flag:"completion-batch-size" desc:"max completions processed per tick" default:"1000" dst:"1:1000"`
+	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
+	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
+	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
+	TaskEnqueueDelay    time.Duration `flag:"task-enqueue-delay" desc:"time delay before attempting to reenqueue tasks" default:"10s" dst:"1s:10s"`
+	SignalTimeout       time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" dst:"1s:10s"`
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%d)",
+		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%s)",
 		c.CoroutineMaxSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
 		c.PromiseBatchSize,
 		c.ScheduleBatchSize,
 		c.TaskBatchSize,
-		c.TaskEnqueueDelay.Milliseconds(),
+		c.TaskEnqueueDelay.String(),
 	)
-}
-
-type coroutineTick struct {
-	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
-	name      string
-	last      int64
-	every     time.Duration
 }
 
 type backgroundCoroutine struct {
 	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	name      string
+	last      int64
 	promise   promise.Promise[any]
 }
 
 type System struct {
-	api        api.API
-	aio        aio.AIO
-	config     *Config
-	metrics    *metrics.Metrics
-	scheduler  gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
-	onRequest  map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
-	onTick     []*coroutineTick
-	background []*backgroundCoroutine
-	shutdown   chan interface{}
+	api          api.API
+	aio          aio.AIO
+	config       *Config
+	metrics      *metrics.Metrics
+	scheduler    gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
+	onRequest    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
+	background   []*backgroundCoroutine
+	shutdown     chan interface{}
+	shortCircuit chan interface{}
 }
 
 func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *System {
 	return &System{
-		api:       api,
-		aio:       aio,
-		config:    config,
-		metrics:   metrics,
-		scheduler: gocoro.New(aio, config.CoroutineMaxSize),
-		onRequest: map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]{},
-		onTick:    []*coroutineTick{},
-		shutdown:  make(chan interface{}),
+		api:          api,
+		aio:          aio,
+		config:       config,
+		metrics:      metrics,
+		scheduler:    gocoro.New(aio, config.CoroutineMaxSize),
+		onRequest:    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]{},
+		background:   []*backgroundCoroutine{},
+		shutdown:     make(chan interface{}),
+		shortCircuit: make(chan interface{}),
 	}
+}
+
+func (s *System) String() string {
+	return fmt.Sprintf(
+		"System(api=%s, aio=%s, config=%s)",
+		s.api,
+		s.aio,
+		s.config,
+	)
 }
 
 func (s *System) Loop() error {
 	defer close(s.shutdown)
 
 	for {
-		select {
-		case sqe := <-s.api.SQ():
-			slog.Debug("api:dequeue", "id", sqe.Submission.Id(), "sqe", sqe)
-			s.Tick(time.Now().UnixMilli(), sqe, nil)
-		case cqe := <-s.aio.CQ():
-			slog.Debug("aio:dequeue", "id", cqe.Completion.Id(), "cqe", cqe)
-			s.Tick(time.Now().UnixMilli(), nil, cqe)
-		case <-time.After(1 * time.Second):
-			s.Tick(time.Now().UnixMilli(), nil, nil)
-		}
+		// tick first
+		s.Tick(time.Now().UnixMilli())
 
+		// complete shutdown if done
 		if s.Done() {
-			// now we can shut down the aio and scheduler
 			s.aio.Shutdown()
 			s.scheduler.Shutdown()
 			return nil
 		}
+
+		// create signals
+		cancel := make(chan interface{})
+		apiSignal := s.api.Signal(cancel)
+		aioSignal := s.aio.Signal(cancel)
+
+		// wait for a signal, short circuit, or timeout; whichever occurs
+		// first
+		select {
+		case <-apiSignal:
+		case <-aioSignal:
+		case <-s.shortCircuit:
+		case <-time.After(s.config.SignalTimeout):
+		}
+
+		// close the cancel channel so the api and aio can stop listening
+		// and wait for the signal channels to close
+		close(cancel)
+		<-apiSignal
+		<-aioSignal
 	}
 }
 
-func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe *bus.CQE[t_aio.Submission, t_aio.Completion]) {
-	util.Assert(sqe == nil || cqe == nil, "one or both of sqe and cqe must be nil")
+func (s *System) Tick(t int64) {
 	util.Assert(s.config.SubmissionBatchSize > 0, "submission batch size must be greater than zero")
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
-	var sqes []*bus.SQE[t_api.Request, t_api.Response]
-	var cqes []io.QE
-
-	if sqe != nil {
-		sqes = append(sqes, sqe)
-	}
-
-	if cqe != nil {
-		cqes = append(cqes, cqe)
-	}
-
-	// dequeue sqes
-	sqes = append(sqes, s.api.Dequeue(s.config.SubmissionBatchSize)...)
-
 	// dequeue cqes
-	cqes = append(cqes, s.aio.Dequeue(s.config.CompletionBatchSize)...)
-
-	// add tick coroutines
-	for _, tick := range s.onTick {
-		// add the coroutine if the interval has elapsed and the api sq is
-		// not done (which means we are shutting down)
-		// if every is set to 0 never add the coroutine
-		if tick.every != 0 && (t-tick.last) > int64(tick.every.Milliseconds()) && !s.api.Done() {
-			tick.last = t
-
-			tags := map[string]string{
-				"request_id": fmt.Sprintf("%s:%d", tick.name, t),
-				"name":       tick.name,
-			}
-
-			if p, ok := gocoro.Add(s.scheduler, tick.coroutine(s.config, tags)); ok {
-				s.coroutineMetrics(p, tags)
-			} else {
-				slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-			}
-		}
+	for i, cqe := range s.aio.Dequeue(s.config.CompletionBatchSize) {
+		util.Assert(i < s.config.CompletionBatchSize, "cqes length be no greater than the completion batch size")
+		cqe.Callback(cqe.Completion, cqe.Error)
 	}
 
 	// add background coroutines
 	for _, bg := range s.background {
-		if !s.api.Done() && (bg.promise == nil || bg.promise.Completed()) {
+		if !s.api.Done() && (t-bg.last) >= int64(s.config.SignalTimeout.Milliseconds()) && (bg.promise == nil || bg.promise.Completed()) {
+			bg.last = t
+
 			tags := map[string]string{
 				"request_id": fmt.Sprintf("%s:%d", bg.name, t),
 				"name":       bg.name,
@@ -164,8 +148,10 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 		}
 	}
 
-	// add request coroutines
-	for _, sqe := range sqes {
+	// dequeue sqes
+	for i, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize) {
+		util.Assert(i < s.config.SubmissionBatchSize, "sqes length be no greater than the submission batch size")
+
 		coroutine, ok := s.onRequest[sqe.Submission.Kind]
 		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind))
 
@@ -178,9 +164,9 @@ func (s *System) Tick(t int64, sqe *bus.SQE[t_api.Request, t_api.Response], cqe 
 	}
 
 	// tick scheduler
-	s.scheduler.RunUntilBlocked(t, cqes)
+	s.scheduler.RunUntilBlocked(t)
 
-	// the system is now responsible for flushing the aio
+	// flush aio
 	s.aio.Flush(t)
 }
 
@@ -188,7 +174,11 @@ func (s *System) Shutdown() <-chan interface{} {
 	// start by shutting down the api
 	s.api.Shutdown()
 
-	// return the channel so the caller can wait for the system to shutdown
+	// short circuit the system loop
+	close(s.shortCircuit)
+
+	// return the shutdown channel so the caller can wait on system
+	// shutdown
 	return s.shutdown
 }
 
@@ -205,33 +195,11 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 	}
 }
 
-func (s *System) AddOnTick(every time.Duration, name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
-	util.Assert(every >= 0, "frequency must be non negative")
-	s.onTick = append(s.onTick, &coroutineTick{
-		coroutine: constructor,
-		name:      name,
-		every:     every,
-	})
-}
-
-func (s *System) AddForever(constructor func() gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
-	gocoro.Add(s.scheduler, constructor())
-}
-
 func (s *System) AddBackground(name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
 	s.background = append(s.background, &backgroundCoroutine{
 		coroutine: constructor,
 		name:      name,
 	})
-}
-
-func (s *System) String() string {
-	return fmt.Sprintf(
-		"System(api=%s, aio=%s, config=%s)",
-		s.api,
-		s.aio,
-		s.config,
-	)
 }
 
 // TODO: move this to gocoro

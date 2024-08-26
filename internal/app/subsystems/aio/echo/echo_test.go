@@ -22,9 +22,11 @@ func TestEcho(t *testing.T) {
 				},
 			}
 
-			worker := New().NewWorker(0)
-			cqes := worker.Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
+			echo, err := New(nil, &Config{Workers: 1})
+			assert.Nil(t, err)
+			assert.Len(t, echo.workers, 1)
 
+			cqes := echo.workers[0].Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
 			assert.Equal(t, tc, cqes[0].Completion.Echo.Data)
 		})
 	}

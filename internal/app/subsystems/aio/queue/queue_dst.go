@@ -1,61 +1,60 @@
 package queue
 
 import (
-	"github.com/resonatehq/resonate/internal/aio"
+	"math/rand" // nosemgrep
+
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 )
 
+// Config
+
+type ConfigDST struct {
+	P float64 `flag:"p" desc:"probability of simulated unsuccessful request" default:"0.5" dst:"0:1"`
+}
+
+// Subsystem
+
 type QueueDST struct {
+	config      *ConfigDST
+	r           *rand.Rand
 	backchannel chan interface{}
 }
 
-type QueueDSTDevice struct {
-	backchannel chan interface{}
-}
-
-func NewDST(backchannel chan interface{}) aio.Subsystem {
+func NewDST(r *rand.Rand, backchannel chan interface{}, config *ConfigDST) (*QueueDST, error) {
 	return &QueueDST{
+		config:      config,
+		r:           r,
 		backchannel: backchannel,
-	}
+	}, nil
 }
 
-func (s *QueueDST) String() string {
+func (q *QueueDST) String() string {
 	return "queue:dst"
 }
 
-func (s *QueueDST) Start() error {
+func (q *QueueDST) Kind() t_aio.Kind {
+	return t_aio.Queue
+}
+
+func (q *QueueDST) Start() error {
 	return nil
 }
 
-func (s *QueueDST) Stop() error {
+func (q *QueueDST) Stop() error {
 	return nil
 }
 
-func (s *QueueDST) Reset() error {
-	return nil
-}
-
-func (s *QueueDST) Close() error {
-	return nil
-}
-
-func (s *QueueDST) NewWorker(int) aio.Worker {
-	return &QueueDSTDevice{
-		backchannel: s.backchannel,
-	}
-}
-
-func (d *QueueDSTDevice) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (q *QueueDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
 
 	for i, sqe := range sqes {
 		var completion *t_aio.QueueCompletion
 
 		select {
-		case d.backchannel <- sqe.Submission.Queue.Task:
+		case q.backchannel <- sqe.Submission.Queue.Task:
 			completion = &t_aio.QueueCompletion{
-				Success: true,
+				Success: q.r.Float64() < q.config.P,
 			}
 		default:
 			completion = &t_aio.QueueCompletion{

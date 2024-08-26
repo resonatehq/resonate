@@ -20,7 +20,7 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "promises",
 		Aliases: []string{"promise"},
-		Short:   "Manage durable promises",
+		Short:   "Resonate promises",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
@@ -39,8 +39,8 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	cmd.AddCommand(CompletePromiseCmds(c)...)
 
 	// Flags
-	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "Basic auth username")
-	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "Basic auth password")
+	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "resonate username")
+	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "resonate password")
 
 	return cmd
 }

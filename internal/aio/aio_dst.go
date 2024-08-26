@@ -1,11 +1,10 @@
 package aio
 
 import (
+	"errors"
 	"fmt"
-	"log/slog"
 	"math/rand" // nosemgrep
 
-	"github.com/resonatehq/gocoro/pkg/io"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 
@@ -13,25 +12,12 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-type AioDSTError struct {
-	msg string
-}
-
-func (e *AioDSTError) Error() string {
-	return e.msg
-}
-
-func (e *AioDSTError) Is(target error) bool {
-	_, ok := target.(*AioDSTError)
-	return ok
-}
-
 type aioDST struct {
 	r          *rand.Rand
 	p          float64
 	sqes       []*bus.SQE[t_aio.Submission, t_aio.Completion]
-	cqes       []io.QE
-	subsystems map[t_aio.Kind]Subsystem
+	cqes       []*bus.CQE[t_aio.Submission, t_aio.Completion]
+	subsystems map[t_aio.Kind]SubsystemDST
 	metrics    *metrics.Metrics
 }
 
@@ -39,13 +25,23 @@ func NewDST(r *rand.Rand, p float64, metrics *metrics.Metrics) *aioDST {
 	return &aioDST{
 		r:          r,
 		p:          p,
-		subsystems: map[t_aio.Kind]Subsystem{},
+		subsystems: map[t_aio.Kind]SubsystemDST{},
 		metrics:    metrics,
 	}
 }
 
-func (a *aioDST) AddSubsystem(kind t_aio.Kind, subsystem Subsystem, config *SubsystemConfig) {
-	a.subsystems[kind] = subsystem
+func (a *aioDST) String() string {
+	// use subsystem keys so that we can compare cross-store dst runs
+	subsystems := make([]t_aio.Kind, len(a.subsystems))
+	for i, subsystem := range util.OrderedRangeKV(a.subsystems) {
+		subsystems[i] = subsystem.Key
+	}
+
+	return fmt.Sprintf("AIODST(subsystems=%s)", subsystems)
+}
+
+func (a *aioDST) AddSubsystem(subsystem SubsystemDST) {
+	a.subsystems[subsystem.Kind()] = subsystem
 }
 
 func (a *aioDST) Start() error {
@@ -74,11 +70,11 @@ func (a *aioDST) Errors() <-chan error {
 	return nil
 }
 
-func (a *aioDST) CQ() <-chan *bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (a *aioDST) Signal(cancel <-chan interface{}) <-chan interface{} {
 	panic("not implemented")
 }
 
-func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
+func (a *aioDST) Dispatch(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
 	sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
 		Submission: submission,
 		Callback: func(completion *t_aio.Completion, err error) {
@@ -98,7 +94,6 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 		},
 	}
 
-	slog.Debug("aio:enqueue", "id", submission.Id(), "sqe", sqe)
 	a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 
 	// insert at random position
@@ -106,7 +101,11 @@ func (a *aioDST) Enqueue(submission *t_aio.Submission, callback func(*t_aio.Comp
 	a.sqes = append(a.sqes[:i], append([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe}, a.sqes[i:]...)...)
 }
 
-func (a *aioDST) Dequeue(n int) []io.QE {
+func (a *aioDST) Enqueue(cqe *bus.CQE[t_aio.Submission, t_aio.Completion]) {
+	a.cqes = append(a.cqes, cqe)
+}
+
+func (a *aioDST) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	cqes := a.cqes[:min(n, len(a.cqes))]
 	a.cqes = a.cqes[min(n, len(a.cqes)):]
 
@@ -137,11 +136,11 @@ func (a *aioDST) Flush(t int64) {
 				}
 
 				if preFailure[i] {
-					// Simulate failure before processing
-					a.cqes = append(a.cqes, &bus.CQE[t_aio.Submission, t_aio.Completion]{
+					// simulate failure before processing
+					a.Enqueue(&bus.CQE[t_aio.Submission, t_aio.Completion]{
 						Completion: nil,
 						Callback:   sqes.Value[i].Callback,
-						Error:      &AioDSTError{"simulated failure before processing"},
+						Error:      errors.New("simulated failure before processing"),
 					})
 				} else {
 					toProcess = append(toProcess, sqes.Value[i])
@@ -149,14 +148,14 @@ func (a *aioDST) Flush(t int64) {
 				}
 			}
 
-			// Process the SQE
-			for i, cqe := range subsystem.NewWorker(0).Process(toProcess) {
+			// process the SQE
+			for i, cqe := range subsystem.Process(toProcess) {
 				if postFailure[i] {
-					// Simulate failure after processing
+					// simulate failure after processing
 					cqe.Completion = nil
-					cqe.Error = &AioDSTError{"simulated failure after processing"}
+					cqe.Error = errors.New("simulated failure after processing")
 				}
-				a.cqes = append(a.cqes, cqe)
+				a.Enqueue(cqe)
 			}
 		} else {
 			panic("invalid aio submission")
@@ -164,14 +163,4 @@ func (a *aioDST) Flush(t int64) {
 	}
 
 	a.sqes = nil
-}
-
-func (a *aioDST) String() string {
-	// use subsystem keys so that we can compare cross-store dst runs
-	subsystems := make([]t_aio.Kind, len(a.subsystems))
-	for i, subsystem := range util.OrderedRangeKV(a.subsystems) {
-		subsystems[i] = subsystem.Key
-	}
-
-	return fmt.Sprintf("AIODST(subsystems=%s)", subsystems)
 }

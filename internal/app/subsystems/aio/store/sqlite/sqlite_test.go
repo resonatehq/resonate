@@ -9,7 +9,7 @@ import (
 
 func TestSqliteStore(t *testing.T) {
 	for _, tc := range test.TestCases {
-		store, err := New(&Config{
+		store, err := New(nil, &Config{
 			Path:      ":memory:",
 			TxTimeout: 250 * time.Millisecond,
 		})
@@ -20,7 +20,7 @@ func TestSqliteStore(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tc.Run(t, store)
+		tc.Run(t, store.worker)
 
 		if err := store.Stop(); err != nil {
 			t.Fatal(err)
