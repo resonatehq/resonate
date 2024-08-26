@@ -4,8 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       seed:
+        description: "Psuedo random seed"
         type: number
       ticks:
+        description: "Number of ticks"
         type: number
   schedule:
     - cron: "0 * * * *" # every hour
@@ -99,7 +101,7 @@ jobs:
             --ticks ${{ needs.values.outputs.ticks }} \
             --timeout 2h \
             --scenario ${{ matrix.scenario }} \
-            --aio-store ${{ matrix.store }} \
+            --aio-store-${{ matrix.store }}-enable true \
             > logs.txt 2>&1
       - name: Create issue if dst failed
         env:
