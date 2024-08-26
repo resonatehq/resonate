@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand" // nosemgrep
 	"reflect"
@@ -329,7 +330,14 @@ func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
 			}
-			cmd.Flags().StringToString(n, map[string]string{}, desc)
+			if value == "" {
+				value = "{}"
+			}
+			var v map[string]string
+			if err := json.Unmarshal([]byte(value), &v); err != nil {
+				return err
+			}
+			cmd.Flags().StringToString(n, v, desc)
 			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Struct:
 			if err := bind(cmd, v.Field(i).Addr().Interface(), dst, n, k); err != nil {

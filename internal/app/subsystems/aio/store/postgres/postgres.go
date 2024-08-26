@@ -316,12 +316,12 @@ type Config struct {
 	Size      int               `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int               `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
 	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
-	Host      string            `flag:"host" desc:"postgres host"`
-	Port      string            `flag:"port" desc:"postgres port"`
-	Username  string            `flag:"username" desc:"postgres username" default:"localhost"`
-	Password  string            `flag:"password" desc:"postgres password" default:"5432"`
+	Host      string            `flag:"host" desc:"postgres host" default:"localhost"`
+	Port      string            `flag:"port" desc:"postgres port" default:"5432"`
+	Username  string            `flag:"username" desc:"postgres username"`
+	Password  string            `flag:"password" desc:"postgres password"`
 	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
-	Query     map[string]string `flag:"query" desc:"postgres query options"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}"`
 	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
 	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
 }
