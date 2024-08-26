@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: "Psuedo random seed"
+        description: "seed"
         type: number
       ticks:
-        description: "Number of ticks"
+        description: "ticks"
         type: number
   schedule:
     - cron: "0 * * * *" # every hour
