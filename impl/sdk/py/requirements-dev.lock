@@ -6,30 +6,44 @@
 #   features: []
 #   all-features: false
 #   with-sources: false
+#   generate-hashes: false
+#   universal: false
 
 -e file:.
-attrs==23.2.0
+attrs==24.2.0
     # via hypothesis
+certifi==2024.7.4
+    # via requests
+charset-normalizer==3.3.2
+    # via requests
 exceptiongroup==1.2.2
     # via hypothesis
     # via pytest
-hypothesis==6.108.4
+hypothesis==6.111.2
+idna==3.8
+    # via requests
 iniconfig==2.0.0
     # via pytest
-mypy==1.11.0
+mypy==1.11.2
 mypy-extensions==1.0.0
     # via mypy
 packaging==24.1
     # via pytest
 pluggy==1.5.0
     # via pytest
-pytest==8.3.1
-ruff==0.5.4
+pytest==8.3.2
+requests==2.32.3
+    # via resonate-sdk
+ruff==0.6.2
 sortedcontainers==2.4.0
     # via hypothesis
 tomli==2.0.1
     # via mypy
     # via pytest
+types-requests==2.32.0.20240712
 typing-extensions==4.12.2
     # via mypy
     # via resonate-sdk
+urllib3==2.2.2
+    # via requests
+    # via types-requests

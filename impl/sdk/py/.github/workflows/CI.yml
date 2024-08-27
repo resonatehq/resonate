@@ -7,6 +7,8 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/CI.yml"
+      - "src/**"
+      - "tests/**"
 
 env:
   PYTHONUNBUFFERED: "1"
@@ -40,6 +42,22 @@ jobs:
         
       - name: Check types
         run: rye run check-types
+      
+      - name: Checkout resonate repository
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate
+          path: resonate
+      
+      - name: Build resonate
+        run: go build -o resonate
+        working-directory: resonate
+
+      - name: Start resonate server
+        run: ./resonate serve &
+        working-directory: resonate
 
       - name: Test code
+        env:
+            RESONATE_STORE_URL: http://localhost:8001
         run: rye test

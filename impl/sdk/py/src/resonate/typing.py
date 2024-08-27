@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Coroutine, Generator
-from typing import Any, Callable, TypeVar, Union
+from typing import Any, Callable, Literal, TypeVar, Union
 
 from typing_extensions import Concatenate, ParamSpec, TypeAlias
 
@@ -38,4 +38,13 @@ CommandHandlers: TypeAlias = dict[
 ]
 CommandHandlerQueues: TypeAlias = dict[
     type[Command], CmdBuffer[tuple[Promise[Any], Command]]
+]
+
+
+Headers: TypeAlias = Union[dict[str, str], None]
+Tags: TypeAlias = Union[dict[str, str], None]
+IdempotencyKey: TypeAlias = Union[str, None]
+Data: TypeAlias = Union[str, None]
+State: TypeAlias = Literal[
+    "PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"
 ]

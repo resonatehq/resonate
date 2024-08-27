@@ -7,6 +7,7 @@ authors = [
 ]
 dependencies = [
     "typing-extensions>=4.12.2",
+    "requests>=2.32.3",
 ]
 readme = "README.md"
 requires-python = ">= 3.9"
@@ -28,6 +29,7 @@ dev-dependencies = [
     "pytest>=8.2.0",
     "ruff>=0.4.7",
     "hypothesis>=6.104.2",
+    "types-requests>=2.32.0.20240712",
 ]
 
 [tool.rye.scripts]
