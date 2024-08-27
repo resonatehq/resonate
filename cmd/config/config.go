@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/match"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
@@ -122,6 +123,7 @@ type APISubsystems struct {
 type AIOSubsystems struct {
 	Echo          DisabledSubsystem[echo.Config]     `flag:"echo"`
 	Queue         EnabledSubsystem[queue.Config]     `flag:"queue"`
+	Match         EnabledSubsystem[match.Config]     `flag:"match"`
 	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
@@ -142,6 +144,14 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 	subsystems := []aio.Subsystem{}
 	if s.Echo.Enabled {
 		subsystem, err := echo.New(a, &s.Echo.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if s.Match.Enabled {
+		subsystem, err := match.New(a, &s.Match.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -182,6 +192,7 @@ type APIDSTSubsystems struct {
 
 type AIODSTSubsystems struct {
 	Queue         EnabledSubsystem[queue.ConfigDST]  `flag:"queue"`
+	Match         EnabledSubsystem[match.Config]     `flag:"match"`
 	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
@@ -200,6 +211,14 @@ func (s *APIDSTSubsystems) Instantiate(a api.API) []api.Subsystem {
 
 func (s *AIODSTSubsystems) Instantiate(r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
 	subsystems := []aio.SubsystemDST{}
+	if s.Match.Enabled {
+		subsystem, err := match.New(nil, &s.Match.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
 	if s.Queue.Enabled {
 		subsystem, err := queue.NewDST(r, backchannel, &s.Queue.Config)
 		if err != nil {
@@ -326,6 +345,9 @@ func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix
 				cmd.Flags().Float64(n, v, desc)
 				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 			}
+		case reflect.Slice:
+			// TODO: support slice types
+			// for now, slice types may only be defined in the config file
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))

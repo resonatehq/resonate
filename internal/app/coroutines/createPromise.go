@@ -51,27 +51,58 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	var res *t_api.Response
 
 	if result.RowsReturned == 0 {
-		createdOn := c.Time()
+		p := &promise.Promise{
+			Id:                      r.CreatePromise.Id,
+			State:                   promise.Pending,
+			Param:                   r.CreatePromise.Param,
+			Timeout:                 r.CreatePromise.Timeout,
+			IdempotencyKeyForCreate: r.CreatePromise.IdempotencyKey,
+			Tags:                    r.CreatePromise.Tags,
+		}
 
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+			Kind: t_aio.Match,
+			Tags: r.Tags,
+			Match: &t_aio.MatchSubmission{
+				Promise: p,
+			},
+		})
+
+		if err != nil {
+			slog.Error("failed to match promise", "req", r, "err", err)
+			return nil, t_api.NewError(t_api.StatusAIOMatchError, err)
+		}
+
+		createdOn := c.Time()
+		p.CreatedOn = &createdOn
+
+		commands := []*t_aio.Command{{
+			Kind: t_aio.CreatePromise,
+			CreatePromise: &t_aio.CreatePromiseCommand{
+				Id:             r.CreatePromise.Id,
+				State:          promise.Pending,
+				Param:          r.CreatePromise.Param,
+				Timeout:        r.CreatePromise.Timeout,
+				IdempotencyKey: r.CreatePromise.IdempotencyKey,
+				Tags:           r.CreatePromise.Tags,
+				CreatedOn:      createdOn,
+			},
+		}}
+
+		if completion.Match.Matched {
+			util.Assert(completion.Match.Command != nil, "command must not be nil")
+			commands = append(commands, &t_aio.Command{
+				Kind:       t_aio.CreateTasks,
+				CreateTask: completion.Match.Command,
+			})
+		}
+
+		completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: r.Tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.CreatePromise,
-							CreatePromise: &t_aio.CreatePromiseCommand{
-								Id:             r.CreatePromise.Id,
-								State:          promise.Pending,
-								Param:          r.CreatePromise.Param,
-								Timeout:        r.CreatePromise.Timeout,
-								IdempotencyKey: r.CreatePromise.IdempotencyKey,
-								Tags:           r.CreatePromise.Tags,
-								CreatedOn:      createdOn,
-							},
-						},
-					},
+					Commands: commands,
 				},
 			},
 		})
@@ -91,16 +122,8 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 				Kind: t_api.CreatePromise,
 				Tags: r.Tags,
 				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:                      r.CreatePromise.Id,
-						State:                   promise.Pending,
-						Param:                   r.CreatePromise.Param,
-						Timeout:                 r.CreatePromise.Timeout,
-						IdempotencyKeyForCreate: r.CreatePromise.IdempotencyKey,
-						Tags:                    r.CreatePromise.Tags,
-						CreatedOn:               &createdOn,
-					},
+					Status:  t_api.StatusCreated,
+					Promise: p,
 				},
 			}
 		} else {

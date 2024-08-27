@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/match"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
@@ -52,6 +53,11 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	backchannel := make(chan interface{}, 100)
 
 	// instatiate aio subsystems
+	match, err := match.New(nil, &match.Config{Workers: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	queue, err := queue.NewDST(r, backchannel, &queue.ConfigDST{})
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +69,9 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	}
 
 	// add api subsystems
-	aio.AddSubsystem(store)
+	aio.AddSubsystem(match)
 	aio.AddSubsystem(queue)
+	aio.AddSubsystem(store)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
