@@ -108,7 +108,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				Kind: t_api.CreateCallback,
 				Tags: r.Tags,
 				CreateCallback: &t_api.CreateCallbackResponse{
-					Status:  t_api.ForbiddenStatus(p.State),
+					// ok indicates that the promise is completed and the process
+					// may continue
+					Status:  t_api.StatusOK,
 					Promise: p,
 				},
 			}
