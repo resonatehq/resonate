@@ -26,7 +26,7 @@ func SearchSchedulesCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "search <id>",
-		Short:   "Search for durables schedules",
+		Short:   "Search for schedules",
 		Example: searchSchedulesExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

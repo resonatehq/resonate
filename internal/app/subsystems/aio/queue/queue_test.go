@@ -67,9 +67,11 @@ func TestEcho(t *testing.T) {
 				},
 			}
 
-			worker := New().NewWorker(0)
-			cqes := worker.Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
+			queue, err := New(nil, &Config{Workers: 1})
+			assert.Nil(t, err)
+			assert.Len(t, queue.workers, 1)
 
+			cqes := queue.workers[0].Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
 			assert.Len(t, cqes, 1)
 			assert.Equal(t, tc.success, cqes[0].Completion.Queue.Success)
 			assert.Equal(t, &req{tc.id, tc.counter}, <-ch)

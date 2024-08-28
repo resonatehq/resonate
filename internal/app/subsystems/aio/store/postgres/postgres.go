@@ -310,28 +310,35 @@ const (
 		pid = $2 AND state = 4`
 )
 
+// Config
+
 type Config struct {
-	Host      string
-	Port      string
-	Username  string
-	Password  string
-	Database  string
-	Query     map[string]string
-	TxTimeout time.Duration
-	Reset     bool
+	Size      int               `flag:"size" desc:"submission buffered channel size" default:"1000"`
+	BatchSize int               `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
+	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
+	Host      string            `flag:"host" desc:"postgres host" default:"localhost"`
+	Port      string            `flag:"port" desc:"postgres port" default:"5432"`
+	Username  string            `flag:"username" desc:"postgres username"`
+	Password  string            `flag:"password" desc:"postgres password"`
+	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}"`
+	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
+	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
 }
+
+// Subsystem
 
 type PostgresStore struct {
-	config *Config
-	db     *sql.DB
+	config  *Config
+	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	db      *sql.DB
+	workers []*PostgresStoreWorker
 }
 
-type PostgresStoreWorker struct {
-	*PostgresStore
-	i int
-}
+func New(aio aio.AIO, config *Config) (*PostgresStore, error) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*PostgresStoreWorker, config.Workers)
 
-func New(config *Config, workers int) (aio.Subsystem, error) {
 	rawQuery := make([]string, len(config.Query))
 	for i, q := range util.OrderedRangeKV(config.Query) {
 		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
@@ -350,18 +357,34 @@ func New(config *Config, workers int) (aio.Subsystem, error) {
 		return nil, err
 	}
 
-	db.SetMaxOpenConns(workers)
-	db.SetMaxIdleConns(workers)
+	db.SetMaxOpenConns(config.Workers)
+	db.SetMaxIdleConns(config.Workers)
 	db.SetConnMaxIdleTime(0)
 
+	for i := 0; i < config.Workers; i++ {
+		workers[i] = &PostgresStoreWorker{
+			config: config,
+			db:     db,
+			sq:     sq,
+			aio:    aio,
+			flush:  make(chan int64, 1),
+		}
+	}
+
 	return &PostgresStore{
-		config: config,
-		db:     db,
+		config:  config,
+		sq:      sq,
+		db:      db,
+		workers: workers,
 	}, nil
 }
 
 func (s *PostgresStore) String() string {
 	return "store:postgres"
+}
+
+func (s *PostgresStore) Kind() t_aio.Kind {
+	return t_aio.Store
 }
 
 func (s *PostgresStore) Start() error {
@@ -373,6 +396,7 @@ func (s *PostgresStore) Start() error {
 }
 
 func (s *PostgresStore) Stop() error {
+	close(s.sq)
 
 	if s.config.Reset {
 		if err := s.Reset(); err != nil {
@@ -384,7 +408,6 @@ func (s *PostgresStore) Stop() error {
 }
 
 func (s *PostgresStore) Reset() error {
-
 	if _, err := s.db.Exec(DROP_TABLE_STATEMENT); err != nil {
 		return err
 	}
@@ -392,10 +415,51 @@ func (s *PostgresStore) Reset() error {
 	return nil
 }
 
-func (s *PostgresStore) NewWorker(i int) aio.Worker {
-	return &PostgresStoreWorker{
-		PostgresStore: s,
-		i:             i,
+func (s *PostgresStore) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
+	return s.sq
+}
+
+func (s *PostgresStore) Flush(t int64) {
+	for _, worker := range s.workers {
+		worker.Flush(t)
+	}
+}
+
+func (s *PostgresStore) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
+	util.Assert(len(s.workers) > 0, "must be at least one worker")
+	return s.workers[0].Process(sqes)
+}
+
+// Worker
+
+type PostgresStoreWorker struct {
+	config *Config
+	db     *sql.DB
+	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	aio    aio.AIO
+	flush  chan int64
+}
+
+func (w *PostgresStoreWorker) Start() {
+	for {
+		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		if len(sqes) > 0 {
+			for _, cqe := range w.Process(sqes) {
+				w.aio.Enqueue(cqe)
+			}
+		}
+		if !ok {
+			return
+		}
+	}
+}
+
+func (w *PostgresStoreWorker) Flush(t int64) {
+	// ignore case where flush channel is full,
+	// this means the flush is waiting on the cq
+	select {
+	case w.flush <- t:
+	default:
 	}
 }
 

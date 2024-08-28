@@ -14,18 +14,19 @@ import (
 func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTaskResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.ClaimTask,
-		Tags: s.tags(header.RequestId, "ClaimTask"),
-		ClaimTask: &t_api.ClaimTaskRequest{
-			Id:        body.Id,
-			ProcessId: body.ProcessId,
-			Counter:   body.Counter,
-			Frequency: body.Frequency,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.ClaimTask,
+			Tags: s.tags(header.RequestId, "ClaimTask"),
+			ClaimTask: &t_api.ClaimTaskRequest{
+				Id:        body.Id,
+				ProcessId: body.ProcessId,
+				Counter:   body.Counter,
+				Frequency: body.Frequency,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -48,16 +49,17 @@ func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTa
 func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.CompleteTaskResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.CompleteTask,
-		Tags: s.tags(header.RequestId, "CompleteTask"),
-		CompleteTask: &t_api.CompleteTaskRequest{
-			Id:      body.Id,
-			Counter: body.Counter,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.CompleteTask,
+			Tags: s.tags(header.RequestId, "CompleteTask"),
+			CompleteTask: &t_api.CompleteTaskRequest{
+				Id:      body.Id,
+				Counter: body.Counter,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -80,15 +82,16 @@ func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.C
 func (s *Service) HeartbeatTasks(header *Header, body *HeartbeatTaskBody) (*t_api.HeartbeatTasksResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.HeartbeatTasks,
-		Tags: s.tags(header.RequestId, "HeartbeatTasks"),
-		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
-			ProcessId: body.ProcessId,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.HeartbeatTasks,
+			Tags: s.tags(header.RequestId, "HeartbeatTasks"),
+			HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+				ProcessId: body.ProcessId,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {

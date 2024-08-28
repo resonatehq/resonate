@@ -6,21 +6,23 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPostgresStore(t *testing.T) {
-	host := os.Getenv("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_HOST")
-	port := os.Getenv("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PORT")
-	username := os.Getenv("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_USERNAME")
-	password := os.Getenv("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_PASSWORD")
-	database := os.Getenv("TEST_AIO_SUBSYSTEMS_STORE_CONFIG_POSTGRES_DATABASE")
+	host := os.Getenv("TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST")
+	port := os.Getenv("TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT")
+	username := os.Getenv("TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME")
+	password := os.Getenv("TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD")
+	database := os.Getenv("TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE")
 
 	if host == "" {
 		t.Skip("Postgres is not configured, skipping")
 	}
 
 	for _, tc := range test.TestCases {
-		store, err := New(&Config{
+		store, err := New(nil, &Config{
+			Workers:   1,
 			Host:      host,
 			Port:      port,
 			Username:  username,
@@ -28,7 +30,7 @@ func TestPostgresStore(t *testing.T) {
 			Database:  database,
 			Query:     map[string]string{"sslmode": "disable"},
 			TxTimeout: 250 * time.Millisecond,
-		}, 1)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +39,8 @@ func TestPostgresStore(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		tc.Run(t, store)
+		assert.Len(t, store.workers, 1)
+		tc.Run(t, store.workers[0])
 
 		if err := store.Reset(); err != nil {
 			t.Fatal(err)

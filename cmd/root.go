@@ -21,7 +21,7 @@ var (
 
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
-	Short:   "Durable promises",
+	Short:   "Resonate: distributed async await",
 	Version: "0.6.0", // This needs to be bumped when new versions are released.
 }
 
@@ -31,11 +31,9 @@ func init() {
 	c := client.NewOrDie(&server)
 
 	// Flags
-	rootCmd.PersistentFlags().StringVarP(&server, "server", "", "http://127.0.0.1:8001", "Server address used by the client")
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "Config file (default \"resonate.yml\")")
-	rootCmd.PersistentFlags().StringP("log-level", "", "info", "Log level, can be one of: debug, info, warn, error")
-	_ = viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
-	_ = viper.BindPFlag("dst.log.level", rootCmd.PersistentFlags().Lookup("log-level"))
+	rootCmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "Resonate server url")
+	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands
 	rootCmd.AddCommand(promises.NewCmd(c))
@@ -48,7 +46,6 @@ func init() {
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
 }
-
 
 func initConfig() {
 	if cfgFile != "" {

@@ -19,20 +19,21 @@ func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_a
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.CreateCallback,
-		Tags: s.tags(header.RequestId, "CreateCallback"),
-		CreateCallback: &t_api.CreateCallbackRequest{
-			PromiseId: body.PromiseId,
-			Timeout:   body.Timeout,
-			Message: &message.Message{
-				Recv: body.Recv,
-				Data: body.Data,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: s.tags(header.RequestId, "CreateCallback"),
+			CreateCallback: &t_api.CreateCallbackRequest{
+				PromiseId: body.PromiseId,
+				Timeout:   body.Timeout,
+				Message: &message.Message{
+					Recv: body.Recv,
+					Data: body.Data,
+				},
 			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {

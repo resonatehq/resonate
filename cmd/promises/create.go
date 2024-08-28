@@ -29,7 +29,7 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create a durable promise",
+		Short:   "Create a promise",
 		Example: createPromiseExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

@@ -10,14 +10,14 @@ import (
 
 var deleteScheduleExample = `
 # Delete a schedule
-resonate schedule delete foo`
+resonate schedules delete foo`
 
 func DeleteScheduleCmd(c client.ResonateClient) *cobra.Command {
 	var id string
 
 	cmd := &cobra.Command{
 		Use:     "delete <id>",
-		Short:   "Delete a durable schedule",
+		Short:   "Delete a schedule",
 		Example: deleteScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

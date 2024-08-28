@@ -3,8 +3,7 @@ package test
 import (
 	"testing"
 
-	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/kernel/bus"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
@@ -13,7 +12,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
-
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,7 +22,7 @@ type testCase struct {
 	expected []*t_aio.Result
 }
 
-func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
+func (c *testCase) Run(t *testing.T, store store.Store) {
 	t.Run(c.name, func(t *testing.T) {
 		// assert panic occurs
 		if c.panic {
@@ -35,59 +33,47 @@ func (c *testCase) Run(t *testing.T, subsystem aio.Subsystem) {
 			}()
 		}
 
-		sqes := []*bus.SQE[t_aio.Submission, t_aio.Completion]{
-			{
-				Submission: &t_aio.Submission{
-					Kind: t_aio.Store,
-					Store: &t_aio.StoreSubmission{
-						Transaction: &t_aio.Transaction{
-							Commands: c.commands,
-						},
-					},
-				},
-			},
+		results, err := store.Execute([]*t_aio.Transaction{{Commands: c.commands}})
+		if err != nil {
+			t.Fatal(err)
 		}
 
-		for _, cqe := range subsystem.NewWorker(0).Process(sqes) {
-			if cqe.Error != nil {
-				t.Fatal(cqe.Error)
-			}
+		assert.Len(t, results, 1)
 
-			// normalize results
-			for _, result := range cqe.Completion.Store.Results {
-				switch result.Kind {
-				case t_aio.ReadPromise:
-					for _, record := range result.ReadPromise.Records {
-						record.ParamHeaders = normalizeJSON(record.ParamHeaders)
-						record.ValueHeaders = normalizeJSON(record.ValueHeaders)
-						record.Tags = normalizeJSON(record.Tags)
-					}
-				case t_aio.SearchPromises:
-					for _, record := range result.SearchPromises.Records {
-						record.ParamHeaders = normalizeJSON(record.ParamHeaders)
-						record.ValueHeaders = normalizeJSON(record.ValueHeaders)
-						record.Tags = normalizeJSON(record.Tags)
-					}
-				case t_aio.ReadSchedule:
-					for _, record := range result.ReadSchedule.Records {
-						record.Tags = normalizeJSON(record.Tags)
-						record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
-					}
-				case t_aio.ReadSchedules:
-					for _, record := range result.ReadSchedules.Records {
-						record.Tags = normalizeJSON(record.Tags)
-						record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
-					}
-				case t_aio.SearchSchedules:
-					for _, record := range result.SearchSchedules.Records {
-						record.Tags = normalizeJSON(record.Tags)
-						record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
-					}
+		// normalize results
+		for _, result := range results[0] {
+			switch result.Kind {
+			case t_aio.ReadPromise:
+				for _, record := range result.ReadPromise.Records {
+					record.ParamHeaders = normalizeJSON(record.ParamHeaders)
+					record.ValueHeaders = normalizeJSON(record.ValueHeaders)
+					record.Tags = normalizeJSON(record.Tags)
+				}
+			case t_aio.SearchPromises:
+				for _, record := range result.SearchPromises.Records {
+					record.ParamHeaders = normalizeJSON(record.ParamHeaders)
+					record.ValueHeaders = normalizeJSON(record.ValueHeaders)
+					record.Tags = normalizeJSON(record.Tags)
+				}
+			case t_aio.ReadSchedule:
+				for _, record := range result.ReadSchedule.Records {
+					record.Tags = normalizeJSON(record.Tags)
+					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+				}
+			case t_aio.ReadSchedules:
+				for _, record := range result.ReadSchedules.Records {
+					record.Tags = normalizeJSON(record.Tags)
+					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+				}
+			case t_aio.SearchSchedules:
+				for _, record := range result.SearchSchedules.Records {
+					record.Tags = normalizeJSON(record.Tags)
+					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
 				}
 			}
-
-			assert.Equal(t, c.expected, cqe.Completion.Store.Results)
 		}
+
+		assert.Equal(t, c.expected, results[0])
 	})
 }
 

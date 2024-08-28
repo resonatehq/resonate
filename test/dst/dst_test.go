@@ -13,7 +13,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
@@ -49,18 +48,23 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	api := api.New(1000, metrics)
 	aio := aio.NewDST(r, p, metrics)
 
+	// instantiate backchannel
+	backchannel := make(chan interface{}, 100)
+
 	// instatiate aio subsystems
-	store, err := sqlite.New(&sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
+	queue, err := queue.NewDST(r, backchannel, &queue.ConfigDST{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// instantiate backchannel
-	backchannel := make(chan interface{}, 100)
+	store, err := sqlite.New(nil, &sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// add api subsystems
-	aio.AddSubsystem(t_aio.Store, store, nil)
-	aio.AddSubsystem(t_aio.Queue, queue.NewDST(backchannel), nil)
+	aio.AddSubsystem(store)
+	aio.AddSubsystem(queue)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
@@ -82,12 +86,10 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 
 	if !l {
 		system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+		system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
+		system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
 		system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
 		system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
-
-		// TODO: migrate tick to background coroutines
-		system.AddOnTick(1*time.Second, "SchedulePromises", coroutines.SchedulePromises)
-		system.AddOnTick(1*time.Second, "TimeoutLocks", coroutines.TimeoutLocks)
 	}
 
 	// start api/aio
@@ -126,11 +128,6 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	// shutdown api/aio
 	api.Shutdown()
 	aio.Shutdown()
-
-	// reset store
-	if err := store.Reset(); err != nil {
-		t.Fatal(err)
-	}
 
 	// stop api/aio
 	if err := api.Stop(); err != nil {

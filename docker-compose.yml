@@ -4,6 +4,8 @@ services:
     container_name: resonate
     command:
       - serve
+      - --aio-store-postgres-enable
+      - "true"
       - --aio-store-postgres-host
       - postgres
       - --aio-store-postgres-username
@@ -12,6 +14,8 @@ services:
       - password
       - --aio-store-postgres-database
       - resonate
+      - --aio-store-postgres-query
+      - sslmode=disable
     volumes:
       - ./resonate.yml:/root/resonate.yml
     ports:
@@ -34,46 +38,6 @@ services:
       - no-new-privileges:true
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U username -d resonate"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # dst
-  resonate-dst:
-    build: .
-    profiles: ["dst"]
-    container_name: resonate-dst
-    command:
-      - dst
-      - run
-      - --aio-store
-      - postgres
-      - --aio-store-postgres-host
-      - postgres-dst
-      - --aio-store-postgres-username
-      - username
-      - --aio-store-postgres-password
-      - password
-      - --aio-store-postgres-database
-      - resonate_dst
-    volumes:
-      - ./resonate.yml:/root/resonate.yml
-    depends_on:
-      - postgres-dst
-  postgres-dst:
-    image: postgres:15
-    profiles: ["dst"]
-    container_name: postgres-dst
-    environment:
-      POSTGRES_USER: username
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: resonate_dst
-    read_only: true
-    tmpfs: /var/run/postgresql:rw,nosuid,nodev,noexec,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U username -d resonate_dst"]
       interval: 10s
       timeout: 5s
       retries: 5

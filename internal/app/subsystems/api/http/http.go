@@ -18,29 +18,16 @@ import (
 )
 
 type Config struct {
-	Host    string
-	Port    int
-	Auth    map[string]string
-	Timeout time.Duration
+	Host    string            `flag:"host" desc:"http server host" default:"0.0.0.0"`
+	Port    int               `flag:"port" desc:"http server port" default:"8001"`
+	Timeout time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	Auth    map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
 }
 
 type Http struct {
 	addr   string
 	config *Config
 	server *http.Server
-}
-
-var oneOfCaseInsensitive validator.Func = func(f validator.FieldLevel) bool {
-	fieldValue := f.Field().String()
-	allowedValues := strings.Split(f.Param(), " ")
-
-	for _, allowedValue := range allowedValues {
-		if strings.EqualFold(fieldValue, allowedValue) {
-			return true
-		}
-	}
-
-	return false
 }
 
 func New(api api.API, config *Config) api.Subsystem {
@@ -100,6 +87,10 @@ func New(api api.API, config *Config) api.Subsystem {
 	}
 }
 
+func (h *Http) String() string {
+	return "http"
+}
+
 func (h *Http) Start(errors chan<- error) {
 	slog.Info("starting http server", "addr", h.addr)
 	if err := h.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -114,10 +105,6 @@ func (h *Http) Stop() error {
 	return h.server.Shutdown(ctx)
 }
 
-func (h *Http) String() string {
-	return "http"
-}
-
 type server struct {
 	service *service.Service
 }
@@ -125,4 +112,17 @@ type server struct {
 func (s *server) log(c *gin.Context) {
 	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
 	c.Next()
+}
+
+func oneOfCaseInsensitive(f validator.FieldLevel) bool {
+	fieldValue := f.Field().String()
+	allowedValues := strings.Split(f.Param(), " ")
+
+	for _, allowedValue := range allowedValues {
+		if strings.EqualFold(fieldValue, allowedValue) {
+			return true
+		}
+	}
+
+	return false
 }

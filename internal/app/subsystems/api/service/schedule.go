@@ -15,15 +15,16 @@ import (
 func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.ReadSchedule,
-		Tags: s.tags(header.RequestId, "ReadSchedule"),
-		ReadSchedule: &t_api.ReadScheduleRequest{
-			Id: id,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.ReadSchedule,
+			Tags: s.tags(header.RequestId, "ReadSchedule"),
+			ReadSchedule: &t_api.ReadScheduleRequest{
+				Id: id,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -74,13 +75,14 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind:            t_api.SearchSchedules,
-		Tags:            s.tags(header.RequestId, "SearchSchedules"),
-		SearchSchedules: searchSchedules,
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind:            t_api.SearchSchedules,
+			Tags:            s.tags(header.RequestId, "SearchSchedules"),
+			SearchSchedules: searchSchedules,
+		},
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -111,23 +113,24 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 		return nil, api.HandleValidationError(err)
 	}
 
-	req := &t_api.Request{
-		Kind: t_api.CreateSchedule,
-		Tags: s.tags(header.RequestId, "CreateSchedule"),
-		CreateSchedule: &t_api.CreateScheduleRequest{
-			Id:             body.Id,
-			Description:    body.Description,
-			Cron:           body.Cron,
-			Tags:           body.Tags,
-			PromiseId:      body.PromiseId,
-			PromiseTimeout: body.PromiseTimeout,
-			PromiseParam:   body.PromiseParam,
-			PromiseTags:    body.PromiseTags,
-			IdempotencyKey: header.IdempotencyKey,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.CreateSchedule,
+			Tags: s.tags(header.RequestId, "CreateSchedule"),
+			CreateSchedule: &t_api.CreateScheduleRequest{
+				Id:             body.Id,
+				Description:    body.Description,
+				Cron:           body.Cron,
+				Tags:           body.Tags,
+				PromiseId:      body.PromiseId,
+				PromiseTimeout: body.PromiseTimeout,
+				PromiseParam:   body.PromiseParam,
+				PromiseTags:    body.PromiseTags,
+				IdempotencyKey: header.IdempotencyKey,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {
@@ -150,15 +153,16 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	req := &t_api.Request{
-		Kind: t_api.DeleteSchedule,
-		Tags: s.tags(header.RequestId, "DeleteSchedule"),
-		DeleteSchedule: &t_api.DeleteScheduleRequest{
-			Id: id,
+	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Callback: s.sendOrPanic(cq),
+		Submission: &t_api.Request{
+			Kind: t_api.DeleteSchedule,
+			Tags: s.tags(header.RequestId, "DeleteSchedule"),
+			DeleteSchedule: &t_api.DeleteScheduleRequest{
+				Id: id,
+			},
 		},
-	}
-
-	s.api.Enqueue(req, s.sendOrPanic(cq))
+	})
 
 	cqe := <-cq
 	if cqe.Error != nil {

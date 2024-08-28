@@ -12,10 +12,10 @@ import (
 
 var createScheduleExample = `
 # Create a schedule that runs every minute
-resonate schedule create foo --cron "* * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h
+resonate schedules create foo --cron "* * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h
 
 # Create a schedule that runs every 5 minutes and includes data and headers
-resonate schedule create foo --cron "*/5 * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h --promise-data foo --promise-header bar=bar`
+resonate schedules create foo --cron "*/5 * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h --promise-data foo --promise-header bar=bar`
 
 func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 	var (
@@ -32,7 +32,7 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create a durable schedule",
+		Short:   "Create a schedule",
 		Example: createScheduleExample,
 		Run: func(cmd *cobra.Command, args []string) {
 			if len(args) != 1 {

@@ -47,11 +47,11 @@ func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.Corou
 
 		awaiting := make([]gocoroPromise.Awaitable[bool], len(result.Records))
 
-		for i, p := range result.Records {
-			util.Assert(p.State == promise.Pending, "promise must be pending")
-			util.Assert(p.Timeout <= c.Time(), "promise timeout must have elapsed")
+		for i, r := range result.Records {
+			util.Assert(r.State == promise.Pending, "promise must be pending")
+			util.Assert(r.Timeout <= c.Time(), "promise timeout must have elapsed")
 
-			p, err := p.Promise()
+			p, err := r.Promise()
 			if err != nil {
 				slog.Error("failed to parse promise, skipping", "err", err)
 				continue
