@@ -3,6 +3,13 @@ info:
   title: Distributed Lock API
   description: Manage Distributed Locks
   version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+servers:
+  - url: https://resonatehq.io # Replace with your actual API base URL
+    description: Website
+security: [] # Explicitly state no security is required globally
 paths:
   /locks/acquire:
     post:
@@ -22,6 +29,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Lock"
+        "400":
+          description: Bad request - Invalid input or missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found - The specified lock could not be found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /locks/heartbeat:
     post:
@@ -41,6 +60,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HeartbeatResponse"
+        "400":
+          description: Bad request - Invalid input or missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found - The specified lock could not be found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /locks/release:
     post:
@@ -56,6 +87,18 @@ paths:
       responses:
         "200":
           description: successful operation
+        "400":
+          description: Bad request - Invalid input or missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found - The specified lock could not be found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   schemas:
@@ -106,3 +149,14 @@ components:
       required:
         - resourceId
         - executionId
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+        details:
+          type: string

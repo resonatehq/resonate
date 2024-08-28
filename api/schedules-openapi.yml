@@ -2,6 +2,13 @@ openapi: 3.0.0
 info:
   title: Schedules API
   version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+servers:
+  - url: https://resonatehq.io # Replace with your actual API base URL
+    description: Website
+security: [] # Explicitly state no security is required globally
 paths:
   /schedules:
     post:
