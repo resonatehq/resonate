@@ -18,7 +18,7 @@
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://twitter.com/resonatehqio">Twitter</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://resonatehqcommunity.slack.com">Slack</a>
+  <a href="https://resonatehq.io/discord">Discord</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://github.com/resonatehq/resonate/issues">Issues</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
@@ -50,9 +50,9 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 
 Resonate provides client SDKs for different programming languages to easily interact with the Resonate server and write elegant distributed async await applications. More are coming soon!
 
-| Type        | Language                                                                                       | Source Code                                                             | Package                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| TS SDK      | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/>             | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk)                     |
+| Type   | Language                                                                                                            | Source Code                                   | Package                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------- |
+| TS SDK | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/> | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk) |
 
 ## Core Features
 
