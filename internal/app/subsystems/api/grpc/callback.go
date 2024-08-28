@@ -2,12 +2,9 @@ package grpc
 
 import (
 	"context"
-	"errors"
 
-	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -33,9 +30,7 @@ func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallback
 
 	_, err := s.service.CreateCallback(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CreateCallbackResponse{}, nil

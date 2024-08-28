@@ -1,0 +1,157 @@
+package service
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/go-playground/validator/v10"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
+)
+
+type Error struct {
+	// Code is the internal code that indicates the type of error
+	Code t_api.StatusCode `json:"code,omitempty"`
+
+	// Message is the error message
+	Message string `json:"message,omitempty"`
+
+	// Details is a list of details about the error
+	Details []*ErrorDetails `json:"details,omitempty"`
+}
+
+type ErrorDetails struct {
+	// Type is the specific error type
+	Type string `json:"@type,omitempty"`
+
+	// Message is a human readable description of the error
+	Message string `json:"message,omitempty"`
+
+	// Domain is the domain of the error
+	Domain string `json:"domain,omitempty"`
+
+	// Metadata is additional information about the error
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+func (e *Error) Error() string {
+	return e.Message
+}
+
+func ServerError(err error) *Error {
+	var error *t_api.Error
+	util.Assert(errors.As(err, &error), "must be a resonate error")
+
+	var message string
+	if error.Unwrap() != nil {
+		message = error.Unwrap().Error()
+	}
+
+	return &Error{
+		Code:    error.Code(),
+		Message: error.Error(),
+		Details: []*ErrorDetails{{
+			Type:    "ServerError",
+			Message: message,
+			Domain:  "server",
+			Metadata: map[string]string{
+				"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%d", error.Code()),
+			},
+		}},
+	}
+}
+
+func RequestError(status t_api.StatusCode) *Error {
+	if status.IsSuccessful() {
+		return nil
+	}
+
+	return &Error{
+		Code:    status,
+		Message: status.String(),
+		Details: []*ErrorDetails{{
+			Type:    "RequestError",
+			Message: "Request errors are not retryable since they are caused by invalid client requests",
+			Domain:  "request",
+			Metadata: map[string]string{
+				"url": fmt.Sprintf("https://docs.resonatehq.io/reference/error-codes#%d", status),
+			},
+		}},
+	}
+}
+
+func RequestValidationError(err error) *Error {
+	code := t_api.StatusFieldValidationError
+	details := []*ErrorDetails{}
+
+	for _, err := range parseBindingError(err) {
+		details = append(details, &ErrorDetails{
+			Type:    "FieldValidationError",
+			Message: err,
+			Domain:  "request",
+			Metadata: map[string]string{
+				"url": fmt.Sprintf("https://docs.resonatehq.io/resonate/error-codes#%d", code),
+			},
+		})
+	}
+
+	return &Error{
+		Code:    code,
+		Message: code.String(),
+		Details: details,
+	}
+}
+
+// Helper functions
+
+func parseBindingError(errs ...error) []string {
+	var out []string
+	for _, err := range errs {
+		switch typedErr := err.(type) {
+		case validator.ValidationErrors:
+			for _, e := range typedErr {
+				out = append(out, parseFieldError(e))
+			}
+		default:
+			out = append(out, err.Error())
+		}
+	}
+	return out
+}
+
+func parseFieldError(e validator.FieldError) string {
+	fieldPrefix := fmt.Sprintf("The field %s", e.Field())
+	tag := strings.Split(e.Tag(), "|")[0]
+
+	switch tag {
+	case "required":
+		return fmt.Sprintf("%s is required", fieldPrefix)
+	case "min":
+		param := e.Param()
+		return fmt.Sprintf("%s must be be at least length %s", fieldPrefix, param)
+	case "max":
+		param := e.Param()
+		return fmt.Sprintf("%s must be be at most length %s", fieldPrefix, param)
+	case "gt":
+		param := e.Param()
+		return fmt.Sprintf("%s must be greater than %s", fieldPrefix, param)
+	case "gte":
+		param := e.Param()
+		return fmt.Sprintf("%s must be greater than or equal to %s", fieldPrefix, param)
+	case "lt":
+		param := e.Param()
+		return fmt.Sprintf("%s must be less than %s", fieldPrefix, param)
+	case "lte":
+		param := e.Param()
+		return fmt.Sprintf("%s must be less than or equal to %s", fieldPrefix, param)
+	case "oneof", "oneofcaseinsensitive":
+		param := e.Param()
+		paramArr := strings.Split(param, " ")
+		paramArr[len(paramArr)-1] = "or " + paramArr[len(paramArr)-1]
+		param = strings.Join(paramArr, ", ")
+		return fmt.Sprintf("%s must be either %s", fieldPrefix, param)
+	default:
+		return e.Error()
+	}
+}

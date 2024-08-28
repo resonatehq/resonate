@@ -30,7 +30,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -44,7 +44,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if p.State == promise.Pending && c.Time() >= p.Timeout {

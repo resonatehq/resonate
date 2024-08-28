@@ -159,7 +159,7 @@ func (s *System) Tick(t int64) {
 			s.coroutineMetrics(p, sqe.Submission.Tags)
 		} else {
 			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
+			sqe.Callback(nil, t_api.NewError(t_api.StatusSchedulerQueueFull, nil))
 		}
 	}
 

@@ -1,11 +1,7 @@
 package http
 
 import (
-	"errors"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 )
 
@@ -14,27 +10,31 @@ import (
 func (s *server) acquireLock(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.AcquireLockBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.AcquireLock(&header, body)
+	res, err := s.service.AcquireLock(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Lock)
+	c.JSON(s.code(res.Status), res.Lock)
 }
 
 // RELEASE
@@ -42,27 +42,31 @@ func (s *server) acquireLock(c *gin.Context) {
 func (s *server) releaseLock(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.ReleaseLockBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.ReleaseLock(&header, body)
+	res, err := s.service.ReleaseLock(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), nil)
+	c.JSON(s.code(res.Status), nil)
 }
 
 // HEARTBEAT
@@ -70,27 +74,31 @@ func (s *server) releaseLock(c *gin.Context) {
 func (s *server) heartbeatLocks(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.HeartbeatBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.Heartbeat(&header, body)
+	res, err := s.service.Heartbeat(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), gin.H{
-		"locksAffected": resp.LocksAffected,
+	c.JSON(s.code(res.Status), gin.H{
+		"locksAffected": res.LocksAffected,
 	})
 }

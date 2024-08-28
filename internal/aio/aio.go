@@ -141,7 +141,7 @@ func (a *aio) Dispatch(submission *t_aio.Submission, callback func(*t_aio.Comple
 		case subsystem.SQ() <- sqe:
 			a.metrics.AioInFlight.WithLabelValues(submission.Kind.String()).Inc()
 		default:
-			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAIOSubmissionQueueFull, fmt.Sprintf("aio:subsytem:%s submission queue full", subsystem), nil))
+			sqe.Callback(nil, t_api.NewError(t_api.StatusAIOSubmissionQueueFull, nil))
 		}
 	} else {
 		panic("invalid aio submission")

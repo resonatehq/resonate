@@ -2,46 +2,51 @@ package t_api
 
 import (
 	"fmt"
-
-	"google.golang.org/grpc/codes"
 )
 
-// ResponseStatus is the status code for the response.
-type ResponseStatus int
+// StatusCode represents the type of response that occurred
+type StatusCode int
 
-// Application level status (2000-4999)
 const (
-	StatusOK        ResponseStatus = 2000
-	StatusCreated   ResponseStatus = 2010
-	StatusNoContent ResponseStatus = 2040
+	// Application level status (2000-4999)
+	StatusOK        StatusCode = 2000
+	StatusCreated   StatusCode = 2010
+	StatusNoContent StatusCode = 2040
 
-	StatusFieldValidationFailure ResponseStatus = 4000
+	StatusFieldValidationError   StatusCode = 4000
+	StatusPromiseAlreadyResolved StatusCode = 4030
+	StatusPromiseAlreadyRejected StatusCode = 4031
+	StatusPromiseAlreadyCanceled StatusCode = 4032
+	StatusPromiseAlreadyTimedout StatusCode = 4033
+	StatusLockAlreadyAcquired    StatusCode = 4034
+	StatusTaskAlreadyClaimed     StatusCode = 4035
+	StatusTaskAlreadyCompleted   StatusCode = 4036
+	StatusTaskInvalidCounter     StatusCode = 4037
+	StatusTaskInvalidState       StatusCode = 4038
+	StatusPromiseNotFound        StatusCode = 4040
+	StatusScheduleNotFound       StatusCode = 4041
+	StatusLockNotFound           StatusCode = 4042
+	StatusTaskNotFound           StatusCode = 4043
+	StatusPromiseAlreadyExists   StatusCode = 4090
+	StatusScheduleAlreadyExists  StatusCode = 4091
 
-	StatusPromiseAlreadyResolved ResponseStatus = 4030
-	StatusPromiseAlreadyRejected ResponseStatus = 4031
-	StatusPromiseAlreadyCanceled ResponseStatus = 4032
-	StatusPromiseAlreadyTimedout ResponseStatus = 4033
-	StatusLockAlreadyAcquired    ResponseStatus = 4034
-	StatusTaskAlreadyClaimed     ResponseStatus = 4035
-	StatusTaskAlreadyCompleted   ResponseStatus = 4036
-	StatusTaskInvalidCounter     ResponseStatus = 4037
-	StatusTaskInvalidState       ResponseStatus = 4038
-
-	StatusPromiseNotFound  ResponseStatus = 4040
-	StatusScheduleNotFound ResponseStatus = 4041
-	StatusLockNotFound     ResponseStatus = 4042
-	StatusTaskNotFound     ResponseStatus = 4043
-
-	StatusPromiseAlreadyExists  ResponseStatus = 4090
-	StatusScheduleAlreadyExists ResponseStatus = 4091
+	// Platform level status (5000-5999)
+	StatusInternalServerError    StatusCode = 5000
+	StatusAIOEchoError           StatusCode = 5001
+	StatusAIOQueueError          StatusCode = 5002
+	StatusAIOStoreError          StatusCode = 5003
+	StatusSystemShuttingDown     StatusCode = 5030
+	StatusAPISubmissionQueueFull StatusCode = 5031
+	StatusAIOSubmissionQueueFull StatusCode = 5032
+	StatusSchedulerQueueFull     StatusCode = 5033
 )
 
 // String returns the string representation of the status code.
-func (s ResponseStatus) String() string {
+func (s StatusCode) String() string {
 	switch s {
 	case StatusOK, StatusCreated, StatusNoContent:
 		return "The request was successful"
-	case StatusFieldValidationFailure:
+	case StatusFieldValidationError:
 		return "The request is invalid"
 	case StatusPromiseAlreadyResolved:
 		return "The promise has already been resolved"
@@ -60,7 +65,7 @@ func (s ResponseStatus) String() string {
 	case StatusTaskInvalidCounter:
 		return "The task counter is invalid"
 	case StatusTaskInvalidState:
-		return "The lock state is invalid"
+		return "The task state is invalid"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:
@@ -70,106 +75,30 @@ func (s ResponseStatus) String() string {
 	case StatusTaskNotFound:
 		return "The specified task was not found"
 	case StatusPromiseAlreadyExists:
-		return "A promise with this identifier already exists"
+		return "The specified promise already exists"
 	case StatusScheduleAlreadyExists:
-		return "A schedule with this identifier already exists"
+		return "The specified schedule already exists"
+	case StatusInternalServerError:
+		return "There was an internal server error"
+	case StatusAIOEchoError:
+		return "There was an error in the echo subsystem"
+	case StatusAIOQueueError:
+		return "There was an error in the queue subsystem"
+	case StatusAIOStoreError:
+		return "There was an error in the store subsystem"
+	case StatusSystemShuttingDown:
+		return "The system is shutting down"
+	case StatusAPISubmissionQueueFull:
+		return "The api submission queue is full"
+	case StatusAIOSubmissionQueueFull:
+		return "The aio submission queue is full"
+	case StatusSchedulerQueueFull:
+		return "The scheduler queue is full"
 	default:
 		panic(fmt.Sprintf("unknown status code %d", s))
 	}
 }
 
-// HTTP maps to http status code.
-func (s ResponseStatus) HTTP() int {
-	return int(s) / 10
-}
-
-// GRPC maps to grpc status code.
-func (s ResponseStatus) GRPC() codes.Code {
-	switch s {
-	case StatusOK, StatusCreated, StatusNoContent:
-		return codes.OK
-	case StatusFieldValidationFailure:
-		return codes.InvalidArgument
-	case StatusPromiseAlreadyResolved, StatusPromiseAlreadyRejected, StatusPromiseAlreadyCanceled, StatusPromiseAlreadyTimedout:
-		return codes.PermissionDenied
-	case StatusLockAlreadyAcquired:
-		return codes.PermissionDenied
-	case StatusTaskAlreadyClaimed, StatusTaskAlreadyCompleted, StatusTaskInvalidCounter, StatusTaskInvalidState:
-		return codes.PermissionDenied
-	case StatusPromiseAlreadyExists, StatusScheduleAlreadyExists:
-		return codes.AlreadyExists
-	case StatusPromiseNotFound, StatusLockNotFound, StatusTaskNotFound:
-		return codes.NotFound
-	default:
-		panic(fmt.Sprintf("invalid status: %d", s))
-	}
-}
-
-// Platform level errors (5000-5999)
-const (
-	ErrInternalServer               ResonateErrorCode = 5000
-	ErrAIOStoreFailure              ResonateErrorCode = 5001
-	ErrAIOStoreSerializationFailure ResonateErrorCode = 5002
-	ErrSystemShuttingDown           ResonateErrorCode = 5030
-	ErrAPISubmissionQueueFull       ResonateErrorCode = 5031
-	ErrAIOSubmissionQueueFull       ResonateErrorCode = 5032
-	ErrSchedulerQueueFull           ResonateErrorCode = 5033
-)
-
-type ResonateErrorCode int
-
-func (e ResonateErrorCode) HTTP() int {
-	return int(e) / 10
-}
-
-func (e ResonateErrorCode) GRPC() codes.Code {
-	switch e {
-	case ErrInternalServer:
-		return codes.Internal
-	case ErrAIOStoreFailure:
-		return codes.Internal
-	case ErrAIOStoreSerializationFailure:
-		return codes.Internal
-	case ErrSystemShuttingDown:
-		return codes.Unavailable
-	case ErrAPISubmissionQueueFull:
-		return codes.Unavailable
-	case ErrAIOSubmissionQueueFull:
-		return codes.Unavailable
-	case ErrSchedulerQueueFull:
-		return codes.Unavailable
-	default:
-		panic(fmt.Sprintf("invalid error code: %d", e))
-	}
-}
-
-type ResonateError struct {
-	code          ResonateErrorCode
-	reason        string
-	originalError error
-}
-
-func NewResonateError(code ResonateErrorCode, out string, in error) *ResonateError {
-	return &ResonateError{
-		code:          code,
-		reason:        out,
-		originalError: in,
-	}
-}
-
-func (e *ResonateError) Error() string {
-	return e.reason
-}
-
-func (e *ResonateError) Unwrap() error {
-	return e.originalError
-}
-
-func (e *ResonateError) Code() ResonateErrorCode {
-	return e.code
-}
-
-func (e *ResonateError) Is(target error) bool {
-	_, ok := target.(*ResonateError)
-	return ok
+func (s StatusCode) IsSuccessful() bool {
+	return s >= 2000 && s < 3000
 }

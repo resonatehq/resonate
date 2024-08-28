@@ -1,11 +1,7 @@
 package http
 
 import (
-	"errors"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 )
 
@@ -14,28 +10,32 @@ import (
 func (s *server) createCallback(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.CreateCallbackBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.CreateCallback(&header, body)
+	res, err := s.service.CreateCallback(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), gin.H{
-		"callback": resp.Callback,
-		"promise":  resp.Promise,
+	c.JSON(s.code(res.Status), gin.H{
+		"callback": res.Callback,
+		"promise":  res.Promise,
 	})
 }

@@ -1,9 +1,6 @@
 package service
 
 import (
-	"errors"
-
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -11,7 +8,7 @@ import (
 
 // CLAIM
 
-func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTaskResponse, error) {
+func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTaskResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -30,23 +27,16 @@ func (s *Service) ClaimTask(header *Header, body *ClaimTaskBody) (*t_api.ClaimTa
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ClaimTask != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.ClaimTask.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ClaimTask.Status)
-	}
-
-	return cqe.Completion.ClaimTask, nil
+	return cqe.Completion.ClaimTask, RequestError(cqe.Completion.Status())
 }
 
 // COMPLETE
 
-func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.CompleteTaskResponse, error) {
+func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.CompleteTaskResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -63,23 +53,16 @@ func (s *Service) CompleteTask(header *Header, body *CompleteTaskBody) (*t_api.C
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CompleteTask != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.CompleteTask.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.CompleteTask.Status)
-	}
-
-	return cqe.Completion.CompleteTask, nil
+	return cqe.Completion.CompleteTask, RequestError(cqe.Completion.Status())
 }
 
 // HEARTBEAT
 
-func (s *Service) HeartbeatTasks(header *Header, body *HeartbeatTaskBody) (*t_api.HeartbeatTasksResponse, error) {
+func (s *Service) HeartbeatTasks(header *Header, body *HeartbeatTaskBody) (*t_api.HeartbeatTasksResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -95,16 +78,9 @@ func (s *Service) HeartbeatTasks(header *Header, body *HeartbeatTaskBody) (*t_ap
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.HeartbeatTasks != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.HeartbeatTasks.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.HeartbeatTasks.Status)
-	}
-
-	return cqe.Completion.HeartbeatTasks, nil
+	return cqe.Completion.HeartbeatTasks, RequestError(cqe.Completion.Status())
 }
