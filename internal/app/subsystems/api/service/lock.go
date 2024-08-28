@@ -1,9 +1,6 @@
 package service
 
 import (
-	"errors"
-
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -11,7 +8,7 @@ import (
 
 // ACQUIRE
 
-func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, error) {
+func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, *Error) {
 	util.Assert(body.ResourceId != "", "lock.resource_id must be provided")
 	util.Assert(body.ExecutionId != "", "lock.execution_id must be provided")
 	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
@@ -37,23 +34,16 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.AcquireLock != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.AcquireLock.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.AcquireLock.Status)
-	}
-
-	return cqe.Completion.AcquireLock, nil
+	return cqe.Completion.AcquireLock, RequestError(cqe.Completion.Status())
 }
 
 // HEARTBEAT
 
-func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, error) {
+func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, *Error) {
 	util.Assert(body.ProcessId != "", "process_id must be provided")
 
 	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
@@ -73,23 +63,16 @@ func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.Heartbe
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.HeartbeatLocks != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.HeartbeatLocks.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.HeartbeatLocks.Status)
-	}
-
-	return cqe.Completion.HeartbeatLocks, nil
+	return cqe.Completion.HeartbeatLocks, RequestError(cqe.Completion.Status())
 }
 
 // RELEASE
 
-func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.ReleaseLockResponse, error) {
+func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.ReleaseLockResponse, *Error) {
 	util.Assert(body.ResourceId != "", "resource_id must be provided")
 	util.Assert(body.ExecutionId != "", "execution_id must be provided")
 
@@ -111,16 +94,9 @@ func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.Rel
 
 	cqe := <-cq
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ReleaseLock != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.ReleaseLock.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ReleaseLock.Status)
-	}
-
-	return cqe.Completion.ReleaseLock, nil
+	return cqe.Completion.ReleaseLock, RequestError(cqe.Completion.Status())
 }

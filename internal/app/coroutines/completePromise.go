@@ -31,7 +31,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -45,13 +45,13 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if p.State == promise.Pending {
 			var con int64
 			var req *t_api.Request
-			var status t_api.ResponseStatus
+			var status t_api.StatusCode
 
 			if c.Time() < p.Timeout {
 				con = c.Time()
@@ -188,7 +188,7 @@ func completePromise(completedOn int64, r *t_api.Request) gocoro.CoroutineFunc[*
 
 		if err != nil {
 			slog.Error("failed to update promise", "req", r, "err", err)
-			return false, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to update promise", err)
+			return false, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -205,7 +205,7 @@ func completePromise(completedOn int64, r *t_api.Request) gocoro.CoroutineFunc[*
 
 // Helper functions
 
-func alreadyCompletedStatus(state promise.State) t_api.ResponseStatus {
+func alreadyCompletedStatus(state promise.State) t_api.StatusCode {
 	switch state {
 	case promise.Resolved:
 		return t_api.StatusPromiseAlreadyResolved

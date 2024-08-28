@@ -36,7 +36,7 @@ func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.Corou
 
 		if err != nil {
 			slog.Error("failed to read promises", "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promises", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")

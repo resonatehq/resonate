@@ -14,7 +14,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
 	util.Assert(r.ClaimTask.Frequency > 0, "frequency must be greater than 0")
 
-	var status t_api.ResponseStatus
+	var status t_api.StatusCode
 	var t *task.Task
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -35,7 +35,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	})
 	if err != nil {
 		slog.Error("failed to read task", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read task", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -46,7 +46,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		t, err = result.Records[0].Task()
 		if err != nil {
 			slog.Error("failed to parse task record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse task record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if t.State == task.Claimed {
@@ -83,7 +83,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 			})
 			if err != nil {
 				slog.Error("failed to claim task", "req", r, "err", err)
-				return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to claim task", err)
+				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")

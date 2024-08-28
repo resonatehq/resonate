@@ -2,9 +2,7 @@ package grpc
 
 import (
 	"context"
-	"errors"
 
-	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/util"
@@ -39,15 +37,13 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 		PromiseTags: req.PromiseTags,
 	}
 
-	resp, err := s.service.CreateSchedule(header, &body)
+	res, err := s.service.CreateSchedule(header, &body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CreatedScheduleResponse{
-		Schedule: protoSchedule(resp.Schedule),
+		Schedule: protoSchedule(res.Schedule),
 	}, nil
 }
 
@@ -58,15 +54,13 @@ func (s *server) ReadSchedule(ctx context.Context, req *grpcApi.ReadScheduleRequ
 		RequestId: req.RequestId,
 	}
 
-	resp, err := s.service.ReadSchedule(req.Id, &header)
+	res, err := s.service.ReadSchedule(req.Id, &header)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.ReadScheduleResponse{
-		Schedule: protoSchedule(resp.Schedule),
+		Schedule: protoSchedule(res.Schedule),
 	}, nil
 }
 
@@ -78,8 +72,7 @@ func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedul
 	}
 
 	if req.Limit > 100 || req.Limit < 0 {
-		err := api.HandleValidationError(errors.New("field limit must be greater than 0 and less than or equal to 100"))
-		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+		return nil, grpcStatus.Error(codes.InvalidArgument, "field limit must be greater than 0 and less than or equal to 100")
 	}
 
 	params := &service.SearchSchedulesParams{
@@ -89,22 +82,20 @@ func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedul
 		Cursor: &req.Cursor,
 	}
 
-	resp, err := s.service.SearchSchedules(headers, params)
+	res, err := s.service.SearchSchedules(headers, params)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	schedules := make([]*grpcApi.Schedule, len(resp.Schedules))
-	for i, schedule := range resp.Schedules {
+	schedules := make([]*grpcApi.Schedule, len(res.Schedules))
+	for i, schedule := range res.Schedules {
 		schedules[i] = protoSchedule(schedule)
 	}
 
 	var cursor string
-	if resp.Cursor != nil {
+	if res.Cursor != nil {
 		var err error
-		cursor, err = resp.Cursor.Encode()
+		cursor, err = res.Cursor.Encode()
 		if err != nil {
 			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
@@ -125,9 +116,7 @@ func (s *server) DeleteSchedule(ctx context.Context, req *grpcApi.DeleteSchedule
 
 	_, err := s.service.DeleteSchedule(req.Id, &header)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.DeleteScheduleResponse{}, nil

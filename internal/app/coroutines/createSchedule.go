@@ -42,7 +42,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	})
 	if err != nil {
 		slog.Error("failed to read schedule", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -56,7 +56,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		next, err := util.Next(createdOn, r.CreateSchedule.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "req", r, "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to calculate next run time", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -87,7 +87,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		})
 		if err != nil {
 			slog.Error("failed to create schedule", "req", r, "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create schedule", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -127,7 +127,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		s, err := result.Records[0].Schedule()
 		if err != nil {
 			slog.Error("failed to parse schedule", "req", r, "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to parse schedule", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		status := t_api.StatusScheduleAlreadyExists

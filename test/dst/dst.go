@@ -332,7 +332,7 @@ func (d *DST) Model() porcupine.Model {
 			case Op:
 				var status int
 				if res.err != nil {
-					var err *t_api.ResonateError
+					var err *t_api.Error
 					if errors.As(res.err, &err) {
 						status = int(err.Code())
 					}
@@ -550,20 +550,20 @@ func (d *DST) Model() porcupine.Model {
 
 func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response, err error) (*Model, error) {
 	if err != nil {
-		var resErr *t_api.ResonateError
-		if !errors.As(err, &resErr) {
+		var error *t_api.Error
+		if !errors.As(err, &error) {
 			return model, fmt.Errorf("unexpected error '%v'", err)
 		}
 
-		switch resErr.Code() {
-		case t_api.ErrAPISubmissionQueueFull:
+		switch error.Code() {
+		case t_api.StatusAPISubmissionQueueFull:
 			return model, nil
-		case t_api.ErrAIOSubmissionQueueFull:
+		case t_api.StatusAIOSubmissionQueueFull:
 			return model, nil
-		case t_api.ErrSchedulerQueueFull:
+		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		default:
-			return model, fmt.Errorf("unexpected resonate error '%v'", resErr)
+			return model, fmt.Errorf("unexpected resonate error '%v'", error)
 		}
 	}
 

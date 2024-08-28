@@ -85,10 +85,10 @@ func TestSystemLoop(t *testing.T) {
 			Callback: func(res *t_api.Response, err error) {
 				received <- 1
 
-				var apiErr *t_api.ResonateError
-				assert.True(t, errors.As(err, &apiErr))
+				var error *t_api.Error
+				assert.True(t, errors.As(err, &error))
 				assert.NotNil(t, err)
-				assert.ErrorContains(t, apiErr, "system is shutting down")
+				assert.ErrorContains(t, error, "system is shutting down")
 			},
 		})
 	}

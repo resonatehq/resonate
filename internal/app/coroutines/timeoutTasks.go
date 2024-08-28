@@ -36,7 +36,7 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 		if err != nil {
 			slog.Error("failed to read tasks", "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read tasks", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")

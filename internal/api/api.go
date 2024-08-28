@@ -130,9 +130,9 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 		var status int
 
 		if err != nil {
-			var resErr *t_api.ResonateError
-			util.Assert(errors.As(err, &resErr), "err must be a ResonateError")
-			status = int(resErr.Code())
+			var error *t_api.Error
+			util.Assert(errors.As(err, &error), "err must be a ResonateError")
+			status = int(error.Code())
 		} else {
 			switch res.Kind {
 			case t_api.ReadPromise:
@@ -181,7 +181,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// we must wait to close the channel because even in a select
 	// sending to a closed channel will panic
 	if a.done {
-		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSystemShuttingDown, "system is shutting down", nil))
+		sqe.Callback(nil, t_api.NewError(t_api.StatusSystemShuttingDown, nil))
 		return
 	}
 
@@ -189,7 +189,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	case a.sq <- sqe:
 		slog.Debug("api:enqueue", "id", sqe.Submission.Id(), "sqe", sqe)
 	default:
-		sqe.Callback(nil, t_api.NewResonateError(t_api.ErrAPISubmissionQueueFull, "api submission queue is full", nil))
+		sqe.Callback(nil, t_api.NewError(t_api.StatusAPISubmissionQueueFull, nil))
 	}
 }
 

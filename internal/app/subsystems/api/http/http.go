@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
@@ -107,6 +108,10 @@ func (h *Http) Stop() error {
 
 type server struct {
 	service *service.Service
+}
+
+func (s *server) code(status t_api.StatusCode) int {
+	return int(status) / 10
 }
 
 func (s *server) log(c *gin.Context) {

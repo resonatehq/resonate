@@ -29,7 +29,7 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	})
 	if err != nil {
 		slog.Error("failed to heartbeat task", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to heartbeat task", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
