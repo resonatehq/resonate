@@ -245,7 +245,7 @@ paths:
         tags:
           - Schedules
         summary: Create a new schedule
-        operationdId: createSchedule
+        operationId: createSchedule
         parameters:
           - $ref: '#/components/parameters/RequestIdHeader'
           - $ref: '#/components/parameters/IdempotencyKeyHeader'
@@ -324,7 +324,7 @@ paths:
         tags:
           - Schedules
         summary: Get a schedule
-        operationdId: getSchedule
+        operationId: getSchedule
         parameters:
           - $ref: '#/components/parameters/IdPath'
           - $ref: '#/components/parameters/RequestIdHeader'
@@ -341,7 +341,7 @@ paths:
         tags:
           - Schedules
         summary: Delete a schedule
-        operationdId: deleteSchedule
+        operationId: deleteSchedule
         parameters:
           - $ref: '#/components/parameters/IdPath'
           - $ref: '#/components/parameters/RequestIdHeader'
@@ -351,15 +351,66 @@ paths:
           '404':
             description: Schedule not found
 components:
+  parameters:
+    PromiseParameters:
+      $ref: '#/components/parameters/parameters'
+    ScheduleParameters:
+      $ref: '#/components/parameters/components-parameters'
+    parameters:
+      IdPath:
+        name: id
+        in: path
+        required: true
+        description: The promise ID
+        schema:
+          type: string
+      IdempotencyKeyHeader:
+        name: idempotency-key
+        in: header
+        description: Deduplicates multiple requests
+        schema:
+          type: string
+      StrictHeader:
+        name: strict
+        in: header
+        description: If true, deduplicates only when promise state matches the request
+        schema:
+          type: boolean
+      RequestIdHeader:
+        name: request-id
+        in: header
+        description: Unique ID for each request
+        schema:
+          type: string
+    components-parameters:
+      IdPath:
+        name: id
+        in: path
+        required: true
+        description: The schedule ID
+        schema:
+          type: string
+      IdempotencyKeyHeader:
+        name: idempotency-key
+        in: header
+        description: Deduplicates multiple requests
+        schema:
+          type: string
+      RequestIdHeader:
+        name: request-id
+        in: header
+        description: Unique ID for each request
+        schema:
+          type: string
   schemas:
-    PromiseSchemas:
+    PromiseSchema:
       $ref: '#/components/schemas/schemas'
-    TaskSchemas:
+    ScheduleSchema:
       $ref: '#/components/schemas/components-schemas'
-    LockSchemas:
+    LockSchema:
       $ref: '#/components/schemas/locks-openapi_components-schemas'
-    ScheduleSchemas:
-      $ref: '#/components/schemas/schedules-openapi_components-schemas'
+    TaskSchema:
+      $ref: '#/components/schemas/tasks-openapi_components-schemas'
     schemas:
       Promise:
         type: object
@@ -459,6 +510,116 @@ components:
             items:
               $ref: '#/components/schemas/Promise'
     components-schemas:
+      Schedule:
+        type: object
+        required:
+          - id
+          - cron
+          - promiseId
+          - promiseTimeout
+        properties:
+          id:
+            type: string
+          description:
+            type: string
+          cron:
+            type: string
+          tags:
+            type: object
+            additionalProperties:
+              type: string
+          promiseId:
+            type: string
+          promiseTimeout:
+            type: integer
+            format: int64
+          promiseParam:
+            $ref: '#/components/schemas/PromiseValue'
+          promiseTags:
+            type: object
+            additionalProperties:
+              type: string
+          lastRunTime:
+            type: integer
+            readOnly: true
+            format: int64
+          nextRunTime:
+            type: integer
+            readOnly: true
+            format: int64
+          idempotencyKey:
+            type: string
+            readOnly: true
+          createdOn:
+            type: integer
+            readOnly: true
+            format: int64
+      PromiseValue:
+        type: object
+        required:
+          - headers
+        properties:
+          data:
+            type: string
+          headers:
+            type: object
+            additionalProperties:
+              type: string
+      SearchSchedulesResp:
+        type: object
+        properties:
+          cursor:
+            type: string
+          schedules:
+            type: array
+            items:
+              $ref: '#/components/schemas/Schedule'
+    locks-openapi_components-schemas:
+      Lock:
+        type: object
+        properties:
+          resourceId:
+            type: string
+          processId:
+            type: string
+          executionId:
+            type: string
+          expiryInSeconds:
+            type: integer
+            format: int64
+          expiresAt:
+            type: integer
+            format: int64
+            readOnly: true
+        required:
+          - resourceId
+          - processId
+          - executionId
+          - expiryInSeconds
+      HeartbeatRequest:
+        type: object
+        properties:
+          processId:
+            type: string
+        required:
+          - processId
+      HeartbeatResponse:
+        type: object
+        properties:
+          locksAffected:
+            type: integer
+            format: int64
+      ReleaseLockRequest:
+        type: object
+        properties:
+          resourceId:
+            type: string
+          executionId:
+            type: string
+        required:
+          - resourceId
+          - executionId
+    tasks-openapi_components-schemas:
       Promise:
         type: object
         required:
@@ -563,177 +724,3 @@ components:
           - executionId
           - state
           - value
-    locks-openapi_components-schemas:
-      Lock:
-        type: object
-        properties:
-          resourceId:
-            type: string
-          processId:
-            type: string
-          executionId:
-            type: string
-          expiryInSeconds:
-            type: integer
-            format: int64
-          expiresAt:
-            type: integer
-            format: int64
-            readOnly: true
-        required:
-          - resourceId
-          - processId
-          - executionId
-          - expiryInSeconds
-      HeartbeatRequest:
-        type: object
-        properties:
-          processId:
-            type: string
-        required:
-          - processId
-      HeartbeatResponse:
-        type: object
-        properties:
-          locksAffected:
-            type: integer
-            format: int64
-      ReleaseLockRequest:
-        type: object
-        properties:
-          resourceId:
-            type: string
-          executionId:
-            type: string
-        required:
-          - resourceId
-          - executionId
-    schedules-openapi_components-schemas:
-      Schedule:
-        type: object
-        required:
-          - id
-          - cron
-          - promiseId
-          - promiseTimeout
-        properties:
-          id:
-            type: string
-          description:
-            type: string
-          cron:
-            type: string
-          tags:
-            type: object
-            additionalProperties:
-              type: string
-          promiseId:
-            type: string
-          promiseTimeout:
-            type: integer
-            format: int64
-          promiseParam:
-            $ref: '#/components/schemas/PromiseValue'
-          promiseTags:
-            type: object
-            additionalProperties:
-              type: string
-          lastRunTime:
-            type: integer
-            readOnly: true
-            format: int64
-          nextRunTime:
-            type: integer
-            readOnly: true
-            format: int64
-          idempotencyKey:
-            type: string
-            readOnly: true
-          createdOn:
-            type: integer
-            readOnly: true
-            format: int64
-      PromiseValue:
-        type: object
-        required:
-          - headers
-        properties:
-          data:
-            type: string
-          headers:
-            type: object
-            additionalProperties:
-              type: string
-      SearchSchedulesResp:
-        type: object
-        properties:
-          cursor:
-            type: string
-          schedules:
-            type: array
-            items:
-              $ref: '#/components/schemas/Schedule'
-  parameters:
-    PromiseParameters:
-      $ref: '#/components/parameters/parameters'
-    TaskParameters:
-      $ref: ./tasks-openapi.yml#/components/parameters
-    LockParameters:
-      $ref: ./locks-openapi.yml#/components/parameters
-    ScheduleParameters:
-      $ref: '#/components/parameters/components-parameters'
-    parameters:
-      IdPath:
-        name: id
-        in: path
-        required: true
-        description: The promise ID
-        schema:
-          type: string
-      IdempotencyKeyHeader:
-        name: idempotency-key
-        in: header
-        description: Deduplicates multiple requests
-        schema:
-          type: string
-      StrictHeader:
-        name: strict
-        in: header
-        description: If true, deduplicates only when promise state matches the request
-        schema:
-          type: boolean
-      RequestIdHeader:
-        name: request-id
-        in: header
-        description: Unique ID for each request
-        schema:
-          type: string
-    components-parameters:
-      IdPath:
-        name: id
-        in: path
-        required: true
-        description: The schedule ID
-        schema:
-          type: string
-      IdempotencyKeyHeader:
-        name: idempotency-key
-        in: header
-        description: Deduplicates multiple requests
-        schema:
-          type: string
-      RequestIdHeader:
-        name: request-id
-        in: header
-        description: Unique ID for each request
-        schema:
-          type: string
-  securitySchemes:
-    PromiseSecuritySchemes:
-      $ref: ./promises-openapi.yml#/components/securitySchemes
-    TaskSecuritySchemes:
-      $ref: ./tasks-openapi.yml#/components/securitySchemes
-    LockSecuritySchemes:
-      $ref: ./locks-openapi.yml#/components/securitySchemes
-    ScheduleSecuritySchemes:
-      $ref: ./schedules-openapi.yml#/components/securitySchemes

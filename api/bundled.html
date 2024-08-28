@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf8" />
+  <title>Combined API</title>
+  <!-- needed for adaptive design -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      padding: 0;
+      margin: 0;
+    }
+  </style>
+  <script src="https://cdn.redoc.ly/redoc/v2.1.5/bundles/redoc.standalone.js"></script><style data-styled="true" data-styled-version="6.1.12">.htdgPt{width:calc(100% - 40%);padding:0 40px;}/*!sc*/
+@media print,screen and (max-width: 75rem){.htdgPt{width:100%;padding:40px 40px;}}/*!sc*/
+data-styled.g4[id="sc-fQpRED"]{content:"htdgPt,"}/*!sc*/
+.diwyyM{padding:40px 0;}/*!sc*/
+.diwyyM:last-child{min-height:calc(100vh + 1px);}/*!sc*/
+.diwyyM>.diwyyM:last-child{min-height:initial;}/*!sc*/
+@media print,screen and (max-width: 75rem){.diwyyM{padding:0;}}/*!sc*/
+data-styled.g5[id="sc-dsLQwm"]{content:"diwyyM,"}/*!sc*/
+.dSIRVR{display:flex;width:100%;padding:0;}/*!sc*/
+@media print,screen and (max-width: 75rem){.dSIRVR{flex-direction:column;}}/*!sc*/
+data-styled.g8[id="sc-la-DxNn"]{content:"dSIRVR,"}/*!sc*/
+.gfRsnu{font-family:Montserrat,sans-serif;font-weight:400;font-size:1.85714em;line-height:1.6em;color:#333333;}/*!sc*/
+data-styled.g9[id="sc-iCZwEW"]{content:"gfRsnu,"}/*!sc*/
+.fwfkcU code[class*='language-'],.fwfkcU pre[class*='language-']{text-shadow:0 -0.1em 0.2em black;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.5;-moz-tab-size:4;-o-tab-size:4;tab-size:4;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none;}/*!sc*/
+@media print{.fwfkcU code[class*='language-'],.fwfkcU pre[class*='language-']{text-shadow:none;}}/*!sc*/
+.fwfkcU pre[class*='language-']{padding:1em;margin:0.5em 0;overflow:auto;}/*!sc*/
+.fwfkcU .token.comment,.fwfkcU .token.prolog,.fwfkcU .token.doctype,.fwfkcU .token.cdata{color:hsl(30, 20%, 50%);}/*!sc*/
+.fwfkcU .token.punctuation{opacity:0.7;}/*!sc*/
+.fwfkcU .namespace{opacity:0.7;}/*!sc*/
+.fwfkcU .token.property,.fwfkcU .token.tag,.fwfkcU .token.number,.fwfkcU .token.constant,.fwfkcU .token.symbol{color:#4a8bb3;}/*!sc*/
+.fwfkcU .token.boolean{color:#e64441;}/*!sc*/
+.fwfkcU .token.selector,.fwfkcU .token.attr-name,.fwfkcU .token.string,.fwfkcU .token.char,.fwfkcU .token.builtin,.fwfkcU .token.inserted{color:#a0fbaa;}/*!sc*/
+.fwfkcU .token.selector+a,.fwfkcU .token.attr-name+a,.fwfkcU .token.string+a,.fwfkcU .token.char+a,.fwfkcU .token.builtin+a,.fwfkcU .token.inserted+a,.fwfkcU .token.selector+a:visited,.fwfkcU .token.attr-name+a:visited,.fwfkcU .token.string+a:visited,.fwfkcU .token.char+a:visited,.fwfkcU .token.builtin+a:visited,.fwfkcU .token.inserted+a:visited{color:#4ed2ba;text-decoration:underline;}/*!sc*/
+.fwfkcU .token.property.string{color:white;}/*!sc*/
+.fwfkcU .token.operator,.fwfkcU .token.entity,.fwfkcU .token.url,.fwfkcU .token.variable{color:hsl(40, 90%, 60%);}/*!sc*/
+.fwfkcU .token.atrule,.fwfkcU .token.attr-value,.fwfkcU .token.keyword{color:hsl(350, 40%, 70%);}/*!sc*/
+.fwfkcU .token.regex,.fwfkcU .token.important{color:#e90;}/*!sc*/
+.fwfkcU .token.important,.fwfkcU .token.bold{font-weight:bold;}/*!sc*/
+.fwfkcU .token.italic{font-style:italic;}/*!sc*/
+.fwfkcU .token.entity{cursor:help;}/*!sc*/
+.fwfkcU .token.deleted{color:red;}/*!sc*/
+data-styled.g32[id="sc-euGpHm"]{content:"fwfkcU,"}/*!sc*/
+.bWVgjU{position:relative;}/*!sc*/
+data-styled.g37[id="sc-dJDBYC"]{content:"bWVgjU,"}/*!sc*/
+.kqJXdD{font-family:Roboto,sans-serif;font-weight:400;line-height:1.5em;}/*!sc*/
+.kqJXdD p:last-child{margin-bottom:0;}/*!sc*/
+.kqJXdD h1{font-family:Montserrat,sans-serif;font-weight:400;font-size:1.85714em;line-height:1.6em;color:#32329f;margin-top:0;}/*!sc*/
+.kqJXdD h2{font-family:Montserrat,sans-serif;font-weight:400;font-size:1.57143em;line-height:1.6em;color:#333333;}/*!sc*/
+.kqJXdD code{color:#e53935;background-color:rgba(38, 50, 56, 0.05);font-family:Courier,monospace;border-radius:2px;border:1px solid rgba(38, 50, 56, 0.1);padding:0 5px;font-size:13px;font-weight:400;word-break:break-word;}/*!sc*/
+.kqJXdD pre{font-family:Courier,monospace;white-space:pre;background-color:#11171a;color:white;padding:20px;overflow-x:auto;line-height:normal;border-radius:0;border:1px solid rgba(38, 50, 56, 0.1);}/*!sc*/
+.kqJXdD pre code{background-color:transparent;color:white;padding:0;}/*!sc*/
+.kqJXdD pre code:before,.kqJXdD pre code:after{content:none;}/*!sc*/
+.kqJXdD blockquote{margin:0;margin-bottom:1em;padding:0 15px;color:#777;border-left:4px solid #ddd;}/*!sc*/
+.kqJXdD img{max-width:100%;box-sizing:content-box;}/*!sc*/
+.kqJXdD ul,.kqJXdD ol{padding-left:2em;margin:0;margin-bottom:1em;}/*!sc*/
+.kqJXdD ul ul,.kqJXdD ol ul,.kqJXdD ul ol,.kqJXdD ol ol{margin-bottom:0;margin-top:0;}/*!sc*/
+.kqJXdD table{display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all;border-collapse:collapse;border-spacing:0;margin-top:1.5em;margin-bottom:1.5em;}/*!sc*/
+.kqJXdD table tr{background-color:#fff;border-top:1px solid #ccc;}/*!sc*/
+.kqJXdD table tr:nth-child(2n){background-color:#fafafa;}/*!sc*/
+.kqJXdD table th,.kqJXdD table td{padding:6px 13px;border:1px solid #ddd;}/*!sc*/
+.kqJXdD table th{text-align:left;font-weight:bold;}/*!sc*/
+.kqJXdD .share-link{cursor:pointer;margin-left:-20px;padding:0;line-height:1;width:20px;display:inline-block;outline:0;}/*!sc*/
+.kqJXdD .share-link:before{content:'';width:15px;height:15px;background-size:contain;background-image:url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgeD0iMCIgeT0iMCIgd2lkdGg9IjUxMiIgaGVpZ2h0PSI1MTIiIHZpZXdCb3g9IjAgMCA1MTIgNTEyIiBlbmFibGUtYmFja2dyb3VuZD0ibmV3IDAgMCA1MTIgNTEyIiB4bWw6c3BhY2U9InByZXNlcnZlIj48cGF0aCBmaWxsPSIjMDEwMTAxIiBkPSJNNDU5LjcgMjMzLjRsLTkwLjUgOTAuNWMtNTAgNTAtMTMxIDUwLTE4MSAwIC03LjktNy44LTE0LTE2LjctMTkuNC0yNS44bDQyLjEtNDIuMWMyLTIgNC41LTMuMiA2LjgtNC41IDIuOSA5LjkgOCAxOS4zIDE1LjggMjcuMiAyNSAyNSA2NS42IDI0LjkgOTAuNSAwbDkwLjUtOTAuNWMyNS0yNSAyNS02NS42IDAtOTAuNSAtMjQuOS0yNS02NS41LTI1LTkwLjUgMGwtMzIuMiAzMi4yYy0yNi4xLTEwLjItNTQuMi0xMi45LTgxLjYtOC45bDY4LjYtNjguNmM1MC01MCAxMzEtNTAgMTgxIDBDNTA5LjYgMTAyLjMgNTA5LjYgMTgzLjQgNDU5LjcgMjMzLjR6TTIyMC4zIDM4Mi4ybC0zMi4yIDMyLjJjLTI1IDI0LjktNjUuNiAyNC45LTkwLjUgMCAtMjUtMjUtMjUtNjUuNiAwLTkwLjVsOTAuNS05MC41YzI1LTI1IDY1LjUtMjUgOTAuNSAwIDcuOCA3LjggMTIuOSAxNy4yIDE1LjggMjcuMSAyLjQtMS40IDQuOC0yLjUgNi44LTQuNWw0Mi4xLTQyYy01LjQtOS4yLTExLjYtMTgtMTkuNC0yNS44IC01MC01MC0xMzEtNTAtMTgxIDBsLTkwLjUgOTAuNWMtNTAgNTAtNTAgMTMxIDAgMTgxIDUwIDUwIDEzMSA1MCAxODEgMGw2OC42LTY4LjZDMjc0LjYgMzk1LjEgMjQ2LjQgMzkyLjMgMjIwLjMgMzgyLjJ6Ii8+PC9zdmc+Cg==');opacity:0.5;visibility:hidden;display:inline-block;vertical-align:middle;}/*!sc*/
+.kqJXdD h1:hover>.share-link::before,.kqJXdD h2:hover>.share-link::before,.kqJXdD .share-link:hover::before{visibility:visible;}/*!sc*/
+.kqJXdD a{text-decoration:auto;color:#32329f;}/*!sc*/
+.kqJXdD a:visited{color:#32329f;}/*!sc*/
+.kqJXdD a:hover{color:#6868cf;text-decoration:auto;}/*!sc*/
+data-styled.g42[id="sc-exayXG"]{content:"kqJXdD,"}/*!sc*/
+.edbYXQ{margin-top:0;margin-bottom:0.5em;}/*!sc*/
+data-styled.g91[id="sc-gjHHYa"]{content:"edbYXQ,"}/*!sc*/
+.cwcfQE{border:1px solid #32329f;color:#32329f;font-weight:normal;margin-left:0.5em;padding:4px 8px 4px;display:inline-block;text-decoration:none;cursor:pointer;}/*!sc*/
+data-styled.g92[id="sc-kyZTxD"]{content:"cwcfQE,"}/*!sc*/
+.hrVgqq::before{content:'|';display:inline-block;opacity:0.5;width:15px;text-align:center;}/*!sc*/
+.hrVgqq:last-child::after{display:none;}/*!sc*/
+data-styled.g93[id="sc-ggPNws"]{content:"hrVgqq,"}/*!sc*/
+.dgGfLY{overflow:hidden;}/*!sc*/
+data-styled.g94[id="sc-kwhYVV"]{content:"dgGfLY,"}/*!sc*/
+.kqOgwj{display:flex;flex-wrap:wrap;margin-left:-15px;}/*!sc*/
+data-styled.g95[id="sc-fyEUpq"]{content:"kqOgwj,"}/*!sc*/
+.hYtPsf{margin:0;padding:0;}/*!sc*/
+.hYtPsf:first-child{padding-bottom:32px;}/*!sc*/
+.sc-iMDhdf .sc-iMDhdf{font-size:0.929em;}/*!sc*/
+data-styled.g100[id="sc-iMDhdf"]{content:"hYtPsf,"}/*!sc*/
+.iljewH{font-size:0.8em;margin-top:10px;text-align:center;position:fixed;width:260px;bottom:0;background:#fafafa;}/*!sc*/
+.iljewH a,.iljewH a:visited,.iljewH a:hover{color:#333333!important;padding:5px 0;border-top:1px solid #e1e1e1;text-decoration:none;display:flex;align-items:center;justify-content:center;}/*!sc*/
+.iljewH img{width:15px;margin-right:5px;}/*!sc*/
+@media screen and (max-width: 50rem){.iljewH{width:100%;}}/*!sc*/
+data-styled.g104[id="sc-gkavYR"]{content:"iljewH,"}/*!sc*/
+.jQQbBk{user-select:none;width:20px;height:20px;align-self:center;display:flex;flex-direction:column;color:#32329f;}/*!sc*/
+data-styled.g129[id="sc-bQEQyQ"]{content:"jQQbBk,"}/*!sc*/
+.ktzGvn{width:260px;background-color:#fafafa;overflow:hidden;display:flex;flex-direction:column;backface-visibility:hidden;height:100vh;position:sticky;position:-webkit-sticky;top:0;}/*!sc*/
+@media screen and (max-width: 50rem){.ktzGvn{position:fixed;z-index:20;width:100%;background:#fafafa;display:none;}}/*!sc*/
+@media print{.ktzGvn{display:none;}}/*!sc*/
+data-styled.g130[id="sc-dUMaFF"]{content:"ktzGvn,"}/*!sc*/
+.kEKeWg{outline:none;user-select:none;background-color:#f2f2f2;color:#32329f;display:none;cursor:pointer;position:fixed;right:20px;z-index:100;border-radius:50%;box-shadow:0 0 20px rgba(0, 0, 0, 0.3);bottom:44px;width:60px;height:60px;padding:0 20px;}/*!sc*/
+@media screen and (max-width: 50rem){.kEKeWg{display:flex;}}/*!sc*/
+.kEKeWg svg{color:#0065FB;}/*!sc*/
+@media print{.kEKeWg{display:none;}}/*!sc*/
+data-styled.g131[id="sc-elEJnV"]{content:"kEKeWg,"}/*!sc*/
+.fabhKa{font-family:Roboto,sans-serif;font-size:14px;font-weight:400;line-height:1.5em;color:#333333;display:flex;position:relative;text-align:left;-webkit-font-smoothing:antialiased;font-smoothing:antialiased;text-rendering:optimizeSpeed!important;tap-highlight-color:rgba(0, 0, 0, 0);text-size-adjust:100%;}/*!sc*/
+.fabhKa *{box-sizing:border-box;-webkit-tap-highlight-color:rgba(255, 255, 255, 0);}/*!sc*/
+data-styled.g132[id="sc-ixtKjU"]{content:"fabhKa,"}/*!sc*/
+.laenHu{z-index:1;position:relative;overflow:hidden;width:calc(100% - 260px);contain:layout;}/*!sc*/
+@media print,screen and (max-width: 50rem){.laenHu{width:100%;}}/*!sc*/
+data-styled.g133[id="sc-dKGrn"]{content:"laenHu,"}/*!sc*/
+.bWkBKa{background:#263238;position:absolute;top:0;bottom:0;right:0;width:calc((100% - 260px) * 0.4);}/*!sc*/
+@media print,screen and (max-width: 75rem){.bWkBKa{display:none;}}/*!sc*/
+data-styled.g134[id="sc-epzHnm"]{content:"bWkBKa,"}/*!sc*/
+.dcjLWY{padding:5px 0;}/*!sc*/
+data-styled.g135[id="sc-dovzVR"]{content:"dcjLWY,"}/*!sc*/
+.dlxCDf{width:calc(100% - 40px);box-sizing:border-box;margin:0 20px;padding:5px 10px 5px 20px;border:0;border-bottom:1px solid #e1e1e1;font-family:Roboto,sans-serif;font-weight:bold;font-size:13px;color:#333333;background-color:transparent;outline:none;}/*!sc*/
+data-styled.g136[id="sc-hAkARQ"]{content:"dlxCDf,"}/*!sc*/
+.fBvPoH{position:absolute;left:20px;height:1.8em;width:0.9em;}/*!sc*/
+.fBvPoH path{fill:#333333;}/*!sc*/
+data-styled.g137[id="sc-kvXgyf"]{content:"fBvPoH,"}/*!sc*/
+</style>
+  <link href="https://fonts.googleapis.com/css?family=Montserrat:300,400,700|Roboto:300,400,700" rel="stylesheet">
+</head>
+
+<body>
+  
+      <div id="redoc"><div class="sc-ixtKjU fabhKa redoc-wrap"><div class="sc-dUMaFF ktzGvn menu-content" style="top:0px;height:calc(100vh - 0px)"><div role="search" class="sc-dovzVR dcjLWY"><svg class="sc-kvXgyf fBvPoH search-icon" version="1.1" viewBox="0 0 1000 1000" x="0px" xmlns="http://www.w3.org/2000/svg" y="0px"><path d="M968.2,849.4L667.3,549c83.9-136.5,66.7-317.4-51.7-435.6C477.1-25,252.5-25,113.9,113.4c-138.5,138.3-138.5,362.6,0,501C219.2,730.1,413.2,743,547.6,666.5l301.9,301.4c43.6,43.6,76.9,14.9,104.2-12.4C981,928.3,1011.8,893,968.2,849.4z M524.5,522c-88.9,88.7-233,88.7-321.8,0c-88.9-88.7-88.9-232.6,0-321.3c88.9-88.7,233-88.7,321.8,0C613.4,289.4,613.4,433.3,524.5,522z"></path></svg><input placeholder="Search..." aria-label="Search" type="text" class="sc-hAkARQ dlxCDf search-input" value=""/></div><div class="sc-dJDBYC bWVgjU scrollbar-container undefined"><ul role="menu" class="sc-iMDhdf hYtPsf"></ul><div class="sc-gkavYR iljewH"><a target="_blank" rel="noopener noreferrer" href="https://redocly.com/redoc/">API docs by Redocly</a></div></div></div><div class="sc-elEJnV kEKeWg"><div class="sc-bQEQyQ jQQbBk"><svg class="" style="transform:translate(2px, -4px) rotate(180deg);transition:transform 0.2s ease" viewBox="0 0 926.23699 573.74994" version="1.1" x="0px" y="0px" width="15" height="15"><g transform="translate(904.92214,-879.1482)"><path d="
+          m -673.67664,1221.6502 -231.2455,-231.24803 55.6165,
+          -55.627 c 30.5891,-30.59485 56.1806,-55.627 56.8701,-55.627 0.6894,
+          0 79.8637,78.60862 175.9427,174.68583 l 174.6892,174.6858 174.6892,
+          -174.6858 c 96.079,-96.07721 175.253196,-174.68583 175.942696,
+          -174.68583 0.6895,0 26.281,25.03215 56.8701,
+          55.627 l 55.6165,55.627 -231.245496,231.24803 c -127.185,127.1864
+          -231.5279,231.248 -231.873,231.248 -0.3451,0 -104.688,
+          -104.0616 -231.873,-231.248 z
+        " fill="currentColor"></path></g></svg><svg class="" style="transform:translate(2px, 4px);transition:transform 0.2s ease" viewBox="0 0 926.23699 573.74994" version="1.1" x="0px" y="0px" width="15" height="15"><g transform="translate(904.92214,-879.1482)"><path d="
+          m -673.67664,1221.6502 -231.2455,-231.24803 55.6165,
+          -55.627 c 30.5891,-30.59485 56.1806,-55.627 56.8701,-55.627 0.6894,
+          0 79.8637,78.60862 175.9427,174.68583 l 174.6892,174.6858 174.6892,
+          -174.6858 c 96.079,-96.07721 175.253196,-174.68583 175.942696,
+          -174.68583 0.6895,0 26.281,25.03215 56.8701,
+          55.627 l 55.6165,55.627 -231.245496,231.24803 c -127.185,127.1864
+          -231.5279,231.248 -231.873,231.248 -0.3451,0 -104.688,
+          -104.0616 -231.873,-231.248 z
+        " fill="currentColor"></path></g></svg></div></div><div class="sc-dKGrn laenHu api-content"><div class="sc-dsLQwm diwyyM"><div class="sc-la-DxNn dSIRVR"><div class="sc-fQpRED htdgPt api-info"><h1 class="sc-iCZwEW sc-gjHHYa gfRsnu edbYXQ">Combined API<!-- --> <span>(<!-- -->1.0.0<!-- -->)</span></h1><p>Download OpenAPI specification<!-- -->:<a download="openapi.json" target="_blank" class="sc-kyZTxD cwcfQE">Download</a></p><div class="sc-euGpHm sc-exayXG fwfkcU kqJXdD"><div class="sc-kwhYVV dgGfLY"><div class="sc-fyEUpq kqOgwj"> <!-- --> <span class="sc-ggPNws hrVgqq">License:<!-- --> <a href="https://opensource.org/licenses/MIT">MIT</a></span> </div></div></div><div data-role="redoc-summary" html="" class="sc-euGpHm sc-exayXG fwfkcU kqJXdD"></div><div data-role="redoc-description" html="&lt;p&gt;API documentation for Promises, Tasks, Locks, and Schedules.&lt;/p&gt;
+" class="sc-euGpHm sc-exayXG fwfkcU kqJXdD"><p>API documentation for Promises, Tasks, Locks, and Schedules.</p>
+</div></div></div></div></div><div class="sc-epzHnm bWkBKa"></div></div></div>
+      <script>
+      const __redoc_state = {"menu":{"activeItemIdx":-1},"spec":{"data":{"openapi":"3.0.0","info":{"title":"Combined API","description":"API documentation for Promises, Tasks, Locks, and Schedules.","version":"1.0.0","license":{"name":"MIT","url":"https://opensource.org/licenses/MIT"}},"servers":[{"url":"https://resonatehq.io","description":"Website"}],"security":[],"paths":{"/promises":{"/promises":{"post":{"tags":["Promises"],"summary":"Create a promise","operationId":"createPromise","parameters":[{"$ref":"#/components/parameters/RequestIdHeader"},{"$ref":"#/components/parameters/IdempotencyKeyHeader"},{"$ref":"#/components/parameters/StrictHeader"}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CreatePromiseReq"}}}},"responses":{"200":{"description":"Operation deduplicated, Promise fetched successfully","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Promise"}}}},"201":{"description":"Created","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Promise"}}}},"400":{"description":"Invalid request"},"403":{"description":"Forbidden request"},"409":{"description":"Promise already exists"}}},"get":{"tags":["Promises"],"summary":"Search promises","operationId":"searchPromises","parameters":[{"$ref":"#/components/parameters/RequestIdHeader"},{"name":"id","in":"query","description":"Search promises for matching IDs, can include wildcards.\n\nFor example:\n- \"foo/*\" matches all IDs starting with \"foo/\"\n- \"*/bar\" matches all IDs starting with \"bar/\"\n- \"foo/*/bar\" matches all IDs starting with \"foo/\" and ending with \"/bar\"\n","schema":{"type":"string"}},{"name":"state","in":"query","description":"Search promises for matching states","schema":{"type":"string","enum":["pending","resolved","rejected"]}},{"name":"tags","in":"query","style":"deepObject","explode":true,"schema":{"type":"object","additionalProperties":{"type":"string"}}},{"name":"limit","in":"query","description":"Number of results","schema":{"type":"integer"}},{"name":"cursor","in":"query","description":"Cursor for pagination","schema":{"type":"string"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/SearchPromisesResp"}}}},"400":{"description":"Invalid request"}}}},"/promises/{id}":{"get":{"tags":["Promises"],"summary":"Get a promise","operationId":"getPromise","parameters":[{"$ref":"#/components/parameters/IdPath"},{"$ref":"#/components/parameters/RequestIdHeader"}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Promise"}}}},"400":{"description":"Invalid request"},"404":{"description":"Promise not found"}}},"patch":{"tags":["Promises"],"summary":"Complete a promise","parameters":[{"$ref":"#/components/parameters/IdPath"},{"$ref":"#/components/parameters/RequestIdHeader"},{"$ref":"#/components/parameters/IdempotencyKeyHeader"},{"$ref":"#/components/parameters/StrictHeader"}],"requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompletePromiseReq"}}}},"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Promise"}}}},"400":{"description":"Invalid request"},"403":{"description":"Forbidden request"},"404":{"description":"Promise not found"}}}}},"/tasks":{"/tasks/claim":{"post":{"tags":["Tasks"],"summary":"Claim a task","operationId":"claimTask","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ClaimTaskReq"}}}},"responses":{"200":{"description":"successful operation","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Promise"}}}},"409":{"description":"Task already claimed"}}}},"/tasks/complete":{"post":{"tags":["Tasks"],"summary":"Complete a task","operationId":"completeTask","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/CompleteTaskReq"}}}},"responses":{"200":{"description":"successful operation"},"409":{"description":"Task already completed"}}}}},"/locks":{"/locks/acquire":{"post":{"summary":"Acquire lock","description":"Acquire a distributed lock","operationId":"acquireLock","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Lock"}}},"required":true},"responses":{"200":{"description":"successful operation","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Lock"}}}}}}},"/locks/heartbeat":{"post":{"summary":"heartbeat","description":"update heartbeat for all locks that match the processId","operationId":"heartbeat","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/HeartbeatRequest"}}},"required":true},"responses":{"200":{"description":"successful operation","content":{"application/json":{"schema":{"$ref":"#/components/schemas/HeartbeatResponse"}}}}}}},"/locks/release":{"post":{"summary":"Release lock","description":"Release a distributed lock","operationId":"releaseLock","requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/ReleaseLockRequest"}}},"required":true},"responses":{"200":{"description":"successful operation"}}}}},"/schedules":{"/schedules":{"post":{"tags":["Schedules"],"summary":"Create a new schedule","operationId":"createSchedule","parameters":[{"$ref":"#/components/parameters/RequestIdHeader"},{"$ref":"#/components/parameters/IdempotencyKeyHeader"}],"requestBody":{"content":{"application/json":{"schema":{"$ref":"#/components/schemas/Schedule"}}},"required":true},"responses":{"200":{"description":"Operation deduplicated, Schedule fetched successfully","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Schedule"}}}},"201":{"description":"Created","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Schedule"}}}},"400":{"description":"Invalid request"},"403":{"description":"Forbidden request"},"409":{"description":"Schedule already exists"}}},"get":{"tags":["Schedules"],"summary":"Search schedules","operationId":"searchSchedules","parameters":[{"$ref":"#/components/parameters/RequestIdHeader"},{"name":"id","in":"query","description":"Search schedules for matching IDs, can include wildcards.\n\nFor example:\n- \"foo/*\" matches all IDs starting with \"foo/\"\n- \"*/bar\" matches all IDs starting with \"bar/\"\n- \"foo/*/bar\" matches all IDs starting with \"foo/\" and ending with \"/bar\"\n","schema":{"type":"string"}},{"name":"tags","in":"query","style":"deepObject","explode":true,"schema":{"type":"object","additionalProperties":{"type":"string"}}},{"name":"limit","in":"query","description":"Number of results","schema":{"type":"integer"}},{"name":"cursor","in":"query","description":"Cursor for pagination","schema":{"type":"string"}}],"responses":{"200":{"description":"OK","content":{"application/json":{"schema":{"$ref":"#/components/schemas/SearchSchedulesResp"}}}},"400":{"description":"Invalid request"}}}},"/schedules/{id}":{"get":{"tags":["Schedules"],"summary":"Get a schedule","operationId":"getSchedule","parameters":[{"$ref":"#/components/parameters/IdPath"},{"$ref":"#/components/parameters/RequestIdHeader"}],"responses":{"200":{"description":"Successfully retrieved the schedule","content":{"application/json":{"schema":{"$ref":"#/components/schemas/Schedule"}}}},"404":{"description":"Schedule not found"}}},"delete":{"tags":["Schedules"],"summary":"Delete a schedule","operationId":"deleteSchedule","parameters":[{"$ref":"#/components/parameters/IdPath"},{"$ref":"#/components/parameters/RequestIdHeader"}],"responses":{"204":{"description":"Successfully deleted the schedule"},"404":{"description":"Schedule not found"}}}}}},"components":{"parameters":{"PromiseParameters":{"$ref":"#/components/parameters/parameters"},"ScheduleParameters":{"$ref":"#/components/parameters/components-parameters"},"parameters":{"IdPath":{"name":"id","in":"path","required":true,"description":"The promise ID","schema":{"type":"string"}},"IdempotencyKeyHeader":{"name":"idempotency-key","in":"header","description":"Deduplicates multiple requests","schema":{"type":"string"}},"StrictHeader":{"name":"strict","in":"header","description":"If true, deduplicates only when promise state matches the request","schema":{"type":"boolean"}},"RequestIdHeader":{"name":"request-id","in":"header","description":"Unique ID for each request","schema":{"type":"string"}}},"components-parameters":{"IdPath":{"name":"id","in":"path","required":true,"description":"The schedule ID","schema":{"type":"string"}},"IdempotencyKeyHeader":{"name":"idempotency-key","in":"header","description":"Deduplicates multiple requests","schema":{"type":"string"}},"RequestIdHeader":{"name":"request-id","in":"header","description":"Unique ID for each request","schema":{"type":"string"}}}},"schemas":{"PromiseSchema":{"$ref":"#/components/schemas/schemas"},"ScheduleSchema":{"$ref":"#/components/schemas/components-schemas"},"LockSchema":{"$ref":"#/components/schemas/locks-openapi_components-schemas"},"TaskSchema":{"$ref":"#/components/schemas/tasks-openapi_components-schemas"},"schemas":{"Promise":{"type":"object","required":["id","state","timeout","param","value","tags"],"properties":{"id":{"type":"string"},"state":{"$ref":"#/components/schemas/PromiseState"},"param":{"$ref":"#/components/schemas/PromiseValue"},"value":{"$ref":"#/components/schemas/PromiseValue"},"timeout":{"type":"integer","format":"int64"},"idempotencyKeyForCreate":{"type":"string","readOnly":true},"idempotencyKeyForComplete":{"type":"string","readOnly":true},"tags":{"type":"object","additionalProperties":{"type":"string"}},"createdOn":{"type":"integer","readOnly":true},"completedOn":{"type":"integer","readOnly":true}}},"PromiseState":{"type":"string","enum":["PENDING","RESOLVED","REJECTED","REJECTED_CANCELED","REJECTED_TIMEDOUT"]},"PromiseStateComplete":{"type":"string","enum":["RESOLVED","REJECTED","REJECTED_CANCELED"]},"PromiseValue":{"type":"object","required":["headers"],"properties":{"headers":{"type":"object","additionalProperties":{"type":"string"}},"data":{"type":"string"}}},"CreatePromiseReq":{"type":"object","required":["id","timeout"],"properties":{"id":{"type":"string"},"timeout":{"type":"integer","format":"int64"},"param":{"$ref":"#/components/schemas/PromiseValue"},"tags":{"type":"object","additionalProperties":{"type":"string"}}}},"CompletePromiseReq":{"type":"object","required":["state"],"properties":{"state":{"$ref":"#/components/schemas/PromiseStateComplete"},"value":{"$ref":"#/components/schemas/PromiseValue"}}},"SearchPromisesResp":{"type":"object","properties":{"cursor":{"type":"string"},"promises":{"type":"array","items":{"$ref":"#/components/schemas/Promise"}}}}},"components-schemas":{"Schedule":{"type":"object","required":["id","cron","promiseId","promiseTimeout"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"cron":{"type":"string"},"tags":{"type":"object","additionalProperties":{"type":"string"}},"promiseId":{"type":"string"},"promiseTimeout":{"type":"integer","format":"int64"},"promiseParam":{"$ref":"#/components/schemas/PromiseValue"},"promiseTags":{"type":"object","additionalProperties":{"type":"string"}},"lastRunTime":{"type":"integer","readOnly":true,"format":"int64"},"nextRunTime":{"type":"integer","readOnly":true,"format":"int64"},"idempotencyKey":{"type":"string","readOnly":true},"createdOn":{"type":"integer","readOnly":true,"format":"int64"}}},"PromiseValue":{"type":"object","required":["headers"],"properties":{"data":{"type":"string"},"headers":{"type":"object","additionalProperties":{"type":"string"}}}},"SearchSchedulesResp":{"type":"object","properties":{"cursor":{"type":"string"},"schedules":{"type":"array","items":{"$ref":"#/components/schemas/Schedule"}}}}},"locks-openapi_components-schemas":{"Lock":{"type":"object","properties":{"resourceId":{"type":"string"},"processId":{"type":"string"},"executionId":{"type":"string"},"expiryInSeconds":{"type":"integer","format":"int64"},"expiresAt":{"type":"integer","format":"int64","readOnly":true}},"required":["resourceId","processId","executionId","expiryInSeconds"]},"HeartbeatRequest":{"type":"object","properties":{"processId":{"type":"string"}},"required":["processId"]},"HeartbeatResponse":{"type":"object","properties":{"locksAffected":{"type":"integer","format":"int64"}}},"ReleaseLockRequest":{"type":"object","properties":{"resourceId":{"type":"string"},"executionId":{"type":"string"}},"required":["resourceId","executionId"]}},"tasks-openapi_components-schemas":{"Promise":{"type":"object","required":["id","state","timeout","param","value","tags"],"properties":{"id":{"type":"string"},"state":{"$ref":"#/components/schemas/PromiseState"},"param":{"$ref":"#/components/schemas/PromiseValue"},"value":{"$ref":"#/components/schemas/PromiseValue"},"timeout":{"type":"integer","format":"int64"},"idempotencyKeyForCreate":{"type":"string","readOnly":true},"idempotencyKeyForComplete":{"type":"string","readOnly":true},"tags":{"type":"object","additionalProperties":{"type":"string"}},"createdOn":{"type":"integer","readOnly":true},"completedOn":{"type":"integer","readOnly":true}}},"PromiseState":{"type":"string","enum":["PENDING","RESOLVED","REJECTED","REJECTED_CANCELED","REJECTED_TIMEDOUT"]},"PromiseStateComplete":{"type":"string","enum":["RESOLVED","REJECTED"]},"PromiseValue":{"type":"object","required":["headers"],"properties":{"headers":{"type":"object","additionalProperties":{"type":"string"}},"data":{"type":"string"}}},"ClaimTaskReq":{"type":"object","properties":{"taskId":{"type":"string","description":"The ID of the task to claim"},"counter":{"type":"integer","description":"The counter of the task to claim"},"processId":{"type":"string"},"executionId":{"type":"string"},"expiryInMilliseconds":{"type":"integer","format":"int64"}},"required":["taskId","counter","processId","executionId","expiryInMilliseconds"]},"CompleteTaskReq":{"type":"object","properties":{"taskId":{"type":"string","description":"The ID of the task to complete"},"counter":{"type":"integer","description":"The counter of the task to claim"},"executionId":{"type":"string"},"state":{"$ref":"#/components/schemas/PromiseStateComplete"},"value":{"$ref":"#/components/schemas/PromiseValue"}},"required":["taskId","counter","executionId","state","value"]}}}}}},"searchIndex":{"store":[],"index":{"version":"2.3.9","fields":["title","description"],"fieldVectors":[],"invertedIndex":[],"pipeline":[]}},"options":{}};
+
+      var container = document.getElementById('redoc');
+      Redoc.hydrate(__redoc_state, container);
+
+      </script>
+</body>
+
+</html>

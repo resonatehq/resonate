@@ -8,7 +8,7 @@ paths:
       tags:
         - Schedules
       summary: Create a new schedule
-      operationdId: createSchedule
+      operationId: createSchedule
       parameters:
         - $ref: "#/components/parameters/RequestIdHeader"
         - $ref: "#/components/parameters/IdempotencyKeyHeader"
@@ -88,7 +88,7 @@ paths:
       tags:
         - Schedules
       summary: Get a schedule
-      operationdId: getSchedule
+      operationId: getSchedule
       parameters:
         - $ref: "#/components/parameters/IdPath"
         - $ref: "#/components/parameters/RequestIdHeader"
@@ -106,7 +106,7 @@ paths:
       tags:
         - Schedules
       summary: Delete a schedule
-      operationdId: deleteSchedule
+      operationId: deleteSchedule
       parameters:
         - $ref: "#/components/parameters/IdPath"
         - $ref: "#/components/parameters/RequestIdHeader"
