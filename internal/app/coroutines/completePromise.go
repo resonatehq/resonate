@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -109,7 +110,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				},
 			}
 		} else {
-			status := t_api.ForbiddenStatus(p.State)
+			status := alreadyCompletedStatus(p.State)
 			strict := r.CompletePromise.Strict && p.State != r.CompletePromise.State
 			timeout := !r.CompletePromise.Strict && p.State == promise.Timedout
 
@@ -199,5 +200,22 @@ func completePromise(completedOn int64, r *t_api.Request) gocoro.CoroutineFunc[*
 		util.Assert(completion.Store.Results[1].CreateTasks.RowsAffected == completion.Store.Results[2].DeleteCallbacks.RowsAffected, "created rows must equal deleted rows")
 
 		return completion.Store.Results[0].UpdatePromise.RowsAffected == 1, nil
+	}
+}
+
+// Helper functions
+
+func alreadyCompletedStatus(state promise.State) t_api.ResponseStatus {
+	switch state {
+	case promise.Resolved:
+		return t_api.StatusPromiseAlreadyResolved
+	case promise.Rejected:
+		return t_api.StatusPromiseAlreadyRejected
+	case promise.Canceled:
+		return t_api.StatusPromiseAlreadyCanceled
+	case promise.Timedout:
+		return t_api.StatusPromiseAlreadyTimedout
+	default:
+		panic(fmt.Sprintf("invalid promise state: %s", state))
 	}
 }
