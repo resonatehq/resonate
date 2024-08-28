@@ -1,0 +1,739 @@
+openapi: 3.0.0
+info:
+  title: Combined API
+  description: API documentation for Promises, Tasks, Locks, and Schedules.
+  version: 1.0.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: https://resonatehq.io
+    description: Website
+security: []
+paths:
+  /promises:
+    /promises:
+      post:
+        tags:
+          - Promises
+        summary: Create a promise
+        operationId: createPromise
+        parameters:
+          - $ref: '#/components/parameters/RequestIdHeader'
+          - $ref: '#/components/parameters/IdempotencyKeyHeader'
+          - $ref: '#/components/parameters/StrictHeader'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatePromiseReq'
+        responses:
+          '200':
+            description: Operation deduplicated, Promise fetched successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Promise'
+          '201':
+            description: Created
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Promise'
+          '400':
+            description: Invalid request
+          '403':
+            description: Forbidden request
+          '409':
+            description: Promise already exists
+      get:
+        tags:
+          - Promises
+        summary: Search promises
+        operationId: searchPromises
+        parameters:
+          - $ref: '#/components/parameters/RequestIdHeader'
+          - name: id
+            in: query
+            description: |
+              Search promises for matching IDs, can include wildcards.
+
+              For example:
+              - "foo/*" matches all IDs starting with "foo/"
+              - "*/bar" matches all IDs starting with "bar/"
+              - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+            schema:
+              type: string
+          - name: state
+            in: query
+            description: Search promises for matching states
+            schema:
+              type: string
+              enum:
+                - pending
+                - resolved
+                - rejected
+          - name: tags
+            in: query
+            style: deepObject
+            explode: true
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+          - name: limit
+            in: query
+            description: Number of results
+            schema:
+              type: integer
+          - name: cursor
+            in: query
+            description: Cursor for pagination
+            schema:
+              type: string
+        responses:
+          '200':
+            description: OK
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/SearchPromisesResp'
+          '400':
+            description: Invalid request
+    /promises/{id}:
+      get:
+        tags:
+          - Promises
+        summary: Get a promise
+        operationId: getPromise
+        parameters:
+          - $ref: '#/components/parameters/IdPath'
+          - $ref: '#/components/parameters/RequestIdHeader'
+        responses:
+          '200':
+            description: OK
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Promise'
+          '400':
+            description: Invalid request
+          '404':
+            description: Promise not found
+      patch:
+        tags:
+          - Promises
+        summary: Complete a promise
+        parameters:
+          - $ref: '#/components/parameters/IdPath'
+          - $ref: '#/components/parameters/RequestIdHeader'
+          - $ref: '#/components/parameters/IdempotencyKeyHeader'
+          - $ref: '#/components/parameters/StrictHeader'
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompletePromiseReq'
+        responses:
+          '200':
+            description: OK
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Promise'
+          '400':
+            description: Invalid request
+          '403':
+            description: Forbidden request
+          '404':
+            description: Promise not found
+  /tasks:
+    /tasks/claim:
+      post:
+        tags:
+          - Tasks
+        summary: Claim a task
+        operationId: claimTask
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimTaskReq'
+        responses:
+          '200':
+            description: successful operation
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Promise'
+          '409':
+            description: Task already claimed
+    /tasks/complete:
+      post:
+        tags:
+          - Tasks
+        summary: Complete a task
+        operationId: completeTask
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteTaskReq'
+        responses:
+          '200':
+            description: successful operation
+          '409':
+            description: Task already completed
+  /locks:
+    /locks/acquire:
+      post:
+        summary: Acquire lock
+        description: Acquire a distributed lock
+        operationId: acquireLock
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lock'
+          required: true
+        responses:
+          '200':
+            description: successful operation
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Lock'
+    /locks/heartbeat:
+      post:
+        summary: heartbeat
+        description: update heartbeat for all locks that match the processId
+        operationId: heartbeat
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HeartbeatRequest'
+          required: true
+        responses:
+          '200':
+            description: successful operation
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/HeartbeatResponse'
+    /locks/release:
+      post:
+        summary: Release lock
+        description: Release a distributed lock
+        operationId: releaseLock
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleaseLockRequest'
+          required: true
+        responses:
+          '200':
+            description: successful operation
+  /schedules:
+    /schedules:
+      post:
+        tags:
+          - Schedules
+        summary: Create a new schedule
+        operationdId: createSchedule
+        parameters:
+          - $ref: '#/components/parameters/RequestIdHeader'
+          - $ref: '#/components/parameters/IdempotencyKeyHeader'
+        requestBody:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Schedule'
+          required: true
+        responses:
+          '200':
+            description: Operation deduplicated, Schedule fetched successfully
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Schedule'
+          '201':
+            description: Created
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Schedule'
+          '400':
+            description: Invalid request
+          '403':
+            description: Forbidden request
+          '409':
+            description: Schedule already exists
+      get:
+        tags:
+          - Schedules
+        summary: Search schedules
+        operationId: searchSchedules
+        parameters:
+          - $ref: '#/components/parameters/RequestIdHeader'
+          - name: id
+            in: query
+            description: |
+              Search schedules for matching IDs, can include wildcards.
+
+              For example:
+              - "foo/*" matches all IDs starting with "foo/"
+              - "*/bar" matches all IDs starting with "bar/"
+              - "foo/*/bar" matches all IDs starting with "foo/" and ending with "/bar"
+            schema:
+              type: string
+          - name: tags
+            in: query
+            style: deepObject
+            explode: true
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+          - name: limit
+            in: query
+            description: Number of results
+            schema:
+              type: integer
+          - name: cursor
+            in: query
+            description: Cursor for pagination
+            schema:
+              type: string
+        responses:
+          '200':
+            description: OK
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/SearchSchedulesResp'
+          '400':
+            description: Invalid request
+    /schedules/{id}:
+      get:
+        tags:
+          - Schedules
+        summary: Get a schedule
+        operationdId: getSchedule
+        parameters:
+          - $ref: '#/components/parameters/IdPath'
+          - $ref: '#/components/parameters/RequestIdHeader'
+        responses:
+          '200':
+            description: Successfully retrieved the schedule
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Schedule'
+          '404':
+            description: Schedule not found
+      delete:
+        tags:
+          - Schedules
+        summary: Delete a schedule
+        operationdId: deleteSchedule
+        parameters:
+          - $ref: '#/components/parameters/IdPath'
+          - $ref: '#/components/parameters/RequestIdHeader'
+        responses:
+          '204':
+            description: Successfully deleted the schedule
+          '404':
+            description: Schedule not found
+components:
+  schemas:
+    PromiseSchemas:
+      $ref: '#/components/schemas/schemas'
+    TaskSchemas:
+      $ref: '#/components/schemas/components-schemas'
+    LockSchemas:
+      $ref: '#/components/schemas/locks-openapi_components-schemas'
+    ScheduleSchemas:
+      $ref: '#/components/schemas/schedules-openapi_components-schemas'
+    schemas:
+      Promise:
+        type: object
+        required:
+          - id
+          - state
+          - timeout
+          - param
+          - value
+          - tags
+        properties:
+          id:
+            type: string
+          state:
+            $ref: '#/components/schemas/PromiseState'
+          param:
+            $ref: '#/components/schemas/PromiseValue'
+          value:
+            $ref: '#/components/schemas/PromiseValue'
+          timeout:
+            type: integer
+            format: int64
+          idempotencyKeyForCreate:
+            type: string
+            readOnly: true
+          idempotencyKeyForComplete:
+            type: string
+            readOnly: true
+          tags:
+            type: object
+            additionalProperties:
+              type: string
+          createdOn:
+            type: integer
+            readOnly: true
+          completedOn:
+            type: integer
+            readOnly: true
+      PromiseState:
+        type: string
+        enum:
+          - PENDING
+          - RESOLVED
+          - REJECTED
+          - REJECTED_CANCELED
+          - REJECTED_TIMEDOUT
+      PromiseStateComplete:
+        type: string
+        enum:
+          - RESOLVED
+          - REJECTED
+          - REJECTED_CANCELED
+      PromiseValue:
+        type: object
+        required:
+          - headers
+        properties:
+          headers:
+            type: object
+            additionalProperties:
+              type: string
+          data:
+            type: string
+      CreatePromiseReq:
+        type: object
+        required:
+          - id
+          - timeout
+        properties:
+          id:
+            type: string
+          timeout:
+            type: integer
+            format: int64
+          param:
+            $ref: '#/components/schemas/PromiseValue'
+          tags:
+            type: object
+            additionalProperties:
+              type: string
+      CompletePromiseReq:
+        type: object
+        required:
+          - state
+        properties:
+          state:
+            $ref: '#/components/schemas/PromiseStateComplete'
+          value:
+            $ref: '#/components/schemas/PromiseValue'
+      SearchPromisesResp:
+        type: object
+        properties:
+          cursor:
+            type: string
+          promises:
+            type: array
+            items:
+              $ref: '#/components/schemas/Promise'
+    components-schemas:
+      Promise:
+        type: object
+        required:
+          - id
+          - state
+          - timeout
+          - param
+          - value
+          - tags
+        properties:
+          id:
+            type: string
+          state:
+            $ref: '#/components/schemas/PromiseState'
+          param:
+            $ref: '#/components/schemas/PromiseValue'
+          value:
+            $ref: '#/components/schemas/PromiseValue'
+          timeout:
+            type: integer
+            format: int64
+          idempotencyKeyForCreate:
+            type: string
+            readOnly: true
+          idempotencyKeyForComplete:
+            type: string
+            readOnly: true
+          tags:
+            type: object
+            additionalProperties:
+              type: string
+          createdOn:
+            type: integer
+            readOnly: true
+          completedOn:
+            type: integer
+            readOnly: true
+      PromiseState:
+        type: string
+        enum:
+          - PENDING
+          - RESOLVED
+          - REJECTED
+          - REJECTED_CANCELED
+          - REJECTED_TIMEDOUT
+      PromiseStateComplete:
+        type: string
+        enum:
+          - RESOLVED
+          - REJECTED
+      PromiseValue:
+        type: object
+        required:
+          - headers
+        properties:
+          headers:
+            type: object
+            additionalProperties:
+              type: string
+          data:
+            type: string
+      ClaimTaskReq:
+        type: object
+        properties:
+          taskId:
+            type: string
+            description: The ID of the task to claim
+          counter:
+            type: integer
+            description: The counter of the task to claim
+          processId:
+            type: string
+          executionId:
+            type: string
+          expiryInMilliseconds:
+            type: integer
+            format: int64
+        required:
+          - taskId
+          - counter
+          - processId
+          - executionId
+          - expiryInMilliseconds
+      CompleteTaskReq:
+        type: object
+        properties:
+          taskId:
+            type: string
+            description: The ID of the task to complete
+          counter:
+            type: integer
+            description: The counter of the task to claim
+          executionId:
+            type: string
+          state:
+            $ref: '#/components/schemas/PromiseStateComplete'
+          value:
+            $ref: '#/components/schemas/PromiseValue'
+        required:
+          - taskId
+          - counter
+          - executionId
+          - state
+          - value
+    locks-openapi_components-schemas:
+      Lock:
+        type: object
+        properties:
+          resourceId:
+            type: string
+          processId:
+            type: string
+          executionId:
+            type: string
+          expiryInSeconds:
+            type: integer
+            format: int64
+          expiresAt:
+            type: integer
+            format: int64
+            readOnly: true
+        required:
+          - resourceId
+          - processId
+          - executionId
+          - expiryInSeconds
+      HeartbeatRequest:
+        type: object
+        properties:
+          processId:
+            type: string
+        required:
+          - processId
+      HeartbeatResponse:
+        type: object
+        properties:
+          locksAffected:
+            type: integer
+            format: int64
+      ReleaseLockRequest:
+        type: object
+        properties:
+          resourceId:
+            type: string
+          executionId:
+            type: string
+        required:
+          - resourceId
+          - executionId
+    schedules-openapi_components-schemas:
+      Schedule:
+        type: object
+        required:
+          - id
+          - cron
+          - promiseId
+          - promiseTimeout
+        properties:
+          id:
+            type: string
+          description:
+            type: string
+          cron:
+            type: string
+          tags:
+            type: object
+            additionalProperties:
+              type: string
+          promiseId:
+            type: string
+          promiseTimeout:
+            type: integer
+            format: int64
+          promiseParam:
+            $ref: '#/components/schemas/PromiseValue'
+          promiseTags:
+            type: object
+            additionalProperties:
+              type: string
+          lastRunTime:
+            type: integer
+            readOnly: true
+            format: int64
+          nextRunTime:
+            type: integer
+            readOnly: true
+            format: int64
+          idempotencyKey:
+            type: string
+            readOnly: true
+          createdOn:
+            type: integer
+            readOnly: true
+            format: int64
+      PromiseValue:
+        type: object
+        required:
+          - headers
+        properties:
+          data:
+            type: string
+          headers:
+            type: object
+            additionalProperties:
+              type: string
+      SearchSchedulesResp:
+        type: object
+        properties:
+          cursor:
+            type: string
+          schedules:
+            type: array
+            items:
+              $ref: '#/components/schemas/Schedule'
+  parameters:
+    PromiseParameters:
+      $ref: '#/components/parameters/parameters'
+    TaskParameters:
+      $ref: ./tasks-openapi.yml#/components/parameters
+    LockParameters:
+      $ref: ./locks-openapi.yml#/components/parameters
+    ScheduleParameters:
+      $ref: '#/components/parameters/components-parameters'
+    parameters:
+      IdPath:
+        name: id
+        in: path
+        required: true
+        description: The promise ID
+        schema:
+          type: string
+      IdempotencyKeyHeader:
+        name: idempotency-key
+        in: header
+        description: Deduplicates multiple requests
+        schema:
+          type: string
+      StrictHeader:
+        name: strict
+        in: header
+        description: If true, deduplicates only when promise state matches the request
+        schema:
+          type: boolean
+      RequestIdHeader:
+        name: request-id
+        in: header
+        description: Unique ID for each request
+        schema:
+          type: string
+    components-parameters:
+      IdPath:
+        name: id
+        in: path
+        required: true
+        description: The schedule ID
+        schema:
+          type: string
+      IdempotencyKeyHeader:
+        name: idempotency-key
+        in: header
+        description: Deduplicates multiple requests
+        schema:
+          type: string
+      RequestIdHeader:
+        name: request-id
+        in: header
+        description: Unique ID for each request
+        schema:
+          type: string
+  securitySchemes:
+    PromiseSecuritySchemes:
+      $ref: ./promises-openapi.yml#/components/securitySchemes
+    TaskSecuritySchemes:
+      $ref: ./tasks-openapi.yml#/components/securitySchemes
+    LockSecuritySchemes:
+      $ref: ./locks-openapi.yml#/components/securitySchemes
+    ScheduleSecuritySchemes:
+      $ref: ./schedules-openapi.yml#/components/securitySchemes
