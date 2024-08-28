@@ -98,15 +98,15 @@ func (s *server) code(status t_api.StatusCode) codes.Code {
 		t_api.StatusTaskInvalidState:
 		return codes.PermissionDenied
 	case
-		t_api.StatusPromiseAlreadyExists,
-		t_api.StatusScheduleAlreadyExists:
-		return codes.AlreadyExists
-	case
 		t_api.StatusPromiseNotFound,
 		t_api.StatusScheduleNotFound,
 		t_api.StatusLockNotFound,
 		t_api.StatusTaskNotFound:
 		return codes.NotFound
+	case
+		t_api.StatusPromiseAlreadyExists,
+		t_api.StatusScheduleAlreadyExists:
+		return codes.AlreadyExists
 
 	case
 		t_api.StatusInternalServerError,
