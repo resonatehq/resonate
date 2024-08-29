@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 import os
 import random
 import tempfile
@@ -23,6 +22,7 @@ from resonate.events import (
 )
 from resonate.result import Ok
 from resonate.testing import dst
+from resonate.time import now
 from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
@@ -108,7 +108,7 @@ def greet_with_batching_but_with_call(
 
 def test_raise_inmediately() -> None:
     s = dst(seeds=[1])[0]
-    s.add(raise_inmediately)
+    s.add("1", raise_inmediately)
     p = s.run()[0]
     assert p.failure()
     with pytest.raises(RuntimeError):
@@ -117,13 +117,13 @@ def test_raise_inmediately() -> None:
 
 def test_failing_call() -> None:
     s = dst(seeds=[1])[0]
-    s.add(coro_that_fails_call)
+    s.add("1", coro_that_fails_call)
     promises = s.run()
     assert (p.failure() for p in promises)
     assert (not p.success() for p in promises)
 
     s = dst(seeds=[1])[0]
-    s.add(coro_that_fails_invoke)
+    s.add("1", coro_that_fails_invoke)
     promises = s.run()
     assert (p.failure() for p in promises)
     assert (not p.success() for p in promises)
@@ -133,11 +133,11 @@ def test_batching_using_call() -> None:
     s = dst(seeds=[1])[0]
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
 
-    s.add(greet_with_batching, name="Ging")
-    s.add(greet_with_batching, name="Razor")
-    s.add(greet_with_batching_but_with_call, name="Eta")
-    s.add(greet_with_batching, name="Elena")
-    s.add(greet_with_batching, name="Dwun")
+    s.add("1", greet_with_batching, name="Ging")
+    s.add("2", greet_with_batching, name="Razor")
+    s.add("3", greet_with_batching_but_with_call, name="Eta")
+    s.add("4", greet_with_batching, name="Elena")
+    s.add("5", greet_with_batching, name="Dwun")
     greetings_promises = s.run()
     assert all(p.success() for p in greetings_promises)
     assert [p.result() for p in greetings_promises] == [
@@ -153,11 +153,11 @@ def test_batching() -> None:
     s: DSTScheduler = dst(seeds=[1])[0]
 
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
-    s.add(greet_with_batching, name="Ging")
-    s.add(greet_with_batching, name="Razor")
-    s.add(greet_with_batching, name="Eta")
-    s.add(greet_with_batching, name="Elena")
-    s.add(greet_with_batching, name="Dwun")
+    s.add("1", greet_with_batching, name="Ging")
+    s.add("2", greet_with_batching, name="Razor")
+    s.add("3", greet_with_batching, name="Eta")
+    s.add("4", greet_with_batching, name="Elena")
+    s.add("5", greet_with_batching, name="Dwun")
     greetings_promises = s.run()
     assert all(p.success() for p in greetings_promises)
     assert [p.result() for p in greetings_promises] == [
@@ -183,8 +183,8 @@ def test_pin_seed() -> None:
 @pytest.mark.dst()
 def test_mock_function() -> None:
     s = dst(seeds=[1])[0]
-    s.add(only_call, n=3)
-    s.add(only_invocation, n=3)
+    s.add("1", only_call, n=3)
+    s.add("2", only_invocation, n=3)
     promises = s.run()
     assert all(p.result() == 3 for p in promises)  # noqa: PLR2004
     s = dst(seeds=[1], mocks={number: mocked_number})[0]
@@ -198,11 +198,11 @@ def test_dst_scheduler() -> None:
         seed = random.randint(0, 1000000)  # noqa: S311
         s = dst(seeds=[seed])[0]
 
-        s.add(only_call, n=1)
-        s.add(only_call, n=2)
-        s.add(only_call, n=3)
-        s.add(only_call, n=4)
-        s.add(only_call, n=5)
+        s.add("1", only_call, n=1)
+        s.add("2", only_call, n=2)
+        s.add("3", only_call, n=3)
+        s.add("4", only_call, n=4)
+        s.add("5", only_call, n=5)
 
         promises = s.run()
         values = _promise_result(promises=promises)
@@ -219,31 +219,31 @@ def test_dst_scheduler() -> None:
 def test_dst_determinitic() -> None:
     seed = random.randint(1, 100)  # noqa: S311
     s = dst(seeds=[seed])[0]
-    s.add(only_call, n=1)
-    s.add(only_call, n=2)
-    s.add(only_call, n=3)
-    s.add(only_call, n=4)
-    s.add(only_call, n=5)
+    s.add("1", only_call, n=1)
+    s.add("2", only_call, n=2)
+    s.add("3", only_call, n=3)
+    s.add("4", only_call, n=4)
+    s.add("5", only_call, n=5)
     promises = s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     expected_events = s.get_events()
 
     same_seed_s = dst(seeds=[seed])[0]
-    same_seed_s.add(only_call, n=1)
-    same_seed_s.add(only_call, n=2)
-    same_seed_s.add(only_call, n=3)
-    same_seed_s.add(only_call, n=4)
-    same_seed_s.add(only_call, n=5)
+    same_seed_s.add("1", only_call, n=1)
+    same_seed_s.add("2", only_call, n=2)
+    same_seed_s.add("3", only_call, n=3)
+    same_seed_s.add("4", only_call, n=4)
+    same_seed_s.add("5", only_call, n=5)
     promises = same_seed_s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     assert expected_events == same_seed_s.get_events()
 
     different_seed_s = dst(seeds=[seed + 10])[0]
-    different_seed_s.add(only_call, n=1)
-    different_seed_s.add(only_call, n=2)
-    different_seed_s.add(only_call, n=3)
-    different_seed_s.add(only_call, n=4)
-    different_seed_s.add(only_call, n=5)
+    different_seed_s.add("1", only_call, n=1)
+    different_seed_s.add("2", only_call, n=2)
+    different_seed_s.add("3", only_call, n=3)
+    different_seed_s.add("4", only_call, n=4)
+    different_seed_s.add("5", only_call, n=5)
     promises = different_seed_s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     assert expected_events != different_seed_s.get_events()
@@ -252,7 +252,7 @@ def test_dst_determinitic() -> None:
 @pytest.mark.dst()
 def test_failing_asserting() -> None:
     s = dst(seeds=[1])[0]
-    s.add(failing_asserting)
+    s.add("1", failing_asserting)
     p = s.run()
     with pytest.raises(AssertionError):
         p[0].result()
@@ -261,11 +261,11 @@ def test_failing_asserting() -> None:
 @pytest.mark.dst()
 @pytest.mark.parametrize("scheduler", resonate.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
-    scheduler.add(only_call, n=1)
-    scheduler.add(only_call, n=2)
-    scheduler.add(only_call, n=3)
-    scheduler.add(only_call, n=4)
-    scheduler.add(only_call, n=5)
+    scheduler.add("1", only_call, n=1)
+    scheduler.add("2", only_call, n=2)
+    scheduler.add("3", only_call, n=3)
+    scheduler.add("4", only_call, n=4)
+    scheduler.add("5", only_call, n=5)
     promises = scheduler.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
 
@@ -273,7 +273,7 @@ def test_dst_framework(scheduler: DSTScheduler) -> None:
 @pytest.mark.dst()
 def test_failure() -> None:
     scheduler = dst(seeds=[1], max_failures=3, failure_chance=100)[0]
-    scheduler.add(only_call, n=1)
+    scheduler.add("1", only_call, n=1)
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
@@ -281,7 +281,7 @@ def test_failure() -> None:
     assert scheduler.current_failures == 3  # noqa: PLR2004
 
     scheduler = dst(seeds=[1], max_failures=2, failure_chance=0)[0]
-    scheduler.add(only_call, n=1)
+    scheduler.add("1", only_call, n=1)
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
@@ -292,175 +292,155 @@ def test_failure() -> None:
 @pytest.mark.dst()
 def test_sequential() -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential")[0]
-    seq_scheduler.add(only_call, n=1)
-    seq_scheduler.add(only_call, n=2)
-    seq_scheduler.add(only_call, n=3)
-    seq_scheduler.add(only_call, n=4)
-    seq_scheduler.add(only_call, n=5)
+    seq_scheduler.add("1", only_call, n=1)
+    seq_scheduler.add("2", only_call, n=2)
+    seq_scheduler.add("3", only_call, n=3)
+    seq_scheduler.add("4", only_call, n=4)
+    seq_scheduler.add("5", only_call, n=5)
     promises = seq_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert seq_scheduler.get_events() == [
-        PromiseCreated(promise_id="5", tick=0),
-        ExecutionInvoked(
-            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
-        ),
-        ExecutionResumed(promise_id="5", tick=0),
-        PromiseCreated(promise_id="4", tick=0),
-        ExecutionInvoked(
-            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
-        ),
-        ExecutionResumed(promise_id="4", tick=0),
-        PromiseCreated(promise_id="3", tick=0),
-        ExecutionInvoked(
-            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
-        ),
-        ExecutionResumed(promise_id="3", tick=0),
-        PromiseCreated(promise_id="2", tick=0),
-        ExecutionInvoked(
-            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
-        ),
-        ExecutionResumed(promise_id="2", tick=0),
         PromiseCreated(promise_id="1", tick=0),
         ExecutionInvoked(
             promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        ExecutionResumed(promise_id="1", tick=0),
         PromiseCreated(promise_id="1.1", tick=1),
         ExecutionInvoked(
             promise_id="1.1", tick=1, fn_name="number", args=(), kwargs={"n": 1}
         ),
         ExecutionAwaited(promise_id="1.1", tick=1),
-        ExecutionTerminated(promise_id="1.1", tick=2),
         PromiseCompleted(promise_id="1.1", tick=2, value=Ok(1)),
         ExecutionResumed(promise_id="1", tick=2),
-        ExecutionTerminated(promise_id="1", tick=3),
         PromiseCompleted(promise_id="1", tick=3, value=Ok(1)),
+        ExecutionTerminated(promise_id="1", tick=3),
+        PromiseCreated(promise_id="2", tick=3),
+        ExecutionInvoked(
+            promise_id="2", tick=3, fn_name="only_call", args=(), kwargs={"n": 2}
+        ),
         PromiseCreated(promise_id="2.1", tick=4),
         ExecutionInvoked(
             promise_id="2.1", tick=4, fn_name="number", args=(), kwargs={"n": 2}
         ),
         ExecutionAwaited(promise_id="2.1", tick=4),
-        ExecutionTerminated(promise_id="2.1", tick=5),
         PromiseCompleted(promise_id="2.1", tick=5, value=Ok(2)),
         ExecutionResumed(promise_id="2", tick=5),
-        ExecutionTerminated(promise_id="2", tick=6),
         PromiseCompleted(promise_id="2", tick=6, value=Ok(2)),
+        ExecutionTerminated(promise_id="2", tick=6),
+        PromiseCreated(promise_id="3", tick=6),
+        ExecutionInvoked(
+            promise_id="3", tick=6, fn_name="only_call", args=(), kwargs={"n": 3}
+        ),
         PromiseCreated(promise_id="3.1", tick=7),
         ExecutionInvoked(
             promise_id="3.1", tick=7, fn_name="number", args=(), kwargs={"n": 3}
         ),
         ExecutionAwaited(promise_id="3.1", tick=7),
-        ExecutionTerminated(promise_id="3.1", tick=8),
         PromiseCompleted(promise_id="3.1", tick=8, value=Ok(3)),
         ExecutionResumed(promise_id="3", tick=8),
-        ExecutionTerminated(promise_id="3", tick=9),
         PromiseCompleted(promise_id="3", tick=9, value=Ok(3)),
+        ExecutionTerminated(promise_id="3", tick=9),
+        PromiseCreated(promise_id="4", tick=9),
+        ExecutionInvoked(
+            promise_id="4", tick=9, fn_name="only_call", args=(), kwargs={"n": 4}
+        ),
         PromiseCreated(promise_id="4.1", tick=10),
         ExecutionInvoked(
             promise_id="4.1", tick=10, fn_name="number", args=(), kwargs={"n": 4}
         ),
         ExecutionAwaited(promise_id="4.1", tick=10),
-        ExecutionTerminated(promise_id="4.1", tick=11),
         PromiseCompleted(promise_id="4.1", tick=11, value=Ok(4)),
         ExecutionResumed(promise_id="4", tick=11),
-        ExecutionTerminated(promise_id="4", tick=12),
         PromiseCompleted(promise_id="4", tick=12, value=Ok(4)),
+        ExecutionTerminated(promise_id="4", tick=12),
+        PromiseCreated(promise_id="5", tick=12),
+        ExecutionInvoked(
+            promise_id="5", tick=12, fn_name="only_call", args=(), kwargs={"n": 5}
+        ),
         PromiseCreated(promise_id="5.1", tick=13),
         ExecutionInvoked(
             promise_id="5.1", tick=13, fn_name="number", args=(), kwargs={"n": 5}
         ),
         ExecutionAwaited(promise_id="5.1", tick=13),
-        ExecutionTerminated(promise_id="5.1", tick=14),
         PromiseCompleted(promise_id="5.1", tick=14, value=Ok(5)),
         ExecutionResumed(promise_id="5", tick=14),
-        ExecutionTerminated(promise_id="5", tick=15),
         PromiseCompleted(promise_id="5", tick=15, value=Ok(5)),
+        ExecutionTerminated(promise_id="5", tick=15),
     ]
 
     con_scheduler = dst(seeds=[1], max_failures=2)[0]
-    con_scheduler.add(only_call, n=1)
-    con_scheduler.add(only_call, n=2)
-    con_scheduler.add(only_call, n=3)
-    con_scheduler.add(only_call, n=4)
-    con_scheduler.add(only_call, n=5)
+    con_scheduler.add("1", only_call, n=1)
+    con_scheduler.add("2", only_call, n=2)
+    con_scheduler.add("3", only_call, n=3)
+    con_scheduler.add("4", only_call, n=4)
+    con_scheduler.add("5", only_call, n=5)
     promises = con_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert con_scheduler.get_events() == [
-        PromiseCreated(promise_id="5", tick=0),
-        ExecutionInvoked(
-            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
-        ),
-        ExecutionResumed(promise_id="5", tick=0),
-        PromiseCreated(promise_id="4", tick=0),
-        ExecutionInvoked(
-            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
-        ),
-        ExecutionResumed(promise_id="4", tick=0),
-        PromiseCreated(promise_id="3", tick=0),
-        ExecutionInvoked(
-            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
-        ),
-        ExecutionResumed(promise_id="3", tick=0),
-        PromiseCreated(promise_id="2", tick=0),
-        ExecutionInvoked(
-            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
-        ),
-        ExecutionResumed(promise_id="2", tick=0),
         PromiseCreated(promise_id="1", tick=0),
         ExecutionInvoked(
             promise_id="1", tick=0, fn_name="only_call", args=(), kwargs={"n": 1}
         ),
-        ExecutionResumed(promise_id="1", tick=0),
-        PromiseCreated(promise_id="5.1", tick=1),
+        PromiseCreated(promise_id="2", tick=0),
         ExecutionInvoked(
-            promise_id="5.1", tick=1, fn_name="number", args=(), kwargs={"n": 5}
+            promise_id="2", tick=0, fn_name="only_call", args=(), kwargs={"n": 2}
         ),
-        ExecutionAwaited(promise_id="5.1", tick=1),
-        PromiseCreated(promise_id="1.1", tick=2),
+        PromiseCreated(promise_id="3", tick=0),
         ExecutionInvoked(
-            promise_id="1.1", tick=2, fn_name="number", args=(), kwargs={"n": 1}
+            promise_id="3", tick=0, fn_name="only_call", args=(), kwargs={"n": 3}
         ),
-        ExecutionAwaited(promise_id="1.1", tick=2),
-        PromiseCreated(promise_id="4.1", tick=3),
+        PromiseCreated(promise_id="4", tick=0),
         ExecutionInvoked(
-            promise_id="4.1", tick=3, fn_name="number", args=(), kwargs={"n": 4}
+            promise_id="4", tick=0, fn_name="only_call", args=(), kwargs={"n": 4}
         ),
-        ExecutionAwaited(promise_id="4.1", tick=3),
-        ExecutionTerminated(promise_id="1.1", tick=4),
-        PromiseCompleted(promise_id="1.1", tick=4, value=Ok(1)),
-        ExecutionResumed(promise_id="1", tick=4),
-        ExecutionTerminated(promise_id="4.1", tick=5),
-        PromiseCompleted(promise_id="4.1", tick=5, value=Ok(4)),
-        ExecutionResumed(promise_id="4", tick=5),
-        ExecutionTerminated(promise_id="5.1", tick=6),
-        PromiseCompleted(promise_id="5.1", tick=6, value=Ok(5)),
-        ExecutionResumed(promise_id="5", tick=6),
+        PromiseCreated(promise_id="5", tick=0),
+        ExecutionInvoked(
+            promise_id="5", tick=0, fn_name="only_call", args=(), kwargs={"n": 5}
+        ),
+        PromiseCreated(promise_id="1.1", tick=1),
+        ExecutionInvoked(
+            promise_id="1.1", tick=1, fn_name="number", args=(), kwargs={"n": 1}
+        ),
+        ExecutionAwaited(promise_id="1.1", tick=1),
+        PromiseCreated(promise_id="5.1", tick=2),
+        ExecutionInvoked(
+            promise_id="5.1", tick=2, fn_name="number", args=(), kwargs={"n": 5}
+        ),
+        ExecutionAwaited(promise_id="5.1", tick=2),
+        PromiseCreated(promise_id="2.1", tick=3),
+        ExecutionInvoked(
+            promise_id="2.1", tick=3, fn_name="number", args=(), kwargs={"n": 2}
+        ),
+        ExecutionAwaited(promise_id="2.1", tick=3),
+        PromiseCompleted(promise_id="5.1", tick=4, value=Ok(5)),
+        ExecutionResumed(promise_id="5", tick=4),
+        PromiseCompleted(promise_id="2.1", tick=5, value=Ok(2)),
+        ExecutionResumed(promise_id="2", tick=5),
+        PromiseCompleted(promise_id="1.1", tick=6, value=Ok(1)),
+        ExecutionResumed(promise_id="1", tick=6),
         PromiseCreated(promise_id="3.1", tick=7),
         ExecutionInvoked(
             promise_id="3.1", tick=7, fn_name="number", args=(), kwargs={"n": 3}
         ),
         ExecutionAwaited(promise_id="3.1", tick=7),
-        ExecutionTerminated(promise_id="3.1", tick=8),
         PromiseCompleted(promise_id="3.1", tick=8, value=Ok(3)),
         ExecutionResumed(promise_id="3", tick=8),
-        ExecutionTerminated(promise_id="5", tick=9),
-        PromiseCompleted(promise_id="5", tick=9, value=Ok(5)),
-        ExecutionTerminated(promise_id="1", tick=10),
-        PromiseCompleted(promise_id="1", tick=10, value=Ok(1)),
-        ExecutionTerminated(promise_id="4", tick=11),
-        PromiseCompleted(promise_id="4", tick=11, value=Ok(4)),
-        ExecutionTerminated(promise_id="3", tick=12),
+        PromiseCompleted(promise_id="1", tick=9, value=Ok(1)),
+        ExecutionTerminated(promise_id="1", tick=9),
+        PromiseCompleted(promise_id="5", tick=10, value=Ok(5)),
+        ExecutionTerminated(promise_id="5", tick=10),
+        PromiseCompleted(promise_id="2", tick=11, value=Ok(2)),
+        ExecutionTerminated(promise_id="2", tick=11),
         PromiseCompleted(promise_id="3", tick=12, value=Ok(3)),
-        PromiseCreated(promise_id="2.1", tick=13),
+        ExecutionTerminated(promise_id="3", tick=12),
+        PromiseCreated(promise_id="4.1", tick=13),
         ExecutionInvoked(
-            promise_id="2.1", tick=13, fn_name="number", args=(), kwargs={"n": 2}
+            promise_id="4.1", tick=13, fn_name="number", args=(), kwargs={"n": 4}
         ),
-        ExecutionAwaited(promise_id="2.1", tick=13),
-        ExecutionTerminated(promise_id="2.1", tick=14),
-        PromiseCompleted(promise_id="2.1", tick=14, value=Ok(2)),
-        ExecutionResumed(promise_id="2", tick=14),
-        ExecutionTerminated(promise_id="2", tick=15),
-        PromiseCompleted(promise_id="2", tick=15, value=Ok(2)),
+        ExecutionAwaited(promise_id="4.1", tick=13),
+        PromiseCompleted(promise_id="4.1", tick=14, value=Ok(4)),
+        ExecutionResumed(promise_id="4", tick=14),
+        PromiseCompleted(promise_id="4", tick=15, value=Ok(4)),
+        ExecutionTerminated(promise_id="4", tick=15),
     ]
 
     assert len(con_scheduler.get_events()) == len(seq_scheduler.get_events())
@@ -472,11 +452,11 @@ def test_dump_events() -> None:
         s = dst(seeds=[1], log_file=log_file_path.as_posix())[0]
         formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
         assert not formatted_file_path.exists()
-        s.add(only_call, n=1)
-        s.add(only_call, n=2)
-        s.add(only_call, n=3)
-        s.add(only_call, n=4)
-        s.add(only_call, n=5)
+        s.add("1", only_call, n=1)
+        s.add("2", only_call, n=2)
+        s.add("3", only_call, n=3)
+        s.add("4", only_call, n=4)
+        s.add("5", only_call, n=5)
         s.run()
 
         assert formatted_file_path.exists()
@@ -485,16 +465,17 @@ def test_dump_events() -> None:
         )
 
 
-def _probe_function(deps: Dependencies, tick: int) -> datetime.datetime:  # noqa: ARG001
-    return datetime.datetime.now(tz=datetime.timezone.utc)
+def _probe_function(deps: Dependencies, tick: int) -> int:  # noqa: ARG001
+    return now()
 
 
 def test_probe() -> None:
     s = dst(seeds=[1], probe=_probe_function)[0]
-    s.add(only_call, n=1)
-    s.add(only_call, n=2)
-    s.add(only_call, n=3)
-    s.add(only_call, n=4)
-    s.add(only_call, n=5)
+    s.add("1", only_call, n=1)
+    s.add("2", only_call, n=2)
+    s.add("3", only_call, n=3)
+    s.add("4", only_call, n=4)
+    s.add("5", only_call, n=5)
     s.run()
-    assert len(s._probe_results) > 0  # noqa: SLF001
+    assert len(s.probe_results) > 0
+    assert s.probe_results[-1] <= now()

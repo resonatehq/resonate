@@ -1,6 +1,6 @@
 [project]
 name = "resonate-sdk"
-version = "0.1.22"
+version = "0.1.23"
 description = "Distributed Async Await by Resonate HQ, Inc"
 authors = [
     { name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }
@@ -27,8 +27,6 @@ managed = true
 dev-dependencies = [
     "mypy>=1.10.0",
     "pytest>=8.2.0",
-    "ruff>=0.4.7",
-    "hypothesis>=6.104.2",
     "types-requests>=2.32.0.20240712",
 ]
 

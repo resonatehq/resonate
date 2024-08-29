@@ -10,16 +10,12 @@
 #   universal: false
 
 -e file:.
-attrs==24.2.0
-    # via hypothesis
 certifi==2024.7.4
     # via requests
 charset-normalizer==3.3.2
     # via requests
 exceptiongroup==1.2.2
-    # via hypothesis
     # via pytest
-hypothesis==6.111.2
 idna==3.8
     # via requests
 iniconfig==2.0.0
@@ -34,9 +30,6 @@ pluggy==1.5.0
 pytest==8.3.2
 requests==2.32.3
     # via resonate-sdk
-ruff==0.6.2
-sortedcontainers==2.4.0
-    # via hypothesis
 tomli==2.0.1
     # via mypy
     # via pytest

@@ -23,6 +23,7 @@ from resonate.dependency_injection import Dependencies
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.promise import Promise
 from resonate.result import Err, Ok
+from resonate.time import now
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -146,7 +147,7 @@ class _Metronome:
         while self._worker_continue.wait():
             self._worker_continue.clear()
 
-            current_time = int(time.time())
+            current_time = now()
             sleep_e = utils.dequeue_batch(self._sq, batch_size=self._sq.qsize())
             for idx, e in enumerate(sleep_e):
                 heapq.heappush(
