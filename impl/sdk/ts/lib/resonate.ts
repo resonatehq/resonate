@@ -4,7 +4,7 @@ import { ILogger } from "./core/logger";
 import { Logger } from "./core/loggers/logger";
 import { PartialOptions, Options, InvocationOverrides, ResonateOptions, options } from "./core/options";
 import * as durablePromises from "./core/promises/promises";
-import { DurablePromiseRecord } from "./core/promises/types";
+import { DurablePromiseRecord, handleCompletedPromise } from "./core/promises/types";
 import * as retryPolicies from "./core/retry";
 import { runWithRetry } from "./core/retry";
 import * as schedules from "./core/schedules/schedules";
@@ -616,24 +616,8 @@ export class Context {
     const runFunc = async (): Promise<R> => {
       while (!this.#stopAllPolling) {
         const durablePromiseRecord: DurablePromiseRecord = await this.#resonate.promisesStore.get(storedPromise.id);
-        switch (durablePromiseRecord.state) {
-          case "RESOLVED":
-            return opts.encoder.decode(durablePromiseRecord.value.data) as R;
-          case "REJECTED":
-            throw opts.encoder.decode(durablePromiseRecord.value.data);
-          case "REJECTED_CANCELED":
-            throw new ResonateError(
-              "Resonate function canceled",
-              ErrorCodes.CANCELED,
-              opts.encoder.decode(durablePromiseRecord.value.data),
-            );
-          case "REJECTED_TIMEDOUT":
-            throw new ResonateError(
-              `Resonate function timedout at ${new Date(durablePromiseRecord.timeout).toISOString()}`,
-              ErrorCodes.TIMEDOUT,
-            );
-          case "PENDING":
-            break;
+        if (durablePromiseRecord.state !== "PENDING") {
+          return handleCompletedPromise(durablePromiseRecord, opts.encoder);
         }
         // TODO: Consider using exponential backoff instead.
         sleep(opts.pollFrequency);
@@ -1030,22 +1014,8 @@ const _runFunc = async <R>(
   const { id, eid, opts } = ctx.invocationData;
 
   // If the promise that comes back from the server is already completed, resolve or reject right away.
-  switch (storedPromise.state) {
-    case "RESOLVED":
-      return opts.encoder.decode(storedPromise.value.data) as R;
-    case "REJECTED":
-      throw opts.encoder.decode(storedPromise.value.data);
-    case "REJECTED_CANCELED":
-      throw new ResonateError(
-        "Resonate function canceled",
-        ErrorCodes.CANCELED,
-        opts.encoder.decode(storedPromise.value.data),
-      );
-    case "REJECTED_TIMEDOUT":
-      throw new ResonateError(
-        `Resonate function timedout at ${new Date(storedPromise.timeout).toISOString()}`,
-        ErrorCodes.TIMEDOUT,
-      );
+  if (storedPromise.state !== "PENDING") {
+    return handleCompletedPromise(storedPromise, opts.encoder);
   }
 
   // storedPromise.state === "PENDING"
@@ -1107,21 +1077,7 @@ const _runFunc = async <R>(
     // Because of eventual consistency and recovery paths it is possible that we get a
     // rejected promise even if we did call `resolve` on it or the other way around.
     // What should never happen is that we get a "PENDING" promise
-    switch (completedPromiseRecord.state) {
-      case "RESOLVED":
-        return value as R;
-      case "REJECTED":
-        throw error;
-      case "REJECTED_CANCELED":
-        throw new ResonateError("Resonate function canceled", ErrorCodes.CANCELED, error);
-      case "REJECTED_TIMEDOUT":
-        throw new ResonateError(
-          `Resonate function timedout at ${new Date(completedPromiseRecord.timeout).toISOString()}`,
-          ErrorCodes.TIMEDOUT,
-        );
-      case "PENDING":
-        throw new Error("Unreachable");
-    }
+    return handleCompletedPromise(completedPromiseRecord, opts.encoder);
   } catch (err) {
     if (err instanceof ResonateError && (err.code === ErrorCodes.CANCELED || err.code === ErrorCodes.TIMEDOUT)) {
       // Cancel and timeout errors, just forward them

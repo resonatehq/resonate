@@ -10,13 +10,12 @@ describe("User Defined Resources", () => {
 
     resonate.register("resource", async (ctx: Context, resourceVal: unknown) => {
       ctx.setResource("mock", resourceVal);
-      return ctx.getResource("mock");
+      const resource = ctx.getResource("mock");
+      expect(resource).toBe(resourceVal);
     });
 
     const resourceVal = {};
-    const handle = await resonate.invokeLocal<void>("resource", "resource.0", resourceVal);
-
-    await expect(handle.result()).resolves.toBe(resourceVal);
+    await resonate.invokeLocal<void>("resource", "resource.0", resourceVal);
   });
 
   test("Set a resource and get it deep in the context stack", async () => {
