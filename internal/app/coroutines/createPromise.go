@@ -11,6 +11,7 @@ import (
 )
 
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	// set defaults
 	if r.CreatePromise.Param.Headers == nil {
 		r.CreatePromise.Param.Headers = map[string]string{}
 	}
@@ -21,6 +22,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		r.CreatePromise.Tags = map[string]string{}
 	}
 
+	// first read the promise to see if it already exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Tags,
@@ -51,6 +53,8 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	var res *t_api.Response
 
 	if result.RowsReturned == 0 {
+		// if the promise does not exist, create it
+		createdOn := c.Time()
 		p := &promise.Promise{
 			Id:                      r.CreatePromise.Id,
 			State:                   promise.Pending,
@@ -58,24 +62,10 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			Timeout:                 r.CreatePromise.Timeout,
 			IdempotencyKeyForCreate: r.CreatePromise.IdempotencyKey,
 			Tags:                    r.CreatePromise.Tags,
+			CreatedOn:               &createdOn,
 		}
 
-		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
-			Kind: t_aio.Match,
-			Tags: r.Tags,
-			Match: &t_aio.MatchSubmission{
-				Promise: p,
-			},
-		})
-
-		if err != nil {
-			slog.Error("failed to match promise", "req", r, "err", err)
-			return nil, t_api.NewError(t_api.StatusAIOMatchError, err)
-		}
-
-		createdOn := c.Time()
-		p.CreatedOn = &createdOn
-
+		// instantiate commands with create promise command
 		commands := []*t_aio.Command{{
 			Kind: t_aio.CreatePromise,
 			CreatePromise: &t_aio.CreatePromiseCommand{
@@ -89,14 +79,29 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			},
 		}}
 
-		if completion.Match.Matched {
+		// check matcher to see if a task needs to be created
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+			Kind: t_aio.Match,
+			Tags: r.Tags,
+			Match: &t_aio.MatchSubmission{
+				Promise: p,
+			},
+		})
+
+		if err != nil {
+			slog.Warn("failed to match promise", "req", r, "err", err)
+		} else if completion.Match.Matched {
 			util.Assert(completion.Match.Command != nil, "command must not be nil")
+			completion.Match.Command.CreatedOn = createdOn
+
+			// add create task command if matched
 			commands = append(commands, &t_aio.Command{
-				Kind:       t_aio.CreateTasks,
+				Kind:       t_aio.CreateTask,
 				CreateTask: completion.Match.Command,
 			})
 		}
 
+		// yield commands
 		completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: r.Tags,
@@ -113,6 +118,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
+		util.Assert(len(completion.Store.Results) == len(commands), "completion must have one or two results")
 
 		result := completion.Store.Results[0].CreatePromise
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")

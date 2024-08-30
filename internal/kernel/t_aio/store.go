@@ -356,7 +356,6 @@ type ReadTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
-	PromiseId string
 	Message   *message.Message
 	Timeout   int64
 	CreatedOn int64

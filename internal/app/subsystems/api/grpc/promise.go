@@ -111,14 +111,14 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		Timeout: req.Timeout,
 	}
 
-	resp, err := s.service.CreatePromise(header, body)
+	res, err := s.service.CreatePromise(header, body)
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Noop:    resp.Status == t_api.StatusOK,
-		Promise: protoPromise(resp.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 

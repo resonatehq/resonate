@@ -1,6 +1,7 @@
 package match
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/mitchellh/mapstructure"
@@ -27,7 +28,9 @@ type MatcherConfig struct {
 }
 
 type TagMatcherConfig struct {
-	Tag string
+	Key  string
+	Val  *string
+	Recv message.Recv
 }
 
 // Subsystem
@@ -41,19 +44,18 @@ type Match struct {
 func New(aio aio.AIO, config *Config) (*Match, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*MatchWorker, config.Workers)
+	matchers := make([]func(*promise.Promise) (*message.Recv, bool), len(config.Matchers))
 
-	matchers := make([]func(*promise.Promise) (*t_aio.CreateTaskCommand, bool), len(config.Matchers))
-	for i, matcherConfig := range config.Matchers {
-		switch matcherConfig.Type {
+	for i, matcher := range config.Matchers {
+		switch matcher.Type {
 		case "tag":
-			var tagMatcherConfig *TagMatcherConfig
-			err := mapstructure.Decode(matcherConfig.Config, &tagMatcherConfig)
-			if err != nil {
+			var config *TagMatcherConfig
+			if err := mapstructure.Decode(matcher.Config, &config); err != nil {
 				return nil, err
 			}
-			matchers[i] = TagMatcher(tagMatcherConfig)
+			matchers[i] = TagMatcher(config)
 		default:
-			return nil, fmt.Errorf("unknown matcher type: %s", matcherConfig.Type)
+			return nil, fmt.Errorf("unknown matcher type: %s", matcher.Type)
 		}
 	}
 
@@ -114,7 +116,7 @@ func (m *Match) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*
 type MatchWorker struct {
 	sq       <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
 	aio      aio.AIO
-	matchers []func(*promise.Promise) (*t_aio.CreateTaskCommand, bool)
+	matchers []func(*promise.Promise) (*message.Recv, bool)
 }
 
 func (w *MatchWorker) Start() {
@@ -129,19 +131,42 @@ func (w *MatchWorker) Start() {
 	}
 }
 
+type data struct {
+	Type    string           `json:"type"`
+	Promise *promise.Promise `json:"promise"`
+}
+
 func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) *bus.CQE[t_aio.Submission, t_aio.Completion] {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
 	util.Assert(sqe.Submission.Match != nil, "match must not be nil")
 	util.Assert(sqe.Submission.Match.Promise != nil, "promise must not be nil")
 
+	data, err := json.Marshal(&data{Type: "invoke", Promise: sqe.Submission.Match.Promise})
+	if err != nil {
+		return &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Completion: nil,
+			Callback:   sqe.Callback,
+			Error:      err,
+		}
+	}
+
 	// apply matchers in succession, first match wins
 	for _, f := range w.matchers {
-		if command, ok := f(sqe.Submission.Match.Promise); ok {
+		if recv, ok := f(sqe.Submission.Match.Promise); ok {
 			return &bus.CQE[t_aio.Submission, t_aio.Completion]{
 				Completion: &t_aio.Completion{
-					Kind:  t_aio.Match,
-					Tags:  sqe.Submission.Tags,
-					Match: &t_aio.MatchCompletion{Matched: true, Command: command},
+					Kind: t_aio.Match,
+					Tags: sqe.Submission.Tags,
+					Match: &t_aio.MatchCompletion{
+						Matched: true,
+						Command: &t_aio.CreateTaskCommand{
+							Message: &message.Message{
+								Recv: recv,
+								Data: data,
+							},
+							Timeout: sqe.Submission.Match.Promise.Timeout,
+						},
+					},
 				},
 				Callback: sqe.Callback,
 				Error:    nil,
@@ -162,19 +187,35 @@ func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 
 // Matcher functions
 
-func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*t_aio.CreateTaskCommand, bool) {
-	return func(p *promise.Promise) (*t_aio.CreateTaskCommand, bool) {
+func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*message.Recv, bool) {
+	return func(p *promise.Promise) (*message.Recv, bool) {
 		util.Assert(p.Tags != nil, "tags must be set")
 
-		if recv, ok := p.Tags[config.Tag]; ok {
-			return &t_aio.CreateTaskCommand{
-				PromiseId: p.Id,
-				Message: &message.Message{
-					Recv: recv,
-					Data: p.Param.Data,
-				},
-			}, true
+		if v, ok := p.Tags[config.Key]; ok && (config.Val == nil || v == *config.Val) {
+			switch config.Recv.Type {
+			case "http":
+				var data interface{}
+				if config.Val != nil {
+					data = config.Recv.Data
+				} else {
+					data = matchHttp(v)
+				}
+
+				return &message.Recv{
+					Type: config.Recv.Type,
+					Data: data,
+				}, true
+			}
 		}
+
 		return nil, false
+	}
+}
+
+// TODO: move to a plugin
+
+func matchHttp(url string) interface{} {
+	return map[string]interface{}{
+		"url": url,
 	}
 }

@@ -12,7 +12,7 @@ import (
 func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_api.CreateCallbackResponse, *Error) {
 	util.Assert(body.PromiseId != "", "callback.promiseId must be provided")
 	util.Assert(body.Timeout != 0, "callback.timeout must be provided")
-	util.Assert(body.Recv != "", "callback.recv must be provided")
+	util.Assert(body.Recv != nil, "callback.recv must be provided")
 
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 

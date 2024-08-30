@@ -273,6 +273,12 @@ const (
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
 		(message, timeout, counter, attempt, frequency, expiration, created_on)
+	VALUES
+		(?, ?, 0, 0, 0, 0, ?)`
+
+	TASK_INSERT_ALL_STATEMENT = `
+	INSERT INTO tasks
+		(message, timeout, counter, attempt, frequency, expiration, created_on)
 	SELECT
 		message, timeout, 0, 0, 0, 0, ?
 	FROM
@@ -466,6 +472,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	var lockHeartbeatStmt *sql.Stmt
 	var lockTimeoutStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
+	var tasksInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
 	var taskHeartbeatStmt *sql.Stmt
 
@@ -637,7 +644,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 			case t_aio.ReadTasks:
 				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
-			case t_aio.CreateTasks:
+			case t_aio.CreateTask:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
 					if err != nil {
@@ -646,8 +653,19 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					defer taskInsertStmt.Close()
 				}
 
+				util.Assert(command.CreateTask != nil, "command must not be nil")
+				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
+			case t_aio.CreateTasks:
+				if tasksInsertStmt == nil {
+					tasksInsertStmt, err = tx.Prepare(TASK_INSERT_ALL_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer tasksInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateTasks != nil, "command must not be nil")
-				results[i][j], err = w.createTasks(tx, taskInsertStmt, command.CreateTasks)
+				results[i][j], err = w.createTasks(tx, tasksInsertStmt, command.CreateTasks)
 			case t_aio.UpdateTask:
 				if taskUpdateStmt == nil {
 					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
@@ -1419,6 +1437,30 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 		ReadTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+	message, err := json.Marshal(cmd.Message)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(message, cmd.Timeout, cmd.CreatedOn)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateTask,
+		CreateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
 		},
 	}, nil
 }

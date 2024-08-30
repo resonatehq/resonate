@@ -134,7 +134,7 @@ func protoSchedule(schedule *schedule.Schedule) *grpcApi.Schedule {
 		Tags:           schedule.Tags,
 		PromiseId:      schedule.PromiseId,
 		PromiseTimeout: schedule.PromiseTimeout,
-		PromiseParam: &grpcApi.PromiseValue{
+		PromiseParam: &grpcApi.Value{
 			Headers: schedule.PromiseParam.Headers,
 			Data:    schedule.PromiseParam.Data,
 		},

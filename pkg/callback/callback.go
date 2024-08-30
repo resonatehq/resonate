@@ -9,7 +9,7 @@ import (
 type Callback struct {
 	Id        string           `json:"id"`
 	PromiseId string           `json:"promiseId"`
-	Message   *message.Message `json:"message,omitempty"`
+	Message   *message.Message `json:"-"` // do not export
 	Timeout   int64            `json:"timeout"`
 	CreatedOn int64            `json:"createdOn"`
 }

@@ -1,9 +1,14 @@
 package message
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// Message
 
 type Message struct {
-	Recv string `json:"recv"`
+	Recv *Recv  `json:"recv"`
 	Data []byte `json:"data"`
 }
 
@@ -13,4 +18,24 @@ func (m *Message) String() string {
 		m.Recv,
 		len(m.Data),
 	)
+}
+
+// Recv
+
+type Recv struct {
+	Type string      `json:"type"`
+	Data interface{} `json:"data"`
+}
+
+func (r *Recv) String() string {
+	return r.Type
+}
+
+func (r *Recv) As(v interface{}) error {
+	b, err := json.Marshal(r.Data)
+	if err != nil {
+		return err
+	}
+
+	return json.Unmarshal(b, v)
 }

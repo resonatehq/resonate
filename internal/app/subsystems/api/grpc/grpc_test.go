@@ -1089,7 +1089,10 @@ func TestCreateCallback(t *testing.T) {
 			grpcReq: &grpcApi.CreateCallbackRequest{
 				PromiseId: "foo",
 				Timeout:   1,
-				Recv:      "http://localhost:3000",
+				Recv: &grpcApi.Recv{
+					Type: "http",
+					Data: []byte(`{"url": "http://localhost:3000"}`),
+				},
 				Data:      []byte("{}"),
 				RequestId: "CreateCallback",
 			},
@@ -1104,7 +1107,10 @@ func TestCreateCallback(t *testing.T) {
 					PromiseId: "foo",
 					Timeout:   1,
 					Message: &message.Message{
-						Recv: "http://localhost:3000",
+						Recv: &message.Recv{
+							Type: "http",
+							Data: map[string]interface{}{"url": "http://localhost:3000"},
+						},
 						Data: []byte("{}"),
 					},
 				},
@@ -1122,7 +1128,10 @@ func TestCreateCallback(t *testing.T) {
 			grpcReq: &grpcApi.CreateCallbackRequest{
 				PromiseId: "foo",
 				Timeout:   1,
-				Recv:      "http://localhost:3000",
+				Recv: &grpcApi.Recv{
+					Type: "http",
+					Data: []byte(`{"url": "http://localhost:3000"}`),
+				},
 				Data:      []byte("{}"),
 				RequestId: "CreateCallback",
 			},
@@ -1137,7 +1146,10 @@ func TestCreateCallback(t *testing.T) {
 					PromiseId: "foo",
 					Timeout:   1,
 					Message: &message.Message{
-						Recv: "http://localhost:3000",
+						Recv: &message.Recv{
+							Type: "http",
+							Data: map[string]interface{}{"url": "http://localhost:3000"},
+						},
 						Data: []byte("{}"),
 					},
 				},
@@ -1210,7 +1222,7 @@ func TestCreateSchedule(t *testing.T) {
 				Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
 				PromiseId:      "foo",
 				PromiseTimeout: 1,
-				PromiseParam: &grpcApi.PromiseValue{
+				PromiseParam: &grpcApi.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("pending"),
 				},
@@ -1260,7 +1272,7 @@ func TestCreateSchedule(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			resp, err := grpcTest.schedules.CreateSchedule(ctx, tc.grpcReq)
+			res, err := grpcTest.schedules.CreateSchedule(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1270,7 +1282,7 @@ func TestCreateSchedule(t *testing.T) {
 				return
 			}
 
-			assert.Equal(t, tc.noop, resp.Noop)
+			assert.Equal(t, tc.noop, res.Noop)
 
 			select {
 			case err := <-grpcTest.errors:

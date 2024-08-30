@@ -36,5 +36,5 @@ message HeartbeatTasksRequest {
 }
 
 message HeartbeatTasksResponse {
-    int32 tasksAffected = 1;
+    int64 tasksAffected = 1;
 }

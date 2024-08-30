@@ -107,5 +107,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), nil)
+	c.JSON(s.code(res.Status), gin.H{
+		"tasksAffected": res.TasksAffected,
+	})
 }

@@ -3,7 +3,7 @@ package queue
 import (
 	"bytes"
 	"encoding/json"
-	"log/slog"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Config
@@ -127,46 +128,68 @@ func (w *QueueWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 		util.Assert(sqe.Submission.Queue.Task != nil, "task must not be nil")
 		util.Assert(sqe.Submission.Queue.Task.Message != nil, "message must not be nil")
 
+		// instantiate cqe
 		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Completion: &t_aio.Completion{
-				Kind:  t_aio.Queue,
-				Tags:  sqe.Submission.Tags, // propagate the tags
-				Queue: &t_aio.QueueCompletion{Success: false},
-			},
 			Callback: sqe.Callback,
 		}
 
-		var buf bytes.Buffer
-
-		// by default golang escapes html in json, for queue requests we
-		// need to disable this
-		enc := json.NewEncoder(&buf)
-		enc.SetEscapeHTML(false)
-
-		if err := enc.Encode(&req{
+		body, err := json.Marshal(&req{
 			Id:      sqe.Submission.Queue.Task.Id,
 			Counter: sqe.Submission.Queue.Task.Counter,
-		}); err != nil {
-			slog.Warn("json marshal failed", "err", err)
-			continue
-		}
-
-		req, err := http.NewRequest("POST", sqe.Submission.Queue.Task.Message.Recv, &buf)
+		})
 		if err != nil {
-			slog.Warn("http request failed", "err", err)
+			cqes[i].Error = err
 			continue
 		}
 
-		req.Header.Set("Content-Type", "application/json")
-		res, err := w.client.Do(req)
-		if err != nil {
-			slog.Warn("http request failed", "err", err)
-			continue
+		switch t := sqe.Submission.Queue.Task.Message.Recv.Type; t {
+		case "http":
+			success, err := w.processHttp(sqe.Submission.Queue.Task.Message.Recv, body)
+			if err != nil {
+				cqes[i].Error = err
+			} else {
+				cqes[i].Completion = &t_aio.Completion{
+					Kind:  t_aio.Queue,
+					Tags:  sqe.Submission.Tags,
+					Queue: &t_aio.QueueCompletion{Success: success},
+				}
+			}
+		default:
+			cqes[i].Error = fmt.Errorf("unsupported type %s", t)
 		}
-
-		// set success accordingly
-		cqes[i].Completion.Queue.Success = res.StatusCode == http.StatusOK
 	}
 
 	return cqes
+}
+
+// TODO: move to a plugin
+
+type httpData struct {
+	Url     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
+func (w *QueueWorker) processHttp(recv *message.Recv, body []byte) (bool, error) {
+	util.Assert(recv.Type == "http", "type must be http")
+
+	fmt.Println(recv.Data)
+
+	// unmarshal
+	var data httpData
+	if err := recv.As(&data); err != nil {
+		return false, err
+	}
+
+	req, err := http.NewRequest("POST", data.Url, bytes.NewReader(body))
+	if err != nil {
+		return false, err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	res, err := w.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+
+	return res.StatusCode == http.StatusOK, nil
 }

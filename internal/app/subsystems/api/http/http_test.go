@@ -781,7 +781,7 @@ func TestHttpServer(t *testing.T) {
 					body: []byte(`{
 						"promiseId": "foo",
 						"timeout": 1,
-						"recv": "http://localhost:3000",
+						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
 						"data": "e30="
 					}`),
 					req: &t_api.Request{
@@ -795,7 +795,10 @@ func TestHttpServer(t *testing.T) {
 							PromiseId: "foo",
 							Timeout:   1,
 							Message: &message.Message{
-								Recv: "http://localhost:3000",
+								Recv: &message.Recv{
+									Type: "http",
+									Data: map[string]interface{}{"url": "http://localhost:3000"},
+								},
 								Data: []byte("{}"),
 							},
 						},
@@ -818,7 +821,7 @@ func TestHttpServer(t *testing.T) {
 					body: []byte(`{
 						"promiseId": "foo",
 						"timeout": 1,
-						"recv": "http://localhost:3000",
+						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
 						"data": "e30="
 					}`),
 					req: &t_api.Request{
@@ -832,7 +835,10 @@ func TestHttpServer(t *testing.T) {
 							PromiseId: "foo",
 							Timeout:   1,
 							Message: &message.Message{
-								Recv: "http://localhost:3000",
+								Recv: &message.Recv{
+									Type: "http",
+									Data: map[string]interface{}{"url": "http://localhost:3000"},
+								},
 								Data: []byte("{}"),
 							},
 						},

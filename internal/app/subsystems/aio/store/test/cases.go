@@ -2771,6 +2771,70 @@ var TestCases = []*testCase{
 
 	// TASKS
 	{
+		name: "CreateTask",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.CreateTaskCommand{
+					Message:   &message.Message{Data: []byte("foo")},
+					Timeout:   1,
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.CreateTaskCommand{
+					Message:   &message.Message{Data: []byte("bar")},
+					Timeout:   2,
+					CreatedOn: 2,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					States: []task.State{task.Init},
+					Limit:  10,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateTask,
+				CreateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 2,
+					Records: []*task.TaskRecord{
+						{
+							Id:        "1",
+							State:     task.Init,
+							Message:   []byte(`{"recv":null,"data":"Zm9v"}`), // Zm9v == foo
+							Timeout:   1,
+							CreatedOn: util.ToPointer[int64](1),
+						},
+						{
+							Id:        "2",
+							State:     task.Init,
+							Message:   []byte(`{"recv":null,"data":"YmFy"}`), // YmFy == bar
+							Timeout:   2,
+							CreatedOn: util.ToPointer[int64](2),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "CreateTasks",
 		commands: []*t_aio.Command{
 			{
@@ -2859,19 +2923,19 @@ var TestCases = []*testCase{
 						{
 							Id:        "1",
 							State:     task.Init,
-							Message:   []byte(`{"recv":"","data":null}`),
+							Message:   []byte(`{"recv":null,"data":null}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "2",
 							State:     task.Init,
-							Message:   []byte(`{"recv":"","data":null}`),
+							Message:   []byte(`{"recv":null,"data":null}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "3",
 							State:     task.Init,
-							Message:   []byte(`{"recv":"","data":null}`),
+							Message:   []byte(`{"recv":null,"data":null}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 					},
@@ -3045,7 +3109,7 @@ var TestCases = []*testCase{
 							Id:          "1",
 							ProcessId:   util.ToPointer("pid"),
 							State:       task.Completed,
-							Message:     []byte(`{"recv":"","data":null}`),
+							Message:     []byte(`{"recv":null,"data":null}`),
 							Counter:     5,
 							Attempt:     5,
 							Frequency:   5,

@@ -33,25 +33,28 @@ func TestEcho(t *testing.T) {
 		ch <- req
 
 		switch r.URL.Path {
-		case "/no":
-			w.WriteHeader(http.StatusInternalServerError)
-		default:
+		case "/ok":
 			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}))
 
 	defer server.Close()
 
+	okUrl := fmt.Sprintf("%s/ok", server.URL)
+	koUrl := fmt.Sprintf("%s/ko", server.URL)
+
 	for _, tc := range []struct {
 		id      string
 		counter int
-		recv    string
+		recv    *message.Recv
 		success bool
 	}{
-		{"foo", 0, fmt.Sprintf("%s/ok", server.URL), true},
-		{"foo", 1, fmt.Sprintf("%s/no", server.URL), false},
-		{"bar", 0, fmt.Sprintf("%s/ok", server.URL), true},
-		{"bar", 1, fmt.Sprintf("%s/no", server.URL), false},
+		{"foo", 0, httpRecv(okUrl), true},
+		{"foo", 1, httpRecv(koUrl), false},
+		{"bar", 0, httpRecv(okUrl), true},
+		{"bar", 1, httpRecv(koUrl), false},
 	} {
 		t.Run(fmt.Sprintf("%s/%d", tc.id, tc.counter), func(t *testing.T) {
 			sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
@@ -76,5 +79,14 @@ func TestEcho(t *testing.T) {
 			assert.Equal(t, tc.success, cqes[0].Completion.Queue.Success)
 			assert.Equal(t, &req{tc.id, tc.counter}, <-ch)
 		})
+	}
+}
+
+// Helper functions
+
+func httpRecv(url string) *message.Recv {
+	return &message.Recv{
+		Type: "http",
+		Data: map[string]interface{}{"url": url},
 	}
 }

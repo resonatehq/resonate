@@ -2,6 +2,7 @@ package service
 
 import (
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -39,10 +40,10 @@ type CompletePromiseBody struct {
 // CALLBACKS
 
 type CreateCallbackBody struct {
-	PromiseId string `json:"promiseId" binding:"required"`
-	Timeout   int64  `json:"timeout" binding:"required"`
-	Recv      string `json:"recv" binding:"required"`
-	Data      []byte `json:"data" binding:"required"`
+	PromiseId string        `json:"promiseId" binding:"required"`
+	Timeout   int64         `json:"timeout" binding:"required"`
+	Recv      *message.Recv `json:"recv" binding:"required"`
+	Data      []byte        `json:"data" binding:"required"`
 }
 
 // SCHEDULES

@@ -81,6 +81,6 @@ func (s *server) HeartbeatTasks(ctx context.Context, req *grpcApi.HeartbeatTasks
 	}
 
 	return &grpcApi.HeartbeatTasksResponse{
-		TasksAffected: int32(res.TasksAffected),
+		TasksAffected: res.TasksAffected,
 	}, nil
 }
