@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-from typing_extensions import Self
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from resonate.typing import Data, Headers, IdempotencyKey, State, Tags
@@ -11,14 +9,14 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class Param:
-    headers: Headers
     data: Data
+    headers: Headers
 
 
 @dataclass(frozen=True)
 class Value:
-    headers: Headers
     data: Data
+    headers: Headers
 
 
 @dataclass(frozen=True)
@@ -51,18 +49,3 @@ class DurablePromiseRecord:
 
     def is_pending(self) -> bool:
         return self.state == "PENDING"
-
-    @classmethod
-    def from_json(cls, data: dict[str, Any]) -> Self:
-        return cls(
-            state=data["state"],
-            promise_id=data["id"],
-            timeout=data["timeout"],
-            param=data["param"],
-            value=data["value"],
-            created_on=data["createdOn"],
-            completed_on=data.get("completedOn"),
-            idempotency_key_for_complete=data.get("idempotencyKeyForComplete"),
-            idempotency_key_for_create=data.get("idempotencyKeyForCreate"),
-            tags=data.get("tags"),
-        )

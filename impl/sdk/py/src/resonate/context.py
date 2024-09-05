@@ -10,6 +10,7 @@ from resonate.dataclasses import Command, FnOrCoroutine
 from resonate.dependency_injection import Dependencies
 
 if TYPE_CHECKING:
+    from resonate.options import Options
     from resonate.typing import ExecutionUnit, Invokable
 
 P = ParamSpec("P")
@@ -59,20 +60,25 @@ class Context:
     def invoke(
         self,
         invokable: Invokable[P],
+        opts: Options | None = None,
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Invoke:
-        return Invoke(_wrap_into_execution_unit(invokable, *args, **kwargs))
+        return Invoke(
+            _wrap_into_execution_unit(invokable, *args, **kwargs),
+            opts=opts,
+        )
 
     def call(
         self,
         invokable: Invokable[P],
+        opts: Options | None = None,
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Call:
-        return Call(_wrap_into_execution_unit(invokable, *args, **kwargs))
+        return Call(_wrap_into_execution_unit(invokable, *args, **kwargs), opts=opts)
 
     def sleep(self, seconds: int) -> Sleep:
         return Sleep(seconds)

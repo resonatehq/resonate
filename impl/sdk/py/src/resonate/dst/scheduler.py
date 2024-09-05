@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 from inspect import iscoroutinefunction, isfunction, isgenerator, isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, Union
 
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
+from resonate import utils
 from resonate.actions import Call, Invoke, Sleep
 from resonate.batching import CmdBuffer
 from resonate.contants import CWD
@@ -34,6 +37,9 @@ if TYPE_CHECKING:
     from resonate.events import (
         SchedulerEvents,
     )
+    from resonate.options import Options
+    from resonate.record import DurablePromiseRecord
+    from resonate.storage import IPromiseStore
     from resonate.typing import (
         Awaitables,
         CommandHandlerQueues,
@@ -150,6 +156,7 @@ class DSTScheduler:
             MockFn[Any],
         ]
         | None,
+        durable_promise_storage: IPromiseStore,
     ) -> None:
         self._stg_queue: list[tuple[Invoke, str]] = []
         self._runnable_coros: RunnableCoroutines = []
@@ -182,6 +189,8 @@ class DSTScheduler:
 
         self._handlers: CommandHandlers = {}
         self._handler_queues: CommandHandlerQueues = {}
+
+        self._durable_promise_storage = durable_promise_storage
 
     def register_command(
         self,
@@ -237,6 +246,9 @@ class DSTScheduler:
     def get_events(self) -> list[SchedulerEvents]:
         return self._events
 
+    def _clear_events(self) -> None:
+        self._events.clear()
+
     def _cmds_waiting_to_be_executed(
         self,
     ) -> CommandHandlerQueues:
@@ -254,12 +266,16 @@ class DSTScheduler:
     def add(
         self,
         promise_id: str,
+        opts: Options,
         coro: DurableCoro[P, Any] | DurableFn[P, Any],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        top_lvl = Invoke(FnOrCoroutine(coro, *args, **kwargs))
+        top_lvl = Invoke(
+            FnOrCoroutine(coro, *args, **kwargs),
+            opts=opts,
+        )
         self._stg_queue.append((top_lvl, promise_id))
 
     def _add_coro_to_runnables(
@@ -282,35 +298,66 @@ class DSTScheduler:
     def _route_fn_or_coroutine(
         self, ctx: Context, promise: Promise[Any], fn_or_coroutine: FnOrCoroutine
     ) -> None:
-        if isgeneratorfunction(fn_or_coroutine.exec_unit):
-            coro = fn_or_coroutine.exec_unit(
-                ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
-            )
-            self._add_coro_to_runnables(CoroAndPromise(coro, promise, ctx), None)
+        if promise.done():
+            self._unblock_coros_waiting_on_promise(promise)
         else:
-            self._add_function_to_runnables(
-                _wrap_fn(
-                    ctx,
-                    fn_or_coroutine.exec_unit,
-                    *fn_or_coroutine.args,
-                    **fn_or_coroutine.kwargs,
-                ),
-                promise,
+            if isgeneratorfunction(fn_or_coroutine.exec_unit):
+                coro = fn_or_coroutine.exec_unit(
+                    ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
+                )
+                self._add_coro_to_runnables(CoroAndPromise(coro, promise, ctx), None)
+            else:
+                self._add_function_to_runnables(
+                    _wrap_fn(
+                        ctx,
+                        fn_or_coroutine.exec_unit,
+                        *fn_or_coroutine.args,
+                        **fn_or_coroutine.kwargs,
+                    ),
+                    promise,
+                )
+            self._events.append(
+                ExecutionInvoked(
+                    promise.promise_id,
+                    self.tick,
+                    fn_or_coroutine.exec_unit.__name__,
+                    fn_or_coroutine.args,
+                    fn_or_coroutine.kwargs,
+                )
             )
-
-        self._events.append(
-            ExecutionInvoked(
-                promise.promise_id,
-                self.tick,
-                fn_or_coroutine.exec_unit.__name__,
-                fn_or_coroutine.args,
-                fn_or_coroutine.kwargs,
-            )
-        )
 
     def _create_promise(self, promise_id: str, action: Invoke | Sleep) -> Promise[Any]:
         p = Promise[Any](promise_id, action)
+        if isinstance(action, Invoke):
+            if isinstance(action.exec_unit, Command):
+                raise NotImplementedError
+            if isinstance(action.exec_unit, FnOrCoroutine):
+                data = {
+                    "args": action.exec_unit.args,
+                    "kwargs": action.exec_unit.kwargs,
+                }
+            else:
+                assert_never(action.exec_unit)
+        elif isinstance(action, Sleep):
+            raise NotImplementedError
+        else:
+            assert_never(action)
+        durable_promise_record = self._create_durable_promise_record(
+            promise_id=p.promise_id, data=data
+        )
         self._events.append(PromiseCreated(promise_id=p.promise_id, tick=self.tick))
+        if durable_promise_record.is_pending():
+            return p
+        v: Result[Any, Exception]
+        if durable_promise_record.is_rejected():
+            v = Err(Exception(durable_promise_record.value.data))
+        else:
+            assert durable_promise_record.is_resolved()
+            if durable_promise_record.value.data is None:
+                v = Ok(None)
+            else:
+                v = Ok(json.loads(durable_promise_record.value.data))
+        self._resolve_promise(p, v)
         return p
 
     def _move_next_top_lvl_invoke_to_runnables(
@@ -331,7 +378,6 @@ class DSTScheduler:
         return array.pop(self.random.randint(0, len(array) - 1))
 
     def _reset(self) -> None:
-        self._top_lvl_idx = 0
         self._runnable_coros.clear()
         self._runnable_functions.clear()
         self._awatiables.clear()
@@ -341,6 +387,8 @@ class DSTScheduler:
         self.current_failures += 1
 
     def run(self) -> list[Promise[Any]]:
+        self.tick = 0
+        self._clear_events()
         while True:
             num_top_lvl_invocations = len(self._stg_queue)
             try:
@@ -370,8 +418,21 @@ class DSTScheduler:
         self, promise: Promise[T], value: Result[T, Exception]
     ) -> None:
         promise.set_result(value)
+        completed_record = self._complete_durable_promise_record(
+            promise_id=promise.promise_id,
+            value=value,
+        )
+        assert (
+            completed_record.is_completed()
+        ), "Durable promise record must be completed by this point."
         self._events.append(
             PromiseCompleted(promise_id=promise.promise_id, tick=self.tick, value=value)
+        )
+
+    def _maybe_fail(self) -> bool:
+        return (
+            self.current_failures < self._max_failures
+            and self.random.uniform(0, 100) < self._failure_chance
         )
 
     def _run(self) -> None:  # noqa: C901
@@ -392,15 +453,15 @@ class DSTScheduler:
 
             self.tick += 1
 
-            if (
-                self.current_failures < self._max_failures
-                and self.random.uniform(0, 100) < self._failure_chance
-            ):
+            if self._maybe_fail():
                 raise _DSTFailureError
 
             next_step = self._next_step()
             if next_step == "functions":
+                ## This simulates the processor in the production scheduler.
                 fn_wrapper, promise = self._get_random_element(self._runnable_functions)
+                assert not promise.done(), "Only unresolve promises can be found here."
+
                 v = (
                     _safe_run(self._mocks[fn_wrapper.fn])
                     if self._mocks.get(fn_wrapper.fn) is not None
@@ -412,13 +473,49 @@ class DSTScheduler:
 
             elif next_step == "coroutines":
                 self._advance_runnable_span(
-                    self._get_random_element(self._runnable_coros)
+                    runnable=self._get_random_element(
+                        array=self._runnable_coros,
+                    )
                 )
             else:
                 assert_never(next_step)
 
         if self._assert_eventually is not None:
             self._assert_eventually(self.deps, self.seed)
+
+    def _complete_durable_promise_record(
+        self, promise_id: str, value: Result[Any, Exception]
+    ) -> DurablePromiseRecord:
+        if isinstance(value, Ok):
+            return self._durable_promise_storage.resolve(
+                promise_id=promise_id,
+                ikey=utils.string_to_ikey(promise_id),
+                strict=False,
+                headers=None,
+                data=json.dumps(value.unwrap()),
+            )
+        if isinstance(value, Err):
+            return self._durable_promise_storage.reject(
+                promise_id=promise_id,
+                ikey=utils.string_to_ikey(promise_id),
+                strict=False,
+                headers=None,
+                data=json.dumps(str(value.err())),
+            )
+        assert_never(value)
+
+    def _create_durable_promise_record(
+        self, promise_id: str, data: dict[str, Any]
+    ) -> DurablePromiseRecord:
+        return self._durable_promise_storage.create(
+            promise_id=promise_id,
+            ikey=utils.string_to_ikey(promise_id),
+            strict=False,
+            headers=None,
+            data=json.dumps(data),
+            timeout=sys.maxsize,
+            tags=None,
+        )
 
     def _process_invokation(
         self, invokation: Invoke, runnable: Runnable[Any]
@@ -451,8 +548,9 @@ class DSTScheduler:
         yieldable_or_final_value = iterate_coro(runnable)
 
         if isinstance(yieldable_or_final_value, FinalValue):
-            v = yieldable_or_final_value.v
-            self._resolve_promise(runnable.coro_and_promise.prom, v)
+            self._resolve_promise(
+                runnable.coro_and_promise.prom, yieldable_or_final_value.v
+            )
             self._events.append(
                 ExecutionTerminated(
                     promise_id=runnable.coro_and_promise.prom.promise_id, tick=self.tick
@@ -460,12 +558,11 @@ class DSTScheduler:
             )
             self._unblock_coros_waiting_on_promise(p=runnable.coro_and_promise.prom)
         elif isinstance(yieldable_or_final_value, Call):
-            called = yieldable_or_final_value
-            p = self._process_invokation(called.to_invoke(), runnable)
-            if not p.done():
-                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
-            else:
+            p = self._process_invokation(yieldable_or_final_value.to_invoke(), runnable)
+            if p.done():
                 self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
+            else:
+                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
         elif isinstance(yieldable_or_final_value, Invoke):
             p = self._process_invokation(
                 invokation=yieldable_or_final_value, runnable=runnable
@@ -474,8 +571,8 @@ class DSTScheduler:
         elif isinstance(yieldable_or_final_value, Promise):
             p = yieldable_or_final_value
             if p.done():
-                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
                 self._unblock_coros_waiting_on_promise(p)
+                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
         elif isinstance(yieldable_or_final_value, Sleep):

@@ -28,6 +28,7 @@ dev-dependencies = [
     "mypy>=1.10.0",
     "pytest>=8.2.0",
     "types-requests>=2.32.0.20240712",
+    "ruff>=0.6.3",
 ]
 
 [tool.rye.scripts]
@@ -52,6 +53,7 @@ ignore = [
     "ISC001",
     "S101"
 ]
+logger-objects = ["resonate.logging.logger"]
 
 [tool.ruff.lint.isort]
 combine-as-imports = true

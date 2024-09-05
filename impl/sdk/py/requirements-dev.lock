@@ -10,7 +10,7 @@
 #   universal: false
 
 -e file:.
-certifi==2024.7.4
+certifi==2024.8.30
     # via requests
 charset-normalizer==3.3.2
     # via requests
@@ -30,10 +30,11 @@ pluggy==1.5.0
 pytest==8.3.2
 requests==2.32.3
     # via resonate-sdk
+ruff==0.6.4
 tomli==2.0.1
     # via mypy
     # via pytest
-types-requests==2.32.0.20240712
+types-requests==2.32.0.20240905
 typing-extensions==4.12.2
     # via mypy
     # via resonate-sdk
