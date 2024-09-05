@@ -29,45 +29,32 @@ def dst(  # noqa: PLR0913
     assert_eventually: Callable[[Dependencies, int], Any] | None = None,
     durable_promise_storage: IPromiseStore | None = None,
 ) -> list[DSTScheduler]:
+    def _new_dst_scheduler(seed: int) -> DSTScheduler:
+        return DSTScheduler(
+            random=random.Random(seed),
+            mocks=mocks,
+            mode=mode,
+            failure_chance=failure_chance,
+            max_failures=max_failures,
+            log_file=log_file,
+            probe=probe,
+            assert_always=assert_always,
+            assert_eventually=assert_eventually,
+            durable_promise_storage=durable_promise_storage
+            if durable_promise_storage
+            else LocalPromiseStore(),
+        )
+
     schedulers: list[DSTScheduler] = []
-    if durable_promise_storage is None:
-        durable_promise_storage = LocalPromiseStore()
     pin_seed = os.environ.get(ENV_VARIABLE_PIN_SEED)
     if pin_seed is not None:
         seeds = [int(pin_seed)]
 
     for seed in seeds:
         if isinstance(seed, range):
-            schedulers.extend(
-                DSTScheduler(
-                    random=random.Random(i),
-                    mocks=mocks,
-                    mode=mode,
-                    failure_chance=failure_chance,
-                    max_failures=max_failures,
-                    log_file=log_file,
-                    probe=probe,
-                    assert_always=assert_always,
-                    assert_eventually=assert_eventually,
-                    durable_promise_storage=durable_promise_storage,
-                )
-                for i in seed
-            )
+            schedulers.extend(_new_dst_scheduler(i) for i in seed)
         elif isinstance(seed, int):
-            schedulers.append(
-                DSTScheduler(
-                    random=random.Random(seed),
-                    mocks=mocks,
-                    mode=mode,
-                    failure_chance=failure_chance,
-                    max_failures=max_failures,
-                    log_file=log_file,
-                    probe=probe,
-                    assert_always=assert_always,
-                    assert_eventually=assert_eventually,
-                    durable_promise_storage=durable_promise_storage,
-                )
-            )
+            schedulers.append(_new_dst_scheduler(seed))
         else:
             assert_never(seed)
 
