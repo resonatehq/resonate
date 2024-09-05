@@ -290,7 +290,15 @@ class LocalPromiseStore(IPromiseStore):
         return self._storage.rmw(promise_id=promise_id, fn=_resolve)
 
     def get(self, *, promise_id: str) -> DurablePromiseRecord:
-        raise NotImplementedError
+        def _get(
+            promise_record: DurablePromiseRecord | None,
+        ) -> DurablePromiseRecord:
+            if promise_record is None:
+                raise ResonateError(msg="Not Found", code="STORE_NOT_FOUND")
+
+            return promise_record
+
+        return self._storage.rmw(promise_id=promise_id, fn=_get)
 
     def search(
         self,
@@ -426,7 +434,11 @@ class RemotePromiseStore(IPromiseStore):
         return decode(response=response.json(), encoder=self._encoder)
 
     def get(self, *, promise_id: str) -> DurablePromiseRecord:
-        raise NotImplementedError
+        response = requests.get(
+            f"{self.url}/promises/{promise_id}", timeout=self._request_timeout
+        )
+        _ensure_success(response)
+        return decode(response=response.json(), encoder=self._encoder)
 
     def search(
         self, *, promise_id: str, state: State, tags: Tags, limit: int | None = None
