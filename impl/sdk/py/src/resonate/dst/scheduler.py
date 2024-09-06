@@ -193,6 +193,7 @@ class DSTScheduler:
 
         self._durable_promise_storage = durable_promise_storage
         self._json_encoder = JsonEncoder()
+        self._emphemeral_promise_memo: dict[str, Promise[Any]] = {}
 
     def register_command(
         self,
@@ -274,6 +275,10 @@ class DSTScheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
+        assert (
+            promise_id not in self._emphemeral_promise_memo
+        ), "There's already a promise with the same id"
+
         top_lvl = Invoke(
             FnOrCoroutine(coro, *args, **kwargs),
             opts=opts,
@@ -330,6 +335,7 @@ class DSTScheduler:
 
     def _create_promise(self, promise_id: str, action: Invoke | Sleep) -> Promise[Any]:
         p = Promise[Any](promise_id, action)
+        self._emphemeral_promise_memo[p.promise_id] = p
         if isinstance(action, Invoke):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -384,6 +390,7 @@ class DSTScheduler:
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
         p = self._create_promise(promise_id, top_lvl)
+
         self._route_fn_or_coroutine(
             ctx=Context(
                 ctx_id=promise_id, seed=self.seed, parent_ctx=None, deps=self.deps
@@ -445,18 +452,23 @@ class DSTScheduler:
         ), "Durable promise record must be completed by this point."
         v = self._get_value_from_durable_promise(completed_record)
         promise.set_result(v)
+        assert (
+            promise.promise_id in self._emphemeral_promise_memo
+        ), "Resolved promise should be in the memo"
+        self._emphemeral_promise_memo.pop(promise.promise_id)
 
         self._events.append(
             PromiseCompleted(promise_id=promise.promise_id, tick=self.tick, value=value)
         )
 
-    def _maybe_fail(self) -> bool:
-        return (
+    def _maybe_fail(self) -> None:
+        if (
             self.current_failures < self._max_failures
             and self.random.uniform(0, 100) < self._failure_chance
-        )
+        ):
+            raise _DSTFailureError
 
-    def _run(self) -> None:  # noqa: C901
+    def _run(self) -> None:
         while True:
             if self._probe is not None:
                 self.probe_results.append(self._probe(self.deps, self.tick))
@@ -474,8 +486,7 @@ class DSTScheduler:
 
             self.tick += 1
 
-            if self._maybe_fail():
-                raise _DSTFailureError
+            self._maybe_fail()
 
             next_step = self._next_step()
             if next_step == "functions":
@@ -490,8 +501,7 @@ class DSTScheduler:
                 )
                 assert isinstance(v, (Ok, Err)), f"{v} must be a result."
 
-                if self._maybe_fail():
-                    raise _DSTFailureError
+                self._maybe_fail()
 
                 self._resolve_promise(promise, v)
                 self._unblock_coros_waiting_on_promise(promise)
