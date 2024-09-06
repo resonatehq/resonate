@@ -28,6 +28,7 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 
 	for i, sqe := range sqes {
 		cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Id:       sqe.Id,
 			Callback: sqe.Callback,
 		}
 

@@ -6,7 +6,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -268,7 +267,9 @@ type AlterPromisesResult struct {
 
 type CreateCallbackCommand struct {
 	PromiseId string
-	Message   *message.Message
+	RecvType  string
+	RecvData  []byte
+	Message   []byte
 	Timeout   int64
 	CreatedOn int64
 }
@@ -356,7 +357,9 @@ type ReadTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
-	Message   *message.Message
+	RecvType  string
+	RecvData  []byte
+	Message   []byte
 	Timeout   int64
 	CreatedOn int64
 }

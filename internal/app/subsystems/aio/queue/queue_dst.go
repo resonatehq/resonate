@@ -63,6 +63,7 @@ func (q *QueueDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) 
 		}
 
 		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Id: sqe.Id,
 			Completion: &t_aio.Completion{
 				Kind:  t_aio.Queue,
 				Tags:  sqe.Submission.Tags, // propagate the tags

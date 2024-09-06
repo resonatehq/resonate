@@ -56,7 +56,7 @@ func TestSystemLoop(t *testing.T) {
 		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
-				Tags: map[string]string{},
+				Tags: map[string]string{"id": "test"},
 				Echo: &t_api.EchoRequest{
 					Data: data,
 				},
@@ -77,7 +77,7 @@ func TestSystemLoop(t *testing.T) {
 		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
-				Tags: map[string]string{},
+				Tags: map[string]string{"id": "test"},
 				Echo: &t_api.EchoRequest{
 					Data: "nope",
 				},

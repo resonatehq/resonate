@@ -1,26 +1,50 @@
 package queue
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Config
 
 type Config struct {
-	Size      int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"100"`
-	Workers   int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout   time.Duration `flag:"timeout" desc:"http request timeout" default:"5s"`
+	Size    int          `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers int          `flag:"workers" desc:"number of workers" default:"1"`
+	Plugins PluginConfig `flag:"plugin"`
+}
+
+type PluginConfig struct {
+	Http EnabledPlugin[http.Config] `flag:"http"`
+}
+
+type EnabledPlugin[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable plugin" default:"true"`
+	Config  T    `flag:"-"`
+}
+
+type DisabledPlugin[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable plugin" default:"false"`
+	Config  T    `flag:"-"`
+}
+
+func (c *PluginConfig) Instantiate() ([]aio.Plugin, error) {
+	plugins := []aio.Plugin{}
+	if c.Http.Enabled {
+		plugin, err := http.New(&c.Http.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+
+	return plugins, nil
 }
 
 // Subsystem
@@ -31,17 +55,26 @@ type Queue struct {
 	workers []*QueueWorker
 }
 
-func New(aio aio.AIO, config *Config) (*Queue, error) {
+func New(a aio.AIO, config *Config) (*Queue, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*QueueWorker, config.Workers)
 
+	p, err := config.Plugins.Instantiate()
+	if err != nil {
+		return nil, err
+	}
+
+	plugins := map[string]aio.Plugin{}
+	for _, plugin := range p {
+		plugins[plugin.Type()] = plugin
+	}
+
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &QueueWorker{
-			config: config,
-			client: &http.Client{Timeout: config.Timeout},
-			sq:     sq,
-			aio:    aio,
-			flush:  make(chan int64, 1),
+			config:  config,
+			sq:      sq,
+			aio:     a,
+			plugins: plugins,
 		}
 	}
 
@@ -76,42 +109,26 @@ func (q *Queue) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
 	return q.sq
 }
 
-func (q *Queue) Flush(t int64) {
-	for _, worker := range q.workers {
-		worker.Flush(t)
-	}
-}
+func (q *Queue) Flush(t int64) {}
 
 // Worker
 
 type QueueWorker struct {
-	config *Config
-	client *http.Client
-	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio    aio.AIO
-	flush  chan int64
+	config  *Config
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	aio     aio.AIO
+	plugins map[string]aio.Plugin
 }
 
 func (w *QueueWorker) Start() {
 	for {
-		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
-		if len(sqes) > 0 {
-			for _, cqe := range w.Process(sqes) {
-				w.aio.Enqueue(cqe)
-			}
-		}
+		sqe, ok := <-w.sq
 		if !ok {
 			return
 		}
-	}
-}
 
-func (w *QueueWorker) Flush(t int64) {
-	// ignore case where flush channel is full,
-	// this means the flush is waiting on the cq
-	select {
-	case w.flush <- t:
-	default:
+		// process one at a time
+		w.aio.Enqueue(w.Process(sqe))
 	}
 }
 
@@ -120,76 +137,40 @@ type req struct {
 	Counter int    `json:"counter"`
 }
 
-func (w *QueueWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
+func (w *QueueWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) *bus.CQE[t_aio.Submission, t_aio.Completion] {
+	util.Assert(sqe.Submission.Queue != nil, "queue submission must not be nil")
+	util.Assert(sqe.Submission.Queue.Task != nil, "task must not be nil")
+	util.Assert(sqe.Submission.Queue.Task.Message != nil, "message must not be nil")
 
-	for i, sqe := range sqes {
-		util.Assert(sqe.Submission.Queue != nil, "queue submission must not be nil")
-		util.Assert(sqe.Submission.Queue.Task != nil, "task must not be nil")
-		util.Assert(sqe.Submission.Queue.Task.Message != nil, "message must not be nil")
+	// instantiate cqe
+	cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+		Id:       sqe.Id,
+		Callback: sqe.Callback,
+	}
 
-		// instantiate cqe
-		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Callback: sqe.Callback,
-		}
+	body, err := json.Marshal(&req{
+		Id:      sqe.Submission.Queue.Task.Id,
+		Counter: sqe.Submission.Queue.Task.Counter,
+	})
+	if err != nil {
+		cqe.Error = err
+		return cqe
+	}
 
-		body, err := json.Marshal(&req{
-			Id:      sqe.Submission.Queue.Task.Id,
-			Counter: sqe.Submission.Queue.Task.Counter,
-		})
+	if plugin, ok := w.plugins[sqe.Submission.Queue.Task.Recv.Type]; ok {
+		success, err := plugin.Enqueue(sqe.Submission.Queue.Task.Recv.Data, body)
 		if err != nil {
-			cqes[i].Error = err
-			continue
-		}
-
-		switch t := sqe.Submission.Queue.Task.Message.Recv.Type; t {
-		case "http":
-			success, err := w.processHttp(sqe.Submission.Queue.Task.Message.Recv, body)
-			if err != nil {
-				cqes[i].Error = err
-			} else {
-				cqes[i].Completion = &t_aio.Completion{
-					Kind:  t_aio.Queue,
-					Tags:  sqe.Submission.Tags,
-					Queue: &t_aio.QueueCompletion{Success: success},
-				}
+			cqe.Error = err
+		} else {
+			cqe.Completion = &t_aio.Completion{
+				Kind:  t_aio.Queue,
+				Tags:  sqe.Submission.Tags,
+				Queue: &t_aio.QueueCompletion{Success: success},
 			}
-		default:
-			cqes[i].Error = fmt.Errorf("unsupported type %s", t)
 		}
+	} else {
+		cqe.Error = fmt.Errorf("unsupported type %s", sqe.Submission.Queue.Task.Recv.Type)
 	}
 
-	return cqes
-}
-
-// TODO: move to a plugin
-
-type httpData struct {
-	Url     string            `json:"url"`
-	Headers map[string]string `json:"headers"`
-}
-
-func (w *QueueWorker) processHttp(recv *message.Recv, body []byte) (bool, error) {
-	util.Assert(recv.Type == "http", "type must be http")
-
-	fmt.Println(recv.Data)
-
-	// unmarshal
-	var data httpData
-	if err := recv.As(&data); err != nil {
-		return false, err
-	}
-
-	req, err := http.NewRequest("POST", data.Url, bytes.NewReader(body))
-	if err != nil {
-		return false, err
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	res, err := w.client.Do(req)
-	if err != nil {
-		return false, err
-	}
-
-	return res.StatusCode == http.StatusOK, nil
+	return cqe
 }

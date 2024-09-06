@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
@@ -63,6 +64,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
 									PromiseId: r.CreateCallback.PromiseId,
+									RecvType:  r.CreateCallback.RecvType,
+									RecvData:  r.CreateCallback.RecvData,
 									Message:   r.CreateCallback.Message,
 									Timeout:   r.CreateCallback.Timeout,
 									CreatedOn: createdOn,
@@ -94,6 +97,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 						Callback: &callback.Callback{
 							Id:        result.LastInsertId,
 							PromiseId: r.CreateCallback.PromiseId,
+							Recv:      &receiver.Recv{Type: r.CreateCallback.RecvType, Data: r.CreateCallback.RecvData},
 							Message:   r.CreateCallback.Message,
 							CreatedOn: createdOn,
 						},

@@ -40,7 +40,7 @@ func (s *server) claimTask(c *gin.Context) {
 		util.Assert(res.Task != nil, "task must be non nil")
 		util.Assert(res.Task.Message != nil, "message must be non nil")
 
-		c.Data(s.code(res.Status), "application/json", res.Task.Message.Data)
+		c.Data(s.code(res.Status), "application/json", res.Task.Message)
 	} else {
 		c.JSON(s.code(res.Status), nil)
 	}

@@ -135,8 +135,8 @@ func (s *System) Tick(t int64) {
 			bg.last = t
 
 			tags := map[string]string{
-				"request_id": fmt.Sprintf("%s:%d", bg.name, t),
-				"name":       bg.name,
+				"id":   fmt.Sprintf("%s:%d", bg.name, t),
+				"name": bg.name,
 			}
 
 			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(s.config, tags)); ok {
@@ -206,16 +206,13 @@ func (s *System) AddBackground(name string, constructor func(*Config, map[string
 func (s *System) coroutineMetrics(p promise.Promise[any], tags map[string]string) {
 	util.Assert(tags != nil, "tags must be set")
 
-	id := tags["request_id"]
-	name := tags["name"]
-
-	slog.Debug("scheduler:add", "id", id, "coroutine", name)
-	s.metrics.CoroutinesTotal.WithLabelValues(name).Inc()
-	s.metrics.CoroutinesInFlight.WithLabelValues(name).Inc()
+	slog.Debug("scheduler:add", "id", tags["id"], "coroutine", tags["name"])
+	s.metrics.CoroutinesTotal.WithLabelValues(tags["name"]).Inc()
+	s.metrics.CoroutinesInFlight.WithLabelValues(tags["name"]).Inc()
 
 	go func() {
 		_, _ = p.Await()
-		slog.Debug("scheduler:rmv", "id", id, "coroutine", name)
-		s.metrics.CoroutinesInFlight.WithLabelValues(name).Dec()
+		slog.Debug("scheduler:rmv", "id", tags["id"], "coroutine", tags["name"])
+		s.metrics.CoroutinesInFlight.WithLabelValues(tags["name"]).Dec()
 	}()
 }

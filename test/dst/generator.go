@@ -9,7 +9,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -232,24 +231,18 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 
-	body := make([]byte, 8)
-	binary.BigEndian.PutUint64(body, g.callback)
+	message := make([]byte, 8)
+	binary.BigEndian.PutUint64(message, g.callback)
 	g.callback++
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
 			PromiseId: promiseId,
-			Message: &message.Message{
-				Recv: &message.Recv{
-					Type: "http",
-					Data: map[string]interface{}{
-						"url": "dst",
-					},
-				},
-				Data: body,
-			},
-			Timeout: timeout,
+			RecvType:  "http",
+			RecvData:  nil,
+			Message:   message,
+			Timeout:   timeout,
 		},
 	}
 }

@@ -12,7 +12,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -101,9 +100,9 @@ func TestReadPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ReadPromise,
 				Tags: map[string]string{
-					"request_id": "ReadPromise",
-					"name":       "ReadPromise",
-					"protocol":   "grpc",
+					"id":       "ReadPromise",
+					"name":     "ReadPromise",
+					"protocol": "grpc",
 				},
 				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "foo",
@@ -130,9 +129,9 @@ func TestReadPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ReadPromise,
 				Tags: map[string]string{
-					"request_id": "ReadPromiseNotFound",
-					"name":       "ReadPromise",
-					"protocol":   "grpc",
+					"id":       "ReadPromiseNotFound",
+					"name":     "ReadPromise",
+					"protocol": "grpc",
 				},
 				ReadPromise: &t_api.ReadPromiseRequest{
 					Id: "bar",
@@ -202,9 +201,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromises",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromises",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -236,9 +235,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromisesCursor",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromisesCursor",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -270,9 +269,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromisesPending",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromisesPending",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -302,9 +301,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromisesResolved",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromisesResolved",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -334,9 +333,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromisesRejected",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromisesRejected",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -370,9 +369,9 @@ func TestSearchPromises(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchPromises,
 				Tags: map[string]string{
-					"request_id": "SearchPromisesTags",
-					"name":       "SearchPromises",
-					"protocol":   "grpc",
+					"id":       "SearchPromisesTags",
+					"name":     "SearchPromises",
+					"protocol": "grpc",
 				},
 				SearchPromises: &t_api.SearchPromisesRequest{
 					Id: "*",
@@ -453,9 +452,9 @@ func TestCreatePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
 				Tags: map[string]string{
-					"request_id": "CreatePromise",
-					"name":       "CreatePromise",
-					"protocol":   "grpc",
+					"id":       "CreatePromise",
+					"name":     "CreatePromise",
+					"protocol": "grpc",
 				},
 				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
@@ -490,9 +489,9 @@ func TestCreatePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
 				Tags: map[string]string{
-					"request_id": "CreatePromiseMinimal",
-					"name":       "CreatePromise",
-					"protocol":   "grpc",
+					"id":       "CreatePromiseMinimal",
+					"name":     "CreatePromise",
+					"protocol": "grpc",
 				},
 				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
@@ -526,9 +525,9 @@ func TestCreatePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
 				Tags: map[string]string{
-					"request_id": "CreatePromiseNoTimeout",
-					"name":       "CreatePromise",
-					"protocol":   "grpc",
+					"id":       "CreatePromiseNoTimeout",
+					"name":     "CreatePromise",
+					"protocol": "grpc",
 				},
 				CreatePromise: &t_api.CreatePromiseRequest{
 					Id:             "foo",
@@ -615,9 +614,9 @@ func TestCancelPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "CancelPromise",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "CancelPromise",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -651,9 +650,9 @@ func TestCancelPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "CancelPromiseMinimal",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "CancelPromiseMinimal",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -687,9 +686,9 @@ func TestCancelPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "CancelPromiseAlreadyResolved",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "CancelPromiseAlreadyResolved",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -776,9 +775,9 @@ func TestResolvePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "ResolvePromise",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "ResolvePromise",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -812,9 +811,9 @@ func TestResolvePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "ResolvePromiseMinimal",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "ResolvePromiseMinimal",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -848,9 +847,9 @@ func TestResolvePromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "ResolvePromiseAlreadyRejected",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "ResolvePromiseAlreadyRejected",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -937,9 +936,9 @@ func TestRejectPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "RejectPromise",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "RejectPromise",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -973,9 +972,9 @@ func TestRejectPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "RejectPromiseMinimal",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "RejectPromiseMinimal",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -1009,9 +1008,9 @@ func TestRejectPromise(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
 				Tags: map[string]string{
-					"request_id": "RejectPromiseAlreadyResolved",
-					"name":       "CompletePromise",
-					"protocol":   "grpc",
+					"id":       "RejectPromiseAlreadyResolved",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
 				},
 				CompletePromise: &t_api.CompletePromiseRequest{
 					Id:             "foo",
@@ -1093,26 +1092,22 @@ func TestCreateCallback(t *testing.T) {
 					Type: "http",
 					Data: []byte(`{"url": "http://localhost:3000"}`),
 				},
-				Data:      []byte("{}"),
+				Message:   []byte("{}"),
 				RequestId: "CreateCallback",
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreateCallback,
 				Tags: map[string]string{
-					"request_id": "CreateCallback",
-					"name":       "CreateCallback",
-					"protocol":   "grpc",
+					"id":       "CreateCallback",
+					"name":     "CreateCallback",
+					"protocol": "grpc",
 				},
 				CreateCallback: &t_api.CreateCallbackRequest{
 					PromiseId: "foo",
 					Timeout:   1,
-					Message: &message.Message{
-						Recv: &message.Recv{
-							Type: "http",
-							Data: map[string]interface{}{"url": "http://localhost:3000"},
-						},
-						Data: []byte("{}"),
-					},
+					RecvType:  "http",
+					RecvData:  []byte(`{"url": "http://localhost:3000"}`),
+					Message:   []byte("{}"),
 				},
 			},
 			res: &t_api.Response{
@@ -1132,26 +1127,22 @@ func TestCreateCallback(t *testing.T) {
 					Type: "http",
 					Data: []byte(`{"url": "http://localhost:3000"}`),
 				},
-				Data:      []byte("{}"),
+				Message:   []byte("{}"),
 				RequestId: "CreateCallback",
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreateCallback,
 				Tags: map[string]string{
-					"request_id": "CreateCallback",
-					"name":       "CreateCallback",
-					"protocol":   "grpc",
+					"id":       "CreateCallback",
+					"name":     "CreateCallback",
+					"protocol": "grpc",
 				},
 				CreateCallback: &t_api.CreateCallbackRequest{
 					PromiseId: "foo",
 					Timeout:   1,
-					Message: &message.Message{
-						Recv: &message.Recv{
-							Type: "http",
-							Data: map[string]interface{}{"url": "http://localhost:3000"},
-						},
-						Data: []byte("{}"),
-					},
+					RecvType:  "http",
+					RecvData:  []byte(`{"url": "http://localhost:3000"}`),
+					Message:   []byte("{}"),
 				},
 			},
 			res: &t_api.Response{
@@ -1232,9 +1223,9 @@ func TestCreateSchedule(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CreateSchedule,
 				Tags: map[string]string{
-					"request_id": "CreateSchedule",
-					"name":       "CreateSchedule",
-					"protocol":   "grpc",
+					"id":       "CreateSchedule",
+					"name":     "CreateSchedule",
+					"protocol": "grpc",
 				},
 				CreateSchedule: &t_api.CreateScheduleRequest{
 					Id:             "foo",
@@ -1319,9 +1310,9 @@ func TestReadSchedule(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ReadSchedule,
 				Tags: map[string]string{
-					"request_id": "ReadSchedule",
-					"name":       "ReadSchedule",
-					"protocol":   "grpc",
+					"id":       "ReadSchedule",
+					"name":     "ReadSchedule",
+					"protocol": "grpc",
 				},
 				ReadSchedule: &t_api.ReadScheduleRequest{
 					Id: "foo",
@@ -1395,9 +1386,9 @@ func TestSearchSchedule(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.SearchSchedules,
 				Tags: map[string]string{
-					"request_id": "SearchSchedules",
-					"name":       "SearchSchedules",
-					"protocol":   "grpc",
+					"id":       "SearchSchedules",
+					"name":     "SearchSchedules",
+					"protocol": "grpc",
 				},
 				SearchSchedules: &t_api.SearchSchedulesRequest{
 					Id:    "*",
@@ -1462,9 +1453,9 @@ func TestDeleteSchedule(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.DeleteSchedule,
 				Tags: map[string]string{
-					"request_id": "DeleteSchedule",
-					"name":       "DeleteSchedule",
-					"protocol":   "grpc",
+					"id":       "DeleteSchedule",
+					"name":     "DeleteSchedule",
+					"protocol": "grpc",
 				},
 				DeleteSchedule: &t_api.DeleteScheduleRequest{
 					Id: "foo",
@@ -1539,9 +1530,9 @@ func TestAcquireLock(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.AcquireLock,
 				Tags: map[string]string{
-					"request_id": "AcquireLock",
-					"name":       "AcquireLock",
-					"protocol":   "grpc",
+					"id":       "AcquireLock",
+					"name":     "AcquireLock",
+					"protocol": "grpc",
 				},
 				AcquireLock: &t_api.AcquireLockRequest{
 					ResourceId:           "foo",
@@ -1668,9 +1659,9 @@ func TestReleaseLock(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ReleaseLock,
 				Tags: map[string]string{
-					"request_id": "ReleaseLock",
-					"name":       "ReleaseLock",
-					"protocol":   "grpc",
+					"id":       "ReleaseLock",
+					"name":     "ReleaseLock",
+					"protocol": "grpc",
 				},
 				ReleaseLock: &t_api.ReleaseLockRequest{
 					ResourceId:  "foo",
@@ -1760,9 +1751,9 @@ func TestHeartbeatLocks(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatLocks,
 				Tags: map[string]string{
-					"request_id": "HeartbeatLocks",
-					"name":       "HeartbeatLocks",
-					"protocol":   "grpc",
+					"id":       "HeartbeatLocks",
+					"name":     "HeartbeatLocks",
+					"protocol": "grpc",
 				},
 				HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 					ProcessId: "foo",
@@ -1846,9 +1837,9 @@ func TestClaimTask(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.ClaimTask,
 				Tags: map[string]string{
-					"request_id": "ClaimTask",
-					"name":       "ClaimTask",
-					"protocol":   "grpc",
+					"id":       "ClaimTask",
+					"name":     "ClaimTask",
+					"protocol": "grpc",
 				},
 				ClaimTask: &t_api.ClaimTaskRequest{
 					Id:        "foo",
@@ -1862,7 +1853,7 @@ func TestClaimTask(t *testing.T) {
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
 					Task: &task.Task{
-						Message: &message.Message{},
+						Message: []byte("{}"),
 					},
 				},
 			},
@@ -1958,9 +1949,9 @@ func TestCompleteTask(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.CompleteTask,
 				Tags: map[string]string{
-					"request_id": "CompleteTask",
-					"name":       "CompleteTask",
-					"protocol":   "grpc",
+					"id":       "CompleteTask",
+					"name":     "CompleteTask",
+					"protocol": "grpc",
 				},
 				CompleteTask: &t_api.CompleteTaskRequest{
 					Id:      "foo",
@@ -2041,9 +2032,9 @@ func TestHeartbeatTasks(t *testing.T) {
 			req: &t_api.Request{
 				Kind: t_api.HeartbeatTasks,
 				Tags: map[string]string{
-					"request_id": "HeartbeatTasks",
-					"name":       "HeartbeatTasks",
-					"protocol":   "grpc",
+					"id":       "HeartbeatTasks",
+					"name":     "HeartbeatTasks",
+					"protocol": "grpc",
 				},
 				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 					ProcessId: "bar",

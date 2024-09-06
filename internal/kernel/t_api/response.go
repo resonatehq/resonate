@@ -43,10 +43,6 @@ type Response struct {
 	Echo *EchoResponse
 }
 
-func (r *Response) Id() string {
-	return r.Tags["request_id"]
-}
-
 // Promises
 
 type CreatePromiseResponse struct {
@@ -176,8 +172,11 @@ func (r *Response) Status() StatusCode {
 		return r.CompleteTask.Status
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.Status
+	// ECHO
+	case Echo:
+		return 200
 	default:
-		return 0
+		panic(fmt.Sprintf("invalid response kind: %s", r.Kind))
 	}
 }
 

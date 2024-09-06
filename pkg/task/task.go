@@ -4,30 +4,31 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
+	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
 type Task struct {
-	Id          string           `json:"id"`
-	ProcessId   *string          `json:"processId"`
-	State       State            `json:"state"`
-	Message     *message.Message `json:"message"`
-	Timeout     int64            `json:"timeout"`
-	Counter     int              `json:"counter"`
-	Attempt     int              `json:"attempt"`
-	Frequency   int              `json:"frequency"`
-	Expiration  int64            `json:"expiration"`
-	CreatedOn   *int64           `json:"createdOn"`
-	CompletedOn *int64           `json:"completedOn"`
+	Id          string         `json:"id"`
+	ProcessId   *string        `json:"processId"`
+	State       State          `json:"state"`
+	Recv        *receiver.Recv `json:"-"` // unexported
+	Message     []byte         `json:"-"` // unexported
+	Timeout     int64          `json:"timeout"`
+	Counter     int            `json:"counter"`
+	Attempt     int            `json:"attempt"`
+	Frequency   int            `json:"frequency"`
+	Expiration  int64          `json:"expiration"`
+	CreatedOn   *int64         `json:"createdOn"`
+	CompletedOn *int64         `json:"completedOn"`
 }
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%s, processId=%s, state=%s, message=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
+		"Task(id=%s, processId=%s, state=%s, recv=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
 		t.Id,
 		util.SafeDeref(t.ProcessId),
 		t.State,
-		t.Message,
+		t.Recv,
 		t.Timeout,
 		t.Counter,
 		t.Attempt,

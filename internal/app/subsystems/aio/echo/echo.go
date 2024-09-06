@@ -115,6 +115,7 @@ func (w *EchoWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]
 
 	for i, sqe := range sqes {
 		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
+			Id: sqe.Id,
 			Completion: &t_aio.Completion{
 				Kind: t_aio.Echo,
 				Tags: sqe.Submission.Tags, // propagate the tags

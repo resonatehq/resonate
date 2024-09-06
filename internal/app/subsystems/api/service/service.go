@@ -1,7 +1,6 @@
 package service
 
 import (
-	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -16,18 +15,6 @@ func New(api api.API, protocol string) *Service {
 	return &Service{
 		api:      api,
 		protocol: protocol,
-	}
-}
-
-func (s *Service) tags(requestId string, name string) map[string]string {
-	if requestId == "" {
-		requestId = uuid.New().String()
-	}
-
-	return map[string]string{
-		"request_id": requestId,
-		"name":       name,
-		"protocol":   s.protocol,
 	}
 }
 

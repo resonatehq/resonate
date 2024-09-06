@@ -47,6 +47,8 @@ const (
 	CREATE TABLE IF NOT EXISTS callbacks (
 		id         SERIAL PRIMARY KEY,
 		promise_id TEXT,
+		recv_type  TEXT,
+		recv_data  BYTEA,
 		message    BYTEA,
 		timeout    INTEGER,
 		created_on BIGINT
@@ -74,6 +76,8 @@ const (
 		id           SERIAL PRIMARY KEY,
 		pid          TEXT,
 		state        INTEGER DEFAULT 1,
+		recv_type    TEXT,
+		recv_data    BYTEA,
 		message      BYTEA,
 		timeout      BIGINT,
 		counter      INTEGER,
@@ -165,9 +169,9 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, message, timeout, created_on)
+		(promise_id, recv_type, recv_data, message, timeout, created_on)
 	SELECT
-		$1, $2, $3, $4
+		$1, $2, $3, $4, $5, $6
 	WHERE EXISTS
 		(SELECT 1 FROM promises WHERE id = $1 AND state = 1)
 	RETURNING id`
@@ -263,7 +267,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, pid, state, recv_type, recv_data, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -271,7 +275,7 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, pid, state, recv_type, recv_data, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -283,15 +287,15 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(message, timeout, counter, attempt, frequency, expiration, created_on)
+		(recv_type, recv_data, message, timeout, counter, attempt, frequency, expiration, created_on)
 	VALUES
-		($1, $2, 0, 0, 0, 0, $3)`
+		($1, $2, $3, $4, 0, 0, 0, 0, $5)`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(message, timeout, counter, attempt, frequency, expiration, created_on)
+		(recv_type, recv_data, message, timeout, counter, attempt, frequency, expiration, created_on)
 	SELECT
-		message, timeout, 0, 0, 0, 0, $1
+		recv_type, recv_data, message, timeout, 0, 0, 0, 0, $1
 	FROM
 		callbacks
 	WHERE
@@ -969,16 +973,9 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 // Callbacks
 
 func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Message != nil, "message must not be nil")
-
-	message, err := json.Marshal(cmd.Message)
-	if err != nil {
-		return nil, err
-	}
-
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, message, cmd.Timeout, cmd.CreatedOn)
+	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.RecvType, cmd.RecvData, cmd.Message, cmd.Timeout, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
@@ -1369,6 +1366,8 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
+		&record.RecvType,
+		&record.RecvData,
 		&record.Message,
 		&record.Timeout,
 		&record.Counter,
@@ -1422,6 +1421,8 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
+			&record.RecvType,
+			&record.RecvData,
 			&record.Message,
 			&record.Timeout,
 			&record.Counter,
@@ -1448,12 +1449,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 }
 
 func (w *PostgresStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
-	message, err := json.Marshal(cmd.Message)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := stmt.Exec(message, cmd.Timeout, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.RecvType, cmd.RecvData, cmd.Message, cmd.Timeout, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

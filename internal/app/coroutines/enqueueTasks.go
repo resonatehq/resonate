@@ -94,7 +94,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				slog.Warn("failed to enqueue task", "err", err)
 			}
 
-			if err != nil && completion.Queue.Success {
+			if err == nil && completion.Queue.Success {
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{

@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -40,10 +39,6 @@ type Request struct {
 
 	// ECHO
 	Echo *EchoRequest
-}
-
-func (r *Request) Id() string {
-	return r.Tags["request_id"]
 }
 
 // Promises
@@ -101,9 +96,11 @@ type RejectPromiseRequest struct {
 // Callbacks
 
 type CreateCallbackRequest struct {
-	PromiseId string           `json:"promiseId"`
-	Timeout   int64            `json:"timeout"`
-	Message   *message.Message `json:"message"`
+	PromiseId string `json:"promiseId"`
+	Timeout   int64  `json:"timeout"`
+	RecvType  string `json:"recvType"`
+	RecvData  []byte `json:"recvData"`
+	Message   []byte `json:"message"`
 }
 
 // Schedules

@@ -4,7 +4,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // CREATE
@@ -17,19 +16,23 @@ func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_a
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+		Id: header.Id(),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateCallback,
-			Tags: s.tags(header.RequestId, "CreateCallback"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreateCallback",
+				"protocol": s.protocol,
+			},
 			CreateCallback: &t_api.CreateCallbackRequest{
 				PromiseId: body.PromiseId,
 				Timeout:   body.Timeout,
-				Message: &message.Message{
-					Recv: body.Recv,
-					Data: body.Data,
-				},
+				RecvType:  body.Recv.Type,
+				RecvData:  body.Recv.Data,
+				Message:   body.Message,
 			},
 		},
+		Callback: s.sendOrPanic(cq),
 	})
 
 	cqe := <-cq

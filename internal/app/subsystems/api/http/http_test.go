@@ -14,7 +14,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -103,9 +102,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromise",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromise",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "foo",
@@ -133,9 +132,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromiseWithSlash",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromiseWithSlash",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "foo/bar",
@@ -163,9 +162,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromiseNotFound",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromiseNotFound",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "bar",
@@ -190,9 +189,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromises",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromises",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -227,9 +226,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesCursor",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesCursor",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -261,9 +260,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesPending",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesPending",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -294,9 +293,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesResolved",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesResolved",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -327,9 +326,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesRejected",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesRejected",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -362,9 +361,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesTags",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesTags",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -443,9 +442,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreatePromise,
 						Tags: map[string]string{
-							"request_id": "CreatePromise",
-							"name":       "CreatePromise",
-							"protocol":   "http",
+							"id":       "CreatePromise",
+							"name":     "CreatePromise",
+							"protocol": "http",
 						},
 						CreatePromise: &t_api.CreatePromiseRequest{
 							Id:             "foo/bar",
@@ -484,9 +483,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreatePromise,
 						Tags: map[string]string{
-							"request_id": "CreatePromiseMinimal",
-							"name":       "CreatePromise",
-							"protocol":   "http",
+							"id":       "CreatePromiseMinimal",
+							"name":     "CreatePromise",
+							"protocol": "http",
 						},
 						CreatePromise: &t_api.CreatePromiseRequest{
 							Id:             "foo",
@@ -530,9 +529,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "CancelPromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "CancelPromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -570,9 +569,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "CancelPromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "CancelPromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -616,9 +615,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "ResolvePromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "ResolvePromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -656,9 +655,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "ResolvePromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "ResolvePromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -702,9 +701,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "RejectPromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "RejectPromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -742,9 +741,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "RejectPromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "RejectPromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -782,25 +781,21 @@ func TestHttpServer(t *testing.T) {
 						"promiseId": "foo",
 						"timeout": 1,
 						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
-						"data": "e30="
+						"message": "e30="
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
 						Tags: map[string]string{
-							"request_id": "CreateCallback",
-							"name":       "CreateCallback",
-							"protocol":   "http",
+							"id":       "CreateCallback",
+							"name":     "CreateCallback",
+							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
 							PromiseId: "foo",
 							Timeout:   1,
-							Message: &message.Message{
-								Recv: &message.Recv{
-									Type: "http",
-									Data: map[string]interface{}{"url": "http://localhost:3000"},
-								},
-								Data: []byte("{}"),
-							},
+							RecvType:  "http",
+							RecvData:  []byte(`{"url": "http://localhost:3000"}`),
+							Message:   []byte("{}"),
 						},
 					},
 					res: &t_api.Response{
@@ -822,25 +817,21 @@ func TestHttpServer(t *testing.T) {
 						"promiseId": "foo",
 						"timeout": 1,
 						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
-						"data": "e30="
+						"message": "e30="
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
 						Tags: map[string]string{
-							"request_id": "CreateCallback",
-							"name":       "CreateCallback",
-							"protocol":   "http",
+							"id":       "CreateCallback",
+							"name":     "CreateCallback",
+							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
 							PromiseId: "foo",
 							Timeout:   1,
-							Message: &message.Message{
-								Recv: &message.Recv{
-									Type: "http",
-									Data: map[string]interface{}{"url": "http://localhost:3000"},
-								},
-								Data: []byte("{}"),
-							},
+							RecvType:  "http",
+							RecvData:  []byte(`{"url": "http://localhost:3000"}`),
+							Message:   []byte("{}"),
 						},
 					},
 					res: &t_api.Response{
@@ -863,9 +854,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadSchedule,
 						Tags: map[string]string{
-							"request_id": "ReadSchedule",
-							"name":       "ReadSchedule",
-							"protocol":   "http",
+							"id":       "ReadSchedule",
+							"name":     "ReadSchedule",
+							"protocol": "http",
 						},
 						ReadSchedule: &t_api.ReadScheduleRequest{
 							Id: "foo",
@@ -896,9 +887,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchSchedules,
 						Tags: map[string]string{
-							"request_id": "SearchSchedules",
-							"name":       "SearchSchedules",
-							"protocol":   "http",
+							"id":       "SearchSchedules",
+							"name":     "SearchSchedules",
+							"protocol": "http",
 						},
 						SearchSchedules: &t_api.SearchSchedulesRequest{
 							Id:    "*",
@@ -926,9 +917,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchSchedules,
 						Tags: map[string]string{
-							"request_id": "SearchSchedulesTags",
-							"name":       "SearchSchedules",
-							"protocol":   "http",
+							"id":       "SearchSchedulesTags",
+							"name":     "SearchSchedules",
+							"protocol": "http",
 						},
 						SearchSchedules: &t_api.SearchSchedulesRequest{
 							Id: "*",
@@ -990,9 +981,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreateSchedule,
 						Tags: map[string]string{
-							"request_id": "CreateSchedule",
-							"name":       "CreateSchedule",
-							"protocol":   "http",
+							"id":       "CreateSchedule",
+							"name":     "CreateSchedule",
+							"protocol": "http",
 						},
 						CreateSchedule: &t_api.CreateScheduleRequest{
 							Id:             "foo",
@@ -1027,9 +1018,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.DeleteSchedule,
 						Tags: map[string]string{
-							"request_id": "DeleteSchedule",
-							"name":       "DeleteSchedule",
-							"protocol":   "http",
+							"id":       "DeleteSchedule",
+							"name":     "DeleteSchedule",
+							"protocol": "http",
 						},
 						DeleteSchedule: &t_api.DeleteScheduleRequest{
 							Id: "foo",
@@ -1061,9 +1052,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
-							"request_id": "ClaimTask",
-							"name":       "ClaimTask",
-							"protocol":   "http",
+							"id":       "ClaimTask",
+							"name":     "ClaimTask",
+							"protocol": "http",
 						},
 						ClaimTask: &t_api.ClaimTaskRequest{
 							Id:        "foo",
@@ -1077,7 +1068,7 @@ func TestHttpServer(t *testing.T) {
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
 							Task: &task.Task{
-								Message: &message.Message{},
+								Message: []byte("{}"),
 							},
 						},
 					},
@@ -1145,9 +1136,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompleteTask,
 						Tags: map[string]string{
-							"request_id": "CompleteTask",
-							"name":       "CompleteTask",
-							"protocol":   "http",
+							"id":       "CompleteTask",
+							"name":     "CompleteTask",
+							"protocol": "http",
 						},
 						CompleteTask: &t_api.CompleteTaskRequest{
 							Id:      "foo",
@@ -1190,9 +1181,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.HeartbeatTasks,
 						Tags: map[string]string{
-							"request_id": "HeartbeatTasks",
-							"name":       "HeartbeatTasks",
-							"protocol":   "http",
+							"id":       "HeartbeatTasks",
+							"name":     "HeartbeatTasks",
+							"protocol": "http",
 						},
 						HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 							ProcessId: "bar",
@@ -1237,9 +1228,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.AcquireLock,
 						Tags: map[string]string{
-							"request_id": "AcquireLock",
-							"name":       "AcquireLock",
-							"protocol":   "http",
+							"id":       "AcquireLock",
+							"name":     "AcquireLock",
+							"protocol": "http",
 						},
 						AcquireLock: &t_api.AcquireLockRequest{
 							ResourceId:           "foo",
@@ -1290,9 +1281,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReleaseLock,
 						Tags: map[string]string{
-							"request_id": "ReleaseLock",
-							"name":       "ReleaseLock",
-							"protocol":   "http",
+							"id":       "ReleaseLock",
+							"name":     "ReleaseLock",
+							"protocol": "http",
 						},
 						ReleaseLock: &t_api.ReleaseLockRequest{
 							ResourceId:  "foo",
@@ -1332,9 +1323,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.HeartbeatLocks,
 						Tags: map[string]string{
-							"request_id": "HeartbeatLocks",
-							"name":       "HeartbeatLocks",
-							"protocol":   "http",
+							"id":       "HeartbeatLocks",
+							"name":     "HeartbeatLocks",
+							"protocol": "http",
 						},
 						HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 							ProcessId: "bar",

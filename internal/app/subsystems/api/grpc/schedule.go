@@ -19,7 +19,7 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 	ikey := idempotency.Key(req.IdempotencyKey)
 
 	header := service.CreateScheduleHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		IdempotencyKey: &ikey,
 	}
 

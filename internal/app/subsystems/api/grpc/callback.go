@@ -2,13 +2,12 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/callback"
-	"github.com/resonatehq/resonate/pkg/message"
+	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -25,19 +24,11 @@ func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallback
 		return nil, grpcStatus.Error(codes.InvalidArgument, "task.recv must be provided")
 	}
 
-	var data interface{}
-	if err := json.Unmarshal(req.Recv.Data, &data); err != nil {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.recv.data must be valid json")
-	}
-
 	body := &service.CreateCallbackBody{
 		PromiseId: req.PromiseId,
 		Timeout:   req.Timeout,
-		Recv: &message.Recv{
-			Type: req.Recv.Type,
-			Data: data,
-		},
-		Data: req.Data,
+		Recv:      &receiver.Recv{Type: req.Recv.Type, Data: req.Recv.Data},
+		Message:   req.Message,
 	}
 
 	res, err := s.service.CreateCallback(header, body)

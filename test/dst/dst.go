@@ -122,8 +122,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			reqTime := time
 
 			req.Tags = map[string]string{
-				"request_id": tid,
-				"name":       req.Kind.String(),
+				"tid":  tid,
+				"name": req.Kind.String(),
 			}
 
 			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
@@ -340,7 +340,7 @@ func (d *DST) Model() porcupine.Model {
 					status = int(res.res.Status())
 				}
 
-				return fmt.Sprintf("%s | %s → %d", req.req.Id(), req.req, status)
+				return fmt.Sprintf("%s | %s → %d", req.req.Tags["tid"], req.req, status)
 			case Bc:
 				return fmt.Sprintf("Backchannel | %s", req.bc.Task)
 			default:

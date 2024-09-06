@@ -8,7 +8,6 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -2084,7 +2083,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 		},
@@ -2111,7 +2110,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 		},
@@ -2148,7 +2147,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
@@ -2172,7 +2171,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "bar",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
@@ -2196,7 +2195,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "baz",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
@@ -2220,7 +2219,7 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "qux",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 		},
@@ -2324,21 +2323,21 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "bar",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
@@ -2776,7 +2775,9 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
-					Message:   &message.Message{Data: []byte("foo")},
+					RecvType:  "http",
+					RecvData:  []byte(`{"url":"http://localhost:3000"}`),
+					Message:   []byte("foo"),
 					Timeout:   1,
 					CreatedOn: 1,
 				},
@@ -2784,7 +2785,9 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
-					Message:   &message.Message{Data: []byte("bar")},
+					RecvType:  "http",
+					RecvData:  []byte(`{"url":"http://localhost:3001"}`),
+					Message:   []byte("bar"),
 					Timeout:   2,
 					CreatedOn: 2,
 				},
@@ -2818,14 +2821,18 @@ var TestCases = []*testCase{
 						{
 							Id:        "1",
 							State:     task.Init,
-							Message:   []byte(`{"recv":null,"data":"Zm9v"}`), // Zm9v == foo
+							RecvType:  "http",
+							RecvData:  []byte(`{"url":"http://localhost:3000"}`),
+							Message:   []byte("foo"),
 							Timeout:   1,
 							CreatedOn: util.ToPointer[int64](1),
 						},
 						{
 							Id:        "2",
 							State:     task.Init,
-							Message:   []byte(`{"recv":null,"data":"YmFy"}`), // YmFy == bar
+							RecvType:  "http",
+							RecvData:  []byte(`{"url":"http://localhost:3001"}`),
+							Message:   []byte("bar"),
 							Timeout:   2,
 							CreatedOn: util.ToPointer[int64](2),
 						},
@@ -2850,21 +2857,27 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					RecvType:  "http",
+					RecvData:  []byte("a"),
+					Message:   []byte("a"),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					RecvType:  "http",
+					RecvData:  []byte("b"),
+					Message:   []byte("b"),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					RecvType:  "http",
+					RecvData:  []byte("c"),
+					Message:   []byte("c"),
 				},
 			},
 			{
@@ -2923,19 +2936,25 @@ var TestCases = []*testCase{
 						{
 							Id:        "1",
 							State:     task.Init,
-							Message:   []byte(`{"recv":null,"data":null}`),
+							RecvType:  "http",
+							RecvData:  []byte("a"),
+							Message:   []byte("a"),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "2",
 							State:     task.Init,
-							Message:   []byte(`{"recv":null,"data":null}`),
+							RecvType:  "http",
+							RecvData:  []byte("b"),
+							Message:   []byte("b"),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "3",
 							State:     task.Init,
-							Message:   []byte(`{"recv":null,"data":null}`),
+							RecvType:  "http",
+							RecvData:  []byte("c"),
+							Message:   []byte("c"),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 					},
@@ -2959,7 +2978,9 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					RecvType:  "http",
+					RecvData:  []byte(""),
+					Message:   []byte(""),
 				},
 			},
 			{
@@ -3109,7 +3130,9 @@ var TestCases = []*testCase{
 							Id:          "1",
 							ProcessId:   util.ToPointer("pid"),
 							State:       task.Completed,
-							Message:     []byte(`{"recv":null,"data":null}`),
+							RecvType:    "http",
+							RecvData:    []byte(""),
+							Message:     []byte(""),
 							Counter:     5,
 							Attempt:     5,
 							Frequency:   5,
@@ -3138,21 +3161,21 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
-					Message:   &message.Message{},
+					Message:   []byte(""),
 				},
 			},
 			{

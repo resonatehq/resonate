@@ -16,10 +16,15 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
 		Callback: s.sendOrPanic(cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
-			Tags: s.tags(header.RequestId, "ReadPromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReadPromise",
+				"protocol": s.protocol,
+			},
 			ReadPromise: &t_api.ReadPromiseRequest{
 				Id: id,
 			},
@@ -100,10 +105,15 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
 		Callback: s.sendOrPanic(cq),
 		Submission: &t_api.Request{
-			Kind:           t_api.SearchPromises,
-			Tags:           s.tags(header.RequestId, "SearchPromises"),
+			Kind: t_api.SearchPromises,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "SearchPromises",
+				"protocol": s.protocol,
+			},
 			SearchPromises: searchPromises,
 		},
 	})
@@ -123,10 +133,15 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
 		Callback: s.sendOrPanic(cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
-			Tags: s.tags(header.RequestId, "CreatePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreatePromise",
+				"protocol": s.protocol,
+			},
 			CreatePromise: &t_api.CreatePromiseRequest{
 				Id:             body.Id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -152,10 +167,15 @@ func (s *Service) CompletePromise(id string, state promise.State, header *Comple
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
 		Callback: s.sendOrPanic(cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CompletePromise,
-			Tags: s.tags(header.RequestId, "CompletePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CompletePromise",
+				"protocol": s.protocol,
+			},
 			CompletePromise: &t_api.CompletePromiseRequest{
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,

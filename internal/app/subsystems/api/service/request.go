@@ -1,15 +1,24 @@
 package service
 
 import (
+	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
 // PROMISES
 
 type Header struct {
 	RequestId string `header:"request-id"`
+}
+
+func (h *Header) Id() string {
+	if h.RequestId == "" {
+		h.RequestId = uuid.New().String()
+	}
+
+	return h.RequestId
 }
 
 type SearchPromisesParams struct {
@@ -21,13 +30,13 @@ type SearchPromisesParams struct {
 }
 
 type CreatePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
 }
 
 type CompletePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key,omitempty"`
 	Strict         bool             `header:"strict"`
 }
@@ -40,10 +49,10 @@ type CompletePromiseBody struct {
 // CALLBACKS
 
 type CreateCallbackBody struct {
-	PromiseId string        `json:"promiseId" binding:"required"`
-	Timeout   int64         `json:"timeout" binding:"required"`
-	Recv      *message.Recv `json:"recv" binding:"required"`
-	Data      []byte        `json:"data" binding:"required"`
+	PromiseId string         `json:"promiseId" binding:"required"`
+	Timeout   int64          `json:"timeout" binding:"required"`
+	Recv      *receiver.Recv `json:"recv" binding:"required"`
+	Message   []byte         `json:"message" binding:"required"`
 }
 
 // SCHEDULES
@@ -56,7 +65,7 @@ type SearchSchedulesParams struct {
 }
 
 type CreateScheduleHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 }
 

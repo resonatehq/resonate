@@ -116,9 +116,11 @@ func (a *aio) Signal(cancel <-chan interface{}) <-chan interface{} {
 
 func (a *aio) Dispatch(submission *t_aio.Submission, callback func(*t_aio.Completion, error)) {
 	util.Assert(submission.Tags != nil, "submission tags must be set")
+	util.Assert(submission.Tags["id"] != "", "id tag must be set")
 
 	if subsystem, ok := a.subsystems[submission.Kind]; ok {
 		sqe := &bus.SQE[t_aio.Submission, t_aio.Completion]{
+			Id:         submission.Tags["id"],
 			Submission: submission,
 			Callback: func(completion *t_aio.Completion, err error) {
 				util.Assert(completion != nil && err == nil || completion == nil && err != nil, "one of completion/err must be set")
@@ -153,7 +155,7 @@ func (a *aio) Enqueue(cqe *bus.CQE[t_aio.Submission, t_aio.Completion]) {
 
 	// block until the completion queue has space
 	a.cq <- cqe
-	slog.Debug("aio:enqueue", "id", cqe.Completion.Id(), "cqe", cqe)
+	slog.Debug("aio:enqueue", "id", cqe.Id, "cqe", cqe)
 }
 
 func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
@@ -161,7 +163,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 
 	// insert the buffered sqe
 	if a.buffer != nil {
-		slog.Debug("aio:dequeue", "id", a.buffer.Completion.Id(), "cqe", a.buffer)
+		slog.Debug("aio:dequeue", "id", a.buffer.Id, "cqe", a.buffer)
 		cqes = append(cqes, a.buffer)
 		a.buffer = nil
 	}
@@ -174,7 +176,7 @@ func (a *aio) Dequeue(n int) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 				return cqes
 			}
 
-			slog.Debug("aio:dequeue", "id", cqe.Completion.Id(), "cqe", cqe)
+			slog.Debug("aio:dequeue", "id", cqe.Id, "cqe", cqe)
 			cqes = append(cqes, cqe)
 		default:
 			return cqes

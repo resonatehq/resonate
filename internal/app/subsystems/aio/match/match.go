@@ -3,14 +3,14 @@ package match
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 
-	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
 // Config
@@ -24,13 +24,12 @@ type Config struct {
 type MatcherConfig struct {
 	Name   string
 	Type   string
-	Config interface{}
+	Config json.RawMessage
 }
 
 type TagMatcherConfig struct {
-	Key  string
-	Val  *string
-	Recv message.Recv
+	Key     string
+	Default *receiver.Recv
 }
 
 // Subsystem
@@ -44,15 +43,16 @@ type Match struct {
 func New(aio aio.AIO, config *Config) (*Match, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*MatchWorker, config.Workers)
-	matchers := make([]func(*promise.Promise) (*message.Recv, bool), len(config.Matchers))
+	matchers := make([]func(*promise.Promise) (*receiver.Recv, bool), len(config.Matchers))
 
 	for i, matcher := range config.Matchers {
 		switch matcher.Type {
 		case "tag":
 			var config *TagMatcherConfig
-			if err := mapstructure.Decode(matcher.Config, &config); err != nil {
+			if err := json.Unmarshal(matcher.Config, &config); err != nil {
 				return nil, err
 			}
+
 			matchers[i] = TagMatcher(config)
 		default:
 			return nil, fmt.Errorf("unknown matcher type: %s", matcher.Type)
@@ -116,7 +116,7 @@ func (m *Match) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*
 type MatchWorker struct {
 	sq       <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
 	aio      aio.AIO
-	matchers []func(*promise.Promise) (*message.Recv, bool)
+	matchers []func(*promise.Promise) (*receiver.Recv, bool)
 }
 
 func (w *MatchWorker) Start() {
@@ -141,70 +141,77 @@ func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 	util.Assert(sqe.Submission.Match != nil, "match must not be nil")
 	util.Assert(sqe.Submission.Match.Promise != nil, "promise must not be nil")
 
-	data, err := json.Marshal(&data{Type: "invoke", Promise: sqe.Submission.Match.Promise})
+	cqe := &bus.CQE[t_aio.Submission, t_aio.Completion]{
+		Id:       sqe.Id,
+		Callback: sqe.Callback,
+	}
+
+	message, err := json.Marshal(&data{
+		Type:    "invoke",
+		Promise: sqe.Submission.Match.Promise,
+	})
 	if err != nil {
-		return &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Completion: nil,
-			Callback:   sqe.Callback,
-			Error:      err,
-		}
+		cqe.Error = err
+		return cqe
 	}
 
 	// apply matchers in succession, first match wins
 	for _, f := range w.matchers {
 		if recv, ok := f(sqe.Submission.Match.Promise); ok {
-			return &bus.CQE[t_aio.Submission, t_aio.Completion]{
-				Completion: &t_aio.Completion{
-					Kind: t_aio.Match,
-					Tags: sqe.Submission.Tags,
-					Match: &t_aio.MatchCompletion{
-						Matched: true,
-						Command: &t_aio.CreateTaskCommand{
-							Message: &message.Message{
-								Recv: recv,
-								Data: data,
-							},
-							Timeout: sqe.Submission.Match.Promise.Timeout,
-						},
+			cqe.Completion = &t_aio.Completion{
+				Kind: t_aio.Match,
+				Tags: sqe.Submission.Tags,
+				Match: &t_aio.MatchCompletion{
+					Matched: true,
+					Command: &t_aio.CreateTaskCommand{
+						RecvType: recv.Type,
+						RecvData: recv.Data,
+						Message:  message,
+						Timeout:  sqe.Submission.Match.Promise.Timeout,
 					},
 				},
-				Callback: sqe.Callback,
-				Error:    nil,
 			}
+			return cqe
 		}
 	}
 
-	return &bus.CQE[t_aio.Submission, t_aio.Completion]{
-		Completion: &t_aio.Completion{
-			Kind:  t_aio.Match,
-			Tags:  sqe.Submission.Tags,
-			Match: &t_aio.MatchCompletion{Matched: false},
-		},
-		Callback: sqe.Callback,
-		Error:    nil,
+	cqe.Completion = &t_aio.Completion{
+		Kind:  t_aio.Match,
+		Tags:  sqe.Submission.Tags,
+		Match: &t_aio.MatchCompletion{Matched: false},
 	}
+	return cqe
 }
 
 // Matcher functions
 
-func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*message.Recv, bool) {
-	return func(p *promise.Promise) (*message.Recv, bool) {
+func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*receiver.Recv, bool) {
+	return func(p *promise.Promise) (*receiver.Recv, bool) {
 		util.Assert(p.Tags != nil, "tags must be set")
 
-		if v, ok := p.Tags[config.Key]; ok && (config.Val == nil || v == *config.Val) {
-			switch config.Recv.Type {
-			case "http":
-				var data interface{}
-				if config.Val != nil {
-					data = config.Recv.Data
-				} else {
-					data = matchHttp(v)
+		if v, ok := p.Tags[config.Key]; ok {
+			if config.Default != nil {
+				switch config.Default.Type {
+				case "http":
+					return config.Default, true
+				default:
+					return nil, false
 				}
+			} else {
+				switch protocol(v) {
+				case "http", "https":
+					data, err := json.Marshal(map[string]interface{}{"url": v})
+					if err != nil {
+						return nil, false
+					}
 
-				return &message.Recv{
-					Type: config.Recv.Type,
-					Data: data,
-				}, true
+					return &receiver.Recv{
+						Type: "http",
+						Data: data,
+					}, true
+				default:
+					return nil, false
+				}
 			}
 		}
 
@@ -212,10 +219,11 @@ func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*message.Recv,
 	}
 }
 
-// TODO: move to a plugin
-
-func matchHttp(url string) interface{} {
-	return map[string]interface{}{
-		"url": url,
+func protocol(value string) string {
+	url, err := url.Parse(value)
+	if err != nil {
+		return ""
 	}
+
+	return url.Scheme
 }

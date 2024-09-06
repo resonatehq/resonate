@@ -34,10 +34,6 @@ type Submission struct {
 	Store *StoreSubmission
 }
 
-func (s *Submission) Id() string {
-	return s.Tags["request_id"]
-}
-
 func (s *Submission) String() string {
 	switch s.Kind {
 	case Echo:
@@ -61,10 +57,6 @@ type Completion struct {
 	Match *MatchCompletion
 	Queue *QueueCompletion
 	Store *StoreCompletion
-}
-
-func (c *Completion) Id() string {
-	return c.Tags["request_id"]
 }
 
 func (c *Completion) String() string {

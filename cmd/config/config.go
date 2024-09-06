@@ -53,7 +53,13 @@ func (c *ConfigDST) BindDST(cmd *cobra.Command) error {
 }
 
 func (c *Config) Parse() error {
-	if err := viper.Unmarshal(&c); err != nil {
+	hooks := mapstructure.ComposeDecodeHookFunc(
+		util.MapToBytes(),
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+	)
+
+	if err := viper.Unmarshal(&c, viper.DecodeHook(hooks)); err != nil {
 		return err
 	}
 
@@ -72,9 +78,9 @@ func (c *Config) Parse() error {
 func (c *ConfigDST) Parse(r *rand.Rand) error {
 	hooks := mapstructure.ComposeDecodeHookFunc(
 		util.StringToRange(r),
+		util.MapToBytes(),
 		mapstructure.StringToTimeDurationHookFunc(),
 		mapstructure.StringToSliceHookFunc(","),
-		mapstructure.TextUnmarshallerHookFunc(),
 	)
 
 	config := struct{ DST *ConfigDST }{DST: c}
@@ -105,16 +111,6 @@ type AIODST struct {
 	Subsystems AIODSTSubsystems `flag:"-"`
 }
 
-type EnabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true"`
-	Config  T    `flag:"-"`
-}
-
-type DisabledSubsystem[T any] struct {
-	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false"`
-	Config  T    `flag:"-"`
-}
-
 type APISubsystems struct {
 	Http EnabledSubsystem[http.Config] `flag:"http"`
 	Grpc EnabledSubsystem[grpc.Config] `flag:"grpc"`
@@ -126,6 +122,16 @@ type AIOSubsystems struct {
 	Match         EnabledSubsystem[match.Config]     `flag:"match"`
 	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
+}
+
+type EnabledSubsystem[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true"`
+	Config  T    `flag:"-"`
+}
+
+type DisabledSubsystem[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false"`
+	Config  T    `flag:"-"`
 }
 
 func (s *APISubsystems) Instantiate(a api.API) []api.Subsystem {

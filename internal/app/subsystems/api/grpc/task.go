@@ -36,7 +36,7 @@ func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (
 	}
 
 	return &grpcApi.ClaimTaskResponse{
-		Data: res.Task.Message.Data,
+		Data: res.Task.Message,
 	}, nil
 }
 

@@ -127,52 +127,18 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	callback := sqe.Callback
 	sqe.Callback = func(res *t_api.Response, err error) {
 		util.Assert(res != nil && err == nil || res == nil && err != nil, "one of res/err must be set")
-		var status int
+		var status t_api.StatusCode
 
 		if err != nil {
 			var error *t_api.Error
 			util.Assert(errors.As(err, &error), "err must be a ResonateError")
-			status = int(error.Code())
+
+			status = error.Code()
 		} else {
-			switch res.Kind {
-			case t_api.ReadPromise:
-				status = int(res.ReadPromise.Status)
-			case t_api.SearchPromises:
-				status = int(res.SearchPromises.Status)
-			case t_api.CreatePromise:
-				status = int(res.CreatePromise.Status)
-			case t_api.CompletePromise:
-				status = int(res.CompletePromise.Status)
-			case t_api.CreateCallback:
-				status = int(res.CreateCallback.Status)
-			case t_api.ReadSchedule:
-				status = int(res.ReadSchedule.Status)
-			case t_api.SearchSchedules:
-				status = int(res.SearchSchedules.Status)
-			case t_api.CreateSchedule:
-				status = int(res.CreateSchedule.Status)
-			case t_api.DeleteSchedule:
-				status = int(res.DeleteSchedule.Status)
-			case t_api.AcquireLock:
-				status = int(res.AcquireLock.Status)
-			case t_api.ReleaseLock:
-				status = int(res.ReleaseLock.Status)
-			case t_api.HeartbeatLocks:
-				status = int(res.HeartbeatLocks.Status)
-			case t_api.ClaimTask:
-				status = int(res.ClaimTask.Status)
-			case t_api.CompleteTask:
-				status = int(res.CompleteTask.Status)
-			case t_api.HeartbeatTasks:
-				status = int(res.HeartbeatTasks.Status)
-			case t_api.Echo:
-				status = 2000
-			default:
-				panic(fmt.Errorf("unknown response kind: %s", res.Kind))
-			}
+			status = res.Status()
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"], strconv.Itoa(status)).Inc()
+		a.metrics.ApiTotal.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"], strconv.Itoa(int(status))).Inc()
 		a.metrics.ApiInFlight.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"]).Dec()
 
 		callback(res, err)
@@ -187,7 +153,7 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 
 	select {
 	case a.sq <- sqe:
-		slog.Debug("api:enqueue", "id", sqe.Submission.Id(), "sqe", sqe)
+		slog.Debug("api:enqueue", "id", sqe.Id, "sqe", sqe)
 	default:
 		sqe.Callback(nil, t_api.NewError(t_api.StatusAPISubmissionQueueFull, nil))
 	}
@@ -198,7 +164,7 @@ func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 
 	// insert the buffered sqe
 	if a.buffer != nil {
-		slog.Debug("api:dequeue", "id", a.buffer.Submission.Id(), "sqe", a.buffer)
+		slog.Debug("api:dequeue", "id", a.buffer.Id, "sqe", a.buffer)
 		sqes = append(sqes, a.buffer)
 		a.buffer = nil
 	}
@@ -210,7 +176,7 @@ func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 			if !ok {
 				return sqes
 			}
-			slog.Debug("api:dequeue", "id", sqe.Submission.Id(), "sqe", sqe)
+			slog.Debug("api:dequeue", "id", sqe.Id, "sqe", sqe)
 			sqes = append(sqes, sqe)
 		default:
 			return sqes
