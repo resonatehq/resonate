@@ -17,6 +17,7 @@ from resonate.context import (
 )
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
+from resonate.encoders import ErrorEncoder, JsonEncoder
 from resonate.events import (
     ExecutionAwaited,
     ExecutionInvoked,
@@ -191,6 +192,7 @@ class DSTScheduler:
         self._handler_queues: CommandHandlerQueues = {}
 
         self._durable_promise_storage = durable_promise_storage
+        self._json_encoder = JsonEncoder()
 
     def register_command(
         self,
@@ -348,17 +350,34 @@ class DSTScheduler:
         self._events.append(PromiseCreated(promise_id=p.promise_id, tick=self.tick))
         if durable_promise_record.is_pending():
             return p
+
+        assert (
+            durable_promise_record.value.data is not None
+        ), "If the promise is not pending, there must be data."
+        v = self._get_value_from_durable_promise(durable_promise_record)
+        self._resolve_promise(p, v)
+        return p
+
+    def _get_value_from_durable_promise(
+        self, durable_promise_record: DurablePromiseRecord
+    ) -> Result[Any, Exception]:
+        assert (
+            durable_promise_record.is_completed()
+        ), "If you want to get the value then the promise must have been completed"
+
         v: Result[Any, Exception]
         if durable_promise_record.is_rejected():
-            v = Err(Exception(durable_promise_record.value.data))
+            if durable_promise_record.value.data is None:
+                raise NotImplementedError
+
+            v = Err(ErrorEncoder.decode(durable_promise_record.value.data))
         else:
             assert durable_promise_record.is_resolved()
             if durable_promise_record.value.data is None:
                 v = Ok(None)
             else:
                 v = Ok(json.loads(durable_promise_record.value.data))
-        self._resolve_promise(p, v)
-        return p
+        return v
 
     def _move_next_top_lvl_invoke_to_runnables(
         self, top_lvl: Invoke, promise_id: str
@@ -417,7 +436,6 @@ class DSTScheduler:
     def _resolve_promise(
         self, promise: Promise[T], value: Result[T, Exception]
     ) -> None:
-        promise.set_result(value)
         completed_record = self._complete_durable_promise_record(
             promise_id=promise.promise_id,
             value=value,
@@ -425,6 +443,9 @@ class DSTScheduler:
         assert (
             completed_record.is_completed()
         ), "Durable promise record must be completed by this point."
+        v = self._get_value_from_durable_promise(completed_record)
+        promise.set_result(v)
+
         self._events.append(
             PromiseCompleted(promise_id=promise.promise_id, tick=self.tick, value=value)
         )
@@ -468,6 +489,10 @@ class DSTScheduler:
                     else fn_wrapper.run()
                 )
                 assert isinstance(v, (Ok, Err)), f"{v} must be a result."
+
+                if self._maybe_fail():
+                    raise _DSTFailureError
+
                 self._resolve_promise(promise, v)
                 self._unblock_coros_waiting_on_promise(promise)
 
@@ -492,7 +517,7 @@ class DSTScheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=json.dumps(value.unwrap()),
+                data=self._json_encoder.encode(value.unwrap()),
             )
         if isinstance(value, Err):
             return self._durable_promise_storage.reject(
@@ -500,7 +525,7 @@ class DSTScheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=json.dumps(str(value.err())),
+                data=ErrorEncoder.encode(value.err()),
             )
         assert_never(value)
 
@@ -512,7 +537,7 @@ class DSTScheduler:
             ikey=utils.string_to_ikey(promise_id),
             strict=False,
             headers=None,
-            data=json.dumps(data),
+            data=self._json_encoder.encode(data),
             timeout=sys.maxsize,
             tags=None,
         )

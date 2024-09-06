@@ -20,6 +20,7 @@ from resonate.context import (
 )
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
+from resonate.encoders import ErrorEncoder, JsonEncoder
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.promise import Promise
 from resonate.result import Err, Ok
@@ -127,6 +128,7 @@ class Scheduler:
         self._worker_continue = Event()
 
         self._deps = Dependencies()
+        self._json_encoder = JsonEncoder()
 
         self.runnable_coros: RunnableCoroutines = []
         self.awaitables: Awaitables = {}
@@ -158,7 +160,7 @@ class Scheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=json.dumps(value.unwrap()),
+                data=self._json_encoder.encode(value.unwrap()),
             )
         if isinstance(value, Err):
             return self._durable_promise_storage.reject(
@@ -166,7 +168,7 @@ class Scheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=json.dumps(str(value.err())),
+                data=ErrorEncoder.encode(value.err()),
             )
         assert_never(value)
 
@@ -178,10 +180,31 @@ class Scheduler:
             ikey=utils.string_to_ikey(promise_id),
             strict=False,
             headers=None,
-            data=json.dumps(data),
+            data=self._json_encoder.encode(data),
             timeout=sys.maxsize,
             tags=None,
         )
+
+    def _get_value_from_durable_promise(
+        self, durable_promise_record: DurablePromiseRecord
+    ) -> Result[Any, Exception]:
+        assert (
+            durable_promise_record.is_completed()
+        ), "If you want to get the value then the promise must have been completed"
+
+        v: Result[Any, Exception]
+        if durable_promise_record.is_rejected():
+            if durable_promise_record.value.data is None:
+                raise NotImplementedError
+
+            v = Err(ErrorEncoder.decode(durable_promise_record.value.data))
+        else:
+            assert durable_promise_record.is_resolved()
+            if durable_promise_record.value.data is None:
+                v = Ok(None)
+            else:
+                v = Ok(json.loads(durable_promise_record.value.data))
+        return v
 
     def _create_promise(self, promise_id: str, action: Invoke | Sleep) -> Promise[Any]:
         p = Promise[Any](promise_id=promise_id, action=action)
@@ -204,15 +227,14 @@ class Scheduler:
         )
         if durable_promise_record.is_pending():
             return p
-        v: Result[Any, Exception]
-        if durable_promise_record.is_rejected():
-            v = Err(Exception(durable_promise_record.value.data))
-        else:
-            assert durable_promise_record.is_resolved()
-            if durable_promise_record.value.data is None:
-                v = Ok(None)
-            else:
-                v = Ok(json.loads(durable_promise_record.value.data))
+
+        assert (
+            durable_promise_record.value.data is not None
+        ), "If the promise is not pending, there must be data."
+
+        v = self._get_value_from_durable_promise(
+            durable_promise_record=durable_promise_record
+        )
 
         self._resolve_promise(p, v)
         return p
@@ -319,7 +341,6 @@ class Scheduler:
     def _resolve_promise(
         self, promise: Promise[T], value: Result[T, Exception]
     ) -> None:
-        promise.set_result(value)
         completed_record = self._complete_durable_promise_record(
             promise_id=promise.promise_id,
             value=value,
@@ -327,6 +348,8 @@ class Scheduler:
         assert (
             completed_record.is_completed()
         ), "Durable promise record must be completed by this point."
+        v = self._get_value_from_durable_promise(completed_record)
+        promise.set_result(v)
 
     def _advance_runnable_span(self, runnable: Runnable[Any]) -> None:
         assert isgenerator(

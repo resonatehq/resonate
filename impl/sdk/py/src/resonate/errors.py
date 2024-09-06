@@ -52,10 +52,11 @@ class ResonateError(Exception):
         *,
         retriable: bool = False,
     ) -> None:
-        self.code = _error_to_code(code)
-        self.retriable = retriable
-        self.cause = cause
         super().__init__(msg)
+        self.msg = msg
+        self.code = code
+        self.cause = cause
+        self.retriable = retriable
 
     @classmethod
     def from_error(cls, e: Exception) -> ResonateError:
