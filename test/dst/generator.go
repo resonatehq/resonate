@@ -361,6 +361,8 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
+// TASKS
+
 func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.pop(r, t_api.ClaimTask)
 
