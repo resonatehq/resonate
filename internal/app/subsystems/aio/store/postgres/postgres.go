@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -345,7 +347,7 @@ type PostgresStore struct {
 	workers []*PostgresStoreWorker
 }
 
-func New(aio aio.AIO, config *Config) (*PostgresStore, error) {
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*PostgresStoreWorker, config.Workers)
 
@@ -373,11 +375,13 @@ func New(aio aio.AIO, config *Config) (*PostgresStore, error) {
 
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &PostgresStoreWorker{
-			config: config,
-			db:     db,
-			sq:     sq,
-			aio:    aio,
-			flush:  make(chan int64, 1),
+			config:  config,
+			i:       i,
+			db:      db,
+			sq:      sq,
+			flush:   make(chan int64, 1),
+			aio:     aio,
+			metrics: metrics,
 		}
 	}
 
@@ -400,6 +404,10 @@ func (s *PostgresStore) Kind() t_aio.Kind {
 func (s *PostgresStore) Start() error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
+	}
+
+	for _, worker := range s.workers {
+		go worker.Start()
 	}
 
 	return nil
@@ -443,19 +451,31 @@ func (s *PostgresStore) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completi
 // Worker
 
 type PostgresStoreWorker struct {
-	config *Config
-	db     *sql.DB
-	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio    aio.AIO
-	flush  chan int64
+	config  *Config
+	i       int
+	db      *sql.DB
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	flush   chan int64
+	aio     aio.AIO
+	metrics *metrics.Metrics
+}
+
+func (w *PostgresStoreWorker) String() string {
+	return "store:postgres"
 }
 
 func (w *PostgresStoreWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
 		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
+			counter.Set(float64(len(sqes)))
 			for _, cqe := range w.Process(sqes) {
 				w.aio.Enqueue(cqe)
+				counter.Dec()
 			}
 		}
 		if !ok {

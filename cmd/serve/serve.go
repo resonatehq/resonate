@@ -59,7 +59,7 @@ func ServeCmd() *cobra.Command {
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(aio)
+			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics)
 			if err != nil {
 				return err
 			}

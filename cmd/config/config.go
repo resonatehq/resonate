@@ -21,6 +21,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
 	"github.com/resonatehq/resonate/internal/kernel/system"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -146,10 +147,10 @@ func (s *APISubsystems) Instantiate(a api.API) []api.Subsystem {
 	return subsystems
 }
 
-func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
+func (s *AIOSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsystem, error) {
 	subsystems := []aio.Subsystem{}
 	if s.Echo.Enabled {
-		subsystem, err := echo.New(a, &s.Echo.Config)
+		subsystem, err := echo.New(a, metrics, &s.Echo.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -157,7 +158,7 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 		subsystems = append(subsystems, subsystem)
 	}
 	if s.Match.Enabled {
-		subsystem, err := match.New(a, &s.Match.Config)
+		subsystem, err := match.New(a, metrics, &s.Match.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +166,7 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 		subsystems = append(subsystems, subsystem)
 	}
 	if s.Queue.Enabled {
-		subsystem, err := queue.New(a, &s.Queue.Config)
+		subsystem, err := queue.New(a, metrics, &s.Queue.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -173,7 +174,7 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 		subsystems = append(subsystems, subsystem)
 	}
 
-	subsystem, err := s.instantiateStore(a)
+	subsystem, err := s.instantiateStore(a, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -182,11 +183,11 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO) ([]aio.Subsystem, error) {
 	return subsystems, nil
 }
 
-func (s *AIOSubsystems) instantiateStore(a aio.AIO) (aio.Subsystem, error) {
+func (s *AIOSubsystems) instantiateStore(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
 	if s.StorePostgres.Enabled {
-		return postgres.New(a, &s.StorePostgres.Config)
+		return postgres.New(a, metrics, &s.StorePostgres.Config)
 	} else if s.StoreSqlite.Enabled {
-		return sqlite.New(a, &s.StoreSqlite.Config)
+		return sqlite.New(a, metrics, &s.StoreSqlite.Config)
 	}
 	return nil, fmt.Errorf("no store enabled")
 }
@@ -215,10 +216,10 @@ func (s *APIDSTSubsystems) Instantiate(a api.API) []api.Subsystem {
 	return subsystems
 }
 
-func (s *AIODSTSubsystems) Instantiate(r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
+func (s *AIODSTSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
 	subsystems := []aio.SubsystemDST{}
 	if s.Match.Enabled {
-		subsystem, err := match.New(nil, &s.Match.Config)
+		subsystem, err := match.New(a, metrics, &s.Match.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -234,7 +235,7 @@ func (s *AIODSTSubsystems) Instantiate(r *rand.Rand, backchannel chan interface{
 		subsystems = append(subsystems, subsystem)
 	}
 
-	subsystem, err := s.instantiateStore()
+	subsystem, err := s.instantiateStore(a, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -243,11 +244,11 @@ func (s *AIODSTSubsystems) Instantiate(r *rand.Rand, backchannel chan interface{
 	return subsystems, nil
 }
 
-func (s *AIODSTSubsystems) instantiateStore() (aio.SubsystemDST, error) {
+func (s *AIODSTSubsystems) instantiateStore(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST, error) {
 	if s.StorePostgres.Enabled {
-		return postgres.New(nil, &s.StorePostgres.Config)
+		return postgres.New(a, metrics, &s.StorePostgres.Config)
 	} else if s.StoreSqlite.Enabled {
-		return sqlite.New(nil, &s.StoreSqlite.Config)
+		return sqlite.New(a, metrics, &s.StoreSqlite.Config)
 	}
 	return nil, fmt.Errorf("no store enabled")
 }

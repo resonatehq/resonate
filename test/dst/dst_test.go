@@ -53,7 +53,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	backchannel := make(chan interface{}, 100)
 
 	// instatiate aio subsystems
-	match, err := match.New(nil, &match.Config{Workers: 1})
+	match, err := match.New(nil, metrics, &match.Config{Workers: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 		t.Fatal(err)
 	}
 
-	store, err := sqlite.New(nil, &sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
+	store, err := sqlite.New(nil, metrics, &sqlite.Config{BatchSize: 10, Path: ":memory:", TxTimeout: 250 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}

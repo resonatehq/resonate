@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/receiver"
@@ -40,7 +42,7 @@ type Match struct {
 	workers []*MatchWorker
 }
 
-func New(aio aio.AIO, config *Config) (*Match, error) {
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Match, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*MatchWorker, config.Workers)
 	matchers := make([]func(*promise.Promise) (*receiver.Recv, bool), len(config.Matchers))
@@ -61,9 +63,11 @@ func New(aio aio.AIO, config *Config) (*Match, error) {
 
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &MatchWorker{
+			i:        i,
 			sq:       sq,
-			aio:      aio,
 			matchers: matchers,
+			aio:      aio,
+			metrics:  metrics,
 		}
 	}
 
@@ -75,7 +79,7 @@ func New(aio aio.AIO, config *Config) (*Match, error) {
 }
 
 func (m *Match) String() string {
-	return "match"
+	return t_aio.Match.String()
 }
 
 func (m *Match) Kind() t_aio.Kind {
@@ -114,24 +118,35 @@ func (m *Match) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*
 // Worker
 
 type MatchWorker struct {
+	i        int
 	sq       <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio      aio.AIO
 	matchers []func(*promise.Promise) (*receiver.Recv, bool)
+	aio      aio.AIO
+	metrics  *metrics.Metrics
+}
+
+func (w *MatchWorker) String() string {
+	return t_aio.Match.String()
 }
 
 func (w *MatchWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
 		sqe, ok := <-w.sq
 		if !ok {
 			return
 		}
 
-		// process one at a time
-		w.aio.Enqueue(w.Process(sqe))
+		counter.Inc()
+		w.aio.Enqueue(w.Process(sqe)) // process one at a time
+		counter.Dec()
 	}
 }
 
-type data struct {
+type message struct {
 	Type    string           `json:"type"`
 	Promise *promise.Promise `json:"promise"`
 }
@@ -146,7 +161,7 @@ func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 		Callback: sqe.Callback,
 	}
 
-	message, err := json.Marshal(&data{
+	message, err := json.Marshal(&message{
 		Type:    "invoke",
 		Promise: sqe.Submission.Match.Promise,
 	})

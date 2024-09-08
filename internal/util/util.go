@@ -92,6 +92,7 @@ func ParseCron(cronExp string) (cron.Schedule, error) {
 }
 
 func Collect[T any](c <-chan T, f <-chan int64, n int) ([]T, bool) {
+	Assert(n > 0, "batch size must be greater than 0")
 	batch := []T{}
 
 	for i := 0; i < n; i++ {

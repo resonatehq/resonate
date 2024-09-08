@@ -15,7 +15,6 @@ import (
 
 type API interface {
 	String() string
-	AddSubsystem(subsystem Subsystem)
 
 	Start() error
 	Stop() error
@@ -39,7 +38,7 @@ type api struct {
 	metrics    *metrics.Metrics
 }
 
-func New(size int, metrics *metrics.Metrics) API {
+func New(size int, metrics *metrics.Metrics) *api {
 	return &api{
 		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
 		errors:  make(chan error),

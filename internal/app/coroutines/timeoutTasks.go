@@ -6,7 +6,6 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/task"
 )
@@ -36,7 +35,7 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 		if err != nil {
 			slog.Error("failed to read tasks", "err", err)
-			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")

@@ -118,7 +118,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(r, backchannel)
+			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics, r, backchannel)
 			if err != nil {
 				return err
 			}

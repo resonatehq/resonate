@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -328,7 +329,7 @@ type SqliteStore struct {
 	worker *SqliteStoreWorker
 }
 
-func New(aio aio.AIO, config *Config) (*SqliteStore, error) {
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*SqliteStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
 	db, err := sql.Open("sqlite3", config.Path)
@@ -341,11 +342,12 @@ func New(aio aio.AIO, config *Config) (*SqliteStore, error) {
 		sq:     sq,
 		db:     db,
 		worker: &SqliteStoreWorker{
-			config: config,
-			db:     db,
-			sq:     sq,
-			aio:    aio,
-			flush:  make(chan int64, 1),
+			config:  config,
+			db:      db,
+			sq:      sq,
+			flush:   make(chan int64, 1),
+			aio:     aio,
+			metrics: metrics,
 		},
 	}, nil
 }
@@ -404,19 +406,30 @@ func (s *SqliteStore) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 // Worker
 
 type SqliteStoreWorker struct {
-	config *Config
-	db     *sql.DB
-	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio    aio.AIO
-	flush  chan int64
+	config  *Config
+	db      *sql.DB
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	flush   chan int64
+	aio     aio.AIO
+	metrics *metrics.Metrics
+}
+
+func (w *SqliteStoreWorker) String() string {
+	return "store:sqlite"
 }
 
 func (w *SqliteStoreWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), "0")
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
 		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
+			counter.Set(float64(len(sqes)))
 			for _, cqe := range w.Process(sqes) {
 				w.aio.Enqueue(cqe)
+				counter.Dec()
 			}
 		}
 		if !ok {

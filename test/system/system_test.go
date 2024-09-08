@@ -23,7 +23,7 @@ func TestSystemLoop(t *testing.T) {
 	api := api.New(100, metrics)
 	aio := aio.New(100, metrics)
 
-	echo, err := echo.New(aio, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
+	echo, err := echo.New(aio, metrics, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -15,7 +16,6 @@ import (
 
 type Config struct {
 	Size    int          `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers int          `flag:"workers" desc:"number of workers" default:"1"`
 	Plugins PluginConfig `flag:"plugin"`
 }
 
@@ -33,10 +33,10 @@ type DisabledPlugin[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (c *PluginConfig) Instantiate() ([]aio.Plugin, error) {
+func (c *PluginConfig) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, error) {
 	plugins := []aio.Plugin{}
 	if c.Http.Enabled {
-		plugin, err := http.New(&c.Http.Config)
+		plugin, err := http.New(a, metrics, &c.Http.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -52,41 +52,39 @@ func (c *PluginConfig) Instantiate() ([]aio.Plugin, error) {
 type Queue struct {
 	config  *Config
 	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	workers []*QueueWorker
+	plugins []aio.Plugin
+	worker  *QueueWorker
 }
 
-func New(a aio.AIO, config *Config) (*Queue, error) {
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Queue, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
-	workers := make([]*QueueWorker, config.Workers)
 
-	p, err := config.Plugins.Instantiate()
+	plugins, err := config.Plugins.Instantiate(a, metrics)
 	if err != nil {
 		return nil, err
 	}
 
-	plugins := map[string]aio.Plugin{}
-	for _, plugin := range p {
-		plugins[plugin.Type()] = plugin
+	worker := &QueueWorker{
+		sq:      sq,
+		plugins: map[string]aio.Plugin{},
+		aio:     a,
+		metrics: metrics,
 	}
 
-	for i := 0; i < config.Workers; i++ {
-		workers[i] = &QueueWorker{
-			config:  config,
-			sq:      sq,
-			aio:     a,
-			plugins: plugins,
-		}
+	for _, plugin := range plugins {
+		worker.AddPlugin(plugin)
 	}
 
 	return &Queue{
 		config:  config,
 		sq:      sq,
-		workers: workers,
+		worker:  worker,
+		plugins: plugins,
 	}, nil
 }
 
 func (q *Queue) String() string {
-	return "queue"
+	return t_aio.Queue.String()
 }
 
 func (q *Queue) Kind() t_aio.Kind {
@@ -94,14 +92,30 @@ func (q *Queue) Kind() t_aio.Kind {
 }
 
 func (q *Queue) Start() error {
-	for _, worker := range q.workers {
-		go worker.Start()
+	// start plugins
+	for _, plugin := range q.plugins {
+		if err := plugin.Start(); err != nil {
+			return err
+		}
 	}
+
+	// start worker
+	go q.worker.Start()
+
 	return nil
 }
 
 func (q *Queue) Stop() error {
+	// first close sq
 	close(q.sq)
+
+	// then stop plugins
+	for _, plugin := range q.plugins {
+		if err := plugin.Stop(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -114,13 +128,25 @@ func (q *Queue) Flush(t int64) {}
 // Worker
 
 type QueueWorker struct {
-	config  *Config
 	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio     aio.AIO
 	plugins map[string]aio.Plugin
+	aio     aio.AIO
+	metrics *metrics.Metrics
+}
+
+func (w *QueueWorker) String() string {
+	return t_aio.Queue.String()
+}
+
+func (w *QueueWorker) AddPlugin(plugin aio.Plugin) {
+	w.plugins[plugin.Type()] = plugin
 }
 
 func (w *QueueWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), "0")
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
 		sqe, ok := <-w.sq
 		if !ok {
@@ -128,16 +154,18 @@ func (w *QueueWorker) Start() {
 		}
 
 		// process one at a time
-		w.aio.Enqueue(w.Process(sqe))
+		counter.Inc()
+		w.Process(sqe)
+		counter.Dec()
 	}
 }
 
-type req struct {
+type body struct {
 	Id      string `json:"id"`
 	Counter int    `json:"counter"`
 }
 
-func (w *QueueWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) *bus.CQE[t_aio.Submission, t_aio.Completion] {
+func (w *QueueWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	util.Assert(sqe.Submission.Queue != nil, "queue submission must not be nil")
 	util.Assert(sqe.Submission.Queue.Task != nil, "task must not be nil")
 	util.Assert(sqe.Submission.Queue.Task.Message != nil, "message must not be nil")
@@ -148,29 +176,59 @@ func (w *QueueWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 		Callback: sqe.Callback,
 	}
 
-	body, err := json.Marshal(&req{
+	body, err := json.Marshal(&body{
 		Id:      sqe.Submission.Queue.Task.Id,
 		Counter: sqe.Submission.Queue.Task.Counter,
 	})
 	if err != nil {
 		cqe.Error = err
-		return cqe
+		w.aio.Enqueue(cqe)
+		return
 	}
 
-	if plugin, ok := w.plugins[sqe.Submission.Queue.Task.Recv.Type]; ok {
-		success, err := plugin.Enqueue(sqe.Submission.Queue.Task.Recv.Data, body)
-		if err != nil {
-			cqe.Error = err
+	recv := sqe.Submission.Queue.Task.Recv
+
+	if plugin, ok := w.plugins[recv.Type]; ok {
+		counter := w.metrics.AioInFlight.WithLabelValues(plugin.String())
+
+		ok := plugin.Enqueue(&aio.Message{
+			Data: recv.Data,
+			Body: body,
+			Done: func(success bool, err error) {
+				if err != nil {
+					cqe.Error = err
+				} else {
+					cqe.Completion = &t_aio.Completion{
+						Kind:  t_aio.Queue,
+						Tags:  sqe.Submission.Tags,
+						Queue: &t_aio.QueueCompletion{Success: success},
+					}
+				}
+
+				w.aio.Enqueue(cqe)
+
+				counter.Dec()
+				w.metrics.AioTotal.WithLabelValues(plugin.String(), boolToStatus(success)).Inc()
+			},
+		})
+
+		if ok {
+			counter.Inc()
 		} else {
-			cqe.Completion = &t_aio.Completion{
-				Kind:  t_aio.Queue,
-				Tags:  sqe.Submission.Tags,
-				Queue: &t_aio.QueueCompletion{Success: success},
-			}
+			cqe.Error = fmt.Errorf("aio:%s:%s submission queue full", w, recv.Type)
+			w.aio.Enqueue(cqe)
 		}
 	} else {
 		cqe.Error = fmt.Errorf("unsupported type %s", sqe.Submission.Queue.Task.Recv.Type)
+		w.aio.Enqueue(cqe)
 	}
+}
 
-	return cqe
+func boolToStatus(b bool) string {
+	switch b {
+	case true:
+		return "success"
+	default:
+		return "failure"
+	}
 }

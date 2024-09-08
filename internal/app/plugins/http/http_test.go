@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,6 +39,8 @@ func TestHttpPlugin(t *testing.T) {
 
 	defer server.Close()
 
+	metrics := metrics.New(prometheus.NewRegistry())
+
 	okUrl := fmt.Sprintf("%s/ok", server.URL)
 	koUrl := fmt.Sprintf("%s/ko", server.URL)
 
@@ -48,17 +53,29 @@ func TestHttpPlugin(t *testing.T) {
 		{"ko", &Data{Url: koUrl}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			http, err := New(&Config{Timeout: 1 * time.Second})
+			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second})
 			assert.Nil(t, err)
 
-			b, err := json.Marshal(tc.data)
+			data, err := json.Marshal(tc.data)
 			assert.Nil(t, err)
 
-			// queue
-			ok, err := http.Enqueue(b, []byte("ok"))
+			err = http.Start()
 			assert.Nil(t, err)
-			assert.Equal(t, tc.success, ok)
+
+			ok := http.Enqueue(&aio.Message{
+				Data: data,
+				Body: []byte("ok"),
+				Done: func(ok bool, err error) {
+					assert.Nil(t, err)
+					assert.Equal(t, tc.success, ok)
+				},
+			})
+
+			assert.True(t, ok)
 			assert.Equal(t, []byte("ok"), <-ch)
+
+			err = http.Stop()
+			assert.Nil(t, err)
 		})
 	}
 }
