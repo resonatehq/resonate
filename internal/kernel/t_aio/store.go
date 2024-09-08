@@ -235,7 +235,6 @@ type SearchPromisesCommand struct {
 
 type CreatePromiseCommand struct {
 	Id             string
-	State          promise.State
 	Param          promise.Value
 	Timeout        int64
 	IdempotencyKey *idempotency.Key

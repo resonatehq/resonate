@@ -144,9 +144,9 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATEMENT = `
@@ -895,7 +895,6 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -910,7 +909,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

@@ -11,8 +11,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/promise"
 )
 
 func SchedulePromises(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
@@ -48,7 +46,8 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 		result := completion.Store.Results[0].ReadSchedules
 		util.Assert(result != nil, "result must not be nil")
 
-		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(result.Records))
+		awaiting := make([]gocoroPromise.Awaitable[bool], len(result.Records))
+		commands := make([]*t_aio.CreatePromiseCommand, len(result.Records))
 
 		for i, r := range result.Records {
 			util.Assert(r.NextRunTime <= c.Time(), "schedule next run time must have elapsed")
@@ -74,61 +73,27 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 				continue
 			}
 
-			if s.PromiseParam.Headers == nil {
-				s.PromiseParam.Headers = map[string]string{}
-			}
-			if s.PromiseParam.Data == nil {
-				s.PromiseParam.Data = []byte{}
-			}
-			if s.PromiseTags == nil {
-				s.PromiseTags = map[string]string{}
-			}
-
-			// add invocation tag
-			s.PromiseTags["resonate:invocation"] = "true"
+			// add invocation tags
 			s.PromiseTags["resonate:schedule"] = s.Id
+			s.PromiseTags["resonate:invocation"] = "true"
 
-			// calculate state
-			state := promise.Pending
-			if c.Time() >= s.PromiseTimeout+s.NextRunTime {
-				state = promise.Timedout
+			// create promise command
+			commands[i] = &t_aio.CreatePromiseCommand{
+				Id:        id,
+				Param:     s.PromiseParam,
+				Timeout:   s.PromiseTimeout + s.NextRunTime,
+				Tags:      s.PromiseTags,
+				CreatedOn: c.Time(),
 			}
 
-			// set promise idempotency key to the promise id,
-			// this way the key is non nil and we can
-			// "create" idempotently when picked up by the sdk
-			idempotencyKey := idempotency.Key(id)
-
-			awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
-				Kind: t_aio.Store,
-				Tags: tags,
-				Store: &t_aio.StoreSubmission{
-					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.CreatePromise,
-								CreatePromise: &t_aio.CreatePromiseCommand{
-									Id:             id,
-									IdempotencyKey: &idempotencyKey,
-									State:          state,
-									Param:          s.PromiseParam,
-									Timeout:        s.PromiseTimeout + s.NextRunTime,
-									Tags:           s.PromiseTags,
-									CreatedOn:      s.NextRunTime,
-								},
-							},
-							{
-								Kind: t_aio.UpdateSchedule,
-								UpdateSchedule: &t_aio.UpdateScheduleCommand{
-									Id:          s.Id,
-									LastRunTime: &s.NextRunTime,
-									NextRunTime: next,
-								},
-							},
-						},
-					},
+			awaiting[i] = gocoro.Spawn(c, createPromise(commands[i], &t_aio.Command{
+				Kind: t_aio.UpdateSchedule,
+				UpdateSchedule: &t_aio.UpdateScheduleCommand{
+					Id:          s.Id,
+					LastRunTime: &s.NextRunTime,
+					NextRunTime: next,
 				},
-			})
+			}))
 		}
 
 		for i := 0; i < len(awaiting); i++ {
@@ -136,18 +101,15 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 				continue
 			}
 
-			completion, err := gocoro.Await(c, awaiting[i])
+			ok, err := gocoro.Await(c, awaiting[i])
 			if err != nil {
 				slog.Error("failed to schedule promise", "err", err)
 				continue
 			}
 
-			util.Assert(completion.Store != nil, "completion must not be nil")
-			util.Assert(len(completion.Store.Results) == 2, "completion must have two results")
-
-			results := completion.Store.Results
-			util.Assert(results[0].CreatePromise.RowsAffected == 0 || results[0].CreatePromise.RowsAffected == 1, "result must return 0 or 1 rows")
-			util.Assert(results[1].UpdateSchedule.RowsAffected == 0 || results[1].UpdateSchedule.RowsAffected == 1, "result must return 0 or 1 rows")
+			if !ok {
+				slog.Warn("promise '%s' for schedule '%s' already exists", commands[i].Id, result.Records[i].Id)
+			}
 		}
 
 		return nil, nil
