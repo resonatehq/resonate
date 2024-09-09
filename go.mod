@@ -13,7 +13,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/oapi-codegen/runtime v1.1.1
-	github.com/prometheus/client_golang v1.20.2
+	github.com/prometheus/client_golang v1.20.3
 	github.com/resonatehq/gocoro v0.0.0-20240826185351-0a04f9fd5761
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/cobra v1.8.1
