@@ -52,7 +52,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		}
 
 		// if the promise does not exist, create it
-		ok, err := gocoro.SpawnAndAwait(c, createPromise(cmd))
+		ok, err := gocoro.SpawnAndAwait(c, createPromise(r.Tags, cmd))
 		if err != nil {
 			return nil, err
 		}
@@ -89,15 +89,16 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		// initial status
 		status := t_api.StatusPromiseAlreadyExists
 
-		if p.State == promise.Pending && c.Time() >= p.Timeout {
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(p.Timeout, &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:    p.Id,
-					State: promise.GetTimedoutState(p),
-				},
-			}))
+		if p.State == promise.Pending && p.Timeout <= c.Time() {
+			cmd := &t_aio.UpdatePromiseCommand{
+				Id:             r.CreatePromise.Id,
+				State:          promise.GetTimedoutState(p),
+				Value:          promise.Value{},
+				IdempotencyKey: nil,
+				CompletedOn:    p.Timeout,
+			}
+
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -120,15 +121,15 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 					Status: status,
 					Promise: &promise.Promise{
 						Id:                        p.Id,
-						State:                     promise.GetTimedoutState(p),
+						State:                     cmd.State,
 						Param:                     p.Param,
-						Value:                     promise.Value{Headers: map[string]string{}, Data: []byte{}},
+						Value:                     cmd.Value,
 						Timeout:                   p.Timeout,
 						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: nil,
+						IdempotencyKeyForComplete: cmd.IdempotencyKey,
 						Tags:                      p.Tags,
 						CreatedOn:                 p.CreatedOn,
-						CompletedOn:               &p.Timeout,
+						CompletedOn:               &cmd.CompletedOn,
 					},
 				},
 			}
@@ -154,22 +155,22 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	return res, nil
 }
 
-func createPromise(createPromise *t_aio.CreatePromiseCommand, additionalCmds ...*t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
-	if createPromise.Param.Headers == nil {
-		createPromise.Param.Headers = map[string]string{}
+func createPromise(tags map[string]string, cmd *t_aio.CreatePromiseCommand, additionalCmds ...*t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
+	if cmd.Param.Headers == nil {
+		cmd.Param.Headers = map[string]string{}
 	}
-	if createPromise.Param.Data == nil {
-		createPromise.Param.Data = []byte{}
+	if cmd.Param.Data == nil {
+		cmd.Param.Data = []byte{}
 	}
-	if createPromise.Tags == nil {
-		createPromise.Tags = map[string]string{}
+	if cmd.Tags == nil {
+		cmd.Tags = map[string]string{}
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
 		// add create promise command
 		commands := []*t_aio.Command{{
 			Kind:          t_aio.CreatePromise,
-			CreatePromise: createPromise,
+			CreatePromise: cmd,
 		}}
 
 		// add additional commands
@@ -178,27 +179,27 @@ func createPromise(createPromise *t_aio.CreatePromiseCommand, additionalCmds ...
 		// check matcher to see if a task needs to be created
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Match,
-			Tags: createPromise.Tags,
+			Tags: tags,
 			Match: &t_aio.MatchSubmission{
 				Promise: &promise.Promise{
-					Id:                      createPromise.Id,
+					Id:                      cmd.Id,
 					State:                   promise.Pending,
-					Param:                   createPromise.Param,
-					Timeout:                 createPromise.Timeout,
-					IdempotencyKeyForCreate: createPromise.IdempotencyKey,
-					Tags:                    createPromise.Tags,
-					CreatedOn:               &createPromise.CreatedOn,
+					Param:                   cmd.Param,
+					Timeout:                 cmd.Timeout,
+					IdempotencyKeyForCreate: cmd.IdempotencyKey,
+					Tags:                    cmd.Tags,
+					CreatedOn:               &cmd.CreatedOn,
 				},
 			},
 		})
 
 		if err != nil {
-			slog.Warn("failed to match promise", "req", createPromise, "err", err)
+			slog.Warn("failed to match promise", "req", cmd, "err", err)
 		}
 
 		if err == nil && completion.Match.Matched {
 			util.Assert(completion.Match.Command != nil, "command must not be nil")
-			completion.Match.Command.CreatedOn = createPromise.CreatedOn
+			completion.Match.Command.CreatedOn = cmd.CreatedOn
 
 			// add create task command if matched
 			additionalCmds = append(additionalCmds, &t_aio.Command{
@@ -210,7 +211,7 @@ func createPromise(createPromise *t_aio.CreatePromiseCommand, additionalCmds ...
 		// yield commands
 		completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: createPromise.Tags,
+			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: commands,
@@ -219,12 +220,12 @@ func createPromise(createPromise *t_aio.CreatePromiseCommand, additionalCmds ...
 		})
 
 		if err != nil {
-			slog.Error("failed to update promise", "req", createPromise, "err", err)
+			slog.Error("failed to create promise", "err", err)
 			return false, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
-		util.Assert(len(completion.Store.Results) == len(commands), "completion must have one or two results")
+		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
 		util.Assert(completion.Store.Results[0].CreatePromise.RowsAffected == 0 || completion.Store.Results[0].CreatePromise.RowsAffected == 1, "result must return 0 or 1 rows")
 
 		return completion.Store.Results[0].CreatePromise.RowsAffected == 1, nil

@@ -59,20 +59,17 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			continue
 		}
 
-		if p.State == promise.Pending && c.Time() >= p.Timeout {
-			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(p.Timeout, &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:    p.Id,
-					State: promise.GetTimedoutState(p),
-				},
-			})))
-
-			continue
-		}
-
 		promises = append(promises, p)
+
+		if p.State == promise.Pending && p.Timeout <= c.Time() {
+			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Tags, &t_aio.UpdatePromiseCommand{
+				Id:             p.Id,
+				State:          promise.GetTimedoutState(p),
+				Value:          promise.Value{},
+				IdempotencyKey: nil,
+				CompletedOn:    p.Timeout,
+			})))
+		}
 	}
 
 	for _, p := range awaiting {
