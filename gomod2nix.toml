@@ -47,8 +47,8 @@ schema = 3
     version = "v0.18.1"
     hash = "sha256-2/B2qP51zfiY+k8G0w0D03KXUc7XpWj6wKY7NjNP/9E="
   [mod."github.com/go-playground/validator/v10"]
-    version = "v10.22.0"
-    hash = "sha256-P4K54M9nkXJgJBEPUUXp1TJ7tzw43vtVJ4p/hy8Gzn0="
+    version = "v10.22.1"
+    hash = "sha256-EsgeltH0ow6saxLvTFVtIyHVqWI3Fiu1AE2Qmnsmowg="
   [mod."github.com/goccy/go-json"]
     version = "v0.10.2"
     hash = "sha256-6fMD2/Rku8HT0zDdeA23pX0YxbohiIOC8OJNYbylJTQ="
