@@ -2,6 +2,9 @@ package util
 
 import (
 	"cmp"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"sort"
 	"time"
 
@@ -108,4 +111,24 @@ func Collect[T any](c <-chan T, f <-chan int64, n int) ([]T, bool) {
 	}
 
 	return batch, true
+}
+
+func UnmarshalChain(data []byte, vs ...any) error {
+	var errs []error
+
+	for _, v := range vs {
+		err := json.Unmarshal(data, v)
+		if err == nil {
+			return nil
+		}
+
+		// reset v to zero value
+		if val := reflect.ValueOf(v); !val.IsNil() {
+			val.Elem().Set(reflect.Zero(val.Elem().Type()))
+		}
+
+		errs = append(errs, err)
+	}
+
+	return errors.Join(errs...)
 }

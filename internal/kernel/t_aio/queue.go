@@ -8,10 +8,11 @@ import (
 
 type QueueSubmission struct {
 	Task *task.Task
+	Body []byte
 }
 
 func (s *QueueSubmission) String() string {
-	return fmt.Sprintf("Queue(task=%s)", s.Task)
+	return fmt.Sprintf("Queue(task=%s, body=%d)", s.Task, len(s.Body))
 }
 
 type QueueCompletion struct {

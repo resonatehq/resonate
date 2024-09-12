@@ -3,6 +3,7 @@ package match
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strconv"
 
@@ -11,11 +12,10 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/receiver"
 )
-
-// Config
 
 type Config struct {
 	Size     int             `flag:"size" desc:"submission buffered channel size" default:"100"`
@@ -30,8 +30,7 @@ type MatcherConfig struct {
 }
 
 type TagMatcherConfig struct {
-	Key     string
-	Default *receiver.Recv
+	Key string
 }
 
 // Subsystem
@@ -45,7 +44,7 @@ type Match struct {
 func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Match, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*MatchWorker, config.Workers)
-	matchers := make([]func(*promise.Promise) (*receiver.Recv, bool), len(config.Matchers))
+	matchers := make([]func(*promise.Promise) (any, bool), len(config.Matchers))
 
 	for i, matcher := range config.Matchers {
 		switch matcher.Type {
@@ -120,7 +119,7 @@ func (m *Match) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*
 type MatchWorker struct {
 	i        int
 	sq       <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	matchers []func(*promise.Promise) (*receiver.Recv, bool)
+	matchers []func(*promise.Promise) (any, bool)
 	aio      aio.AIO
 	metrics  *metrics.Metrics
 }
@@ -146,11 +145,6 @@ func (w *MatchWorker) Start() {
 	}
 }
 
-type message struct {
-	Type    string           `json:"type"`
-	Promise *promise.Promise `json:"promise"`
-}
-
 func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) *bus.CQE[t_aio.Submission, t_aio.Completion] {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
 	util.Assert(sqe.Submission.Match != nil, "match must not be nil")
@@ -161,28 +155,34 @@ func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 		Callback: sqe.Callback,
 	}
 
-	message, err := json.Marshal(&message{
-		Type:    "invoke",
-		Promise: sqe.Submission.Match.Promise,
-	})
-	if err != nil {
-		cqe.Error = err
-		return cqe
-	}
-
 	// apply matchers in succession, first match wins
 	for _, f := range w.matchers {
-		if recv, ok := f(sqe.Submission.Match.Promise); ok {
+		if v, ok := w.match(f(sqe.Submission.Match.Promise)); ok {
+			recv, err := json.Marshal(v)
+			if err != nil {
+				slog.Error("failed to marshal recv", "err", err)
+				break
+			}
+
+			mesg, err := json.Marshal(&message.Mesg{
+				Type: message.Invoke,
+				Root: sqe.Submission.Match.Promise.Id,
+				Leaf: sqe.Submission.Match.Promise.Id,
+			})
+			if err != nil {
+				slog.Error("failed to marshal mesg", "err", err)
+				break
+			}
+
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Match,
 				Tags: sqe.Submission.Tags,
 				Match: &t_aio.MatchCompletion{
 					Matched: true,
 					Command: &t_aio.CreateTaskCommand{
-						RecvType: recv.Type,
-						RecvData: recv.Data,
-						Message:  message,
-						Timeout:  sqe.Submission.Match.Promise.Timeout,
+						Recv:    recv,
+						Mesg:    mesg,
+						Timeout: sqe.Submission.Match.Promise.Timeout,
 					},
 				},
 			}
@@ -198,38 +198,56 @@ func (w *MatchWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) 
 	return cqe
 }
 
+func (w *MatchWorker) match(v any, ok bool) (any, bool) {
+	if ok {
+		switch v := v.(type) {
+		case *receiver.Recv:
+			return v, true
+		case string:
+			if recv, ok := protocolToRecv(v); ok {
+				return recv, true
+			}
+
+			// will be matched against logical receivers in the queueing
+			// subsystem
+			return v, true
+		}
+	}
+
+	return nil, false
+}
+
 // Matcher functions
 
-func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (*receiver.Recv, bool) {
-	return func(p *promise.Promise) (*receiver.Recv, bool) {
+func TagMatcher(config *TagMatcherConfig) func(*promise.Promise) (any, bool) {
+	return func(p *promise.Promise) (any, bool) {
 		util.Assert(p.Tags != nil, "tags must be set")
 
 		if v, ok := p.Tags[config.Key]; ok {
-			if config.Default != nil {
-				switch config.Default.Type {
-				case "http":
-					return config.Default, true
-				default:
-					return nil, false
-				}
-			} else {
-				switch protocol(v) {
-				case "http", "https":
-					data, err := json.Marshal(map[string]interface{}{"url": v})
-					if err != nil {
-						return nil, false
-					}
-
-					return &receiver.Recv{
-						Type: "http",
-						Data: data,
-					}, true
-				default:
-					return nil, false
-				}
+			// check if value can be unmarshaled to a recv
+			var recv *receiver.Recv
+			if err := json.Unmarshal([]byte(v), &recv); err == nil {
+				return recv, true
 			}
+
+			// otherwise return the string value
+			return v, true
 		}
 
+		return nil, false
+	}
+}
+
+func protocolToRecv(v string) (*receiver.Recv, bool) {
+	switch protocol(v) {
+	case "http", "https":
+		data, err := json.Marshal(map[string]interface{}{"url": v})
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "http", Data: data}, true
+	default:
 		return nil, false
 	}
 }

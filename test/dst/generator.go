@@ -1,7 +1,6 @@
 package dst
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand" // nosemgrep
@@ -229,20 +228,18 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
+	rootPromiseId := g.idSet[r.Intn(len(g.idSet))]
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-
-	message := make([]byte, 8)
-	binary.BigEndian.PutUint64(message, g.callback)
 	g.callback++
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
-			PromiseId: promiseId,
-			RecvType:  "http",
-			RecvData:  nil,
-			Message:   message,
-			Timeout:   timeout,
+			PromiseId:     promiseId,
+			RootPromiseId: rootPromiseId,
+			// RecvType:      "http",
+			// RecvData:      nil,
+			Timeout: timeout,
 		},
 	}
 }

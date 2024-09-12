@@ -30,13 +30,13 @@ func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (
 		Frequency: int(req.Frequency),
 	}
 
-	res, err := s.service.ClaimTask(header, body)
+	_, err := s.service.ClaimTask(header, body)
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.ClaimTaskResponse{
-		Data: res.Task.Message,
+		// Data: res.Task.Message,
 	}, nil
 }
 

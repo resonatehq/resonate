@@ -1,10 +1,11 @@
 package service
 
 import (
+	"encoding/json"
+
 	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
 // PROMISES
@@ -49,10 +50,10 @@ type CompletePromiseBody struct {
 // CALLBACKS
 
 type CreateCallbackBody struct {
-	PromiseId string         `json:"promiseId" binding:"required"`
-	Timeout   int64          `json:"timeout" binding:"required"`
-	Recv      *receiver.Recv `json:"recv" binding:"required"`
-	Message   []byte         `json:"message" binding:"required"`
+	PromiseId     string          `json:"promiseId" binding:"required"`
+	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
+	Timeout       int64           `json:"timeout" binding:"required"`
+	Recv          json.RawMessage `json:"recv" binding:"required"`
 }
 
 // SCHEDULES

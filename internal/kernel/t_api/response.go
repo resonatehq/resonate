@@ -5,9 +5,9 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -115,13 +115,12 @@ type HeartbeatLocksResponse struct {
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status StatusCode `json:"status"`
-	Task   *task.Task `json:"task"`
+	Status StatusCode                `json:"status"`
+	Mesg   *message.MesgWithPromises `json:"mesg,omitempty"`
 }
 
 type CompleteTaskResponse struct {
 	Status StatusCode `json:"status"`
-	Task   *task.Task `json:"task"`
 }
 
 type HeartbeatTasksResponse struct {
@@ -266,15 +265,14 @@ func (r *Response) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(status=%d, task=%s)",
+			"ClaimTask(status=%d, mesg=%s)",
 			r.ClaimTask.Status,
-			r.ClaimTask.Task,
+			r.ClaimTask.Mesg,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(
-			"CompleteTask(status=%d, task=%s)",
+			"CompleteTask(status=%d)",
 			r.CompleteTask.Status,
-			r.CompleteTask.Task,
 		)
 	case HeartbeatTasks:
 		return fmt.Sprintf(

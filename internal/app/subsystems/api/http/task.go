@@ -3,8 +3,6 @@ package http
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 // CLAIM
@@ -36,14 +34,7 @@ func (s *server) claimTask(c *gin.Context) {
 		return
 	}
 
-	if res.Status == t_api.StatusCreated {
-		util.Assert(res.Task != nil, "task must be non nil")
-		util.Assert(res.Task.Message != nil, "message must be non nil")
-
-		c.Data(s.code(res.Status), "application/json", res.Task.Message)
-	} else {
-		c.JSON(s.code(res.Status), nil)
-	}
+	c.JSON(s.code(res.Status), res.Mesg)
 }
 
 // COMPLETE

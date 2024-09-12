@@ -7,7 +7,6 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/callback"
-	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -26,9 +25,9 @@ func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallback
 
 	body := &service.CreateCallbackBody{
 		PromiseId: req.PromiseId,
-		Timeout:   req.Timeout,
-		Recv:      &receiver.Recv{Type: req.Recv.Type, Data: req.Recv.Data},
-		Message:   req.Message,
+		// RootPromiseId: req.RootPromiseId,
+		Timeout: req.Timeout,
+		// Recv:    &receiver.Recv{Type: req.Recv.Type, Data: req.Recv.Data},
 	}
 
 	res, err := s.service.CreateCallback(header, body)

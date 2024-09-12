@@ -994,7 +994,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.RecvType, cmd.RecvData, cmd.Message, cmd.Timeout, cmd.CreatedOn)
+	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Timeout, cmd.Recv, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
@@ -1385,9 +1385,8 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
-		&record.RecvType,
-		&record.RecvData,
-		&record.Message,
+		&record.Recv,
+		&record.Mesg,
 		&record.Timeout,
 		&record.Counter,
 		&record.Attempt,
@@ -1440,9 +1439,8 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
-			&record.RecvType,
-			&record.RecvData,
-			&record.Message,
+			&record.Recv,
+			&record.Mesg,
 			&record.Timeout,
 			&record.Counter,
 			&record.Attempt,
@@ -1468,7 +1466,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 }
 
 func (w *PostgresStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.RecvType, cmd.RecvData, cmd.Message, cmd.Timeout, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Recv, cmd.Mesg, cmd.Timeout, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

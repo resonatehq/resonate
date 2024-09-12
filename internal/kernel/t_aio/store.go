@@ -265,12 +265,12 @@ type AlterPromisesResult struct {
 // Callback commands
 
 type CreateCallbackCommand struct {
-	PromiseId string
-	RecvType  string
-	RecvData  []byte
-	Message   []byte
-	Timeout   int64
-	CreatedOn int64
+	PromiseId     string
+	RootPromiseId string
+	Timeout       int64
+	Recv          []byte
+	Mesg          []byte
+	CreatedOn     int64
 }
 
 type DeleteCallbacksCommand struct {
@@ -356,9 +356,8 @@ type ReadTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
-	RecvType  string
-	RecvData  []byte
-	Message   []byte
+	Recv      []byte
+	Mesg      []byte
 	Timeout   int64
 	CreatedOn int64
 }

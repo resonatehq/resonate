@@ -202,7 +202,7 @@ func createPromise(tags map[string]string, cmd *t_aio.CreatePromiseCommand, addi
 			completion.Match.Command.CreatedOn = cmd.CreatedOn
 
 			// add create task command if matched
-			additionalCmds = append(additionalCmds, &t_aio.Command{
+			commands = append(commands, &t_aio.Command{
 				Kind:       t_aio.CreateTask,
 				CreateTask: completion.Match.Command,
 			})

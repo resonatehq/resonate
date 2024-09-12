@@ -96,11 +96,10 @@ type RejectPromiseRequest struct {
 // Callbacks
 
 type CreateCallbackRequest struct {
-	PromiseId string `json:"promiseId"`
-	Timeout   int64  `json:"timeout"`
-	RecvType  string `json:"recvType"`
-	RecvData  []byte `json:"recvData"`
-	Message   []byte `json:"message"`
+	PromiseId     string `json:"promiseId"`
+	RootPromiseId string `json:"rootPromiseId"` // TODO: we should be able to know this from the promiseId
+	Timeout       int64  `json:"timeout"`
+	Recv          []byte `json:"recv"`
 }
 
 // Schedules
@@ -154,8 +153,8 @@ type HeartbeatLocksRequest struct {
 
 type ClaimTaskRequest struct {
 	Id        string `json:"id"`
-	ProcessId string `json:"processId"`
 	Counter   int    `json:"counter"`
+	ProcessId string `json:"processId"`
 	Frequency int    `json:"frequency"`
 }
 
@@ -216,9 +215,10 @@ func (r *Request) String() string {
 	// CALLBACKS
 	case CreateCallback:
 		return fmt.Sprintf(
-			"CreateCallback(promiseId=%s, message=%s)",
+			"CreateCallback(promiseId=%s, rootPromiseId=%s, timeout=%d)",
 			r.CreateCallback.PromiseId,
-			r.CreateCallback.Message,
+			r.CreateCallback.RootPromiseId,
+			r.CreateCallback.Timeout,
 		)
 
 	// SCHEDULES
