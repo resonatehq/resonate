@@ -4,14 +4,14 @@ on:
   workflow_call:
     inputs:
       tag:
-        description: 'The tag version to use for verification'
+        description: "The tag version to use for verification"
         required: true
         type: string
-        
+
   workflow_dispatch:
     inputs:
       tag:
-        description: 'The tag version to use for verification'
+        description: "The tag version to use for verification"
         required: true
         type: string
 
@@ -19,20 +19,13 @@ permissions:
   contents: read
   packages: read
 
-jobs:
-  seed:
-    runs-on: ubuntu-22.04
-    steps:
-    - id: seed
-      name: Set random seed
-      run: echo seed=$RANDOM >> $GITHUB_OUTPUT
-    outputs:
-      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
-      
+jobs:
   verify-github-image:
     runs-on: ubuntu-22.04
-    needs: [seed]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -42,25 +35,34 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
           # Pull the test image
-          docker pull ghcr.io/resonatehq/resonate:${{ inputs.tag }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
 
           # Run the test image
-          docker run --rm ghcr.io/resonatehq/resonate:${{ inputs.tag }} dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }} dst run
 
-  
   verify-github-release:
-    runs-on: ubuntu-22.04
-    needs: [seed]
+    runs-on: ${{ matrix.systems.runner }}
+    strategy:
+      matrix:
+        systems:
+          - file: resonate_linux_x86_64.tar.gz
+            runner: ubuntu-22.04
+          - file: resonate_linux_aarch64.tar.gz
+            runner: ubuntu-22.04-arm64
+          - file: resonate_darwin_x86_64.tar.gz
+            runner: macos-13
+          - file: resonate_darwin_aarch64.tar.gz
+            runner: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Download and test GH release
         run: |
           # Download the release artifact
-          curl -L -O "https://github.com/resonatehq/resonate/releases/download/${{ inputs.tag }}/resonate_linux_x86_64.tar.gz"
+          curl -o resonate.tar.gz -L -O "https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/${{ matrix.systems.file }}"
 
           # Extract the artifact
-          tar -xzf resonate_linux_x86_64.tar.gz
+          tar -xzf resonate.tar.gz
 
           # Run the extracted artifact
-          ./resonate dst run --seed ${{ needs.seed.outputs.seed }} --aio-store sqlite
+          ./resonate dst run
