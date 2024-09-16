@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import queue
@@ -36,8 +35,6 @@ from resonate.time import now
 from resonate.tracing.stdout import StdOutAdapter
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
-
     from resonate.options import Options
     from resonate.record import DurablePromiseRecord
     from resonate.result import Result
@@ -58,26 +55,21 @@ P = ParamSpec("P")
 class _SQE(Generic[T]):
     def __init__(
         self,
-        promise_and_context: tuple[Promise[T], Context],
-        fn: Callable[P, T | Coroutine[Any, Any, T]],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
+        promise_id: str,
+        fn: utils.FnWrapper[T] | utils.AsyncFnWrapper[T],
     ) -> None:
-        self.promise_and_context = promise_and_context
+        self.promise_id = promise_id
         self.fn = fn
-        self.args = args
-        self.kwargs = kwargs
 
 
 class _CQE(Generic[T]):
     def __init__(
         self,
-        promise_and_context: tuple[Promise[T], Context],
+        promise_id: str,
         fn_result: Result[T, Exception],
     ) -> None:
         self.fn_result = fn_result
-        self.promise_and_context = promise_and_context
+        self.promise_id = promise_id
 
 
 class _Processor:
@@ -85,16 +77,14 @@ class _Processor:
         self,
         max_workers: int | None,
         sq: queue.Queue[_SQE[Any]],
-        cq: queue.Queue[_CQE[Any]],
-        continue_event: Event | None,
+        scheduler: Scheduler,
     ) -> None:
         if max_workers is None:
             max_workers = min(32, (os.cpu_count() or 1) + 4)
         assert max_workers > 0, "`max_workers` must be positive."
         self._max_workers = max_workers
-        self._sq: queue.Queue[_SQE[Any]] = sq
-        self._cq: queue.Queue[_CQE[Any]] = cq
-        self._continue_event: Event | None = continue_event
+        self._sq = sq
+        self._scheduler = scheduler
         self._threads = set[Thread]()
 
     def enqueue(self, sqe: _SQE[Any]) -> None:
@@ -102,26 +92,14 @@ class _Processor:
         self._adjust_thread_count()
 
     def _run(self) -> None:
-        loop = asyncio.new_event_loop()
         while True:
-            fn_result: Result[Any, Exception]
             sqe = utils.dequeue(self._sq)
-            if asyncio.iscoroutinefunction(sqe.fn):
-                try:
-                    fn_result = Ok(
-                        loop.run_until_complete(sqe.fn(*sqe.args, **sqe.kwargs))
-                    )
-                except Exception as e:  # noqa: BLE001
-                    fn_result = Err(e)
-            else:
-                try:
-                    fn_result = Ok(sqe.fn(*sqe.args, **sqe.kwargs))
-                except Exception as e:  # noqa: BLE001
-                    fn_result = Err(e)
-
-            self._cq.put_nowait(_CQE(sqe.promise_and_context, fn_result))
-            if self._continue_event is not None:
-                self._continue_event.set()
+            fn_result = sqe.fn.run()
+            assert isinstance(fn_result, (Ok, Err))
+            self._scheduler.enqueue_cqe(
+                promise_id=sqe.promise_id,
+                value=fn_result,
+            )
 
     def _adjust_thread_count(self) -> None:
         num_threads = len(self._threads)
@@ -157,8 +135,7 @@ class Scheduler:
         self._processor = _Processor(
             processor_threads,
             self._function_submission_queue,
-            self._completion_queue,
-            self._worker_continue,
+            self,
         )
         self._durable_promise_storage = durable_promise_storage
         self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
@@ -166,8 +143,8 @@ class Scheduler:
         self._worker_thread = Thread(target=self._run, daemon=True)
         self._worker_thread.start()
 
-    def enqueue_cqe(self, cqe: _CQE[Any]) -> None:
-        self._completion_queue.put(cqe)
+    def enqueue_cqe(self, promise_id: str, value: Result[Any, Exception]) -> None:
+        self._completion_queue.put(_CQE[Any](promise_id=promise_id, fn_result=value))
         self._signal()
 
     def _signal(self) -> None:
@@ -323,11 +300,13 @@ class Scheduler:
         else:
             self._processor.enqueue(
                 _SQE(
-                    (promise, ctx),
-                    fn_or_coroutine.exec_unit,
-                    ctx,
-                    *fn_or_coroutine.args,
-                    **fn_or_coroutine.kwargs,
+                    promise.promise_id,
+                    utils.wrap_fn(
+                        ctx,
+                        fn_or_coroutine.exec_unit,
+                        *fn_or_coroutine.args,
+                        **fn_or_coroutine.kwargs,
+                    ),
                 )
             )
 
@@ -362,7 +341,11 @@ class Scheduler:
                 batch_size=self._completion_queue.qsize(),
             )
             for cqe in cqes:
-                promise, ctx = cqe.promise_and_context
+                assert (
+                    cqe.promise_id in self._emphemeral_promise_memo
+                ), "Promise must be recorded in ephemeral storage."
+
+                promise, ctx = self._emphemeral_promise_memo[cqe.promise_id]
                 self._tracing_adapter.process_event(
                     ExecutionTerminated(
                         promise_id=promise.promise_id,

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
-from inspect import iscoroutinefunction, isfunction, isgenerator, isgeneratorfunction
-from typing import TYPE_CHECKING, Any, Callable, Generic, Literal, Union
+from inspect import isgenerator, isgeneratorfunction
+from typing import TYPE_CHECKING, Any, Callable, Literal, Union
 
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
@@ -45,10 +44,8 @@ if TYPE_CHECKING:
         Awaitables,
         CommandHandlerQueues,
         CommandHandlers,
-        DurableAsyncFn,
         DurableCoro,
         DurableFn,
-        DurableSyncFn,
         EphemeralPromiseMemo,
         MockFn,
         RunnableCoroutines,
@@ -63,71 +60,9 @@ Step: TypeAlias = Literal["functions", "coroutines"]
 Mode: TypeAlias = Literal["concurrent", "sequential"]
 
 
-class _FnWrapper(Generic[T]):
-    def __init__(
-        self,
-        ctx: Context,
-        fn: DurableSyncFn[P, T],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.fn = fn
-        self.ctx = ctx
-        self.args = args
-        self.kwargs = kwargs
-
-    def run(self) -> Result[T, Exception]:
-        result: Result[T, Exception]
-        try:
-            result = Ok(self.fn(self.ctx, *self.args, **self.kwargs))
-        except Exception as e:  # noqa: BLE001
-            result = Err(e)
-
-        return result
-
-
-class _AsyncFnWrapper(Generic[T]):
-    def __init__(
-        self,
-        ctx: Context,
-        fn: DurableAsyncFn[P, T],
-        /,
-        *args: P.args,
-        **kwargs: P.kwargs,
-    ) -> None:
-        self.fn = fn
-        self.ctx = ctx
-        self.args = args
-        self.kwargs = kwargs
-
-    async def run(self) -> Result[T, Exception]:
-        result: Result[T, Exception]
-        try:
-            result = Ok(asyncio.run(self.fn(self.ctx, *self.args, **self.kwargs)))
-        except Exception as e:  # noqa: BLE001
-            result = Err(e)
-        return result
-
-
 RunnableFunctions: TypeAlias = list[
-    tuple[Union[_FnWrapper[Any], _AsyncFnWrapper[Any]], Promise[Any]]
+    tuple[Union[utils.FnWrapper[Any], utils.AsyncFnWrapper[Any]], Promise[Any]]
 ]
-
-
-def _wrap_fn(
-    ctx: Context,
-    fn: DurableFn[P, T],
-    *args: P.args,
-    **kwargs: P.kwargs,
-) -> _FnWrapper[T] | _AsyncFnWrapper[T]:
-    cmd: _FnWrapper[T] | _AsyncFnWrapper[T]
-    if isfunction(fn):
-        cmd = _FnWrapper(ctx, fn, *args, **kwargs)
-    else:
-        assert iscoroutinefunction(fn)
-        cmd = _AsyncFnWrapper(ctx, fn, *args, **kwargs)
-    return cmd
 
 
 class _DSTFailureError(Exception):
@@ -298,7 +233,9 @@ class DSTScheduler:
         )
 
     def _add_function_to_runnables(
-        self, fn_wrapper: _FnWrapper[Any] | _AsyncFnWrapper[Any], promise: Promise[Any]
+        self,
+        fn_wrapper: utils.FnWrapper[Any] | utils.AsyncFnWrapper[Any],
+        promise: Promise[Any],
     ) -> None:
         self._runnable_functions.append(
             (
@@ -322,7 +259,7 @@ class DSTScheduler:
             )
         else:
             self._add_function_to_runnables(
-                _wrap_fn(
+                utils.wrap_fn(
                     ctx,
                     fn_or_coroutine.exec_unit,
                     *fn_or_coroutine.args,
