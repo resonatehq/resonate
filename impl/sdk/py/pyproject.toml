@@ -7,7 +7,10 @@ authors = [
 ]
 dependencies = [
     "typing-extensions>=4.12.2",
-    "requests>=2.32.3",
+    "requests",
+    "opentelemetry-api",
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-http",
 ]
 readme = "README.md"
 requires-python = ">= 3.9"

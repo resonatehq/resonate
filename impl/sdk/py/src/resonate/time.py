@@ -4,4 +4,4 @@ import time
 
 
 def now() -> int:
-    return int(time.time() * 1000)
+    return time.time_ns()

@@ -57,3 +57,9 @@ class Promise(Generic[T]):
 
     def failure(self) -> bool:
         return not self.success()
+
+    def __str__(self) -> str:
+        return f"Promise representing execution {self.promise_id}"
+
+    def __repr__(self) -> str:
+        return self.__str__()

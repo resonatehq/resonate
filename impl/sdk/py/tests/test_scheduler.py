@@ -51,7 +51,10 @@ def _promise_storages() -> list[IPromiseStore]:
 @pytest.mark.skip()
 @pytest.mark.parametrize("store", _promise_storages())
 def test_coro_return_promise(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(processor_threads=1, durable_promise_storage=store)
+    s = scheduler.Scheduler(
+        processor_threads=1,
+        durable_promise_storage=store,
+    )
     p: Promise[Promise[str]] = s.run(
         "bar", Options(durable=True), bar, name="A", sleep_time=0.1
     )
@@ -60,7 +63,9 @@ def test_coro_return_promise(store: IPromiseStore) -> None:
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_scheduler(store: IPromiseStore) -> None:
-    p = scheduler.Scheduler(durable_promise_storage=store)
+    p = scheduler.Scheduler(
+        durable_promise_storage=store,
+    )
 
     promise: Promise[str] = p.run(
         "baz-1", Options(durable=True), baz, name="A", sleep_time=0.2
@@ -73,7 +78,10 @@ def test_scheduler(store: IPromiseStore) -> None:
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_multithreading_capabilities(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(processor_threads=3, durable_promise_storage=store)
+    s = scheduler.Scheduler(
+        processor_threads=3,
+        durable_promise_storage=store,
+    )
     time_per_process: int = 5
     start = time.time()
     p1: Promise[str] = s.run(
@@ -117,7 +125,10 @@ def sleep_coroutine(
 @pytest.mark.skip()
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sleep_on_coroutines(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(processor_threads=1, durable_promise_storage=store)
+    s = scheduler.Scheduler(
+        processor_threads=1,
+        durable_promise_storage=store,
+    )
     start = time.time()
     sleep_time = 4
     p1: Promise[str] = s.run(

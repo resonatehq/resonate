@@ -30,7 +30,7 @@ Invokable: TypeAlias = Union[DurableCoro[P, Any], DurableFn[P, Any], Command]
 
 
 Awaitables: TypeAlias = dict[Promise[Any], list[CoroAndPromise[Any]]]
-RunnableCoroutines: TypeAlias = list[Runnable[Any]]
+RunnableCoroutines: TypeAlias = list[tuple[Runnable[Any], bool]]
 
 
 CommandHandlers: TypeAlias = dict[
@@ -48,3 +48,5 @@ Data: TypeAlias = Union[str, None]
 State: TypeAlias = Literal[
     "PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"
 ]
+
+EphemeralPromiseMemo: TypeAlias = dict[str, tuple[Promise[Any], Context]]

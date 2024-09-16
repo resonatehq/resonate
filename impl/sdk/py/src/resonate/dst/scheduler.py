@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         DurableCoro,
         DurableFn,
         DurableSyncFn,
+        EphemeralPromiseMemo,
         MockFn,
         RunnableCoroutines,
     )
@@ -193,7 +194,7 @@ class DSTScheduler:
 
         self._durable_promise_storage = durable_promise_storage
         self._json_encoder = JsonEncoder()
-        self._emphemeral_promise_memo: dict[str, Promise[Any]] = {}
+        self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
 
     def register_command(
         self,
@@ -289,8 +290,12 @@ class DSTScheduler:
         self,
         coro_and_promise: CoroAndPromise[Any],
         value_to_yield_back: Result[Any, Exception] | None,
+        *,
+        was_awaited: bool,
     ) -> None:
-        self._runnable_coros.append(Runnable(coro_and_promise, value_to_yield_back))
+        self._runnable_coros.append(
+            (Runnable(coro_and_promise, value_to_yield_back), was_awaited)
+        )
 
     def _add_function_to_runnables(
         self, fn_wrapper: _FnWrapper[Any] | _AsyncFnWrapper[Any], promise: Promise[Any]
@@ -305,37 +310,44 @@ class DSTScheduler:
     def _route_fn_or_coroutine(
         self, ctx: Context, promise: Promise[Any], fn_or_coroutine: FnOrCoroutine
     ) -> None:
-        if promise.done():
-            self._unblock_coros_waiting_on_promise(promise)
+        assert (
+            not promise.done()
+        ), "Only executions of unresolved promises can be passed here."
+        if isgeneratorfunction(fn_or_coroutine.exec_unit):
+            coro = fn_or_coroutine.exec_unit(
+                ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
+            )
+            self._add_coro_to_runnables(
+                CoroAndPromise(coro, promise, ctx), None, was_awaited=False
+            )
         else:
-            if isgeneratorfunction(fn_or_coroutine.exec_unit):
-                coro = fn_or_coroutine.exec_unit(
-                    ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
-                )
-                self._add_coro_to_runnables(CoroAndPromise(coro, promise, ctx), None)
-            else:
-                self._add_function_to_runnables(
-                    _wrap_fn(
-                        ctx,
-                        fn_or_coroutine.exec_unit,
-                        *fn_or_coroutine.args,
-                        **fn_or_coroutine.kwargs,
-                    ),
-                    promise,
-                )
-            self._events.append(
-                ExecutionInvoked(
-                    promise.promise_id,
-                    self.tick,
-                    fn_or_coroutine.exec_unit.__name__,
-                    fn_or_coroutine.args,
-                    fn_or_coroutine.kwargs,
-                )
+            self._add_function_to_runnables(
+                _wrap_fn(
+                    ctx,
+                    fn_or_coroutine.exec_unit,
+                    *fn_or_coroutine.args,
+                    **fn_or_coroutine.kwargs,
+                ),
+                promise,
             )
 
-    def _create_promise(self, promise_id: str, action: Invoke | Sleep) -> Promise[Any]:
-        p = Promise[Any](promise_id, action)
-        self._emphemeral_promise_memo[p.promise_id] = p
+        self._events.append(
+            ExecutionInvoked(
+                promise.promise_id,
+                utils.get_parent_promise_id_from_ctx(ctx),
+                self.tick,
+                fn_or_coroutine.exec_unit.__name__,
+                fn_or_coroutine.args,
+                fn_or_coroutine.kwargs,
+            )
+        )
+
+    def _create_promise(self, ctx: Context, action: Invoke | Sleep) -> Promise[Any]:
+        p = Promise[Any](ctx.ctx_id, action)
+        assert (
+            p.promise_id not in self._emphemeral_promise_memo
+        ), "There should not be a new promise with same promise id."
+        self._emphemeral_promise_memo[p.promise_id] = (p, ctx)
         if isinstance(action, Invoke):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -353,7 +365,13 @@ class DSTScheduler:
         durable_promise_record = self._create_durable_promise_record(
             promise_id=p.promise_id, data=data
         )
-        self._events.append(PromiseCreated(promise_id=p.promise_id, tick=self.tick))
+        self._events.append(
+            PromiseCreated(
+                promise_id=p.promise_id,
+                tick=self.tick,
+                parent_promise_id=utils.get_parent_promise_id_from_ctx(ctx),
+            )
+        )
         if durable_promise_record.is_pending():
             return p
 
@@ -389,15 +407,18 @@ class DSTScheduler:
         self, top_lvl: Invoke, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
-        p = self._create_promise(promise_id, top_lvl)
-
-        self._route_fn_or_coroutine(
-            ctx=Context(
-                ctx_id=promise_id, seed=self.seed, parent_ctx=None, deps=self.deps
-            ),
-            promise=p,
-            fn_or_coroutine=top_lvl.exec_unit,
+        root_ctx = Context(
+            ctx_id=promise_id, seed=self.seed, parent_ctx=None, deps=self.deps
         )
+        p = self._create_promise(root_ctx, top_lvl)
+        if p.done():
+            self._unblock_coros_waiting_on_promise(p)
+        else:
+            self._route_fn_or_coroutine(
+                ctx=root_ctx,
+                promise=p,
+                fn_or_coroutine=top_lvl.exec_unit,
+            )
         return p
 
     def _get_random_element(self, array: list[T]) -> T:
@@ -407,6 +428,8 @@ class DSTScheduler:
         self._runnable_coros.clear()
         self._runnable_functions.clear()
         self._awatiables.clear()
+        self._emphemeral_promise_memo.clear()
+        self.probe_results.clear()
         for queue in self._handler_queues.values():
             queue.clear()
 
@@ -455,10 +478,19 @@ class DSTScheduler:
         assert (
             promise.promise_id in self._emphemeral_promise_memo
         ), "Resolved promise should be in the memo"
-        self._emphemeral_promise_memo.pop(promise.promise_id)
 
         self._events.append(
-            PromiseCompleted(promise_id=promise.promise_id, tick=self.tick, value=value)
+            PromiseCompleted(
+                promise_id=promise.promise_id,
+                tick=self.tick,
+                value=value,
+                parent_promise_id=utils.get_parent_promise_id_from_ctx(
+                    self._get_ctx_from_ephemeral_memo(
+                        promise.promise_id,
+                        and_delete=True,
+                    )
+                ),
+            )
         )
 
     def _maybe_fail(self) -> None:
@@ -503,15 +535,24 @@ class DSTScheduler:
 
                 self._maybe_fail()
 
+                self._events.append(
+                    ExecutionTerminated(
+                        promise_id=promise.promise_id,
+                        tick=self.tick,
+                        parent_promise_id=utils.get_parent_promise_id_from_ctx(
+                            fn_wrapper.ctx
+                        ),
+                    )
+                )
+
                 self._resolve_promise(promise, v)
                 self._unblock_coros_waiting_on_promise(promise)
 
             elif next_step == "coroutines":
-                self._advance_runnable_span(
-                    runnable=self._get_random_element(
-                        array=self._runnable_coros,
-                    )
+                runnable, was_awaited = self._get_random_element(
+                    array=self._runnable_coros,
                 )
+                self._advance_runnable_span(runnable=runnable, was_awaited=was_awaited)
             else:
                 assert_never(next_step)
 
@@ -552,17 +593,27 @@ class DSTScheduler:
             tags=None,
         )
 
+    def _get_ctx_from_ephemeral_memo(
+        self, promise_id: str, *, and_delete: bool
+    ) -> Context:
+        if and_delete:
+            return self._emphemeral_promise_memo.pop(promise_id)[-1]
+        return self._emphemeral_promise_memo[promise_id][-1]
+
     def _process_invokation(
         self, invokation: Invoke, runnable: Runnable[Any]
     ) -> Promise[Any]:
         child_ctx = runnable.coro_and_promise.ctx.new_child()
-        p = self._create_promise(promise_id=child_ctx.ctx_id, action=invokation)
+        p = self._create_promise(child_ctx, invokation)
         if isinstance(invokation.exec_unit, Command):
             self._handler_queues[type(invokation.exec_unit)].append(
                 (p, invokation.exec_unit)
             )
         elif isinstance(invokation.exec_unit, FnOrCoroutine):
-            self._route_fn_or_coroutine(child_ctx, p, invokation.exec_unit)
+            if p.done():
+                self._unblock_coros_waiting_on_promise(p)
+            else:
+                self._route_fn_or_coroutine(child_ctx, p, invokation.exec_unit)
         else:
             assert_never(invokation.exec_unit)
         return p
@@ -574,42 +625,81 @@ class DSTScheduler:
             not p.done()
         ), "If the promise is resolved already it makes no sense to block coroutine"
         self._awatiables.setdefault(p, []).append(coro_and_promise)
-        self._events.append(ExecutionAwaited(promise_id=p.promise_id, tick=self.tick))
+        self._events.append(
+            ExecutionAwaited(
+                promise_id=coro_and_promise.prom.promise_id,
+                tick=self.tick,
+                parent_promise_id=utils.get_parent_promise_id_from_ctx(
+                    coro_and_promise.ctx
+                ),
+            )
+        )
 
-    def _advance_runnable_span(self, runnable: Runnable[Any]) -> None:
+    def _advance_runnable_span(
+        self, runnable: Runnable[Any], *, was_awaited: bool
+    ) -> None:
         assert isgenerator(
             runnable.coro_and_promise.coro
         ), "Only coroutines can be advanced"
+
         yieldable_or_final_value = iterate_coro(runnable)
 
-        if isinstance(yieldable_or_final_value, FinalValue):
-            self._resolve_promise(
-                runnable.coro_and_promise.prom, yieldable_or_final_value.v
+        if was_awaited:
+            self._events.append(
+                ExecutionResumed(
+                    promise_id=runnable.coro_and_promise.prom.promise_id,
+                    tick=self.tick,
+                    parent_promise_id=utils.get_parent_promise_id_from_ctx(
+                        runnable.coro_and_promise.ctx
+                    ),
+                )
             )
+
+        if isinstance(yieldable_or_final_value, FinalValue):
             self._events.append(
                 ExecutionTerminated(
-                    promise_id=runnable.coro_and_promise.prom.promise_id, tick=self.tick
+                    promise_id=runnable.coro_and_promise.prom.promise_id,
+                    tick=self.tick,
+                    parent_promise_id=utils.get_parent_promise_id_from_ctx(
+                        runnable.coro_and_promise.ctx
+                    ),
                 )
+            )
+            self._resolve_promise(
+                runnable.coro_and_promise.prom, yieldable_or_final_value.v
             )
             self._unblock_coros_waiting_on_promise(p=runnable.coro_and_promise.prom)
         elif isinstance(yieldable_or_final_value, Call):
             p = self._process_invokation(yieldable_or_final_value.to_invoke(), runnable)
+            assert (
+                p not in self._awatiables
+            ), "Since it's a call it should be a promise without dependants"
             if p.done():
-                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
+                self._add_coro_to_runnables(
+                    runnable.coro_and_promise,
+                    p.safe_result(),
+                    was_awaited=False,
+                )
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
+
         elif isinstance(yieldable_or_final_value, Invoke):
             p = self._process_invokation(
                 invokation=yieldable_or_final_value, runnable=runnable
             )
-            self._add_coro_to_runnables(runnable.coro_and_promise, Ok(p))
+            self._add_coro_to_runnables(
+                runnable.coro_and_promise, Ok(p), was_awaited=False
+            )
         elif isinstance(yieldable_or_final_value, Promise):
             p = yieldable_or_final_value
             if p.done():
                 self._unblock_coros_waiting_on_promise(p)
-                self._add_coro_to_runnables(runnable.coro_and_promise, p.safe_result())
+                self._add_coro_to_runnables(
+                    runnable.coro_and_promise, p.safe_result(), was_awaited=False
+                )
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
+
         elif isinstance(yieldable_or_final_value, Sleep):
             raise NotImplementedError
         else:
@@ -620,11 +710,8 @@ class DSTScheduler:
         if self._awatiables.get(p) is None:
             return
         for coro_and_promise in self._awatiables.pop(p):
-            self._add_coro_to_runnables(coro_and_promise, p.safe_result())
-            self._events.append(
-                ExecutionResumed(
-                    promise_id=coro_and_promise.prom.promise_id, tick=self.tick
-                )
+            self._add_coro_to_runnables(
+                coro_and_promise, p.safe_result(), was_awaited=True
             )
 
     def _next_step(self) -> Step:
