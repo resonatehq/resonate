@@ -21,26 +21,30 @@ jobs:
         systems:
           - os: linux
             arch: x86_64
+            arch_grep: x86-64
             runner: ubuntu-22.04
           - os: linux
             arch: aarch64
-            runner: ubuntu-22.04
+            arch_grep: aarch64
+            runner: ubuntu-22.04-arm64
           - os: darwin
             arch: x86_64
-            runner: macos-12
+            arch_grep: x86_64
+            runner: macos-13
           - os: darwin
             arch: aarch64
-            runner: macos-12
+            arch_grep: arm64
+            runner: macos-14
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-      
+
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v13
 
       - name: Use Magic Nix Cache
         uses: DeterminateSystems/magic-nix-cache-action@v7
-      
+
       - name: Build Resonate binary
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
@@ -51,6 +55,9 @@ jobs:
 
           # Copy into root
           cp ./result/bin/resonate resonate
+
+          # Verify binary
+          file resonate | grep "${{ matrix.systems.arch_grep }}"
 
           # Compress binary
           tar -czvf "${TARBALL}" resonate
@@ -68,6 +75,6 @@ jobs:
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
-          
+
           gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
           gh release upload ${{ inputs.tag }} "${TARBALL_CHECKSUM}" --clobber
