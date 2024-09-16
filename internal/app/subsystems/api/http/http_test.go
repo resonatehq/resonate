@@ -14,9 +14,9 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -779,9 +779,9 @@ func TestHttpServer(t *testing.T) {
 					},
 					body: []byte(`{
 						"promiseId": "foo",
+						"rootPromiseId": "bar",
 						"timeout": 1,
-						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
-						"message": "e30="
+						"recv": "foo"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
@@ -791,11 +791,10 @@ func TestHttpServer(t *testing.T) {
 							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
-							PromiseId: "foo",
-							Timeout:   1,
-							RecvType:  "http",
-							RecvData:  []byte(`{"url": "http://localhost:3000"}`),
-							Message:   []byte("{}"),
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`"foo"`),
 						},
 					},
 					res: &t_api.Response{
@@ -815,9 +814,9 @@ func TestHttpServer(t *testing.T) {
 					},
 					body: []byte(`{
 						"promiseId": "foo",
+						"rootPromiseId": "bar",
 						"timeout": 1,
-						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}},
-						"message": "e30="
+						"recv": "foo"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
@@ -827,11 +826,10 @@ func TestHttpServer(t *testing.T) {
 							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
-							PromiseId: "foo",
-							Timeout:   1,
-							RecvType:  "http",
-							RecvData:  []byte(`{"url": "http://localhost:3000"}`),
-							Message:   []byte("{}"),
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`"foo"`),
 						},
 					},
 					res: &t_api.Response{
@@ -1067,9 +1065,7 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
-							Task: &task.Task{
-								Message: []byte("{}"),
-							},
+							Mesg:   &message.Mesg{},
 						},
 					},
 					status: 201,
@@ -1149,7 +1145,6 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.CompleteTask,
 						CompleteTask: &t_api.CompleteTaskResponse{
 							Status: t_api.StatusCreated,
-							Task:   &task.Task{},
 						},
 					},
 					status: 201,

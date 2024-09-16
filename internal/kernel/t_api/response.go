@@ -115,8 +115,8 @@ type HeartbeatLocksResponse struct {
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status StatusCode                `json:"status"`
-	Mesg   *message.MesgWithPromises `json:"mesg,omitempty"`
+	Status StatusCode    `json:"status"`
+	Mesg   *message.Mesg `json:"mesg,omitempty"`
 }
 
 type CompleteTaskResponse struct {

@@ -17,7 +17,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(r.ClaimTask.Frequency > 0, "frequency must be greater than 0")
 
 	var status t_api.StatusCode
-	var mesg *message.MesgWithPromises
+	var mesg *message.Mesg
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -127,20 +127,25 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 				var root, leaf *promise.Promise
 
-				root, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
-				if err != nil {
-					slog.Error("failed to parse promises", "err", err)
+				if completion.Store.Results[0].ReadPromise.RowsReturned == 1 {
+					root, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
+					if err != nil {
+						slog.Error("failed to parse promises", "err", err)
+					}
 				}
 
-				if t.Mesg.Type == message.Resume {
+				if t.Mesg.Type == message.Resume && completion.Store.Results[1].ReadPromise.RowsReturned == 1 {
 					leaf, err = completion.Store.Results[1].ReadPromise.Records[0].Promise()
 					if err != nil {
 						slog.Error("failed to parse promises", "err", err)
 					}
 				}
 
+				// set promises for response
+				t.Mesg.SetPromises(root, leaf)
+
 				status = t_api.StatusCreated
-				mesg = t.Mesg.WithPromises(root, leaf)
+				mesg = t.Mesg
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to claim. In that case, we should just retry.

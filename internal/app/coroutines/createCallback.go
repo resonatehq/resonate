@@ -75,12 +75,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
-									PromiseId:     r.CreateCallback.PromiseId,
-									RootPromiseId: r.CreateCallback.RootPromiseId,
-									Timeout:       r.CreateCallback.Timeout,
-									Recv:          r.CreateCallback.Recv,
-									Mesg:          mesg,
-									CreatedOn:     createdOn,
+									PromiseId: r.CreateCallback.PromiseId,
+									Timeout:   r.CreateCallback.Timeout,
+									Recv:      r.CreateCallback.Recv,
+									Mesg:      mesg,
+									CreatedOn: createdOn,
 								},
 							},
 						},

@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"encoding/json"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -51,15 +50,6 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 		for i, r := range result.Records {
 			if c.Time() < r.Timeout {
-				body, err := json.Marshal(map[string]interface{}{
-					"id":      r.Id,
-					"counter": r.Counter,
-				})
-				if err != nil {
-					slog.Warn("failed to marshal body", "err", err)
-					continue
-				}
-
 				t, err := r.Task()
 				if err != nil {
 					slog.Warn("failed to parse task", "err", err)
@@ -67,11 +57,10 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				}
 
 				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
-					Kind: t_aio.Queue,
+					Kind: t_aio.Sender,
 					Tags: tags,
-					Queue: &t_aio.QueueSubmission{
+					Sender: &t_aio.SenderSubmission{
 						Task: t,
-						Body: body,
 					},
 				})
 			} else {
@@ -104,7 +93,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				slog.Warn("failed to enqueue task", "err", err)
 			}
 
-			if err == nil && completion.Queue.Success {
+			if err == nil && completion.Sender.Success {
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{

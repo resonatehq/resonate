@@ -24,10 +24,10 @@ func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallback
 	}
 
 	body := &service.CreateCallbackBody{
-		PromiseId: req.PromiseId,
-		// RootPromiseId: req.RootPromiseId,
-		Timeout: req.Timeout,
-		// Recv:    &receiver.Recv{Type: req.Recv.Type, Data: req.Recv.Data},
+		PromiseId:     req.PromiseId,
+		RootPromiseId: req.RootPromiseId,
+		Timeout:       req.Timeout,
+		Recv:          req.Recv,
 	}
 
 	res, err := s.service.CreateCallback(header, body)

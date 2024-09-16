@@ -14,8 +14,8 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/match"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
@@ -119,8 +119,8 @@ type APISubsystems struct {
 
 type AIOSubsystems struct {
 	Echo          DisabledSubsystem[echo.Config]     `flag:"echo"`
-	Queue         EnabledSubsystem[queue.Config]     `flag:"queue"`
-	Match         EnabledSubsystem[match.Config]     `flag:"match"`
+	Router        EnabledSubsystem[router.Config]    `flag:"router"`
+	Sender        EnabledSubsystem[sender.Config]    `flag:"sender"`
 	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
@@ -157,16 +157,16 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Match.Enabled {
-		subsystem, err := match.New(a, metrics, &s.Match.Config)
+	if s.Router.Enabled {
+		subsystem, err := router.New(a, metrics, &s.Router.Config)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Queue.Enabled {
-		subsystem, err := queue.New(a, metrics, &s.Queue.Config)
+	if s.Sender.Enabled {
+		subsystem, err := sender.New(a, metrics, &s.Sender.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -198,8 +198,8 @@ type APIDSTSubsystems struct {
 }
 
 type AIODSTSubsystems struct {
-	Queue         EnabledSubsystem[queue.ConfigDST]  `flag:"queue"`
-	Match         EnabledSubsystem[match.Config]     `flag:"match"`
+	Router        EnabledSubsystem[router.Config]    `flag:"router"`
+	Sender        EnabledSubsystem[sender.ConfigDST] `flag:"sender"`
 	StorePostgres DisabledSubsystem[postgres.Config] `flag:"store-postgres"`
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
@@ -218,16 +218,16 @@ func (s *APIDSTSubsystems) Instantiate(a api.API) []api.Subsystem {
 
 func (s *AIODSTSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
 	subsystems := []aio.SubsystemDST{}
-	if s.Match.Enabled {
-		subsystem, err := match.New(a, metrics, &s.Match.Config)
+	if s.Router.Enabled {
+		subsystem, err := router.New(a, metrics, &s.Router.Config)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Queue.Enabled {
-		subsystem, err := queue.NewDST(r, backchannel, &s.Queue.Config)
+	if s.Sender.Enabled {
+		subsystem, err := sender.NewDST(r, backchannel, &s.Sender.Config)
 		if err != nil {
 			return nil, err
 		}

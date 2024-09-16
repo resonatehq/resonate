@@ -178,9 +178,9 @@ func createPromise(tags map[string]string, cmd *t_aio.CreatePromiseCommand, addi
 
 		// check matcher to see if a task needs to be created
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
-			Kind: t_aio.Match,
+			Kind: t_aio.Router,
 			Tags: tags,
-			Match: &t_aio.MatchSubmission{
+			Router: &t_aio.RouterSubmission{
 				Promise: &promise.Promise{
 					Id:                      cmd.Id,
 					State:                   promise.Pending,
@@ -197,14 +197,14 @@ func createPromise(tags map[string]string, cmd *t_aio.CreatePromiseCommand, addi
 			slog.Warn("failed to match promise", "req", cmd, "err", err)
 		}
 
-		if err == nil && completion.Match.Matched {
-			util.Assert(completion.Match.Command != nil, "command must not be nil")
-			completion.Match.Command.CreatedOn = cmd.CreatedOn
+		if err == nil && completion.Router.Matched {
+			util.Assert(completion.Router.Command != nil, "command must not be nil")
+			completion.Router.Command.CreatedOn = cmd.CreatedOn
 
 			// add create task command if matched
 			commands = append(commands, &t_aio.Command{
 				Kind:       t_aio.CreateTask,
-				CreateTask: completion.Match.Command,
+				CreateTask: completion.Router.Command,
 			})
 		}
 

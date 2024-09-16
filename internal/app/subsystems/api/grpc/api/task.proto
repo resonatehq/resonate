@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package task;
 
+import "internal/app/subsystems/api/grpc/api/promise.proto";
+
 option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
 
 service Tasks {
@@ -19,7 +21,8 @@ message ClaimTaskRequest {
 }
 
 message ClaimTaskResponse {
-    bytes data = 1;
+    string type = 1;
+    map<string, promise.Promise> promises = 2;
 }
 
 message CompleteTaskRequest {

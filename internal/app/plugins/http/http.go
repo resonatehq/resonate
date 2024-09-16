@@ -3,10 +3,12 @@ package http
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
@@ -47,7 +49,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 }
 
 func (h *Http) String() string {
-	return "queue:http"
+	return fmt.Sprintf("%s:http", t_aio.Sender.String())
 }
 
 func (h *Http) Type() string {
@@ -87,7 +89,7 @@ type HttpWorker struct {
 }
 
 func (w *HttpWorker) String() string {
-	return "queue:http"
+	return fmt.Sprintf("%s:http", t_aio.Sender.String())
 }
 
 func (w *HttpWorker) Start() {

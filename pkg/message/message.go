@@ -6,28 +6,29 @@ import (
 )
 
 type Mesg struct {
-	Type Type   `json:"type"`
-	Root string `json:"root"`
-	Leaf string `json:"leaf"`
+	Type     Type                        `json:"type"`
+	Root     string                      `json:"root,omitempty"`
+	Leaf     string                      `json:"leaf,omitempty"`
+	Promises map[string]*promise.Promise `json:"promises,omitempty"`
 }
 
 func (m *Mesg) String() string {
 	return string(m.Type)
 }
 
-func (m *Mesg) WithPromises(root *promise.Promise, leaf *promise.Promise) *MesgWithPromises {
+func (m *Mesg) SetPromises(root *promise.Promise, leaf *promise.Promise) {
 	util.Assert(root == nil || root.Id == m.Root, "root id must match")
 	util.Assert(leaf == nil || leaf.Id == m.Leaf, "leaf id must match")
 
-	return &MesgWithPromises{
-		Type:     m.Type,
-		Promises: map[string]*promise.Promise{"root": root, "leaf": leaf},
-	}
-}
+	// hack, unset root and leaf
+	m.Root = ""
+	m.Leaf = ""
 
-type MesgWithPromises struct {
-	Type     Type                        `json:"type"`
-	Promises map[string]*promise.Promise `json:"promises"`
+	// set promises
+	m.Promises = map[string]*promise.Promise{
+		"root": root,
+		"leaf": leaf,
+	}
 }
 
 type Type string

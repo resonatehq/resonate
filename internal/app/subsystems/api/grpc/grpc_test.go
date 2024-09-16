@@ -12,9 +12,9 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -1086,14 +1086,11 @@ func TestCreateCallback(t *testing.T) {
 		{
 			name: "CreateCallback",
 			grpcReq: &grpcApi.CreateCallbackRequest{
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv: &grpcApi.Recv{
-					Type: "http",
-					Data: []byte(`{"url": "http://localhost:3000"}`),
-				},
-				Message:   []byte("{}"),
-				RequestId: "CreateCallback",
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          []byte("foo"),
+				RequestId:     "CreateCallback",
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreateCallback,
@@ -1103,11 +1100,10 @@ func TestCreateCallback(t *testing.T) {
 					"protocol": "grpc",
 				},
 				CreateCallback: &t_api.CreateCallbackRequest{
-					PromiseId: "foo",
-					Timeout:   1,
-					RecvType:  "http",
-					RecvData:  []byte(`{"url": "http://localhost:3000"}`),
-					Message:   []byte("{}"),
+					PromiseId:     "foo",
+					RootPromiseId: "bar",
+					Timeout:       1,
+					Recv:          []byte("foo"),
 				},
 			},
 			res: &t_api.Response{
@@ -1123,11 +1119,7 @@ func TestCreateCallback(t *testing.T) {
 			grpcReq: &grpcApi.CreateCallbackRequest{
 				PromiseId: "foo",
 				Timeout:   1,
-				Recv: &grpcApi.Recv{
-					Type: "http",
-					Data: []byte(`{"url": "http://localhost:3000"}`),
-				},
-				Message:   []byte("{}"),
+				Recv:      []byte("foo"),
 				RequestId: "CreateCallback",
 			},
 			req: &t_api.Request{
@@ -1140,9 +1132,7 @@ func TestCreateCallback(t *testing.T) {
 				CreateCallback: &t_api.CreateCallbackRequest{
 					PromiseId: "foo",
 					Timeout:   1,
-					RecvType:  "http",
-					RecvData:  []byte(`{"url": "http://localhost:3000"}`),
-					Message:   []byte("{}"),
+					Recv:      []byte("foo"),
 				},
 			},
 			res: &t_api.Response{
@@ -1852,9 +1842,7 @@ func TestClaimTask(t *testing.T) {
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
-					Task: &task.Task{
-						Message: []byte("{}"),
-					},
+					Mesg:   &message.Mesg{},
 				},
 			},
 			code: codes.OK,
@@ -1962,7 +1950,6 @@ func TestCompleteTask(t *testing.T) {
 				Kind: t_api.CompleteTask,
 				CompleteTask: &t_api.CompleteTaskResponse{
 					Status: t_api.StatusCreated,
-					Task:   &task.Task{},
 				},
 			},
 			code: codes.OK,
