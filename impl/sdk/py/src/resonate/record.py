@@ -1,24 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, final
 
 if TYPE_CHECKING:
     from resonate.typing import Data, Headers, IdempotencyKey, State, Tags
 
 
+@final
 @dataclass(frozen=True)
 class Param:
     data: Data
     headers: Headers
 
 
+@final
 @dataclass(frozen=True)
 class Value:
     data: Data
     headers: Headers
 
 
+@final
 @dataclass(frozen=True)
 class DurablePromiseRecord:
     state: State

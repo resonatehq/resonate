@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, final
 
 from opentelemetry import context, trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from opentelemetry.trace.span import Span
 
 
+@final
 class OpenTelemetryAdapter(IAdapter):
     def __init__(self, app_name: str, endpoint: str) -> None:
         self._spans: dict[str, tuple[Span, object]] = {}

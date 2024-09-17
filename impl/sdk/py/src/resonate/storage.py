@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal, final
 
 import requests
 
@@ -119,6 +119,7 @@ class MemoryStorage(IStorage):
         return item
 
 
+@final
 class LocalPromiseStore(IPromiseStore):
     def __init__(self, storage: IStorage | None = None) -> None:
         self._storage = storage or MemoryStorage()
@@ -313,6 +314,7 @@ class LocalPromiseStore(IPromiseStore):
         raise NotImplementedError
 
 
+@final
 class RemotePromiseStore(IPromiseStore):
     def __init__(
         self,

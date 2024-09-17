@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import random
-from typing import TYPE_CHECKING, TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar, Union, final
 
 from typing_extensions import ParamSpec, TypeAlias
 
@@ -14,6 +14,7 @@ P = ParamSpec("P")
 FloatOrInt: TypeAlias = Union[float, int]
 
 
+@final
 class Random:
     """Random class implementation that allows to enforce a prefixable behaviour."""
 

@@ -4,7 +4,7 @@ import base64
 import importlib
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Generic
+from typing import Any, Generic, final
 
 from typing_extensions import TypeVar
 
@@ -20,6 +20,7 @@ class IEncoder(Generic[In, Out], ABC):
     def decode(self, data: Out) -> In: ...
 
 
+@final
 class Base64Encoder(IEncoder[str, str]):
     def encode(self, data: str) -> str:
         return base64.b64encode(data.encode()).decode()
@@ -28,6 +29,7 @@ class Base64Encoder(IEncoder[str, str]):
         return base64.b64decode(data).decode()
 
 
+@final
 class JsonEncoder(IEncoder[Any, str]):
     def encode(self, data: Any) -> str:  # noqa: ANN401
         return json.dumps(data)
@@ -51,6 +53,7 @@ def _import_class_from_qualified_name(qualified_name: str) -> Any:  # noqa: ANN4
     return getattr(module, class_name)
 
 
+@final
 class ErrorEncoder(IEncoder[Exception, str]):
     @classmethod
     def encode(cls, data: Exception) -> str:

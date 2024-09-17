@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Union, final
 
 from typing_extensions import ParamSpec, TypeAlias
 
@@ -14,6 +14,9 @@ P = ParamSpec("P")
 
 
 # Promise Events
+
+
+@final
 @dataclass(frozen=True)
 class PromiseCreated:
     promise_id: str
@@ -21,6 +24,7 @@ class PromiseCreated:
     tick: int
 
 
+@final
 @dataclass(frozen=True)
 class PromiseCompleted:
     promise_id: str
@@ -32,6 +36,7 @@ class PromiseCompleted:
 # Execution Events
 
 
+@final
 @dataclass(frozen=True)
 class ExecutionInvoked:
     promise_id: str
@@ -42,6 +47,7 @@ class ExecutionInvoked:
     kwargs: dict[str, Any]
 
 
+@final
 @dataclass(frozen=True)
 class ExecutionTerminated:
     promise_id: str
@@ -49,6 +55,7 @@ class ExecutionTerminated:
     tick: int
 
 
+@final
 @dataclass(frozen=True)
 class ExecutionResumed:
     promise_id: str
@@ -56,6 +63,7 @@ class ExecutionResumed:
     tick: int
 
 
+@final
 @dataclass(frozen=True)
 class ExecutionAwaited:
     promise_id: str

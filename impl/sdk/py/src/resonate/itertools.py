@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generic
+from typing import TYPE_CHECKING, Generic, final
 
 from typing_extensions import ParamSpec, TypeVar, assert_never
 
@@ -14,6 +14,7 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
+@final
 @dataclass(frozen=True)
 class FinalValue(Generic[T]):
     v: Result[T, Exception]

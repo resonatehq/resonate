@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, final
 
 from typing_extensions import ParamSpec
 
@@ -32,6 +32,7 @@ def _new_deps() -> Dependencies:
     return Dependencies()
 
 
+@final
 @dataclass
 class Context:
     ctx_id: str
@@ -39,6 +40,9 @@ class Context:
     parent_ctx: Context | None = None
     deps: Dependencies = field(default_factory=_new_deps)
     _num_children: int = field(init=False, default=0)
+
+    def parent_promise_id(self) -> str | None:
+        return self.parent_ctx.ctx_id if self.parent_ctx is not None else None
 
     def new_child(self) -> Context:
         self._num_children += 1

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Generic, TypeVar
+from typing import TYPE_CHECKING, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+@final
 class Promise(Generic[T]):
     def __init__(
         self,

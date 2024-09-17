@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import Generic, TypeVar, final
 
 T = TypeVar("T")
 
 
+@final
 @dataclass
 class CmdBuffer(Generic[T]):
     max_length: int
