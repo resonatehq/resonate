@@ -64,13 +64,33 @@ func (c *Config) Parse() error {
 		return err
 	}
 
-	// complex defaults
+	// TODO: rethink defaults
+
 	if c.System.Url == "" {
 		host := c.API.Subsystems.Http.Config.Host
 		if host == "0.0.0.0" {
 			host = "127.0.0.1"
 		}
 		c.System.Url = fmt.Sprintf("http://%s:%d", host, c.API.Subsystems.Http.Config.Port)
+	}
+
+	if c.AIO.Subsystems.Router.Enabled {
+		var found bool
+
+		for _, source := range c.AIO.Subsystems.Router.Config.Sources {
+			if source.Name == "default" {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			c.AIO.Subsystems.Router.Config.Sources = append(c.AIO.Subsystems.Router.Config.Sources, router.SourceConfig{
+				Name: "default",
+				Type: "tag",
+				Data: []byte(`{"key": "resonate:invoke"}`),
+			})
+		}
 	}
 
 	return nil
@@ -87,6 +107,27 @@ func (c *ConfigDST) Parse(r *rand.Rand) error {
 	config := struct{ DST *ConfigDST }{DST: c}
 	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
 		return err
+	}
+
+	// TODO: rethink defaults
+
+	if c.AIO.Subsystems.Router.Enabled {
+		var found bool
+
+		for _, source := range c.AIO.Subsystems.Router.Config.Sources {
+			if source.Name == "default" {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			c.AIO.Subsystems.Router.Config.Sources = append(c.AIO.Subsystems.Router.Config.Sources, router.SourceConfig{
+				Name: "default",
+				Type: "tag",
+				Data: []byte(`{"key": "resonate:invoke"}`),
+			})
+		}
 	}
 
 	return nil
