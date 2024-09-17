@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
 from typing_extensions import ParamSpec
@@ -16,7 +16,7 @@ P = ParamSpec("P")
 @dataclass(frozen=True)
 class Call:
     exec_unit: ExecutionUnit
-    opts: Options | None = field(default=None)
+    opts: Options
 
     def to_invoke(self) -> Invoke:
         return Invoke(self.exec_unit, opts=self.opts)
@@ -26,7 +26,7 @@ class Call:
 @dataclass(frozen=True)
 class Invoke:
     exec_unit: ExecutionUnit
-    opts: Options | None
+    opts: Options
 
 
 @final

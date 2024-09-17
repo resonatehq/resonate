@@ -492,7 +492,9 @@ class Scheduler:
     def _process_invokation(
         self, invokation: Invoke, runnable: Runnable[Any]
     ) -> Promise[Any]:
-        child_ctx = runnable.coro_and_promise.ctx.new_child()
+        child_ctx = runnable.coro_and_promise.ctx.new_child(
+            ctx_id=invokation.opts.promise_id
+        )
         p = self._create_promise(child_ctx, invokation)
         if isinstance(invokation.exec_unit, Command):
             raise NotImplementedError

@@ -7,4 +7,5 @@ from typing import final
 @final
 @dataclass(frozen=True)
 class Options:
-    durable: bool = field(default=False)
+    durable: bool = field(default=True)
+    promise_id: str | None = None
