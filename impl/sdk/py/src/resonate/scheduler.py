@@ -234,6 +234,17 @@ class Scheduler:
             raise NotImplementedError
         else:
             assert_never(action)
+
+        if not p.durable:
+            self._tracing_adapter.process_event(
+                PromiseCreated(
+                    promise_id=p.promise_id,
+                    tick=now(),
+                    parent_promise_id=ctx.parent_promise_id(),
+                )
+            )
+            return p
+
         durable_promise_record = self._create_durable_promise_record(
             promise_id=p.promise_id, data=data
         )
@@ -279,6 +290,8 @@ class Scheduler:
         )
 
         p: Promise[Any] = self._create_promise(ctx=root_ctx, action=top_lvl)
+        assert p.durable, "Top lvl invocation must be durable."
+
         self._stg_queue.put_nowait((top_lvl, p, root_ctx))
         self._signal()
         return p
@@ -399,15 +412,18 @@ class Scheduler:
     def _resolve_promise(
         self, promise: Promise[T], value: Result[T, Exception]
     ) -> None:
-        completed_record = self._complete_durable_promise_record(
-            promise_id=promise.promise_id,
-            value=value,
-        )
-        assert (
-            completed_record.is_completed()
-        ), "Durable promise record must be completed by this point."
-        v = self._get_value_from_durable_promise(completed_record)
-        promise.set_result(v)
+        if promise.durable:
+            completed_record = self._complete_durable_promise_record(
+                promise_id=promise.promise_id,
+                value=value,
+            )
+            assert (
+                completed_record.is_completed()
+            ), "Durable promise record must be completed by this point."
+            v = self._get_value_from_durable_promise(completed_record)
+            promise.set_result(v)
+        else:
+            promise.set_result(value)
         assert (
             promise.promise_id in self._emphemeral_promise_memo
         ), "Ephemeral process must have been registered in the memo."

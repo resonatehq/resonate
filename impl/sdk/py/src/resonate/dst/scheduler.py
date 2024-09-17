@@ -301,6 +301,17 @@ class DSTScheduler:
             raise NotImplementedError
         else:
             assert_never(action)
+
+        if not p.durable:
+            self._events.append(
+                PromiseCreated(
+                    promise_id=p.promise_id,
+                    tick=self.tick,
+                    parent_promise_id=ctx.parent_promise_id(),
+                )
+            )
+            return p
+
         durable_promise_record = self._create_durable_promise_record(
             promise_id=p.promise_id, data=data
         )
@@ -350,6 +361,7 @@ class DSTScheduler:
             ctx_id=promise_id, seed=self.seed, parent_ctx=None, deps=self.deps
         )
         p = self._create_promise(root_ctx, top_lvl)
+        assert p.durable, "Top level invocations must be durable"
         if p.done():
             self._unblock_coros_waiting_on_promise(p)
         else:
@@ -405,15 +417,18 @@ class DSTScheduler:
     def _resolve_promise(
         self, promise: Promise[T], value: Result[T, Exception]
     ) -> None:
-        completed_record = self._complete_durable_promise_record(
-            promise_id=promise.promise_id,
-            value=value,
-        )
-        assert (
-            completed_record.is_completed()
-        ), "Durable promise record must be completed by this point."
-        v = self._get_value_from_durable_promise(completed_record)
-        promise.set_result(v)
+        if promise.durable:
+            completed_record = self._complete_durable_promise_record(
+                promise_id=promise.promise_id,
+                value=value,
+            )
+            assert (
+                completed_record.is_completed()
+            ), "Durable promise record must be completed by this point."
+            v = self._get_value_from_durable_promise(completed_record)
+            promise.set_result(v)
+        else:
+            promise.set_result(value)
         assert (
             promise.promise_id in self._emphemeral_promise_memo
         ), "Resolved promise should be in the memo"

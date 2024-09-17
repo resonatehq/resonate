@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Generic, TypeVar, final
+from typing import Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
+from resonate.actions import Invoke, Sleep
 from resonate.result import Err, Ok, Result
-
-if TYPE_CHECKING:
-    from resonate.actions import Invoke, Sleep
 
 T = TypeVar("T")
 
@@ -23,6 +21,12 @@ class Promise(Generic[T]):
         self.promise_id = promise_id
         self.f = Future[T]()
         self.action = action
+        if isinstance(action, Invoke):
+            self.durable = action.opts.durable
+        elif isinstance(action, Sleep):
+            raise NotImplementedError
+        else:
+            assert_never(action)
 
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)
