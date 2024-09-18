@@ -3,6 +3,7 @@ package sender
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
@@ -59,7 +60,7 @@ type TargetConfig struct {
 
 type Sender struct {
 	config  *Config
-	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	plugins []aio.Plugin
 	worker  *SenderWorker
 }
@@ -133,8 +134,13 @@ func (s *Sender) Stop() error {
 	return nil
 }
 
-func (s *Sender) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return s.sq
+func (s *Sender) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case s.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Sender) Flush(t int64) {}
@@ -168,6 +174,8 @@ func (w *SenderWorker) Start() {
 			return
 		}
 
+		slog.Debug("api:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
+
 		// process one at a time
 		counter.Inc()
 		w.Process(sqe)
@@ -189,7 +197,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	var physicalRecv *receiver.Recv
 	if err := util.UnmarshalChain(sqe.Submission.Sender.Task.Recv, &logicalRecv, &physicalRecv); err != nil {
 		cqe.Error = err
-		w.aio.Enqueue(cqe)
+		w.aio.EnqueueCQE(cqe)
 		return
 	}
 
@@ -204,14 +212,14 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 
 	if recv == nil {
 		cqe.Error = fmt.Errorf("unknown receiver %s", *logicalRecv)
-		w.aio.Enqueue(cqe)
+		w.aio.EnqueueCQE(cqe)
 		return
 	}
 
 	plugin := w.plugins[recv.Type]
 	if plugin == nil {
 		cqe.Error = fmt.Errorf("unknown plugin %s", recv.Type)
-		w.aio.Enqueue(cqe)
+		w.aio.EnqueueCQE(cqe)
 		return
 	}
 
@@ -221,7 +229,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	})
 	if err != nil {
 		cqe.Error = err
-		w.aio.Enqueue(cqe)
+		w.aio.EnqueueCQE(cqe)
 		return
 	}
 
@@ -241,7 +249,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 				}
 			}
 
-			w.aio.Enqueue(cqe)
+			w.aio.EnqueueCQE(cqe)
 
 			counter.Dec()
 			w.metrics.AioTotal.WithLabelValues(plugin.String(), boolToStatus(success)).Inc()
@@ -252,7 +260,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 		counter.Inc()
 	} else {
 		cqe.Error = fmt.Errorf("aio:%s:%s submission queue full", w, recv.Type)
-		w.aio.Enqueue(cqe)
+		w.aio.EnqueueCQE(cqe)
 	}
 }
 

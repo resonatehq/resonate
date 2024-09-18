@@ -322,7 +322,7 @@ type Config struct {
 
 type SqliteStore struct {
 	config *Config
-	sq     chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq     chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db     *sql.DB
 	worker *SqliteStoreWorker
 }
@@ -389,8 +389,13 @@ func (s *SqliteStore) Reset() error {
 	return os.Remove(s.config.Path)
 }
 
-func (s *SqliteStore) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return s.sq
+func (s *SqliteStore) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case s.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *SqliteStore) Flush(t int64) {
@@ -422,11 +427,11 @@ func (w *SqliteStoreWorker) Start() {
 	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
 
 	for {
-		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		sqes, ok := store.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
 			counter.Set(float64(len(sqes)))
 			for _, cqe := range w.Process(sqes) {
-				w.aio.Enqueue(cqe)
+				w.aio.EnqueueCQE(cqe)
 				counter.Dec()
 			}
 		}

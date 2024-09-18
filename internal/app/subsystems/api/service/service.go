@@ -18,16 +18,16 @@ func New(api api.API, protocol string) *Service {
 	}
 }
 
-func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
-	return func(completion *t_api.Response, err error) {
-		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			Completion: completion,
-			Error:      err,
-		}
+func (s *Service) sendOrPanic(id string, cq chan<- *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
+	return func(res *t_api.Response, err error) {
+		defer close(cq)
 
 		select {
-		case cq <- cqe:
-			close(cq) // prevent further writes
+		case cq <- &bus.CQE[t_api.Request, t_api.Response]{
+			Id:         id,
+			Completion: res,
+			Error:      err,
+		}:
 		default:
 			panic("response channel must not block")
 		}

@@ -53,7 +53,7 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		data := strconv.Itoa(i)
 
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
 				Tags: map[string]string{"id": "test"},
@@ -74,7 +74,7 @@ func TestSystemLoop(t *testing.T) {
 
 	// all requests made after shutdown should fail
 	for i := 0; i < 5; i++ {
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
 				Tags: map[string]string{"id": "test"},

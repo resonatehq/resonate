@@ -15,9 +15,9 @@ import (
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
 			Tags: map[string]string{
@@ -31,7 +31,7 @@ func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResp
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -102,11 +102,12 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 		}
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.SearchPromises,
 			Tags: map[string]string{
@@ -118,7 +119,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -130,11 +131,12 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 // Create Promise
 
 func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, *Error) {
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
 			Tags: map[string]string{
@@ -153,7 +155,7 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -166,9 +168,9 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CompletePromise,
 			Tags: map[string]string{
@@ -186,7 +188,7 @@ func (s *Service) CompletePromise(id string, state promise.State, header *Comple
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}

@@ -20,14 +20,18 @@ func (m *Mesg) SetPromises(root *promise.Promise, leaf *promise.Promise) {
 	util.Assert(root == nil || root.Id == m.Root, "root id must match")
 	util.Assert(leaf == nil || leaf.Id == m.Leaf, "leaf id must match")
 
+	// set promises
+	m.Promises = map[string]*promise.Promise{}
+
 	// hack, unset root and leaf
 	m.Root = ""
 	m.Leaf = ""
 
-	// set promises
-	m.Promises = map[string]*promise.Promise{
-		"root": root,
-		"leaf": leaf,
+	if root != nil {
+		m.Promises["root"] = root
+	}
+	if leaf != nil {
+		m.Promises["leaf"] = leaf
 	}
 }
 

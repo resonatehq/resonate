@@ -38,7 +38,7 @@ type TagSourceConfig struct {
 
 type Router struct {
 	config  *Config
-	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	workers []*RouterWorker
 }
 
@@ -98,8 +98,13 @@ func (r *Router) Stop() error {
 	return nil
 }
 
-func (r *Router) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return r.sq
+func (r *Router) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case r.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Router) Flush(int64) {}
@@ -140,8 +145,10 @@ func (w *RouterWorker) Start() {
 			return
 		}
 
+		slog.Debug("api:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
+
 		counter.Inc()
-		w.aio.Enqueue(w.Process(sqe)) // process one at a time
+		w.aio.EnqueueCQE(w.Process(sqe)) // process one at a time
 		counter.Dec()
 	}
 }

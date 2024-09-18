@@ -15,7 +15,7 @@ type subsystem interface {
 type Subsystem interface {
 	subsystem
 
-	SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
+	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion]) bool
 	Flush(int64)
 }
 

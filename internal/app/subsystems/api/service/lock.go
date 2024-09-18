@@ -21,11 +21,12 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 		ExpiryInMilliseconds: body.ExpiryInMilliseconds,
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.AcquireLock,
 			Tags: map[string]string{
@@ -37,7 +38,7 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -57,11 +58,12 @@ func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.Rel
 		ExecutionId: body.ExecutionId,
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReleaseLock,
 			Tags: map[string]string{
@@ -73,7 +75,7 @@ func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.Rel
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -91,11 +93,12 @@ func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.Heartbe
 		ProcessId: body.ProcessId,
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id:       header.Id(),
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.HeartbeatLocks,
 			Tags: map[string]string{
@@ -107,7 +110,7 @@ func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.Heartbe
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}

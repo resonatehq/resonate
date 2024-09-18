@@ -13,10 +13,12 @@ func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_a
 	util.Assert(body.Timeout != 0, "callback.timeout must be provided")
 	util.Assert(body.Recv != nil, "callback.recv must be provided")
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Id: header.Id(),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{
@@ -31,10 +33,9 @@ func (s *Service) CreateCallback(header *Header, body *CreateCallbackBody) (*t_a
 				Recv:          body.Recv,
 			},
 		},
-		Callback: s.sendOrPanic(cq),
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}

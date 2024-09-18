@@ -86,7 +86,8 @@ func TestHttpServer(t *testing.T) {
 				path    string
 				method  string
 				headers map[string]string
-				body    []byte
+				reqBody []byte
+				resBody []byte
 				req     *t_api.Request
 				res     *t_api.Response
 				status  int
@@ -431,7 +432,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo/bar",
 						"param": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -476,7 +477,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CreatePromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"timeout": 1
 					}`),
@@ -519,7 +520,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED_CANCELED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -563,7 +564,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CancelPromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED_CANCELED"
 					}`),
 					req: &t_api.Request{
@@ -605,7 +606,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "RESOLVED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -649,7 +650,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ResolvePromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "RESOLVED"
 					}`),
 					req: &t_api.Request{
@@ -691,7 +692,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -735,7 +736,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "RejectPromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED"
 					}`),
 					req: &t_api.Request{
@@ -777,7 +778,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CreateCallback",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"promiseId": "foo",
 						"rootPromiseId": "bar",
 						"timeout": 1,
@@ -806,13 +807,48 @@ func TestHttpServer(t *testing.T) {
 					status: 201,
 				},
 				{
+					name:   "CreateCallbackPhysicalReceiver",
+					path:   "callbacks",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CreateCallbackPhysicalReceiver",
+					},
+					reqBody: []byte(`{
+						"promiseId": "foo",
+						"rootPromiseId": "bar",
+						"timeout": 1,
+						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}}
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.CreateCallback,
+						Tags: map[string]string{
+							"id":       "CreateCallbackPhysicalReceiver",
+							"name":     "CreateCallback",
+							"protocol": "http",
+						},
+						CreateCallback: &t_api.CreateCallbackRequest{
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`{"type": "http", "data": {"url": "http://localhost:3000"}}`),
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.CreateCallback,
+						CreateCallback: &t_api.CreateCallbackResponse{
+							Status: t_api.StatusCreated,
+						},
+					},
+					status: 201,
+				},
+				{
 					name:   "CreateCallbackNotFound",
 					path:   "callbacks",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "CreateCallback",
+						"Request-Id": "CreateCallbackNotFound",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"promiseId": "foo",
 						"rootPromiseId": "bar",
 						"timeout": 1,
@@ -821,7 +857,7 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
 						Tags: map[string]string{
-							"id":       "CreateCallback",
+							"id":       "CreateCallbackNotFound",
 							"name":     "CreateCallback",
 							"protocol": "http",
 						},
@@ -969,7 +1005,7 @@ func TestHttpServer(t *testing.T) {
 						"Request-Id":      "CreateSchedule",
 						"Idempotency-Key": "bar",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"desc": "",
 						"cron": "* * * * * *",
@@ -1041,7 +1077,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ClaimTask",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"processId": "bar",
 						"counter": 0,
@@ -1071,13 +1107,98 @@ func TestHttpServer(t *testing.T) {
 					status: 201,
 				},
 				{
+					name:   "ClaimTaskInvoke",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTaskInvoke",
+					},
+					reqBody: []byte(`{
+						"id": "foo",
+						"processId": "bar",
+						"counter": 1,
+						"frequency": 1
+					}`),
+					resBody: []byte(`{"type":"invoke","promises":{"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					req: &t_api.Request{
+						Kind: t_api.ClaimTask,
+						Tags: map[string]string{
+							"id":       "ClaimTaskInvoke",
+							"name":     "ClaimTask",
+							"protocol": "http",
+						},
+						ClaimTask: &t_api.ClaimTaskRequest{
+							Id:        "foo",
+							ProcessId: "bar",
+							Counter:   1,
+							Frequency: 1,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.ClaimTask,
+						ClaimTask: &t_api.ClaimTaskResponse{
+							Status: t_api.StatusCreated,
+							Mesg: &message.Mesg{
+								Type: message.Invoke,
+								Promises: map[string]*promise.Promise{
+									"root": {Id: "foo", State: promise.Pending},
+								},
+							},
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "ClaimTaskResume",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTaskResume",
+					},
+					reqBody: []byte(`{
+						"id": "foo",
+						"processId": "bar",
+						"counter": 2,
+						"frequency": 1
+					}`),
+					resBody: []byte(`{"type":"invoke","promises":{"leaf":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					req: &t_api.Request{
+						Kind: t_api.ClaimTask,
+						Tags: map[string]string{
+							"id":       "ClaimTaskResume",
+							"name":     "ClaimTask",
+							"protocol": "http",
+						},
+						ClaimTask: &t_api.ClaimTaskRequest{
+							Id:        "foo",
+							ProcessId: "bar",
+							Counter:   2,
+							Frequency: 1,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.ClaimTask,
+						ClaimTask: &t_api.ClaimTaskResponse{
+							Status: t_api.StatusCreated,
+							Mesg: &message.Mesg{
+								Type: message.Invoke,
+								Promises: map[string]*promise.Promise{
+									"root": {Id: "foo", State: promise.Pending},
+									"leaf": {Id: "bar", State: promise.Resolved},
+								},
+							},
+						},
+					},
+					status: 201,
+				},
+				{
 					name:   "ClaimTaskNoId",
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar",
 						"counter": 0,
 						"frequency": 1
@@ -1091,9 +1212,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoProcessId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0,
 						"frequency": 1
@@ -1107,9 +1228,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoFrequency",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0,
 						"frequency": 0
@@ -1125,7 +1246,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CompleteTask",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0
 					}`),
@@ -1154,9 +1275,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/complete",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "CompleteTask",
+						"Request-Id": "CompleteTaskNoId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"counter": 0
 					}`),
 					req:    nil,
@@ -1170,7 +1291,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "HeartbeatTasks",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar"
 					}`),
 					req: &t_api.Request{
@@ -1198,12 +1319,12 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/heartbeat",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "HeartbeatTasks",
+						"Request-Id": "HeartbeatTasksNoProcessId",
 					},
-					body:   []byte(`{}`),
-					req:    nil,
-					res:    nil,
-					status: 400,
+					reqBody: []byte(`{}`),
+					req:     nil,
+					res:     nil,
+					status:  400,
 				},
 
 				// Locks
@@ -1214,7 +1335,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "AcquireLock",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"processId": "bar",
 						"executionId": "baz",
@@ -1252,7 +1373,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "AcquireLockNoExecutionId",
 					path:   "locks/acquire",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"processId": "bar",
 						"executionId": "",
@@ -1269,7 +1390,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ReleaseLock",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"executionId": "baz"
 					}`),
@@ -1297,7 +1418,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "ReleaseLockNoResourceId",
 					path:   "locks/release",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "",
 						"executionId": "baz"
 					}`),
@@ -1312,7 +1433,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "HeartbeatLocks",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar"
 					}`),
 					req: &t_api.Request{
@@ -1339,7 +1460,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "HeartbeatLocksNoProcessId",
 					path:   "locks/heartbeat",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "",
 						"timeout": 1736571600000
 					}`),
@@ -1351,7 +1472,7 @@ func TestHttpServer(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					httpTest.Load(t, tc.req, tc.res)
 
-					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.body))
+					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.reqBody))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1386,7 +1507,9 @@ func TestHttpServer(t *testing.T) {
 
 					assert.Equal(t, status, res.StatusCode, string(body))
 
-					// TODO: assert body
+					if tc.resBody != nil && status >= 200 && status < 300 {
+						assert.Equal(t, tc.resBody, body)
+					}
 
 					select {
 					case err := <-httpTest.errors:

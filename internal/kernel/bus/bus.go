@@ -17,8 +17,8 @@ type Output interface {
 
 type SQE[I Input, O Output] struct {
 	Id         string
-	Submission *I
 	Callback   func(*O, error)
+	Submission *I
 }
 
 func (sqe *SQE[I, O]) String() string {
@@ -27,8 +27,8 @@ func (sqe *SQE[I, O]) String() string {
 
 type CQE[I Input, O Output] struct {
 	Id         string
-	Completion *O
 	Callback   func(*O, error)
+	Completion *O
 	Error      error
 }
 

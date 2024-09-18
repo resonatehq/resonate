@@ -1,6 +1,7 @@
 package echo
 
 import (
+	"log/slog"
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -22,7 +23,7 @@ type Config struct {
 
 type Echo struct {
 	config  *Config
-	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	workers []*EchoWorker
 }
 
@@ -67,8 +68,13 @@ func (e *Echo) Stop() error {
 	return nil
 }
 
-func (e *Echo) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return e.sq
+func (e *Echo) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case e.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *Echo) Flush(t int64) {}
@@ -109,8 +115,10 @@ func (w *EchoWorker) Start() {
 			return
 		}
 
+		slog.Debug("api:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
+
 		counter.Inc()
-		w.aio.Enqueue(w.Process(sqe)) // process one at a time
+		w.aio.EnqueueCQE(w.Process(sqe)) // process one at a time
 		counter.Dec()
 	}
 }

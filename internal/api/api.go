@@ -23,8 +23,11 @@ type API interface {
 	Errors() <-chan error
 
 	Signal(<-chan interface{}) <-chan interface{}
-	Enqueue(*bus.SQE[t_api.Request, t_api.Response])
-	Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response]
+
+	EnqueueSQE(*bus.SQE[t_api.Request, t_api.Response])
+	DequeueSQE(int) []*bus.SQE[t_api.Request, t_api.Response]
+	EnqueueCQE(*bus.CQE[t_api.Request, t_api.Response])
+	DequeueCQE(<-chan *bus.CQE[t_api.Request, t_api.Response]) *bus.CQE[t_api.Request, t_api.Response]
 }
 
 // API
@@ -94,8 +97,8 @@ func (a *api) Errors() <-chan error {
 
 // IO functions
 
-func (a *api) Signal(cancel <-chan interface{}) <-chan interface{} {
-	ch := make(chan interface{})
+func (a *api) Signal(cancel <-chan any) <-chan any {
+	ch := make(chan any)
 
 	if a.buffer != nil {
 		close(ch)
@@ -117,15 +120,19 @@ func (a *api) Signal(cancel <-chan interface{}) <-chan interface{} {
 	return ch
 }
 
-func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
+// SQE
+
+func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
-	util.Assert(sqe.Submission.Tags != nil, "request tags must not be nil")
+	util.Assert(sqe.Submission.Tags != nil, "submission tags must not be nil")
+
+	slog.Debug("api:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
 	a.metrics.ApiInFlight.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"]).Inc()
 
 	// replace callback with a function that emits metrics
 	callback := sqe.Callback
 	sqe.Callback = func(res *t_api.Response, err error) {
-		util.Assert(res != nil && err == nil || res == nil && err != nil, "one of res/err must be set")
+		util.Assert((res != nil) != (err != nil), "one of res/err must be non nil but not both")
 		var status t_api.StatusCode
 
 		if err != nil {
@@ -152,18 +159,17 @@ func (a *api) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 
 	select {
 	case a.sq <- sqe:
-		slog.Debug("api:enqueue", "id", sqe.Id, "sqe", sqe)
 	default:
 		sqe.Callback(nil, t_api.NewError(t_api.StatusAPISubmissionQueueFull, nil))
 	}
 }
 
-func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
+func (a *api) DequeueSQE(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 	sqes := []*bus.SQE[t_api.Request, t_api.Response]{}
 
 	// insert the buffered sqe
 	if a.buffer != nil {
-		slog.Debug("api:dequeue", "id", a.buffer.Id, "sqe", a.buffer)
+		slog.Debug("api:sqe:dequeue", "id", a.buffer.Id, "sqe", a.buffer)
 		sqes = append(sqes, a.buffer)
 		a.buffer = nil
 	}
@@ -175,7 +181,7 @@ func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 			if !ok {
 				return sqes
 			}
-			slog.Debug("api:dequeue", "id", sqe.Id, "sqe", sqe)
+			slog.Debug("api:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
 			sqes = append(sqes, sqe)
 		default:
 			return sqes
@@ -183,4 +189,21 @@ func (a *api) Dequeue(n int) []*bus.SQE[t_api.Request, t_api.Response] {
 	}
 
 	return sqes
+}
+
+// CQE
+
+func (a *api) EnqueueCQE(cqe *bus.CQE[t_api.Request, t_api.Response]) {
+	util.Assert(cqe.Callback != nil, "callback must not be nil")
+	util.Assert((cqe.Completion != nil) != (cqe.Error != nil), "one of completion/error must be non nil but not both")
+
+	slog.Debug("api:cqe:enqueue", "id", cqe.Id, "cqe", cqe)
+	cqe.Callback(cqe.Completion, cqe.Error)
+}
+
+func (a *api) DequeueCQE(cq <-chan *bus.CQE[t_api.Request, t_api.Response]) *bus.CQE[t_api.Request, t_api.Response] {
+	cqe := <-cq
+	slog.Debug("api:cqe:dequeue", "id", cqe.Id, "cqe", cqe)
+
+	return cqe
 }

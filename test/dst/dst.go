@@ -117,16 +117,16 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		time := d.Time(t)
 
 		for _, req := range d.generator.Generate(r, time, d.config.ReqsPerTick()) {
-			tid := strconv.FormatInt(i, 10)
+			id := strconv.FormatInt(i, 10)
 			req := req
 			reqTime := time
 
 			req.Tags = map[string]string{
-				"tid":  tid,
+				"id":   id,
 				"name": req.Kind.String(),
 			}
 
-			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
 					resTime := d.Time(t)
@@ -135,7 +135,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					}
 
 					// log
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", tid, "req", req, "res", res, "err", err)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
 
 					// extract cursors for subsequent requests
 					if err == nil {
@@ -340,7 +340,7 @@ func (d *DST) Model() porcupine.Model {
 					status = int(res.res.Status())
 				}
 
-				return fmt.Sprintf("%s | %s → %d", req.req.Tags["tid"], req.req, status)
+				return fmt.Sprintf("%s | %s → %d", req.req.Tags["id"], req.req, status)
 			case Bc:
 				return fmt.Sprintf("Backchannel | %s", req.bc.Task)
 			default:

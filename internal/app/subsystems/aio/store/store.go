@@ -50,3 +50,24 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 
 	return cqes
 }
+
+func Collect(c <-chan *bus.SQE[t_aio.Submission, t_aio.Completion], f <-chan int64, n int) ([]*bus.SQE[t_aio.Submission, t_aio.Completion], bool) {
+	util.Assert(n > 0, "batch size must be greater than 0")
+	batch := []*bus.SQE[t_aio.Submission, t_aio.Completion]{}
+
+	for i := 0; i < n; i++ {
+		select {
+		case sqe, ok := <-c:
+			if !ok {
+				return batch, false
+			}
+
+			slog.Debug("aio:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
+			batch = append(batch, sqe)
+		case <-f:
+			return batch, true
+		}
+	}
+
+	return batch, true
+}

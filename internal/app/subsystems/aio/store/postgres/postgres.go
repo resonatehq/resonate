@@ -340,7 +340,7 @@ type Config struct {
 
 type PostgresStore struct {
 	config  *Config
-	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db      *sql.DB
 	workers []*PostgresStoreWorker
 }
@@ -431,8 +431,13 @@ func (s *PostgresStore) Reset() error {
 	return nil
 }
 
-func (s *PostgresStore) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return s.sq
+func (s *PostgresStore) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case s.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *PostgresStore) Flush(t int64) {
@@ -468,11 +473,11 @@ func (w *PostgresStoreWorker) Start() {
 	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
 
 	for {
-		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		sqes, ok := store.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
 			counter.Set(float64(len(sqes)))
 			for _, cqe := range w.Process(sqes) {
-				w.aio.Enqueue(cqe)
+				w.aio.EnqueueCQE(cqe)
 				counter.Dec()
 			}
 		}

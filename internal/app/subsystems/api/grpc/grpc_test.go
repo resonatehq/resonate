@@ -1089,7 +1089,7 @@ func TestCreateCallback(t *testing.T) {
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
-				Recv:          []byte("foo"),
+				Recv:          &grpcApi.CreateCallbackRequest_Logical{Logical: "foo"},
 				RequestId:     "CreateCallback",
 			},
 			req: &t_api.Request{
@@ -1103,7 +1103,7 @@ func TestCreateCallback(t *testing.T) {
 					PromiseId:     "foo",
 					RootPromiseId: "bar",
 					Timeout:       1,
-					Recv:          []byte("foo"),
+					Recv:          []byte(`"foo"`),
 				},
 			},
 			res: &t_api.Response{
@@ -1115,24 +1115,80 @@ func TestCreateCallback(t *testing.T) {
 			code: codes.OK,
 		},
 		{
-			name: "CreateCallbackNotFound",
+			name: "CreateCallbackPhysicalReceiver",
 			grpcReq: &grpcApi.CreateCallbackRequest{
-				PromiseId: "foo",
-				Timeout:   1,
-				Recv:      []byte("foo"),
-				RequestId: "CreateCallback",
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &grpcApi.CreateCallbackRequest_Physical{Physical: &grpcApi.Recv{Type: "http", Data: []byte(`{"url": "http://localhost:3000"}`)}},
+				RequestId:     "CreateCallbackPhysicalReceiver",
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreateCallback,
 				Tags: map[string]string{
-					"id":       "CreateCallback",
+					"id":       "CreateCallbackPhysicalReceiver",
+					"name":     "CreateCallback",
+					"protocol": "grpc",
+				},
+				CreateCallback: &t_api.CreateCallbackRequest{
+					PromiseId:     "foo",
+					RootPromiseId: "bar",
+					Timeout:       1,
+					Recv:          []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateCallback,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					Status: t_api.StatusCreated,
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "CreateCallbackNoRecv",
+			grpcReq: &grpcApi.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				RequestId:     "CreateCallbackNoRecv",
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "CreateCallbackInvalidPhysicalReceiver",
+			grpcReq: &grpcApi.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &grpcApi.CreateCallbackRequest_Physical{Physical: &grpcApi.Recv{Type: "http", Data: []byte("nope")}},
+				RequestId:     "CreateCallbackInvalidPhysicalReceiver",
+			},
+			req:  nil,
+			res:  nil,
+			code: codes.InvalidArgument,
+		},
+		{
+			name: "CreateCallbackNotFound",
+			grpcReq: &grpcApi.CreateCallbackRequest{
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &grpcApi.CreateCallbackRequest_Logical{Logical: "foo"},
+				RequestId: "CreateCallbackNotFound",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreateCallback,
+				Tags: map[string]string{
+					"id":       "CreateCallbackNotFound",
 					"name":     "CreateCallback",
 					"protocol": "grpc",
 				},
 				CreateCallback: &t_api.CreateCallbackRequest{
 					PromiseId: "foo",
 					Timeout:   1,
-					Recv:      []byte("foo"),
+					Recv:      []byte(`"foo"`),
 				},
 			},
 			res: &t_api.Response{
@@ -1811,6 +1867,7 @@ func TestClaimTask(t *testing.T) {
 	tcs := []struct {
 		name    string
 		grpcReq *grpcApi.ClaimTaskRequest
+		grpcRes *grpcApi.ClaimTaskResponse
 		req     *t_api.Request
 		res     *t_api.Response
 		code    codes.Code
@@ -1843,6 +1900,94 @@ func TestClaimTask(t *testing.T) {
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
 					Mesg:   &message.Mesg{},
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "ClaimTaskInvoke",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				Id:        "foo",
+				ProcessId: "bar",
+				Counter:   1,
+				Frequency: 1,
+				RequestId: "ClaimTaskInvoke",
+			},
+			grpcRes: &grpcApi.ClaimTaskResponse{
+				Type: "resume",
+				Promises: map[string]*grpcApi.Promise{
+					"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.ClaimTask,
+				Tags: map[string]string{
+					"id":       "ClaimTaskInvoke",
+					"name":     "ClaimTask",
+					"protocol": "grpc",
+				},
+				ClaimTask: &t_api.ClaimTaskRequest{
+					Id:        "foo",
+					ProcessId: "bar",
+					Counter:   1,
+					Frequency: 1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskResponse{
+					Status: t_api.StatusCreated,
+					Mesg: &message.Mesg{
+						Type: message.Resume,
+						Promises: map[string]*promise.Promise{
+							"root": {Id: "foo", State: promise.Pending},
+						},
+					},
+				},
+			},
+			code: codes.OK,
+		},
+		{
+			name: "ClaimTaskResume",
+			grpcReq: &grpcApi.ClaimTaskRequest{
+				Id:        "foo",
+				ProcessId: "bar",
+				Counter:   2,
+				Frequency: 1,
+				RequestId: "ClaimTaskResume",
+			},
+			grpcRes: &grpcApi.ClaimTaskResponse{
+				Type: "resume",
+				Promises: map[string]*grpcApi.Promise{
+					"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+					"leaf": {Id: "bar", State: grpcApi.State_RESOLVED, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.ClaimTask,
+				Tags: map[string]string{
+					"id":       "ClaimTaskResume",
+					"name":     "ClaimTask",
+					"protocol": "grpc",
+				},
+				ClaimTask: &t_api.ClaimTaskRequest{
+					Id:        "foo",
+					ProcessId: "bar",
+					Counter:   2,
+					Frequency: 1,
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.ClaimTask,
+				ClaimTask: &t_api.ClaimTaskResponse{
+					Status: t_api.StatusCreated,
+					Mesg: &message.Mesg{
+						Type: message.Resume,
+						Promises: map[string]*promise.Promise{
+							"root": {Id: "foo", State: promise.Pending},
+							"leaf": {Id: "bar", State: promise.Resolved},
+						},
+					},
 				},
 			},
 			code: codes.OK,
@@ -1889,7 +2034,7 @@ func TestClaimTask(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.tasks.ClaimTask(ctx, tc.grpcReq)
+			res, err := grpcTest.tasks.ClaimTask(ctx, tc.grpcReq)
 			if err != nil {
 				s, ok := status.FromError(err)
 				if !ok {
@@ -1900,6 +2045,11 @@ func TestClaimTask(t *testing.T) {
 			}
 
 			assert.Equal(t, tc.code, codes.OK)
+
+			if tc.grpcRes != nil {
+				assert.Equal(t, tc.grpcRes.Type, res.Type)
+				assert.Equal(t, tc.grpcRes.Promises, res.Promises)
+			}
 
 			select {
 			case err := <-grpcTest.errors:
