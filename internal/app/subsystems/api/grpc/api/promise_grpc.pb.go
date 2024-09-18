@@ -31,7 +31,6 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type PromisesClient interface {
-	// Promise
 	ReadPromise(ctx context.Context, in *ReadPromiseRequest, opts ...grpc.CallOption) (*ReadPromiseResponse, error)
 	SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error)
 	CreatePromise(ctx context.Context, in *CreatePromiseRequest, opts ...grpc.CallOption) (*CreatePromiseResponse, error)
@@ -106,7 +105,6 @@ func (c *promisesClient) RejectPromise(ctx context.Context, in *RejectPromiseReq
 // All implementations must embed UnimplementedPromisesServer
 // for forward compatibility
 type PromisesServer interface {
-	// Promise
 	ReadPromise(context.Context, *ReadPromiseRequest) (*ReadPromiseResponse, error)
 	SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error)
 	CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error)

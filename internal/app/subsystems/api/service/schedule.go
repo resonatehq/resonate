@@ -13,18 +13,23 @@ import (
 func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadSchedule,
-			Tags: s.tags(header.RequestId, "ReadSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReadSchedule",
+				"protocol": s.protocol,
+			},
 			ReadSchedule: &t_api.ReadScheduleRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -64,18 +69,24 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 		}
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:            t_api.SearchSchedules,
-			Tags:            s.tags(header.RequestId, "SearchSchedules"),
+			Kind: t_api.SearchSchedules,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "SearchSchedules",
+				"protocol": s.protocol,
+			},
 			SearchSchedules: searchSchedules,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -87,6 +98,7 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 // CREATE
 
 func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateScheduleBody) (*t_api.CreateScheduleResponse, *Error) {
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	// validation
@@ -98,11 +110,16 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 		return nil, RequestValidationError(err)
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
-			Tags: s.tags(header.RequestId, "CreateSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreateSchedule",
+				"protocol": s.protocol,
+			},
 			CreateSchedule: &t_api.CreateScheduleRequest{
 				Id:             body.Id,
 				Description:    body.Description,
@@ -117,7 +134,7 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -131,18 +148,23 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.DeleteSchedule,
-			Tags: s.tags(header.RequestId, "DeleteSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "DeleteSchedule",
+				"protocol": s.protocol,
+			},
 			DeleteSchedule: &t_api.DeleteScheduleRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}

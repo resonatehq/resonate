@@ -1,7 +1,6 @@
 package service
 
 import (
-	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -19,28 +18,16 @@ func New(api api.API, protocol string) *Service {
 	}
 }
 
-func (s *Service) tags(requestId string, name string) map[string]string {
-	if requestId == "" {
-		requestId = uuid.New().String()
-	}
-
-	return map[string]string{
-		"request_id": requestId,
-		"name":       name,
-		"protocol":   s.protocol,
-	}
-}
-
-func (s *Service) sendOrPanic(cq chan *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
-	return func(completion *t_api.Response, err error) {
-		cqe := &bus.CQE[t_api.Request, t_api.Response]{
-			Completion: completion,
-			Error:      err,
-		}
+func (s *Service) sendOrPanic(id string, cq chan<- *bus.CQE[t_api.Request, t_api.Response]) func(*t_api.Response, error) {
+	return func(res *t_api.Response, err error) {
+		defer close(cq)
 
 		select {
-		case cq <- cqe:
-			close(cq) // prevent further writes
+		case cq <- &bus.CQE[t_api.Request, t_api.Response]{
+			Id:         id,
+			Completion: res,
+			Error:      err,
+		}:
 		default:
 			panic("response channel must not block")
 		}

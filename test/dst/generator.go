@@ -1,7 +1,6 @@
 package dst
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 	"math/rand" // nosemgrep
@@ -9,7 +8,6 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -69,6 +67,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 			tags["resonate:timeout"] = "true" // transition to resolved on timeout
 		}
 
+		if r.Intn(2) == 0 {
+			tags["resonate:invoke"] = "default" // create a task
+		}
+
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
 	}
 
@@ -110,16 +112,6 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*t_api.Request {
 		for reqs[i] == nil {
 			f := g.generators[r.Intn(len(g.generators))]
 			reqs[i] = f(r, t)
-
-			// k := RangeMap(r, g.generators)
-
-			// if len(g.requests[k]) == 0 {
-			// 	reqs[i] = g.generators[k](r, t)
-			// } else {
-			// 	j := r.Intn(len(g.requests[k]))
-			// 	reqs[i] = g.requests[k][j]
-			// 	g.requests[k] = append(g.requests[k][:j], g.requests[k][j+1:]...)
-			// }
 		}
 	}
 
@@ -230,18 +222,19 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.idSet[r.Intn(len(g.idSet))]
+	rootPromiseId := g.idSet[r.Intn(len(g.idSet))]
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-
-	body := make([]byte, 8)
-	binary.BigEndian.PutUint64(body, g.callback)
 	g.callback++
+
+	// Note: recv is ignored in dst so we do not include a value in the
+	// create callback request
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
-			PromiseId: promiseId,
-			Message:   &message.Message{Recv: "dst", Data: body},
-			Timeout:   timeout,
+			PromiseId:     promiseId,
+			RootPromiseId: rootPromiseId,
+			Timeout:       timeout,
 		},
 	}
 }
@@ -360,6 +353,8 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
+// TASKS
+
 func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.pop(r, t_api.ClaimTask)
 
@@ -398,7 +393,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(3); i++ {
-		switch r.Intn(3) {
+		switch r.Intn(4) {
 		case 0:
 			g.AddRequest(&t_api.Request{
 				Kind: t_api.ClaimTask,
@@ -424,6 +419,8 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 					ProcessId: pid,
 				},
 			})
+		case 3:
+			// do nothing
 		}
 	}
 }

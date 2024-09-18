@@ -4,7 +4,8 @@ type Kind int
 
 const (
 	Echo Kind = iota
-	Queue
+	Router
+	Sender
 	Store
 )
 
@@ -12,8 +13,10 @@ func (k Kind) String() string {
 	switch k {
 	case Echo:
 		return "echo"
-	case Queue:
-		return "queue"
+	case Router:
+		return "router"
+	case Sender:
+		return "sender"
 	case Store:
 		return "store"
 	default:
@@ -25,21 +28,20 @@ type Submission struct {
 	Kind Kind
 	Tags map[string]string
 
-	Echo  *EchoSubmission
-	Queue *QueueSubmission
-	Store *StoreSubmission
-}
-
-func (s *Submission) Id() string {
-	return s.Tags["request_id"]
+	Echo   *EchoSubmission
+	Router *RouterSubmission
+	Sender *SenderSubmission
+	Store  *StoreSubmission
 }
 
 func (s *Submission) String() string {
 	switch s.Kind {
 	case Echo:
 		return s.Echo.String()
-	case Queue:
-		return s.Queue.String()
+	case Router:
+		return s.Router.String()
+	case Sender:
+		return s.Sender.String()
 	case Store:
 		return s.Store.String()
 	default:
@@ -51,21 +53,20 @@ type Completion struct {
 	Kind Kind
 	Tags map[string]string
 
-	Echo  *EchoCompletion
-	Queue *QueueCompletion
-	Store *StoreCompletion
-}
-
-func (c *Completion) Id() string {
-	return c.Tags["request_id"]
+	Echo   *EchoCompletion
+	Router *RouterCompletion
+	Sender *SenderCompletion
+	Store  *StoreCompletion
 }
 
 func (c *Completion) String() string {
 	switch c.Kind {
 	case Echo:
 		return c.Echo.String()
-	case Queue:
-		return c.Queue.String()
+	case Router:
+		return c.Router.String()
+	case Sender:
+		return c.Sender.String()
 	case Store:
 		return c.Store.String()
 	default:

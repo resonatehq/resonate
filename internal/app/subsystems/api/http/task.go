@@ -36,14 +36,8 @@ func (s *server) claimTask(c *gin.Context) {
 		return
 	}
 
-	if res.Status == t_api.StatusCreated {
-		util.Assert(res.Task != nil, "task must be non nil")
-		util.Assert(res.Task.Message != nil, "message must be non nil")
-
-		c.Data(s.code(res.Status), "application/json", res.Task.Message.Data)
-	} else {
-		c.JSON(s.code(res.Status), nil)
-	}
+	util.Assert(res.Status != t_api.StatusCreated || res.Mesg != nil, "message must not be nil if created")
+	c.JSON(s.code(res.Status), res.Mesg)
 }
 
 // COMPLETE
@@ -107,5 +101,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		return
 	}
 
-	c.JSON(s.code(res.Status), nil)
+	c.JSON(s.code(res.Status), gin.H{
+		"tasksAffected": res.TasksAffected,
+	})
 }

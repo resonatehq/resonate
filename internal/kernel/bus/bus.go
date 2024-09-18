@@ -16,17 +16,19 @@ type Output interface {
 }
 
 type SQE[I Input, O Output] struct {
-	Submission *I
+	Id         string
 	Callback   func(*O, error)
+	Submission *I
 }
 
 func (sqe *SQE[I, O]) String() string {
-	return fmt.Sprintf("SQE(submission=%v)", sqe.Submission)
+	return fmt.Sprintf("SQE(id=%s, submission=%v)", sqe.Id, sqe.Submission)
 }
 
 type CQE[I Input, O Output] struct {
-	Completion *O
+	Id         string
 	Callback   func(*O, error)
+	Completion *O
 	Error      error
 }
 
@@ -35,5 +37,5 @@ func (cqe *CQE[I, O]) Invoke() {
 }
 
 func (cqe *CQE[I, O]) String() string {
-	return fmt.Sprintf("CQE(completion=%v, error=%v)", cqe.Completion, cqe.Error)
+	return fmt.Sprintf("CQE(id=%s, completion=%v, error=%v)", cqe.Id, cqe.Completion, cqe.Error)
 }

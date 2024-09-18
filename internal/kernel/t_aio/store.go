@@ -6,7 +6,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -37,6 +36,7 @@ const (
 	// TASKS
 	ReadTask
 	ReadTasks
+	CreateTask
 	CreateTasks
 	UpdateTask
 	HeartbeatTasks
@@ -85,6 +85,8 @@ func (k StoreKind) String() string {
 		return "ReadTask"
 	case ReadTasks:
 		return "ReadTasks"
+	case CreateTask:
+		return "CreateTask"
 	case CreateTasks:
 		return "CreateTasks"
 	case UpdateTask:
@@ -153,6 +155,7 @@ type Command struct {
 	// TASKS
 	ReadTask       *ReadTaskCommand
 	ReadTasks      *ReadTasksCommand
+	CreateTask     *CreateTaskCommand
 	CreateTasks    *CreateTasksCommand
 	UpdateTask     *UpdateTaskCommand
 	HeartbeatTasks *HeartbeatTasksCommand
@@ -194,6 +197,7 @@ type Result struct {
 	// TASKS
 	ReadTask       *QueryTasksResult
 	ReadTasks      *QueryTasksResult
+	CreateTask     *AlterTasksResult
 	CreateTasks    *AlterTasksResult
 	UpdateTask     *AlterTasksResult
 	HeartbeatTasks *AlterTasksResult
@@ -231,7 +235,6 @@ type SearchPromisesCommand struct {
 
 type CreatePromiseCommand struct {
 	Id             string
-	State          promise.State
 	Param          promise.Value
 	Timeout        int64
 	IdempotencyKey *idempotency.Key
@@ -263,8 +266,9 @@ type AlterPromisesResult struct {
 
 type CreateCallbackCommand struct {
 	PromiseId string
-	Message   *message.Message
 	Timeout   int64
+	Recv      []byte
+	Mesg      []byte
 	CreatedOn int64
 }
 
@@ -348,6 +352,13 @@ type ReadTasksCommand struct {
 	States []task.State
 	Time   int64
 	Limit  int
+}
+
+type CreateTaskCommand struct {
+	Recv      []byte
+	Mesg      []byte
+	Timeout   int64
+	CreatedOn int64
 }
 
 type CreateTasksCommand struct {

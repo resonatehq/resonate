@@ -3,12 +3,15 @@ package echo
 import (
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestEcho(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
 	testCases := []string{"foo", "bar", "baz"}
 
 	for _, tc := range testCases {
@@ -22,12 +25,12 @@ func TestEcho(t *testing.T) {
 				},
 			}
 
-			echo, err := New(nil, &Config{Workers: 1})
+			echo, err := New(nil, metrics, &Config{Workers: 1})
 			assert.Nil(t, err)
 			assert.Len(t, echo.workers, 1)
 
-			cqes := echo.workers[0].Process([]*bus.SQE[t_aio.Submission, t_aio.Completion]{sqe})
-			assert.Equal(t, tc, cqes[0].Completion.Echo.Data)
+			cqe := echo.workers[0].Process(sqe)
+			assert.Equal(t, tc, cqe.Completion.Echo.Data)
 		})
 	}
 }

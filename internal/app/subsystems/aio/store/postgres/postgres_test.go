@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/test"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,9 +22,12 @@ func TestPostgresStore(t *testing.T) {
 		t.Skip("Postgres is not configured, skipping")
 	}
 
+	metrics := metrics.New(prometheus.NewRegistry())
+
 	for _, tc := range test.TestCases {
-		store, err := New(nil, &Config{
+		store, err := New(nil, metrics, &Config{
 			Workers:   1,
+			BatchSize: 1,
 			Host:      host,
 			Port:      port,
 			Username:  username,
@@ -34,7 +39,6 @@ func TestPostgresStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		if err := store.Start(); err != nil {
 			t.Fatal(err)
 		}

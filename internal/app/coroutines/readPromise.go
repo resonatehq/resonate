@@ -47,15 +47,16 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
-		if p.State == promise.Pending && c.Time() >= p.Timeout {
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(p.Timeout, &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:    p.Id,
-					State: promise.GetTimedoutState(p),
-				},
-			}))
+		if p.State == promise.Pending && p.Timeout <= c.Time() {
+			cmd := &t_aio.UpdatePromiseCommand{
+				Id:             r.ReadPromise.Id,
+				State:          promise.GetTimedoutState(p),
+				Value:          promise.Value{},
+				IdempotencyKey: nil,
+				CompletedOn:    p.Timeout,
+			}
+
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -73,15 +74,15 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
 						Id:                        p.Id,
-						State:                     promise.GetTimedoutState(p),
+						State:                     cmd.State,
 						Param:                     p.Param,
-						Value:                     promise.Value{Headers: map[string]string{}, Data: nil},
+						Value:                     cmd.Value,
 						Timeout:                   p.Timeout,
 						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: nil,
+						IdempotencyKeyForComplete: cmd.IdempotencyKey,
 						Tags:                      p.Tags,
 						CreatedOn:                 p.CreatedOn,
-						CompletedOn:               &p.Timeout,
+						CompletedOn:               &cmd.CompletedOn,
 					},
 				},
 			}

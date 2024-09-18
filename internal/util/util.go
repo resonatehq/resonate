@@ -2,6 +2,9 @@ package util
 
 import (
 	"cmp"
+	"encoding/json"
+	"errors"
+	"reflect"
 	"sort"
 	"time"
 
@@ -91,20 +94,22 @@ func ParseCron(cronExp string) (cron.Schedule, error) {
 	return cron.NewParser(cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor).Parse(cronExp)
 }
 
-func Collect[T any](c <-chan T, f <-chan int64, n int) ([]T, bool) {
-	batch := []T{}
+func UnmarshalChain(data []byte, vs ...any) error {
+	var errs []error
 
-	for i := 0; i < n; i++ {
-		select {
-		case sqe, ok := <-c:
-			if !ok {
-				return batch, false
-			}
-			batch = append(batch, sqe)
-		case <-f:
-			return batch, true
+	for _, v := range vs {
+		err := json.Unmarshal(data, v)
+		if err == nil {
+			return nil
 		}
+
+		// reset v to zero value
+		if val := reflect.ValueOf(v); !val.IsNil() {
+			val.Elem().Set(reflect.Zero(val.Elem().Type()))
+		}
+
+		errs = append(errs, err)
 	}
 
-	return batch, true
+	return errors.Join(errs...)
 }

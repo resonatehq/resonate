@@ -10,7 +10,8 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/queue"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -52,19 +53,25 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	backchannel := make(chan interface{}, 100)
 
 	// instatiate aio subsystems
-	queue, err := queue.NewDST(r, backchannel, &queue.ConfigDST{})
+	router, err := router.New(nil, metrics, &router.Config{Workers: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	store, err := sqlite.New(nil, &sqlite.Config{Path: ":memory:", TxTimeout: 250 * time.Millisecond})
+	sender, err := sender.NewDST(r, backchannel, &sender.ConfigDST{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := sqlite.New(nil, metrics, &sqlite.Config{BatchSize: 10, Path: ":memory:", TxTimeout: 250 * time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// add api subsystems
+	aio.AddSubsystem(router)
+	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)
-	aio.AddSubsystem(queue)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)

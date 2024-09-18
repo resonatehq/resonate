@@ -15,18 +15,23 @@ import (
 func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
-			Tags: s.tags(header.RequestId, "ReadPromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReadPromise",
+				"protocol": s.protocol,
+			},
 			ReadPromise: &t_api.ReadPromiseRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -97,18 +102,24 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 		}
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:           t_api.SearchPromises,
-			Tags:           s.tags(header.RequestId, "SearchPromises"),
+			Kind: t_api.SearchPromises,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "SearchPromises",
+				"protocol": s.protocol,
+			},
 			SearchPromises: searchPromises,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -120,13 +131,19 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 // Create Promise
 
 func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, *Error) {
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
-			Tags: s.tags(header.RequestId, "CreatePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreatePromise",
+				"protocol": s.protocol,
+			},
 			CreatePromise: &t_api.CreatePromiseRequest{
 				Id:             body.Id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -138,7 +155,7 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}
@@ -151,11 +168,16 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CompletePromise,
-			Tags: s.tags(header.RequestId, "CompletePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CompletePromise",
+				"protocol": s.protocol,
+			},
 			CompletePromise: &t_api.CompletePromiseRequest{
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -166,7 +188,7 @@ func (s *Service) CompletePromise(id string, state promise.State, header *Comple
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
 		return nil, ServerError(cqe.Error)
 	}

@@ -469,6 +469,8 @@ func (v *Validator) ValidateHeartbeatLocks(model *Model, reqTime int64, resTime 
 	}
 }
 
+// TASKS
+
 func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	t := model.tasks.get(req.ClaimTask.Id)
 

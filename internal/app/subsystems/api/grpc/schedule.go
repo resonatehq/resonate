@@ -19,7 +19,7 @@ func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateSchedule
 	ikey := idempotency.Key(req.IdempotencyKey)
 
 	header := service.CreateScheduleHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		IdempotencyKey: &ikey,
 	}
 
@@ -134,7 +134,7 @@ func protoSchedule(schedule *schedule.Schedule) *grpcApi.Schedule {
 		Tags:           schedule.Tags,
 		PromiseId:      schedule.PromiseId,
 		PromiseTimeout: schedule.PromiseTimeout,
-		PromiseParam: &grpcApi.PromiseValue{
+		PromiseParam: &grpcApi.Value{
 			Headers: schedule.PromiseParam.Headers,
 			Data:    schedule.PromiseParam.Data,
 		},

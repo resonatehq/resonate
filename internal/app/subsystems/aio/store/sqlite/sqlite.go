@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
@@ -47,8 +48,9 @@ const (
 	CREATE TABLE IF NOT EXISTS callbacks (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		promise_id TEXT,
-		message    BLOB,
 		timeout    INTEGER,
+		recv       BLOB,
+		mesg       BLOB,
 		created_on INTEGER
 	);
 
@@ -87,8 +89,9 @@ const (
 	CREATE TABLE IF NOT EXISTS tasks (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
 		pid          TEXT,
-		state 	     INTEGER DEFAULT 1,
-		message      BLOB,
+		state        INTEGER DEFAULT 1,
+		recv         BLOB,
+		mesg         BLOB,
 		timeout      INTEGER,
 		counter      INTEGER,
 		attempt      INTEGER,
@@ -139,9 +142,9 @@ const (
 
 	PROMISE_INSERT_STATEMENT = `
 	INSERT INTO promises
-		(id, state, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
+		(id, param_headers, param_data, timeout, idempotency_key_for_create, tags, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?)
+		(?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO NOTHING`
 
 	PROMISE_UPDATE_STATEMENT = `
@@ -154,9 +157,9 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, message, timeout, created_on)
+		(promise_id, timeout, recv, mesg, created_on)
 	SELECT
-		?, ?, ?, ?
+		?, ?, ?, ?, ?
 	WHERE EXISTS
 		(SELECT 1 FROM promises WHERE id = ? AND state = 1)`
 
@@ -252,7 +255,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, pid, state, recv, mesg, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -260,7 +263,7 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, pid, state, message, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, pid, state, recv, mesg, timeout, counter, attempt, frequency, expiration, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -272,9 +275,15 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(message, timeout, counter, attempt, frequency, expiration, created_on)
+		(recv, mesg, timeout, counter, attempt, frequency, expiration, created_on)
+	VALUES
+		(?, ?, ?, 0, 0, 0, 0, ?)`
+
+	TASK_INSERT_ALL_STATEMENT = `
+	INSERT INTO tasks
+		(recv, mesg, timeout, counter, attempt, frequency, expiration, created_on)
 	SELECT
-		message, timeout, 0, 0, 0, 0, ?
+		recv, mesg, timeout, 0, 0, 0, 0, ?
 	FROM
 		callbacks
 	WHERE
@@ -313,12 +322,12 @@ type Config struct {
 
 type SqliteStore struct {
 	config *Config
-	sq     chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq     chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	db     *sql.DB
 	worker *SqliteStoreWorker
 }
 
-func New(aio aio.AIO, config *Config) (*SqliteStore, error) {
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*SqliteStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
 	db, err := sql.Open("sqlite3", config.Path)
@@ -331,11 +340,12 @@ func New(aio aio.AIO, config *Config) (*SqliteStore, error) {
 		sq:     sq,
 		db:     db,
 		worker: &SqliteStoreWorker{
-			config: config,
-			db:     db,
-			sq:     sq,
-			aio:    aio,
-			flush:  make(chan int64, 1),
+			config:  config,
+			db:      db,
+			sq:      sq,
+			flush:   make(chan int64, 1),
+			aio:     aio,
+			metrics: metrics,
 		},
 	}, nil
 }
@@ -379,8 +389,13 @@ func (s *SqliteStore) Reset() error {
 	return os.Remove(s.config.Path)
 }
 
-func (s *SqliteStore) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return s.sq
+func (s *SqliteStore) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case s.sq <- sqe:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *SqliteStore) Flush(t int64) {
@@ -394,19 +409,30 @@ func (s *SqliteStore) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion
 // Worker
 
 type SqliteStoreWorker struct {
-	config *Config
-	db     *sql.DB
-	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio    aio.AIO
-	flush  chan int64
+	config  *Config
+	db      *sql.DB
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	flush   chan int64
+	aio     aio.AIO
+	metrics *metrics.Metrics
+}
+
+func (w *SqliteStoreWorker) String() string {
+	return "store:sqlite"
 }
 
 func (w *SqliteStoreWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), "0")
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
-		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
+		sqes, ok := store.Collect(w.sq, w.flush, w.config.BatchSize)
 		if len(sqes) > 0 {
+			counter.Set(float64(len(sqes)))
 			for _, cqe := range w.Process(sqes) {
-				w.aio.Enqueue(cqe)
+				w.aio.EnqueueCQE(cqe)
+				counter.Dec()
 			}
 		}
 		if !ok {
@@ -466,6 +492,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	var lockHeartbeatStmt *sql.Stmt
 	var lockTimeoutStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
+	var tasksInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
 	var taskHeartbeatStmt *sql.Stmt
 
@@ -637,7 +664,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 			case t_aio.ReadTasks:
 				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
-			case t_aio.CreateTasks:
+			case t_aio.CreateTask:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
 					if err != nil {
@@ -646,8 +673,19 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					defer taskInsertStmt.Close()
 				}
 
+				util.Assert(command.CreateTask != nil, "command must not be nil")
+				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
+			case t_aio.CreateTasks:
+				if tasksInsertStmt == nil {
+					tasksInsertStmt, err = tx.Prepare(TASK_INSERT_ALL_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer tasksInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateTasks != nil, "command must not be nil")
-				results[i][j], err = w.createTasks(tx, taskInsertStmt, command.CreateTasks)
+				results[i][j], err = w.createTasks(tx, tasksInsertStmt, command.CreateTasks)
 			case t_aio.UpdateTask:
 				if taskUpdateStmt == nil {
 					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
@@ -860,7 +898,6 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 }
 
 func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.State.In(promise.Pending|promise.Timedout), "state must be pending or timedout")
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -875,7 +912,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Id, cmd.State, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, headers, cmd.Param.Data, cmd.Timeout, cmd.IdempotencyKey, tags, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -925,14 +962,7 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 // Callbacks
 
 func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
-	util.Assert(cmd.Message != nil, "message must not be nil")
-
-	message, err := json.Marshal(cmd.Message)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := stmt.Exec(cmd.PromiseId, message, cmd.Timeout, cmd.CreatedOn, cmd.PromiseId)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Timeout, cmd.Recv, cmd.Mesg, cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -1345,7 +1375,8 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
-		&record.Message,
+		&record.Recv,
+		&record.Mesg,
 		&record.Timeout,
 		&record.Counter,
 		&record.Attempt,
@@ -1398,7 +1429,8 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
-			&record.Message,
+			&record.Recv,
+			&record.Mesg,
 			&record.Timeout,
 			&record.Counter,
 			&record.Attempt,
@@ -1419,6 +1451,25 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 		ReadTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.Recv, cmd.Mesg, cmd.Timeout, cmd.CreatedOn)
+	if err != nil {
+		return nil, err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreateTask,
+		CreateTask: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
 		},
 	}, nil
 }

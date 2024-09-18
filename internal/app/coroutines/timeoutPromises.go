@@ -7,7 +7,6 @@ import (
 	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -36,7 +35,7 @@ func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.Corou
 
 		if err != nil {
 			slog.Error("failed to read promises", "err", err)
-			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -57,13 +56,12 @@ func TimeoutPromises(config *system.Config, tags map[string]string) gocoro.Corou
 				continue
 			}
 
-			awaiting[i] = gocoro.Spawn(c, completePromise(p.Timeout, &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: tags,
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:    p.Id,
-					State: promise.GetTimedoutState(p),
-				},
+			awaiting[i] = gocoro.Spawn(c, completePromise(tags, &t_aio.UpdatePromiseCommand{
+				Id:             p.Id,
+				State:          promise.GetTimedoutState(p),
+				Value:          promise.Value{},
+				IdempotencyKey: nil,
+				CompletedOn:    p.Timeout,
 			}))
 		}
 

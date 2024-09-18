@@ -33,8 +33,9 @@ const (
 	// Platform level status (5000-5999)
 	StatusInternalServerError    StatusCode = 5000
 	StatusAIOEchoError           StatusCode = 5001
-	StatusAIOQueueError          StatusCode = 5002
-	StatusAIOStoreError          StatusCode = 5003
+	StatusAIOMatchError          StatusCode = 5002
+	StatusAIOQueueError          StatusCode = 5003
+	StatusAIOStoreError          StatusCode = 5004
 	StatusSystemShuttingDown     StatusCode = 5030
 	StatusAPISubmissionQueueFull StatusCode = 5031
 	StatusAIOSubmissionQueueFull StatusCode = 5032
