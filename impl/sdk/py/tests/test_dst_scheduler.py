@@ -23,6 +23,7 @@ from resonate.events import (
 )
 from resonate.options import Options
 from resonate.result import Ok
+from resonate.retry_policy import never
 from resonate.storage import (
     IPromiseStore,
     LocalPromiseStore,
@@ -55,11 +56,11 @@ def failing_function(ctx: Context) -> None:  # noqa: ARG001
 
 
 def coro_that_fails_call(ctx: Context) -> Generator[Yieldable, Any, None]:
-    return (yield ctx.call(failing_function))
+    return (yield ctx.lfc(failing_function).with_options(retry_policy=never()))
 
 
 def coro_that_fails_invoke(ctx: Context) -> Generator[Yieldable, Any, None]:
-    return (yield (yield ctx.invoke(failing_function)))
+    return (yield (yield ctx.lfi(failing_function).with_options(retry_policy=never())))
 
 
 def raise_inmediately(ctx: Context) -> Generator[Yieldable, Any, int]:  # noqa: ARG001
@@ -68,18 +69,18 @@ def raise_inmediately(ctx: Context) -> Generator[Yieldable, Any, int]:  # noqa: 
 
 
 def only_call(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
-    x: int = yield ctx.call(number, n=n)
+    x: int = yield ctx.lfc(number, n=n)
     return x
 
 
 def only_invocation(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
-    xp: Promise[int] = yield ctx.invoke(number, n=n)
+    xp: Promise[int] = yield ctx.lfi(number, n=n)
     x: int = yield xp
     return x
 
 
 def failing_asserting(ctx: Context) -> Generator[Yieldable, Any, int]:
-    x: int = yield ctx.call(only_invocation, n=3)
+    x: int = yield ctx.lfc(only_invocation, n=3)
     ctx.assert_statement(x < 0, f"{x} should be negative")
     return x
 
@@ -102,7 +103,7 @@ def batch_greeting(cmds: list[GreetCommand]) -> list[str]:
 
 
 def greet_with_batching(ctx: Context, name: str) -> Generator[Yieldable, Any, str]:
-    p: Promise[str] = yield ctx.invoke(GreetCommand(name=name))
+    p: Promise[str] = yield ctx.lfi(GreetCommand(name=name))
     g: str = yield p
     return g
 
@@ -110,7 +111,7 @@ def greet_with_batching(ctx: Context, name: str) -> Generator[Yieldable, Any, st
 def greet_with_batching_but_with_call(
     ctx: Context, name: str
 ) -> Generator[Yieldable, Any, str]:
-    g: str = yield ctx.call(GreetCommand(name=name))
+    g: str = yield ctx.lfc(GreetCommand(name=name))
     return g
 
 
@@ -125,7 +126,11 @@ def _promise_storages() -> list[IPromiseStore]:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_raise_inmediately(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("raise-inmediately-1", Options(durable=True), raise_inmediately)
+    s.add(
+        "raise-inmediately-1",
+        Options(durable=True, retry_policy=never()),
+        raise_inmediately,
+    )
     p = s.run()[0]
     assert p.failure()
     with pytest.raises(RuntimeError):
@@ -135,13 +140,21 @@ def test_raise_inmediately(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_failing_call(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("failing-call-1", Options(durable=True), coro_that_fails_call)
+    s.add(
+        "failing-call-1",
+        Options(durable=True, retry_policy=never()),
+        coro_that_fails_call,
+    )
     promises = s.run()
     assert (p.failure() for p in promises)
     assert (not p.success() for p in promises)
 
     s = dst(seeds=[1])[0]
-    s.add("failing-invoke-1", Options(durable=True), coro_that_fails_invoke)
+    s.add(
+        "failing-invoke-1",
+        Options(durable=True, retry_policy=never()),
+        coro_that_fails_invoke,
+    )
     promises = s.run()
     assert (p.failure() for p in promises)
     assert (not p.success() for p in promises)
@@ -154,28 +167,34 @@ def test_batching_using_call(store: IPromiseStore) -> None:
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
 
     s.add(
-        "batching-using-call-1", Options(durable=True), greet_with_batching, name="Ging"
+        "batching-using-call-1",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Ging",
     )
     s.add(
         "batching-using-call-2",
-        Options(durable=True),
+        Options(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Razor",
     )
     s.add(
         "batching-using-call-3",
-        Options(durable=True),
+        Options(durable=True, retry_policy=never()),
         greet_with_batching_but_with_call,
         name="Eta",
     )
     s.add(
         "batching-using-call-4",
-        Options(durable=True),
+        Options(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Elena",
     )
     s.add(
-        "batching-using-call-5", Options(durable=True), greet_with_batching, name="Dwun"
+        "batching-using-call-5",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Dwun",
     )
     greetings_promises = s.run()
     assert all(p.success() for p in greetings_promises)
@@ -194,11 +213,36 @@ def test_batching(store: IPromiseStore) -> None:
     s: DSTScheduler = dst(seeds=[1], durable_promise_storage=store)[0]
 
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
-    s.add("batching-1", Options(durable=True), greet_with_batching, name="Ging")
-    s.add("batching-2", Options(durable=True), greet_with_batching, name="Razor")
-    s.add("batching-3", Options(durable=True), greet_with_batching, name="Eta")
-    s.add("batching-4", Options(durable=True), greet_with_batching, name="Elena")
-    s.add("batching-5", Options(durable=True), greet_with_batching, name="Dwun")
+    s.add(
+        "batching-1",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Ging",
+    )
+    s.add(
+        "batching-2",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Razor",
+    )
+    s.add(
+        "batching-3",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Eta",
+    )
+    s.add(
+        "batching-4",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Elena",
+    )
+    s.add(
+        "batching-5",
+        Options(durable=True, retry_policy=never()),
+        greet_with_batching,
+        name="Dwun",
+    )
     greetings_promises = s.run()
     assert all(p.success() for p in greetings_promises)
     assert [p.result() for p in greetings_promises] == [
@@ -226,8 +270,8 @@ def test_pin_seed(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_mock_function(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("mock-1", Options(durable=True), only_call, n=3)
-    s.add("mock-2", Options(durable=True), only_invocation, n=3)
+    s.add("mock-1", Options(durable=True, retry_policy=never()), only_call, n=3)
+    s.add("mock-2", Options(durable=True, retry_policy=never()), only_invocation, n=3)
     promises = s.run()
     assert all(p.result() == 3 for p in promises)  # noqa: PLR2004
     s = dst(seeds=[1], mocks={number: mocked_number})[0]
@@ -242,11 +286,21 @@ def test_dst_scheduler(store: IPromiseStore) -> None:
         seed = random.randint(0, 1000000)  # noqa: S311
         s = dst(seeds=[seed], durable_promise_storage=store)[0]
 
-        s.add("only-call-1", Options(durable=True), only_call, n=1)
-        s.add("only-call-2", Options(durable=True), only_call, n=2)
-        s.add("only-call-3", Options(durable=True), only_call, n=3)
-        s.add("only-call-4", Options(durable=True), only_call, n=4)
-        s.add("only-call-5", Options(durable=True), only_call, n=5)
+        s.add(
+            "only-call-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        )
+        s.add(
+            "only-call-2", Options(durable=True, retry_policy=never()), only_call, n=2
+        )
+        s.add(
+            "only-call-3", Options(durable=True, retry_policy=never()), only_call, n=3
+        )
+        s.add(
+            "only-call-4", Options(durable=True, retry_policy=never()), only_call, n=4
+        )
+        s.add(
+            "only-call-5", Options(durable=True, retry_policy=never()), only_call, n=5
+        )
 
         promises = s.run()
         values = _promise_result(promises=promises)
@@ -264,31 +318,106 @@ def test_dst_scheduler(store: IPromiseStore) -> None:
 def test_dst_determinitic(store: IPromiseStore) -> None:
     seed = random.randint(1, 100)  # noqa: S311
     s = dst(seeds=[seed], durable_promise_storage=store)[0]
-    s.add("dst-deterministic-1", Options(durable=True), only_call, n=1)
-    s.add("dst-deterministic-2", Options(durable=True), only_call, n=2)
-    s.add("dst-deterministic-3", Options(durable=True), only_call, n=3)
-    s.add("dst-deterministic-4", Options(durable=True), only_call, n=4)
-    s.add("dst-deterministic-5", Options(durable=True), only_call, n=5)
+    s.add(
+        "dst-deterministic-1",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=1,
+    )
+    s.add(
+        "dst-deterministic-2",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=2,
+    )
+    s.add(
+        "dst-deterministic-3",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=3,
+    )
+    s.add(
+        "dst-deterministic-4",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=4,
+    )
+    s.add(
+        "dst-deterministic-5",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=5,
+    )
     promises = s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     expected_events = s.get_events()
 
     same_seed_s = dst(seeds=[seed])[0]
-    same_seed_s.add("dst-deterministic-1", Options(durable=True), only_call, n=1)
-    same_seed_s.add("dst-deterministic-2", Options(durable=True), only_call, n=2)
-    same_seed_s.add("dst-deterministic-3", Options(durable=True), only_call, n=3)
-    same_seed_s.add("dst-deterministic-4", Options(durable=True), only_call, n=4)
-    same_seed_s.add("dst-deterministic-5", Options(durable=True), only_call, n=5)
+    same_seed_s.add(
+        "dst-deterministic-1",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=1,
+    )
+    same_seed_s.add(
+        "dst-deterministic-2",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=2,
+    )
+    same_seed_s.add(
+        "dst-deterministic-3",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=3,
+    )
+    same_seed_s.add(
+        "dst-deterministic-4",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=4,
+    )
+    same_seed_s.add(
+        "dst-deterministic-5",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=5,
+    )
     promises = same_seed_s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     assert expected_events == same_seed_s.get_events()
 
     different_seed_s = dst(seeds=[seed + 10])[0]
-    different_seed_s.add("dst-deterministic-1", Options(durable=True), only_call, n=1)
-    different_seed_s.add("dst-deterministic-2", Options(durable=True), only_call, n=2)
-    different_seed_s.add("dst-deterministic-3", Options(durable=True), only_call, n=3)
-    different_seed_s.add("dst-deterministic-4", Options(durable=True), only_call, n=4)
-    different_seed_s.add("dst-deterministic-5", Options(durable=True), only_call, n=5)
+    different_seed_s.add(
+        "dst-deterministic-1",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=1,
+    )
+    different_seed_s.add(
+        "dst-deterministic-2",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=2,
+    )
+    different_seed_s.add(
+        "dst-deterministic-3",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=3,
+    )
+    different_seed_s.add(
+        "dst-deterministic-4",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=4,
+    )
+    different_seed_s.add(
+        "dst-deterministic-5",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=5,
+    )
     promises = different_seed_s.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
     assert expected_events != different_seed_s.get_events()
@@ -298,7 +427,11 @@ def test_dst_determinitic(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_failing_asserting(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("failing-asserting-1", Options(durable=True), failing_asserting)
+    s.add(
+        "failing-asserting-1",
+        Options(durable=True, retry_policy=never()),
+        failing_asserting,
+    )
     p = s.run()
     with pytest.raises(AssertionError):
         p[0].result()
@@ -307,11 +440,21 @@ def test_failing_asserting(store: IPromiseStore) -> None:
 @pytest.mark.dst()
 @pytest.mark.parametrize("scheduler", resonate.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
-    scheduler.add("dst-framework-1", Options(durable=True), only_call, n=1)
-    scheduler.add("dst-framework-2", Options(durable=True), only_call, n=2)
-    scheduler.add("dst-framework-3", Options(durable=True), only_call, n=3)
-    scheduler.add("dst-framework-4", Options(durable=True), only_call, n=4)
-    scheduler.add("dst-framework-5", Options(durable=True), only_call, n=5)
+    scheduler.add(
+        "dst-framework-1", Options(durable=True, retry_policy=never()), only_call, n=1
+    )
+    scheduler.add(
+        "dst-framework-2", Options(durable=True, retry_policy=never()), only_call, n=2
+    )
+    scheduler.add(
+        "dst-framework-3", Options(durable=True, retry_policy=never()), only_call, n=3
+    )
+    scheduler.add(
+        "dst-framework-4", Options(durable=True, retry_policy=never()), only_call, n=4
+    )
+    scheduler.add(
+        "dst-framework-5", Options(durable=True, retry_policy=never()), only_call, n=5
+    )
     promises = scheduler.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
 
@@ -325,7 +468,9 @@ def test_failure(store: IPromiseStore) -> None:
         failure_chance=100,
         durable_promise_storage=store,
     )[0]
-    scheduler.add("failure-1", Options(durable=True), only_call, n=1)
+    scheduler.add(
+        "failure-1", Options(durable=True, retry_policy=never()), only_call, n=1
+    )
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
@@ -333,7 +478,9 @@ def test_failure(store: IPromiseStore) -> None:
     assert scheduler.current_failures == 3  # noqa: PLR2004
 
     scheduler = dst(seeds=[1], max_failures=2, failure_chance=0)[0]
-    scheduler.add("failure-1", Options(durable=True), only_call, n=1)
+    scheduler.add(
+        "failure-1", Options(durable=True, retry_policy=never()), only_call, n=1
+    )
     p = scheduler.run()
     assert p[0].done()
     assert p[0].result() == 1
@@ -345,7 +492,12 @@ def test_failure(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sequential_retry(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]
-    seq_scheduler.add("execution-seq-with-retry", Options(durable=True), only_call, n=1)
+    seq_scheduler.add(
+        "execution-seq-with-retry",
+        Options(durable=True, retry_policy=never()),
+        only_call,
+        n=1,
+    )
     promises = seq_scheduler.run()
     assert [p.result() for p in promises] == [1]
     assert seq_scheduler.get_events() == [
@@ -426,20 +578,40 @@ def test_sequential_retry(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sequential(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]
-    seq_scheduler.add("execution-seq-1", Options(durable=True), only_call, n=1)
-    seq_scheduler.add("execution-seq-2", Options(durable=True), only_call, n=2)
-    seq_scheduler.add("execution-seq-3", Options(durable=True), only_call, n=3)
-    seq_scheduler.add("execution-seq-4", Options(durable=True), only_call, n=4)
-    seq_scheduler.add("execution-seq-5", Options(durable=True), only_call, n=5)
+    seq_scheduler.add(
+        "execution-seq-1", Options(durable=True, retry_policy=never()), only_call, n=1
+    )
+    seq_scheduler.add(
+        "execution-seq-2", Options(durable=True, retry_policy=never()), only_call, n=2
+    )
+    seq_scheduler.add(
+        "execution-seq-3", Options(durable=True, retry_policy=never()), only_call, n=3
+    )
+    seq_scheduler.add(
+        "execution-seq-4", Options(durable=True, retry_policy=never()), only_call, n=4
+    )
+    seq_scheduler.add(
+        "execution-seq-5", Options(durable=True, retry_policy=never()), only_call, n=5
+    )
     promises = seq_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
 
     con_scheduler = dst(seeds=[1], max_failures=2, durable_promise_storage=store)[0]
-    con_scheduler.add("execution-con-1", Options(durable=True), only_call, n=1)
-    con_scheduler.add("execution-con-2", Options(durable=True), only_call, n=2)
-    con_scheduler.add("execution-con-3", Options(durable=True), only_call, n=3)
-    con_scheduler.add("execution-con-4", Options(durable=True), only_call, n=4)
-    con_scheduler.add("execution-con-5", Options(durable=True), only_call, n=5)
+    con_scheduler.add(
+        "execution-con-1", Options(durable=True, retry_policy=never()), only_call, n=1
+    )
+    con_scheduler.add(
+        "execution-con-2", Options(durable=True, retry_policy=never()), only_call, n=2
+    )
+    con_scheduler.add(
+        "execution-con-3", Options(durable=True, retry_policy=never()), only_call, n=3
+    )
+    con_scheduler.add(
+        "execution-con-4", Options(durable=True, retry_policy=never()), only_call, n=4
+    )
+    con_scheduler.add(
+        "execution-con-5", Options(durable=True, retry_policy=never()), only_call, n=5
+    )
     promises = con_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
     assert len(con_scheduler.get_events()) == len(seq_scheduler.get_events())
@@ -454,11 +626,21 @@ def test_dump_events(store: IPromiseStore) -> None:
         )[0]
         formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
         assert not formatted_file_path.exists()
-        s.add("dump-events-1", Options(durable=True), only_call, n=1)
-        s.add("dump-events-2", Options(durable=True), only_call, n=2)
-        s.add("dump-events-3", Options(durable=True), only_call, n=3)
-        s.add("dump-events-4", Options(durable=True), only_call, n=4)
-        s.add("dump-events-5", Options(durable=True), only_call, n=5)
+        s.add(
+            "dump-events-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        )
+        s.add(
+            "dump-events-2", Options(durable=True, retry_policy=never()), only_call, n=2
+        )
+        s.add(
+            "dump-events-3", Options(durable=True, retry_policy=never()), only_call, n=3
+        )
+        s.add(
+            "dump-events-4", Options(durable=True, retry_policy=never()), only_call, n=4
+        )
+        s.add(
+            "dump-events-5", Options(durable=True, retry_policy=never()), only_call, n=5
+        )
         s.run()
 
         assert formatted_file_path.exists()
@@ -474,11 +656,11 @@ def _probe_function(deps: Dependencies, tick: int) -> int:  # noqa: ARG001
 @pytest.mark.parametrize("store", _promise_storages())
 def test_probe(store: IPromiseStore) -> None:
     s = dst(seeds=[1], probe=_probe_function, durable_promise_storage=store)[0]
-    s.add("probe-1", Options(durable=True), only_call, n=1)
-    s.add("probe-2", Options(durable=True), only_call, n=2)
-    s.add("probe-3", Options(durable=True), only_call, n=3)
-    s.add("probe-4", Options(durable=True), only_call, n=4)
-    s.add("probe-5", Options(durable=True), only_call, n=5)
+    s.add("probe-1", Options(durable=True, retry_policy=never()), only_call, n=1)
+    s.add("probe-2", Options(durable=True, retry_policy=never()), only_call, n=2)
+    s.add("probe-3", Options(durable=True, retry_policy=never()), only_call, n=3)
+    s.add("probe-4", Options(durable=True, retry_policy=never()), only_call, n=4)
+    s.add("probe-5", Options(durable=True, retry_policy=never()), only_call, n=5)
     s.run()
     assert len(s.probe_results) > 0
     assert s.probe_results[-1] <= now()
@@ -486,13 +668,13 @@ def test_probe(store: IPromiseStore) -> None:
 
 def baz(ctx: Context) -> None: ...  # noqa: ARG001, RUF100
 def bar(ctx: Context) -> Generator[Yieldable, Any, str]:
-    yield ctx.call(baz)
+    yield ctx.lfc(baz)
     return "Done"
 
 
 def foo(ctx: Context) -> Generator[Yieldable, Any, list[str]]:
-    p1: Promise[str] = yield ctx.invoke(bar)
-    p2: Promise[str] = yield ctx.invoke(bar)
+    p1: Promise[str] = yield ctx.lfi(bar)
+    p2: Promise[str] = yield ctx.lfi(bar)
 
     resp: list[str] = []
     v1: str = yield p1
@@ -506,7 +688,7 @@ def foo(ctx: Context) -> Generator[Yieldable, Any, list[str]]:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_events_logic(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("foo-events-1", Options(durable=True), foo)
+    s.add("foo-events-1", Options(durable=True, retry_policy=never()), foo)
     s.run()
     assert s.get_events() == [
         PromiseCreated(promise_id="foo-events-1", parent_promise_id=None, tick=0),

@@ -358,7 +358,10 @@ class DSTScheduler:
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
         root_ctx = Context(
-            ctx_id=promise_id, seed=self.seed, parent_ctx=None, deps=self.deps
+            ctx_id=promise_id,
+            seed=self.seed,
+            parent_ctx=None,
+            deps=self.deps,
         )
         p = self._create_promise(root_ctx, top_lvl)
         assert p.durable, "Top level invocations must be durable"
@@ -477,6 +480,7 @@ class DSTScheduler:
                 ## This simulates the processor in the production scheduler.
                 fn_wrapper, promise = self._get_random_element(self._runnable_functions)
                 assert not promise.done(), "Only unresolve promises can be found here."
+                assert isinstance(promise.action, Invoke)
 
                 v = (
                     _safe_run(self._mocks[fn_wrapper.fn])
