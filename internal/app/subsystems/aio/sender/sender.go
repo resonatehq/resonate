@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -24,6 +25,7 @@ type Config struct {
 
 type PluginConfig struct {
 	Http EnabledPlugin[http.Config] `flag:"http"`
+	Poll EnabledPlugin[poll.Config] `flag:"poll"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -40,6 +42,14 @@ func (c *PluginConfig) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.P
 	plugins := []aio.Plugin{}
 	if c.Http.Enabled {
 		plugin, err := http.New(a, metrics, &c.Http.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+	if c.Poll.Enabled {
+		plugin, err := poll.New(a, metrics, &c.Poll.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -106,10 +116,10 @@ func (s *Sender) Kind() t_aio.Kind {
 	return t_aio.Sender
 }
 
-func (s *Sender) Start() error {
+func (s *Sender) Start(errors chan<- error) error {
 	// start plugins
 	for _, plugin := range s.plugins {
-		if err := plugin.Start(); err != nil {
+		if err := plugin.Start(errors); err != nil {
 			return err
 		}
 	}

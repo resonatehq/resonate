@@ -21,7 +21,7 @@ func TestSqliteStore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := store.Start(); err != nil {
+		if err := store.Start(nil); err != nil {
 			t.Fatal(err)
 		}
 

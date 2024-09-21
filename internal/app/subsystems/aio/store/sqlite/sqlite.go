@@ -358,7 +358,7 @@ func (s *SqliteStore) Kind() t_aio.Kind {
 	return t_aio.Store
 }
 
-func (s *SqliteStore) Start() error {
+func (s *SqliteStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}

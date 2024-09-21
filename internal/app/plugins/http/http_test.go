@@ -59,7 +59,7 @@ func TestHttpPlugin(t *testing.T) {
 			data, err := json.Marshal(tc.data)
 			assert.Nil(t, err)
 
-			err = http.Start()
+			err = http.Start(nil)
 			assert.Nil(t, err)
 
 			ok := http.Enqueue(&aio.Message{

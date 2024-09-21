@@ -399,7 +399,7 @@ func (s *PostgresStore) Kind() t_aio.Kind {
 	return t_aio.Store
 }
 
-func (s *PostgresStore) Start() error {
+func (s *PostgresStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}

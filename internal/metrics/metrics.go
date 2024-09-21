@@ -7,6 +7,7 @@ type Metrics struct {
 	AioInFlight        *prometheus.GaugeVec
 	AioWorker          *prometheus.GaugeVec
 	AioWorkerInFlight  *prometheus.GaugeVec
+	AioConnection      *prometheus.GaugeVec
 	ApiTotal           *prometheus.CounterVec
 	ApiInFlight        *prometheus.GaugeVec
 	CoroutinesTotal    *prometheus.CounterVec
@@ -31,6 +32,10 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "aio_worker_in_flight_submissions",
 			Help: "number of in flight aio submissions",
 		}, []string{"type", "worker"}),
+		AioConnection: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "aio_connection",
+			Help: "number of aio subsystem connections",
+		}, []string{"type"}),
 		ApiTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "api_total_requests",
 			Help: "total number of api requests",
@@ -58,6 +63,7 @@ func (m *Metrics) Enable(reg prometheus.Registerer) {
 	reg.MustRegister(m.AioInFlight)
 	reg.MustRegister(m.AioWorker)
 	reg.MustRegister(m.AioWorkerInFlight)
+	reg.MustRegister(m.AioConnection)
 	reg.MustRegister(m.ApiTotal)
 	reg.MustRegister(m.ApiInFlight)
 	reg.MustRegister(m.CoroutinesTotal)
@@ -69,6 +75,7 @@ func (m *Metrics) Disable(reg prometheus.Registerer) {
 	reg.Unregister(m.AioInFlight)
 	reg.Unregister(m.AioWorker)
 	reg.Unregister(m.AioWorkerInFlight)
+	reg.Unregister(m.AioConnection)
 	reg.Unregister(m.ApiTotal)
 	reg.Unregister(m.ApiInFlight)
 	reg.Unregister(m.CoroutinesTotal)

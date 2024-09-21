@@ -46,7 +46,7 @@ func (a *aioDST) AddSubsystem(subsystem SubsystemDST) {
 
 func (a *aioDST) Start() error {
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
-		if err := subsystem.Start(); err != nil {
+		if err := subsystem.Start(nil); err != nil {
 			return err
 		}
 	}

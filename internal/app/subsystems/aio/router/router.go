@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -86,7 +87,7 @@ func (r *Router) Kind() t_aio.Kind {
 	return t_aio.Router
 }
 
-func (r *Router) Start() error {
+func (r *Router) Start(chan<- error) error {
 	for _, worker := range r.workers {
 		go worker.Start()
 	}
@@ -253,7 +254,7 @@ func coerce(v any) (any, bool) {
 	case *receiver.Recv:
 		return v, true
 	case string:
-		if recv, ok := protocolToRecv(v); ok {
+		if recv, ok := schemeToRecv(v); ok {
 			return recv, true
 		}
 
@@ -265,25 +266,28 @@ func coerce(v any) (any, bool) {
 	}
 }
 
-func protocolToRecv(v string) (*receiver.Recv, bool) {
-	switch protocol(v) {
+func schemeToRecv(v string) (*receiver.Recv, bool) {
+	u, err := url.Parse(v)
+	if err != nil {
+		return nil, false
+	}
+
+	switch u.Scheme {
 	case "http", "https":
-		data, err := json.Marshal(map[string]interface{}{"url": v})
+		data, err := json.Marshal(map[string]interface{}{"url": u.String()})
 		if err != nil {
 			return nil, false
 		}
 
 		return &receiver.Recv{Type: "http", Data: data}, true
+	case "poll":
+		data, err := json.Marshal(map[string]interface{}{"group": u.Host, "id": strings.TrimPrefix(u.Path, "/")})
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "poll", Data: data}, true
 	default:
 		return nil, false
 	}
-}
-
-func protocol(value string) string {
-	url, err := url.Parse(value)
-	if err != nil {
-		return ""
-	}
-
-	return url.Scheme
 }

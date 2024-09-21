@@ -66,7 +66,7 @@ func (a *aio) AddSubsystem(subsystem Subsystem) {
 
 func (a *aio) Start() error {
 	for _, subsystem := range util.OrderedRange(a.subsystems) {
-		if err := subsystem.Start(); err != nil {
+		if err := subsystem.Start(a.errors); err != nil {
 			return err
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -56,7 +57,7 @@ func (h *Http) Type() string {
 	return "http"
 }
 
-func (h *Http) Start() error {
+func (h *Http) Start(chan<- error) error {
 	for _, worker := range h.workers {
 		go worker.Start()
 	}
@@ -93,7 +94,7 @@ func (w *HttpWorker) String() string {
 }
 
 func (w *HttpWorker) Start() {
-	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), "0")
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
 	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
 	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
 

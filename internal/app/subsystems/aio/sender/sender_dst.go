@@ -38,7 +38,7 @@ func (s *SenderDST) Kind() t_aio.Kind {
 	return t_aio.Sender
 }
 
-func (s *SenderDST) Start() error {
+func (s *SenderDST) Start(chan<- error) error {
 	return nil
 }
 

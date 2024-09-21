@@ -9,7 +9,7 @@ type Message struct {
 type Plugin interface {
 	String() string
 	Type() string
-	Start() error
+	Start(chan<- error) error
 	Stop() error
 	Enqueue(*Message) bool
 }

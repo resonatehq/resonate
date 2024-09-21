@@ -2,6 +2,6 @@ package api
 
 type Subsystem interface {
 	String() string
-	Start(errors chan<- error)
+	Start(chan<- error)
 	Stop() error
 }
