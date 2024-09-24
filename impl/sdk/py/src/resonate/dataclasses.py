@@ -21,11 +21,17 @@ T = TypeVar("T")
 P = ParamSpec("P")
 
 
-@dataclass(frozen=True)
 class CoroAndPromise(Generic[T]):
-    coro: Generator[Yieldable, Any, T]
-    prom: Promise[T]
-    ctx: Context
+    def __init__(
+        self,
+        coro: Generator[Yieldable, Any, T],
+        prom: Promise[T],
+        ctx: Context,
+    ) -> None:
+        self.coro = coro
+        self.prom = prom
+        self.ctx = ctx
+        self.children_promises: list[Promise[Any]] = []
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from typing import Generic, TypeVar, final
+from typing import Any, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
@@ -62,3 +62,17 @@ class Promise(Generic[T]):
 
     def failure(self) -> bool:
         return not self.success()
+
+
+def all_promises_are_done(promises: list[Promise[Any]]) -> bool:
+    return all(p.done() for p in promises)
+
+
+def get_first_error_if_any(promises: list[Promise[Any]]) -> Err[Exception] | None:
+    for p in promises:
+        if p.success():
+            continue
+        error = p.safe_result()
+        assert isinstance(error, Err)
+        return error
+    return None

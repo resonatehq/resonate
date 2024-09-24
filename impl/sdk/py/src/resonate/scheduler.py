@@ -30,7 +30,7 @@ from resonate.events import (
 from resonate.functools import AsyncFnWrapper, FnWrapper, wrap_fn
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.options import Options
-from resonate.promise import Promise
+from resonate.promise import Promise, all_promises_are_done, get_first_error_if_any
 from resonate.queue import DelayQueue, Queue
 from resonate.result import Err, Ok
 from resonate.retry_policy import Never
@@ -141,6 +141,10 @@ class Scheduler:
 
         self._runnable_coros: RunnableCoroutines = []
         self._awaitables: Awaitables = {}
+
+        self._promises_to_be_resolved: list[
+            tuple[Promise[Any], Result[Any, Exception], list[Promise[Any]]]
+        ] = []
 
         self._processor = _Processor(
             processor_threads,
@@ -367,7 +371,7 @@ class Scheduler:
             )
         )
 
-    def _run(self) -> None:
+    def _run(self) -> None:  # noqa: C901, PLR0912
         while self._worker_continue.wait():
             self._worker_continue.clear()
 
@@ -418,6 +422,18 @@ class Scheduler:
                         ),
                         delay=cqe.sqe.policy.calculate_delay(next_retry_attempt),
                     )
+
+            for p_to_b_resolved in self._promises_to_be_resolved:
+                prom, final_value, children_promises = p_to_b_resolved
+                if all_promises_are_done(children_promises):
+                    firt_error = get_first_error_if_any(children_promises)
+                    if firt_error is None:
+                        self._resolve_promise(prom, final_value)
+                    else:
+                        self._resolve_promise(prom, firt_error)
+
+                    self._unblock_coros_waiting_on_promise(prom)
+                    self._promises_to_be_resolved.remove(p_to_b_resolved)
 
             while self._runnable_coros:
                 runnable, was_awaited = self._runnable_coros.pop()
@@ -494,7 +510,7 @@ class Scheduler:
             )
         )
 
-    def _advance_runnable_span(
+    def _advance_runnable_span(  # noqa: PLR0912
         self, runnable: Runnable[Any], *, was_awaited: bool
     ) -> None:
         assert isgenerator(
@@ -520,10 +536,20 @@ class Scheduler:
                     parent_promise_id=runnable.coro_and_promise.ctx.parent_promise_id(),
                 )
             )
-            self._resolve_promise(
-                runnable.coro_and_promise.prom, yieldable_or_final_value.v
-            )
-            self._unblock_coros_waiting_on_promise(runnable.coro_and_promise.prom)
+            if all_promises_are_done(runnable.coro_and_promise.children_promises):
+                self._resolve_promise(
+                    runnable.coro_and_promise.prom, yieldable_or_final_value.v
+                )
+                self._unblock_coros_waiting_on_promise(runnable.coro_and_promise.prom)
+            else:
+                self._promises_to_be_resolved.append(
+                    (
+                        runnable.coro_and_promise.prom,
+                        yieldable_or_final_value.v,
+                        runnable.coro_and_promise.children_promises,
+                    )
+                )
+            del runnable
 
         elif isinstance(yieldable_or_final_value, Call):
             p = self._process_invokation(yieldable_or_final_value.to_invoke(), runnable)
@@ -566,6 +592,8 @@ class Scheduler:
             ctx_id=invokation.opts.promise_id,
         )
         p = self._create_promise(child_ctx, invokation)
+        runnable.coro_and_promise.children_promises.append(p)
+
         if isinstance(invokation.exec_unit, Command):
             raise NotImplementedError
         if isinstance(invokation.exec_unit, FnOrCoroutine):
