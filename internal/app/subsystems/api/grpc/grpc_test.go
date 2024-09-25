@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -1899,7 +1900,7 @@ func TestClaimTask(t *testing.T) {
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
-					Mesg:   &message.Mesg{},
+					Task:   &task.Task{Mesg: &message.Mesg{}},
 				},
 			},
 			code: codes.OK,
@@ -1914,9 +1915,12 @@ func TestClaimTask(t *testing.T) {
 				RequestId: "ClaimTaskInvoke",
 			},
 			grpcRes: &grpcApi.ClaimTaskResponse{
-				Type: "resume",
-				Promises: map[string]*grpcApi.Promise{
-					"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+				Claimed: true,
+				Mesg: &grpcApi.Mesg{
+					Type: "invoke",
+					Promises: map[string]*grpcApi.Promise{
+						"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+					},
 				},
 			},
 			req: &t_api.Request{
@@ -1937,10 +1941,10 @@ func TestClaimTask(t *testing.T) {
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
-					Mesg: &message.Mesg{
-						Type: message.Resume,
-						Promises: map[string]*promise.Promise{
-							"root": {Id: "foo", State: promise.Pending},
+					Task: &task.Task{
+						Mesg: &message.Mesg{
+							Type:     message.Invoke,
+							Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}},
 						},
 					},
 				},
@@ -1957,10 +1961,13 @@ func TestClaimTask(t *testing.T) {
 				RequestId: "ClaimTaskResume",
 			},
 			grpcRes: &grpcApi.ClaimTaskResponse{
-				Type: "resume",
-				Promises: map[string]*grpcApi.Promise{
-					"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
-					"leaf": {Id: "bar", State: grpcApi.State_RESOLVED, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+				Claimed: true,
+				Mesg: &grpcApi.Mesg{
+					Type: "resume",
+					Promises: map[string]*grpcApi.Promise{
+						"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+						"leaf": {Id: "bar", State: grpcApi.State_RESOLVED, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+					},
 				},
 			},
 			req: &t_api.Request{
@@ -1981,11 +1988,10 @@ func TestClaimTask(t *testing.T) {
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
 					Status: t_api.StatusCreated,
-					Mesg: &message.Mesg{
-						Type: message.Resume,
-						Promises: map[string]*promise.Promise{
-							"root": {Id: "foo", State: promise.Pending},
-							"leaf": {Id: "bar", State: promise.Resolved},
+					Task: &task.Task{
+						Mesg: &message.Mesg{
+							Type:     message.Resume,
+							Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}, "leaf": {Id: "bar", State: promise.Resolved}},
 						},
 					},
 				},
@@ -2047,8 +2053,8 @@ func TestClaimTask(t *testing.T) {
 			assert.Equal(t, tc.code, codes.OK)
 
 			if tc.grpcRes != nil {
-				assert.Equal(t, tc.grpcRes.Type, res.Type)
-				assert.Equal(t, tc.grpcRes.Promises, res.Promises)
+				assert.Equal(t, tc.grpcRes.Claimed, res.Claimed)
+				assert.Equal(t, tc.grpcRes.Mesg, res.Mesg)
 			}
 
 			select {

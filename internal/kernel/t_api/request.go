@@ -1,6 +1,7 @@
 package t_api
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -56,12 +57,34 @@ type SearchPromisesRequest struct {
 }
 
 type CreatePromiseRequest struct {
-	Id             string            `json:"id"`
-	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
-	Strict         bool              `json:"strict"`
-	Param          promise.Value     `json:"param,omitempty"`
-	Timeout        int64             `json:"timeout"`
-	Tags           map[string]string `json:"tags,omitempty"`
+	Id             string                 `json:"id"`
+	IdempotencyKey *idempotency.Key       `json:"idemptencyKey,omitempty"`
+	Strict         bool                   `json:"strict"`
+	Param          promise.Value          `json:"param,omitempty"`
+	Timeout        int64                  `json:"timeout"`
+	Tags           map[string]string      `json:"tags,omitempty"`
+	Task           *CreatePromiseTask     `json:"task,omitempty"`
+	Callback       *CreatePromiseCallback `json:"callback,omitempty"`
+}
+
+type CreatePromiseTask struct {
+	ProcessId string          `json:"processId"`
+	Frequency int             `json:"frequency"`
+	Recv      json.RawMessage `json:"recv"`
+}
+
+func (t *CreatePromiseTask) String() string {
+	return fmt.Sprintf("Task(processId=%s, frequency=%d)", t.ProcessId, t.Frequency)
+}
+
+type CreatePromiseCallback struct {
+	RootPromiseId string          `json:"rootPromiseId"`
+	Timeout       int64           `json:"timeout"`
+	Recv          json.RawMessage `json:"recv"`
+}
+
+func (c *CreatePromiseCallback) String() string {
+	return fmt.Sprintf("Callback(rootPromiseId=%s, timeout=%d)", c.RootPromiseId, c.Timeout)
 }
 
 type CompletePromiseRequest struct {
@@ -97,7 +120,7 @@ type RejectPromiseRequest struct {
 
 type CreateCallbackRequest struct {
 	PromiseId     string `json:"promiseId"`
-	RootPromiseId string `json:"rootPromiseId"` // TODO: we should be able to know this from the promiseId
+	RootPromiseId string `json:"rootPromiseId"` // TODO: we should be able to know this from the promise itself
 	Timeout       int64  `json:"timeout"`
 	Recv          []byte `json:"recv"`
 }
@@ -197,11 +220,13 @@ func (r *Request) String() string {
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
-			"CreatePromise(id=%s, idempotencyKey=%s, strict=%t, timeout=%d)",
+			"CreatePromise(id=%s, idempotencyKey=%s, strict=%t, timeout=%d, task=%s, callback=%s)",
 			r.CreatePromise.Id,
 			r.CreatePromise.IdempotencyKey,
 			r.CreatePromise.Strict,
 			r.CreatePromise.Timeout,
+			r.CreatePromise.Task,
+			r.CreatePromise.Callback,
 		)
 	case CompletePromise:
 		return fmt.Sprintf(

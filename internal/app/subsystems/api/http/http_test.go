@@ -17,6 +17,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -1101,7 +1102,7 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
-							Mesg:   &message.Mesg{},
+							Task:   &task.Task{Mesg: &message.Mesg{}},
 						},
 					},
 					status: 201,
@@ -1119,7 +1120,7 @@ func TestHttpServer(t *testing.T) {
 						"counter": 1,
 						"frequency": 1
 					}`),
-					resBody: []byte(`{"type":"invoke","promises":{"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					resBody: []byte(`{"promises":{"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}},"type":"invoke"}`),
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
@@ -1138,10 +1139,10 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
-							Mesg: &message.Mesg{
-								Type: message.Invoke,
-								Promises: map[string]*promise.Promise{
-									"root": {Id: "foo", State: promise.Pending},
+							Task: &task.Task{
+								Mesg: &message.Mesg{
+									Type:     message.Invoke,
+									Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}},
 								},
 							},
 						},
@@ -1161,7 +1162,7 @@ func TestHttpServer(t *testing.T) {
 						"counter": 2,
 						"frequency": 1
 					}`),
-					resBody: []byte(`{"type":"invoke","promises":{"leaf":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					resBody: []byte(`{"promises":{"leaf":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}},"type":"invoke"}`),
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
@@ -1180,11 +1181,10 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
-							Mesg: &message.Mesg{
-								Type: message.Invoke,
-								Promises: map[string]*promise.Promise{
-									"root": {Id: "foo", State: promise.Pending},
-									"leaf": {Id: "bar", State: promise.Resolved},
+							Task: &task.Task{
+								Mesg: &message.Mesg{
+									Type:     message.Invoke,
+									Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}, "leaf": {Id: "bar", State: promise.Resolved}},
 								},
 							},
 						},

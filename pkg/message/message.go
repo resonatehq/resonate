@@ -1,6 +1,8 @@
 package message
 
 import (
+	"fmt"
+
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -13,7 +15,7 @@ type Mesg struct {
 }
 
 func (m *Mesg) String() string {
-	return string(m.Type)
+	return fmt.Sprintf("Mesg(type=%s, root=%s, leaf=%s)", m.Type, m.Root, m.Leaf)
 }
 
 func (m *Mesg) SetPromises(root *promise.Promise, leaf *promise.Promise) {
@@ -22,10 +24,6 @@ func (m *Mesg) SetPromises(root *promise.Promise, leaf *promise.Promise) {
 
 	// set promises
 	m.Promises = map[string]*promise.Promise{}
-
-	// hack, unset root and leaf
-	m.Root = ""
-	m.Leaf = ""
 
 	if root != nil {
 		m.Promises["root"] = root

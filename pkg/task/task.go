@@ -25,10 +25,12 @@ type Task struct {
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%s, processId=%s, state=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
+		"Task(id=%s, processId=%s, state=%s, recv=%s, mesg=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
 		t.Id,
 		util.SafeDeref(t.ProcessId),
 		t.State,
+		t.Recv,
+		t.Mesg,
 		t.Timeout,
 		t.Counter,
 		t.Attempt,

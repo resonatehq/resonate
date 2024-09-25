@@ -130,7 +130,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 
 // Create Promise
 
-func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, *Error) {
+func (s *Service) CreatePromise(header *CreatePromiseHeader, body *CreatePromiseBody) (*t_api.CreatePromiseResponse, *Error) {
 	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
@@ -151,6 +151,8 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 				Param:          body.Param,
 				Timeout:        body.Timeout,
 				Tags:           body.Tags,
+				Task:           body.Task,
+				Callback:       body.Callback,
 			},
 		},
 	})

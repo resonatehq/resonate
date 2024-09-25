@@ -21,9 +21,9 @@ message Promise {
     int64 timeout = 5;
     string idempotencyKeyForCreate = 6;
     string idempotencyKeyForComplete = 7;
-    int64 createdOn = 8;
-    int64 completedOn = 9;
-    map<string, string> tags = 10;
+    map<string, string> tags = 8;
+    int64 createdOn = 9;
+    int64 completedOn = 10;
 }
 
 enum State {
@@ -43,6 +43,11 @@ enum SearchState {
 
 message Value {
     map<string, string> headers = 1;
+    bytes data = 2;
+}
+
+message Recv {
+    string type = 1;
     bytes data = 2;
 }
 
@@ -75,7 +80,28 @@ message CreatePromiseRequest {
     bool strict = 3;
     Value param = 4;
     int64 timeout = 5;
-    string requestId = 6;
+    map<string, string> tags = 6;
+    CreatePromiseTask task = 7;
+    CreatePromiseCallback callback = 8;
+    string requestId = 9;
+}
+
+message CreatePromiseTask {
+    string processId = 1;
+    int32 frequency = 2;
+    oneof recv {
+        string logical = 3;
+        Recv physical = 4;
+    }
+}
+
+message CreatePromiseCallback {
+    string rootPromiseId = 1;
+    int64 timeout = 2;
+    oneof recv {
+        string logical = 3;
+        Recv physical = 4;
+    }
 }
 
 message CreatePromiseResponse {

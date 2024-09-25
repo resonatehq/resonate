@@ -17,18 +17,13 @@ message Callback {
     int64 createdOn = 4;
 }
 
-message Recv {
-    string type = 1;
-    bytes data = 2;
-}
-
 message CreateCallbackRequest {
     string promiseId = 1;
     string rootPromiseId = 2;
     int64 timeout = 3;
     oneof recv {
         string logical = 4;
-        Recv physical = 5;
+        promise.Recv physical = 5;
     }
     string requestId = 6;
 }

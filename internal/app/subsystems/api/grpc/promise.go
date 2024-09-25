@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -10,6 +11,7 @@ import (
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -102,13 +104,59 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		IdempotencyKey: idempotencyKey,
 	}
 
-	body := &promise.Promise{
-		Id: req.Id,
-		Param: promise.Value{
-			Headers: headers,
-			Data:    data,
-		},
+	body := &service.CreatePromiseBody{
+		Id:      req.Id,
+		Param:   promise.Value{Headers: headers, Data: data},
 		Timeout: req.Timeout,
+		Tags:    req.Tags,
+	}
+
+	if req.Task != nil {
+		var recv []byte
+		var rErr error
+		switch r := req.Task.Recv.(type) {
+		case *grpcApi.CreatePromiseTask_Logical:
+			recv, rErr = json.Marshal(&r.Logical)
+		case *grpcApi.CreatePromiseTask_Physical:
+			recv, rErr = json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
+		}
+
+		if rErr != nil {
+			return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
+		}
+		if recv == nil {
+			return nil, grpcStatus.Error(codes.InvalidArgument, "promise.task.recv must be provided")
+		}
+
+		body.Task = &t_api.CreatePromiseTask{
+			ProcessId: req.Task.ProcessId,
+			Frequency: int(req.Task.Frequency),
+			Recv:      recv,
+		}
+	}
+
+	if req.Callback != nil {
+		var recv []byte
+		var rErr error
+		switch r := req.Callback.Recv.(type) {
+		case *grpcApi.CreatePromiseCallback_Logical:
+			recv, rErr = json.Marshal(&r.Logical)
+		case *grpcApi.CreatePromiseCallback_Physical:
+			recv, rErr = json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
+		}
+
+		if rErr != nil {
+			return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
+		}
+		if recv == nil {
+			return nil, grpcStatus.Error(codes.InvalidArgument, "promise.callback.recv must be provided")
+		}
+
+		body.Callback = &t_api.CreatePromiseCallback{
+			RootPromiseId: req.Callback.RootPromiseId,
+			Timeout:       req.Callback.Timeout,
+			Recv:          recv,
+		}
 	}
 
 	res, err := s.service.CreatePromise(header, body)

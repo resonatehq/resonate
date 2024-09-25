@@ -5,9 +5,9 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -46,8 +46,10 @@ type Response struct {
 // Promises
 
 type CreatePromiseResponse struct {
-	Status  StatusCode       `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
+	Status   StatusCode         `json:"status"`
+	Promise  *promise.Promise   `json:"promise,omitempty"`
+	Task     *task.Task         `json:"task,omitempty"`
+	Callback *callback.Callback `json:"callback,omitempty"`
 }
 
 type ReadPromiseResponse struct {
@@ -115,12 +117,13 @@ type HeartbeatLocksResponse struct {
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status StatusCode    `json:"status"`
-	Mesg   *message.Mesg `json:"mesg,omitempty"`
+	Status StatusCode `json:"status"`
+	Task   *task.Task `json:"task,omitempty"`
 }
 
 type CompleteTaskResponse struct {
 	Status StatusCode `json:"status"`
+	Task   *task.Task `json:"task,omitempty"`
 }
 
 type HeartbeatTasksResponse struct {
@@ -197,9 +200,11 @@ func (r *Response) String() string {
 		)
 	case CreatePromise:
 		return fmt.Sprintf(
-			"CreatePromise(status=%d, promise=%s)",
+			"CreatePromise(status=%d, promise=%s, task=%s, callback=%s)",
 			r.CreatePromise.Status,
 			r.CreatePromise.Promise,
+			r.CreatePromise.Task,
+			r.CreatePromise.Callback,
 		)
 	case CompletePromise:
 		return fmt.Sprintf(
@@ -265,14 +270,15 @@ func (r *Response) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(status=%d, mesg=%s)",
+			"ClaimTask(status=%d, task=%s)",
 			r.ClaimTask.Status,
-			r.ClaimTask.Mesg,
+			r.ClaimTask.Task,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(
-			"CompleteTask(status=%d)",
+			"CompleteTask(status=%d, task=%s)",
 			r.CompleteTask.Status,
+			r.CompleteTask.Task,
 		)
 	case HeartbeatTasks:
 		return fmt.Sprintf(

@@ -12,6 +12,7 @@ import (
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	var status t_api.StatusCode
+	var t *task.Task
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -39,7 +40,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
-		t, err := result.Records[0].Task()
+		t, err = result.Records[0].Task()
 		if err != nil {
 			slog.Error("failed to parse task", "req", r, "err", err)
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
@@ -88,7 +89,16 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
+				// set status
 				status = t_api.StatusCreated
+
+				// update task
+				t.ProcessId = nil
+				t.State = task.Completed
+				t.Attempt = 0
+				t.Frequency = 0
+				t.Expiration = 0
+				t.CompletedOn = &completedOn
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to complete. In that case, we should just retry.
@@ -99,11 +109,15 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		status = t_api.StatusTaskNotFound
 	}
 
+	util.Assert(status != 0, "status must be set")
+	util.Assert(status != t_api.StatusCreated || t != nil, "task must be non nil if status created")
+
 	return &t_api.Response{
 		Kind: t_api.CompleteTask,
 		Tags: r.Tags,
 		CompleteTask: &t_api.CompleteTaskResponse{
 			Status: status,
+			Task:   t,
 		},
 	}, nil
 }

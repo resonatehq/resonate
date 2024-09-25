@@ -38,16 +38,24 @@ func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.Status != t_api.StatusCreated || res.Mesg != nil, "message must not be nil if created")
+	util.Assert(res.Status != t_api.StatusCreated || res.Task != nil, "task must not be nil if created")
 
-	promises := map[string]*grpcApi.Promise{}
-	for k, promise := range res.Mesg.Promises {
-		promises[k] = protoPromise(promise)
+	var mesg *grpcApi.Mesg
+	if res.Status == t_api.StatusCreated {
+		promises := map[string]*grpcApi.Promise{}
+		for k, promise := range res.Task.Mesg.Promises {
+			promises[k] = protoPromise(promise)
+		}
+
+		mesg = &grpcApi.Mesg{
+			Type:     string(res.Task.Mesg.Type),
+			Promises: promises,
+		}
 	}
 
 	return &grpcApi.ClaimTaskResponse{
-		Type:     string(res.Mesg.Type),
-		Promises: promises,
+		Claimed: res.Status == t_api.StatusCreated,
+		Mesg:    mesg,
 	}, nil
 }
 
@@ -65,12 +73,14 @@ func (s *server) CompleteTask(ctx context.Context, req *grpcApi.CompleteTaskRequ
 		Counter: int(req.Counter),
 	}
 
-	_, err := s.service.CompleteTask(header, body)
+	res, err := s.service.CompleteTask(header, body)
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.CompleteTaskResponse{}, nil
+	return &grpcApi.CompleteTaskResponse{
+		Completed: res.Status == t_api.StatusCreated,
+	}, nil
 }
 
 func (s *server) HeartbeatTasks(ctx context.Context, req *grpcApi.HeartbeatTasksRequest) (*grpcApi.HeartbeatTasksResponse, error) {

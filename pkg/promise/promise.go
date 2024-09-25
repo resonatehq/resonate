@@ -16,9 +16,9 @@ type Promise struct {
 	Timeout                   int64             `json:"timeout"`
 	IdempotencyKeyForCreate   *idempotency.Key  `json:"idempotencyKeyForCreate,omitempty"`
 	IdempotencyKeyForComplete *idempotency.Key  `json:"idempotencyKeyForComplete,omitempty"`
+	Tags                      map[string]string `json:"tags,omitempty"`
 	CreatedOn                 *int64            `json:"createdOn,omitempty"`
 	CompletedOn               *int64            `json:"completedOn,omitempty"`
-	Tags                      map[string]string `json:"tags,omitempty"`
 	SortId                    int64             `json:"-"` // unexported
 }
 

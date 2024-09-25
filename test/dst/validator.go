@@ -19,10 +19,12 @@ type Validator struct {
 type ResponseValidator func(*Model, int64, int64, *t_api.Request, *t_api.Response) (*Model, error)
 
 func NewValidator(r *rand.Rand, config *Config) *Validator {
-	regexes := make(map[string]*regexp.Regexp, config.Searches*2)
-	for i := 0; i < config.Searches*2; i = i + 2 {
-		regexes[fmt.Sprintf("*%d", i)] = regexp.MustCompile(fmt.Sprintf("^.*%d$", i))
-		regexes[fmt.Sprintf("%d*", i)] = regexp.MustCompile(fmt.Sprintf("^%d.*$", i))
+	regexes := map[string]*regexp.Regexp{}
+	for i := 0; i < 10; i++ {
+		regexes[fmt.Sprintf("p*%d", i)] = regexp.MustCompile(fmt.Sprintf("^p.*%d$", i))
+		regexes[fmt.Sprintf("p%d*", i)] = regexp.MustCompile(fmt.Sprintf("^p%d.*$", i))
+		regexes[fmt.Sprintf("s*%d", i)] = regexp.MustCompile(fmt.Sprintf("^s.*%d$", i))
+		regexes[fmt.Sprintf("s%d*", i)] = regexp.MustCompile(fmt.Sprintf("^s%d.*$", i))
 	}
 
 	return &Validator{
@@ -131,10 +133,24 @@ func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime i
 		if res.CreatePromise.Promise.State != promise.Pending {
 			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.CreatePromise.Promise.State, req.CreatePromise.Id)
 		}
+		if req.CreatePromise.Task != nil && model.tasks.get(res.CreatePromise.Task.Id) != nil {
+			return model, fmt.Errorf("task '%s' exists", res.CreatePromise.Task.Id)
+		}
+		if req.CreatePromise.Callback != nil && model.callbacks.get(res.CreatePromise.Callback.Id) != nil {
+			return model, fmt.Errorf("callback '%s' exists", res.CreatePromise.Callback.Id)
+		}
 
 		// update model state
 		model = model.Copy()
 		model.promises.set(req.CreatePromise.Id, res.CreatePromise.Promise)
+
+		if req.CreatePromise.Task != nil {
+			model.tasks.set(res.CreatePromise.Task.Id, res.CreatePromise.Task)
+		}
+		if req.CreatePromise.Callback != nil {
+			model.callbacks.set(res.CreatePromise.Callback.Id, res.CreatePromise.Callback)
+		}
+
 		return model, nil
 	case t_api.StatusOK:
 		if p == nil {
@@ -487,15 +503,7 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		}
 
 		model = model.Copy()
-		model.tasks.set(req.ClaimTask.Id, &task.Task{
-			Id:         t.Id,
-			ProcessId:  &req.ClaimTask.ProcessId,
-			State:      task.Claimed,
-			Timeout:    t.Timeout,
-			Counter:    req.ClaimTask.Counter,
-			Frequency:  req.ClaimTask.Frequency,
-			Expiration: reqTime + int64(req.ClaimTask.Frequency), // approximation
-		})
+		model.tasks.set(req.ClaimTask.Id, res.ClaimTask.Task)
 		return model, nil
 	case t_api.StatusTaskAlreadyClaimed:
 		if t == nil {
@@ -547,15 +555,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		}
 
 		model = model.Copy()
-		model.tasks.set(req.CompleteTask.Id, &task.Task{
-			Id:         t.Id,
-			ProcessId:  nil,
-			State:      task.Completed,
-			Timeout:    t.Timeout,
-			Counter:    t.Counter,
-			Frequency:  t.Frequency,
-			Expiration: 0,
-		})
+		model.tasks.set(req.CompleteTask.Id, res.CompleteTask.Task)
 		return model, nil
 	case t_api.StatusTaskAlreadyCompleted:
 		if t == nil {
@@ -616,16 +616,9 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 			}
 
 			// we can only update the model for tasks that are unambiguously
-			// heartbeated
-			model.tasks.set(t.Id, &task.Task{
-				Id:         t.Id,
-				ProcessId:  t.ProcessId,
-				State:      task.Claimed,
-				Timeout:    t.Timeout,
-				Counter:    t.Counter,
-				Frequency:  t.Frequency,
-				Expiration: reqTime + int64(t.Frequency), // approximation
-			})
+			// heartbeated, and it's only an approximation
+			t.Expiration = reqTime + int64(t.Frequency)
+			model.tasks.set(t.Id, t)
 		}
 
 		return model, nil

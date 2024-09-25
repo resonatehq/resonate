@@ -14,7 +14,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/receiver"
 )
@@ -179,26 +178,12 @@ func (w *RouterWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 				break
 			}
 
-			mesg, err := json.Marshal(&message.Mesg{
-				Type: message.Invoke,
-				Root: sqe.Submission.Router.Promise.Id,
-				Leaf: sqe.Submission.Router.Promise.Id,
-			})
-			if err != nil {
-				slog.Error("failed to marshal mesg", "err", err)
-				break
-			}
-
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Router,
 				Tags: sqe.Submission.Tags,
 				Router: &t_aio.RouterCompletion{
 					Matched: true,
-					Command: &t_aio.CreateTaskCommand{
-						Recv:    recv,
-						Mesg:    mesg,
-						Timeout: sqe.Submission.Router.Promise.Timeout,
-					},
+					Recv:    recv,
 				},
 			}
 			return cqe

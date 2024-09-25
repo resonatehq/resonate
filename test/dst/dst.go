@@ -37,7 +37,6 @@ type Config struct {
 	Headers            int
 	Data               int
 	Tags               int
-	Searches           int
 	FaultInjection     bool
 	Backchannel        chan interface{}
 }
@@ -580,13 +579,12 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, searches=%d, backchannel=%d)",
+		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
 		d.config.Ids,
 		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,
-		d.config.Searches,
 		cap(d.config.Backchannel),
 	)
 }

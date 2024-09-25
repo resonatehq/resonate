@@ -36,8 +36,16 @@ func (s *server) claimTask(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.Status != t_api.StatusCreated || res.Mesg != nil, "message must not be nil if created")
-	c.JSON(s.code(res.Status), res.Mesg)
+	util.Assert(res.Status != t_api.StatusCreated || (res.Task != nil && res.Task.Mesg != nil), "task and mesg must not be nil if created")
+
+	if res.Status == t_api.StatusCreated {
+		c.JSON(s.code(res.Status), gin.H{
+			"type":     res.Task.Mesg.Type,
+			"promises": res.Task.Mesg.Promises,
+		})
+	} else {
+		c.JSON(s.code(res.Status), nil)
+	}
 }
 
 // COMPLETE

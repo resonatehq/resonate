@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -34,6 +35,15 @@ type CreatePromiseHeader struct {
 	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
+}
+
+type CreatePromiseBody struct {
+	Id       string                       `json:"id" binding:"required"`
+	Param    promise.Value                `json:"param"`
+	Timeout  int64                        `json:"timeout" binding:"required"`
+	Tags     map[string]string            `json:"tags,omitempty"`
+	Task     *t_api.CreatePromiseTask     `json:"task,omitempty"`
+	Callback *t_api.CreatePromiseCallback `json:"callback,omitempty"`
 }
 
 type CompletePromiseHeader struct {

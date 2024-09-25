@@ -40,7 +40,6 @@ func RunDSTCmd() *cobra.Command {
 		headers         = util.NewRangeIntFlag(1, 25)
 		data            = util.NewRangeIntFlag(1, 25)
 		tags            = util.NewRangeIntFlag(1, 25)
-		searches        = util.NewRangeIntFlag(1, 10)
 		backchannelSize = util.NewRangeIntFlag(1, 1000)
 	)
 
@@ -176,7 +175,6 @@ func RunDSTCmd() *cobra.Command {
 				Headers:            headers.Resolve(r),
 				Data:               data.Resolve(r),
 				Tags:               tags.Resolve(r),
-				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
 				Backchannel:        backchannel,
 			})
@@ -213,7 +211,6 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(headers, "headers", "promise header set size")
 	cmd.Flags().Var(data, "data", "promise data set size")
 	cmd.Flags().Var(tags, "tags", "promise tags set size")
-	cmd.Flags().Var(searches, "searches", "search set size")
 	cmd.Flags().Var(backchannelSize, "backchannel-size", "backchannel size")
 
 	// bind config

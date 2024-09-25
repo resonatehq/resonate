@@ -85,7 +85,7 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	var body *promise.Promise
+	var body *service.CreatePromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		err := service.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{

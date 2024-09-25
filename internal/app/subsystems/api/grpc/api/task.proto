@@ -21,6 +21,11 @@ message ClaimTaskRequest {
 }
 
 message ClaimTaskResponse {
+    bool claimed = 1;
+    Mesg mesg = 2;
+}
+
+message Mesg {
     string type = 1;
     map<string, promise.Promise> promises = 2;
 }
@@ -31,7 +36,9 @@ message CompleteTaskRequest {
     string requestId = 3;
 }
 
-message CompleteTaskResponse {}
+message CompleteTaskResponse {
+    bool completed = 1;
+}
 
 message HeartbeatTasksRequest {
     string processId = 1;

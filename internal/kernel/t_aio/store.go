@@ -3,9 +3,9 @@ package t_aio
 import (
 	"fmt"
 
-	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -266,9 +266,9 @@ type AlterPromisesResult struct {
 
 type CreateCallbackCommand struct {
 	PromiseId string
-	Timeout   int64
 	Recv      []byte
-	Mesg      []byte
+	Mesg      *message.Mesg
+	Timeout   int64
 	CreatedOn int64
 }
 
@@ -277,11 +277,6 @@ type DeleteCallbacksCommand struct {
 }
 
 // Callback results
-
-type QueryCallbacksResult struct {
-	RowsReturned int64
-	Records      []*callback.CallbackRecord
-}
 
 type AlterCallbacksResult struct {
 	RowsAffected int64
@@ -355,10 +350,14 @@ type ReadTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
-	Recv      []byte
-	Mesg      []byte
-	Timeout   int64
-	CreatedOn int64
+	Recv       []byte
+	Mesg       *message.Mesg
+	Timeout    int64
+	ProcessId  *string
+	State      task.State
+	Frequency  int
+	Expiration int64
+	CreatedOn  int64
 }
 
 type CreateTasksCommand struct {
@@ -393,6 +392,7 @@ type QueryTasksResult struct {
 
 type AlterTasksResult struct {
 	RowsAffected int64
+	LastInsertId string
 }
 
 // Lock commands
