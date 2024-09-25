@@ -5,7 +5,7 @@ from typing import Any, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
-from resonate.actions import Invoke, Sleep
+from resonate.actions import Invocation, Sleep
 from resonate.result import Err, Ok, Result
 
 T = TypeVar("T")
@@ -16,12 +16,12 @@ class Promise(Generic[T]):
     def __init__(
         self,
         promise_id: str,
-        action: Invoke | Sleep,
+        action: Invocation | Sleep,
     ) -> None:
         self.promise_id = promise_id
         self.f = Future[T]()
         self.action = action
-        if isinstance(action, Invoke):
+        if isinstance(action, Invocation):
             self.durable = action.opts.durable
         elif isinstance(action, Sleep):
             raise NotImplementedError

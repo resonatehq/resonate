@@ -10,11 +10,9 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 from typing_extensions import ParamSpec, Self, assert_never
 
 from resonate import utils
-from resonate.actions import Sleep
+from resonate.actions import Call, DeferredInvocation, Invocation, Sleep
 from resonate.context import (
-    Call,
     Context,
-    Invoke,
 )
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
@@ -125,7 +123,7 @@ class Scheduler:
         tracing_adapter: IAdapter | None = None,
         processor_threads: int | None = None,
     ) -> None:
-        self._stg_queue = Queue[tuple[Invoke, Promise[Any], Context]]()
+        self._stg_queue = Queue[tuple[Invocation, Promise[Any], Context]]()
         self._completion_queue = Queue[_CQE[Any]]()
         self._submission_queue = Queue[_SQE[Any]]()
 
@@ -154,6 +152,9 @@ class Scheduler:
         self._durable_promise_storage = durable_promise_storage
         self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
 
+        # Note: There's a potential race condition with this attribute.
+        # since we do scheduler.run() on both application thread and scheduler thread
+        # there's a risk of overwriting options.
         self._top_level_options: Options | None = None
 
         self._worker_thread = Thread(target=self._run, daemon=True)
@@ -169,9 +170,6 @@ class Scheduler:
         return self
 
     def enqueue_cqe(self, sqe: _SQE[T], value: Result[T, Exception]) -> None:
-        assert (
-            self._top_level_options is None
-        ), "Do not set options before running this."
         self._completion_queue.put(_CQE[Any](sqe=sqe, fn_result=value))
         self._signal()
 
@@ -240,13 +238,13 @@ class Scheduler:
             return self._emphemeral_promise_memo.pop(promise_id)[-1]
         return self._emphemeral_promise_memo[promise_id][-1]
 
-    def _create_promise(self, ctx: Context, action: Invoke | Sleep) -> Promise[Any]:
+    def _create_promise(self, ctx: Context, action: Invocation | Sleep) -> Promise[Any]:
         p = Promise[Any](promise_id=ctx.ctx_id, action=action)
         assert (
             p.promise_id not in self._emphemeral_promise_memo
         ), "There should not be a new promise with same promise id."
         self._emphemeral_promise_memo[p.promise_id] = (p, ctx)
-        if isinstance(action, Invoke):
+        if isinstance(action, Invocation):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
             if isinstance(action.exec_unit, FnOrCoroutine):
@@ -310,7 +308,7 @@ class Scheduler:
             return self._emphemeral_promise_memo[promise_id][0]
 
         assert self._top_level_options.durable, "Top lvl invocation must be durable."
-        top_lvl = Invoke(
+        top_lvl = Invocation(
             FnOrCoroutine(coro, *args, **kwargs),
             opts=self._top_level_options,
         )
@@ -345,7 +343,7 @@ class Scheduler:
             )
 
         else:
-            assert isinstance(promise.action, Invoke)
+            assert isinstance(promise.action, Invocation)
             self._processor.enqueue(
                 _SQE(
                     promise_id=promise.promise_id,
@@ -510,7 +508,7 @@ class Scheduler:
             )
         )
 
-    def _advance_runnable_span(  # noqa: PLR0912
+    def _advance_runnable_span(  # noqa: C901, PLR0912
         self, runnable: Runnable[Any], *, was_awaited: bool
     ) -> None:
         assert isgenerator(
@@ -552,7 +550,9 @@ class Scheduler:
             del runnable
 
         elif isinstance(yieldable_or_final_value, Call):
-            p = self._process_invokation(yieldable_or_final_value.to_invoke(), runnable)
+            p = self._process_invocation(
+                yieldable_or_final_value.to_invocation(), runnable
+            )
             assert (
                 p not in self._awaitables
             ), "Since it's a call it should be a promise without dependants"
@@ -564,8 +564,8 @@ class Scheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, Invoke):
-            p = self._process_invokation(yieldable_or_final_value, runnable)
+        elif isinstance(yieldable_or_final_value, Invocation):
+            p = self._process_invocation(yieldable_or_final_value, runnable)
             self._add_coro_to_runnables(
                 runnable.coro_and_promise, Ok(p), was_awaited=False
             )
@@ -582,11 +582,23 @@ class Scheduler:
 
         elif isinstance(yieldable_or_final_value, Sleep):
             raise NotImplementedError
+        elif isinstance(yieldable_or_final_value, DeferredInvocation):
+            deferred_p: Promise[Any] = self.with_options(
+                retry_policy=yieldable_or_final_value.opts.retry_policy
+            ).run(
+                yieldable_or_final_value.promise_id,
+                yieldable_or_final_value.coro.exec_unit,
+                *yieldable_or_final_value.coro.args,
+                **yieldable_or_final_value.coro.kwargs,
+            )
+            self._add_coro_to_runnables(
+                runnable.coro_and_promise, Ok(deferred_p), was_awaited=False
+            )
         else:
             assert_never(yieldable_or_final_value)
 
-    def _process_invokation(
-        self, invokation: Invoke, runnable: Runnable[Any]
+    def _process_invocation(
+        self, invokation: Invocation, runnable: Runnable[Any]
     ) -> Promise[Any]:
         child_ctx = runnable.coro_and_promise.ctx.new_child(
             ctx_id=invokation.opts.promise_id,

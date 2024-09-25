@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+
 from resonate.encoders import Base64Encoder, ErrorEncoder, JsonEncoder
 from resonate.errors import ResonateError
 

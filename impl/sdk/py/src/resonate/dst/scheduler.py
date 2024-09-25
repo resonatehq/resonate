@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Union, final
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
 from resonate import utils
-from resonate.actions import Call, Invoke, Sleep
+from resonate.actions import Call, DeferredInvocation, Invocation, Sleep
 from resonate.batching import CmdBuffer
 from resonate.contants import CWD
 from resonate.context import (
@@ -97,7 +97,7 @@ class DSTScheduler:
         | None,
         durable_promise_storage: IPromiseStore,
     ) -> None:
-        self._stg_queue: list[tuple[Invoke, str]] = []
+        self._stg_queue: list[tuple[Invocation, str]] = []
         self._runnable_coros: RunnableCoroutines = []
         self._awatiables: Awaitables = {}
         self._runnable_functions: RunnableFunctions = []
@@ -217,7 +217,7 @@ class DSTScheduler:
             promise_id not in self._emphemeral_promise_memo
         ), "There's already a promise with the same id"
 
-        top_lvl = Invoke(
+        top_lvl = Invocation(
             FnOrCoroutine(coro, *args, **kwargs),
             opts=opts,
         )
@@ -281,13 +281,13 @@ class DSTScheduler:
             )
         )
 
-    def _create_promise(self, ctx: Context, action: Invoke | Sleep) -> Promise[Any]:
+    def _create_promise(self, ctx: Context, action: Invocation | Sleep) -> Promise[Any]:
         p = Promise[Any](ctx.ctx_id, action)
         assert (
             p.promise_id not in self._emphemeral_promise_memo
         ), "There should not be a new promise with same promise id."
         self._emphemeral_promise_memo[p.promise_id] = (p, ctx)
-        if isinstance(action, Invoke):
+        if isinstance(action, Invocation):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
             if isinstance(action.exec_unit, FnOrCoroutine):
@@ -353,8 +353,8 @@ class DSTScheduler:
                 v = Ok(json.loads(durable_promise_record.value.data))
         return v
 
-    def _move_next_top_lvl_invoke_to_runnables(
-        self, top_lvl: Invoke, promise_id: str
+    def _move_next_top_lvl_invocation_to_runnables(
+        self, top_lvl: Invocation, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
         root_ctx = Context(
@@ -410,7 +410,7 @@ class DSTScheduler:
                 ), "All promises should be resolved."
                 assert num_top_lvl_invocations == len(
                     promises
-                ), "There should be one resolved promise per top level invoke"
+                ), "There should be one resolved promise per top level invocation"
 
                 if self._log_file is not None:
                     self.dump(file=self._log_file)
@@ -480,7 +480,7 @@ class DSTScheduler:
                 ## This simulates the processor in the production scheduler.
                 fn_wrapper, promise = self._get_random_element(self._runnable_functions)
                 assert not promise.done(), "Only unresolve promises can be found here."
-                assert isinstance(promise.action, Invoke)
+                assert isinstance(promise.action, Invocation)
 
                 v = (
                     _safe_run(self._mocks[fn_wrapper.fn])
@@ -554,8 +554,8 @@ class DSTScheduler:
             return self._emphemeral_promise_memo.pop(promise_id)[-1]
         return self._emphemeral_promise_memo[promise_id][-1]
 
-    def _process_invokation(
-        self, invokation: Invoke, runnable: Runnable[Any]
+    def _process_invocation(
+        self, invokation: Invocation, runnable: Runnable[Any]
     ) -> Promise[Any]:
         child_ctx = runnable.coro_and_promise.ctx.new_child(
             ctx_id=invokation.opts.promise_id
@@ -620,7 +620,9 @@ class DSTScheduler:
             )
             self._unblock_coros_waiting_on_promise(p=runnable.coro_and_promise.prom)
         elif isinstance(yieldable_or_final_value, Call):
-            p = self._process_invokation(yieldable_or_final_value.to_invoke(), runnable)
+            p = self._process_invocation(
+                yieldable_or_final_value.to_invocation(), runnable
+            )
             assert (
                 p not in self._awatiables
             ), "Since it's a call it should be a promise without dependants"
@@ -633,8 +635,8 @@ class DSTScheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, Invoke):
-            p = self._process_invokation(
+        elif isinstance(yieldable_or_final_value, Invocation):
+            p = self._process_invocation(
                 invokation=yieldable_or_final_value, runnable=runnable
             )
             self._add_coro_to_runnables(
@@ -650,7 +652,7 @@ class DSTScheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, Sleep):
+        elif isinstance(yieldable_or_final_value, (Sleep, DeferredInvocation)):
             raise NotImplementedError
         else:
             assert_never(yieldable_or_final_value)
@@ -688,7 +690,7 @@ class DSTScheduler:
         promises: list[Promise[Any]] = []
         for top_lvl, promise_id in self._stg_queue:
             promises.append(
-                self._move_next_top_lvl_invoke_to_runnables(top_lvl, promise_id)
+                self._move_next_top_lvl_invocation_to_runnables(top_lvl, promise_id)
             )
             self._run()
 
@@ -698,7 +700,7 @@ class DSTScheduler:
         promises: list[Promise[Any]] = []
         for top_lvl, promise_id in self._stg_queue:
             promises.append(
-                self._move_next_top_lvl_invoke_to_runnables(top_lvl, promise_id)
+                self._move_next_top_lvl_invocation_to_runnables(top_lvl, promise_id)
             )
         self._run()
         return promises

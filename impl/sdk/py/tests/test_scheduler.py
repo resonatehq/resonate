@@ -7,6 +7,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
 from resonate import scheduler
 from resonate.retry_policy import (
     Linear,
@@ -58,7 +59,7 @@ def _promise_storages() -> list[IPromiseStore]:
     return stores
 
 
-@pytest.mark.skip()
+@pytest.mark.skip
 @pytest.mark.parametrize("store", _promise_storages())
 def test_coro_return_promise(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(
@@ -128,7 +129,7 @@ def sleep_coroutine(
     return name
 
 
-@pytest.mark.skip()
+@pytest.mark.skip
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sleep_on_coroutines(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(
@@ -255,3 +256,20 @@ def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> N
     )
     with pytest.raises(TypeError):
         p.result()
+
+
+def coro_with_deferred_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
+    _ = yield ctx.deferred("deferred-invoke", foo, name="A", sleep_time=0.5)
+    return 1
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_deferred_invoke(store: IPromiseStore) -> None:
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    start = time.time()
+    p: Promise[int] = s.run("test-deferred-invoke", coro_with_deferred_invoke)
+    assert p.result() == 1
+    assert time.time() - start <= 0.1 + 0.1
+
+    def_p = s.run("deferred-invoke", foo, name="B", sleep_time=120)
+    assert def_p.result() == "A"

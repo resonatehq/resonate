@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from typing_extensions import TypeVar
+
 import resonate
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.context import Command
@@ -32,7 +34,6 @@ from resonate.storage import (
 )
 from resonate.testing import dst
 from resonate.time import now
-from typing_extensions import TypeVar
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -160,7 +161,7 @@ def test_failing_call(store: IPromiseStore) -> None:
     assert (not p.success() for p in promises)
 
 
-@pytest.mark.skip()
+@pytest.mark.skip
 @pytest.mark.parametrize("store", _promise_storages())
 def test_batching_using_call(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
@@ -207,7 +208,7 @@ def test_batching_using_call(store: IPromiseStore) -> None:
     ]
 
 
-@pytest.mark.skip()
+@pytest.mark.skip
 @pytest.mark.parametrize("store", _promise_storages())
 def test_batching(store: IPromiseStore) -> None:
     s: DSTScheduler = dst(seeds=[1], durable_promise_storage=store)[0]
@@ -254,7 +255,7 @@ def test_batching(store: IPromiseStore) -> None:
     ]
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_pin_seed(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
@@ -266,7 +267,7 @@ def test_pin_seed(store: IPromiseStore) -> None:
     assert s.seed == int(os.environ.pop(ENV_VARIABLE_PIN_SEED))
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_mock_function(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
@@ -279,7 +280,7 @@ def test_mock_function(store: IPromiseStore) -> None:
     assert all(p.result() == 23 for p in promises)  # noqa: PLR2004
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_dst_scheduler(store: IPromiseStore) -> None:
     for _ in range(100):
@@ -313,7 +314,7 @@ def test_dst_scheduler(store: IPromiseStore) -> None:
         ], f"Test fails when seed it {seed}"
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_dst_determinitic(store: IPromiseStore) -> None:
     seed = random.randint(1, 100)  # noqa: S311
@@ -423,7 +424,7 @@ def test_dst_determinitic(store: IPromiseStore) -> None:
     assert expected_events != different_seed_s.get_events()
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_failing_asserting(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
@@ -437,7 +438,7 @@ def test_failing_asserting(store: IPromiseStore) -> None:
         p[0].result()
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("scheduler", resonate.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
     scheduler.add(
@@ -459,7 +460,7 @@ def test_dst_framework(scheduler: DSTScheduler) -> None:
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_failure(store: IPromiseStore) -> None:
     scheduler = dst(
@@ -488,7 +489,7 @@ def test_failure(store: IPromiseStore) -> None:
     assert scheduler.current_failures == 0
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sequential_retry(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]
@@ -574,7 +575,7 @@ def test_sequential_retry(store: IPromiseStore) -> None:
     ]
 
 
-@pytest.mark.dst()
+@pytest.mark.dst
 @pytest.mark.parametrize("store", _promise_storages())
 def test_sequential(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]

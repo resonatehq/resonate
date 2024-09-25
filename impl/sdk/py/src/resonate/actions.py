@@ -8,6 +8,7 @@ from typing_extensions import ParamSpec, Self
 from resonate.options import Options
 
 if TYPE_CHECKING:
+    from resonate.dataclasses import FnOrCoroutine
     from resonate.retry_policy import RetryPolicy
     from resonate.typing import ExecutionUnit
 
@@ -32,13 +33,32 @@ class Call:
         )
         return self
 
-    def to_invoke(self) -> Invoke:
-        return Invoke(self.exec_unit, opts=self.opts)
+    def to_invocation(self) -> Invocation:
+        return Invocation(self.exec_unit, opts=self.opts)
 
 
 @final
 @dataclass
-class Invoke:
+class DeferredInvocation:
+    """
+    Dataclass that contains all required information to do a
+    deferred invocation.
+    """
+
+    promise_id: str
+    coro: FnOrCoroutine
+    opts: Options = field(default=Options())
+
+    def with_options(self, *, retry_policy: RetryPolicy | None = None) -> Self:
+        self.opts = Options(
+            durable=True, promise_id=self.promise_id, retry_policy=retry_policy
+        )
+        return self
+
+
+@final
+@dataclass
+class Invocation:
     exec_unit: ExecutionUnit
     opts: Options = field(default=Options())
 
