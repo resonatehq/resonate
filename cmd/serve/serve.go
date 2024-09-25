@@ -3,7 +3,7 @@ package serve
 import (
 	"fmt"
 	"log/slog"
-	netHttp "net/http"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -59,7 +59,7 @@ func ServeCmd() *cobra.Command {
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(aio)
+			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics)
 			if err != nil {
 				return err
 			}
@@ -105,10 +105,10 @@ func ServeCmd() *cobra.Command {
 			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
 
 			// metrics server
-			mux := netHttp.NewServeMux()
+			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 
-			metricsServer := &netHttp.Server{
+			metricsServer := &http.Server{
 				Addr:    fmt.Sprintf(":%d", config.MetricsPort),
 				Handler: mux,
 			}
@@ -118,7 +118,7 @@ func ServeCmd() *cobra.Command {
 					slog.Info("starting metrics server", "addr", metricsServer.Addr)
 
 					if err := metricsServer.ListenAndServe(); err != nil {
-						if err == netHttp.ErrServerClosed {
+						if err == http.ErrServerClosed {
 							return
 						}
 

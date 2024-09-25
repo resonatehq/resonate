@@ -1,11 +1,7 @@
 package http
 
 import (
-	"errors"
-	"net/http"
-
 	"github.com/gin-gonic/gin"
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -16,32 +12,32 @@ import (
 func (s *server) claimTask(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.ClaimTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.ClaimTask(&header, body)
+	res, err := s.service.ClaimTask(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	if resp.Status == t_api.StatusCreated {
-		util.Assert(resp.Task != nil, "task must be non nil")
-		c.Data(resp.Status.HTTP(), "application/json", resp.Task.Message.Data)
-	} else {
-		c.JSON(resp.Status.HTTP(), nil)
-	}
+	util.Assert(res.Status != t_api.StatusCreated || res.Mesg != nil, "message must not be nil if created")
+	c.JSON(s.code(res.Status), res.Mesg)
 }
 
 // COMPLETE
@@ -49,27 +45,31 @@ func (s *server) claimTask(c *gin.Context) {
 func (s *server) completeTask(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.CompleteTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.CompleteTask(&header, body)
+	res, err := s.service.CompleteTask(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), nil)
+	c.JSON(s.code(res.Status), nil)
 }
 
 // HEARTBEAT
@@ -77,25 +77,31 @@ func (s *server) completeTask(c *gin.Context) {
 func (s *server) heartbeatTasks(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.HeartbeatTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.HeartbeatTasks(&header, body)
+	res, err := s.service.HeartbeatTasks(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), nil)
+	c.JSON(s.code(res.Status), gin.H{
+		"tasksAffected": res.TasksAffected,
+	})
 }

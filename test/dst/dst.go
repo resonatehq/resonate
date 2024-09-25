@@ -117,16 +117,16 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		time := d.Time(t)
 
 		for _, req := range d.generator.Generate(r, time, d.config.ReqsPerTick()) {
-			tid := strconv.FormatInt(i, 10)
+			id := strconv.FormatInt(i, 10)
 			req := req
 			reqTime := time
 
 			req.Tags = map[string]string{
-				"request_id": tid,
-				"name":       req.Kind.String(),
+				"id":   id,
+				"name": req.Kind.String(),
 			}
 
-			api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
 				Callback: func(res *t_api.Response, err error) {
 					resTime := d.Time(t)
@@ -135,7 +135,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					}
 
 					// log
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "tid", tid, "req", req, "res", res, "err", err)
+					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
 
 					// extract cursors for subsequent requests
 					if err == nil {
@@ -332,7 +332,7 @@ func (d *DST) Model() porcupine.Model {
 			case Op:
 				var status int
 				if res.err != nil {
-					var err *t_api.ResonateError
+					var err *t_api.Error
 					if errors.As(res.err, &err) {
 						status = int(err.Code())
 					}
@@ -340,7 +340,7 @@ func (d *DST) Model() porcupine.Model {
 					status = int(res.res.Status())
 				}
 
-				return fmt.Sprintf("%s | %s → %d", req.req.Id(), req.req, status)
+				return fmt.Sprintf("%s | %s → %d", req.req.Tags["id"], req.req, status)
 			case Bc:
 				return fmt.Sprintf("Backchannel | %s", req.bc.Task)
 			default:
@@ -550,20 +550,20 @@ func (d *DST) Model() porcupine.Model {
 
 func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response, err error) (*Model, error) {
 	if err != nil {
-		var resErr *t_api.ResonateError
-		if !errors.As(err, &resErr) {
+		var error *t_api.Error
+		if !errors.As(err, &error) {
 			return model, fmt.Errorf("unexpected error '%v'", err)
 		}
 
-		switch resErr.Code() {
-		case t_api.ErrAPISubmissionQueueFull:
+		switch error.Code() {
+		case t_api.StatusAPISubmissionQueueFull:
 			return model, nil
-		case t_api.ErrAIOSubmissionQueueFull:
+		case t_api.StatusAIOSubmissionQueueFull:
 			return model, nil
-		case t_api.ErrSchedulerQueueFull:
+		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		default:
-			return model, fmt.Errorf("unexpected resonate error '%v'", resErr)
+			return model, fmt.Errorf("unexpected resonate error '%v'", error)
 		}
 	}
 

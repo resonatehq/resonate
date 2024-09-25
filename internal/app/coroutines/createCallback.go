@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"encoding/json"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -8,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/callback"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -34,7 +36,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -48,7 +50,18 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+		}
+
+		mesg, err := json.Marshal(&message.Mesg{
+			Type: message.Resume,
+			Root: r.CreateCallback.RootPromiseId,
+			Leaf: r.CreateCallback.PromiseId,
+		})
+
+		if err != nil {
+			slog.Error("failed to marshal message", "err", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if p.State == promise.Pending {
@@ -63,8 +76,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
 									PromiseId: r.CreateCallback.PromiseId,
-									Message:   r.CreateCallback.Message,
 									Timeout:   r.CreateCallback.Timeout,
+									Recv:      r.CreateCallback.Recv,
+									Mesg:      mesg,
 									CreatedOn: createdOn,
 								},
 							},
@@ -75,7 +89,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			if err != nil {
 				slog.Error("failed to create callback", "req", r, "err", err)
-				return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to create callback", err)
+				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
@@ -92,10 +106,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					CreateCallback: &t_api.CreateCallbackResponse{
 						Status: t_api.StatusCreated,
 						Callback: &callback.Callback{
-							Id:        result.LastInsertId,
-							PromiseId: r.CreateCallback.PromiseId,
-							Message:   r.CreateCallback.Message,
-							CreatedOn: createdOn,
+							Id:            result.LastInsertId,
+							PromiseId:     r.CreateCallback.PromiseId,
+							RootPromiseId: r.CreateCallback.RootPromiseId,
+							Recv:          r.CreateCallback.Recv,
+							CreatedOn:     createdOn,
 						},
 						Promise: p,
 					},
@@ -108,7 +123,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				Kind: t_api.CreateCallback,
 				Tags: r.Tags,
 				CreateCallback: &t_api.CreateCallbackResponse{
-					Status:  t_api.ForbiddenStatus(p.State),
+					// ok indicates that the promise is completed and the process
+					// may continue
+					Status:  t_api.StatusOK,
 					Promise: p,
 				},
 			}

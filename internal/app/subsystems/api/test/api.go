@@ -51,11 +51,7 @@ func (a *API) Signal(cancel <-chan interface{}) <-chan interface{} {
 	panic("not implemented")
 }
 
-func (a *API) SQ() <-chan *bus.SQE[t_api.Request, t_api.Response] {
-	panic("not implemented")
-}
-
-func (a *API) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
+func (a *API) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// assert
 	assert.Equal(a.t, a.req, sqe.Submission)
 
@@ -63,6 +59,14 @@ func (a *API) Enqueue(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	go sqe.Callback(a.res, nil)
 }
 
-func (a *API) Dequeue(int) []*bus.SQE[t_api.Request, t_api.Response] {
+func (a *API) DequeueSQE(int) []*bus.SQE[t_api.Request, t_api.Response] {
 	panic("not implemented")
+}
+
+func (a *API) EnqueueCQE(*bus.CQE[t_api.Request, t_api.Response]) {
+	panic("not implemented")
+}
+
+func (a *API) DequeueCQE(cq <-chan *bus.CQE[t_api.Request, t_api.Response]) *bus.CQE[t_api.Request, t_api.Response] {
+	return <-cq
 }

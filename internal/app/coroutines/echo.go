@@ -15,7 +15,10 @@ func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_ap
 		},
 	}
 
-	completion, _ := gocoro.YieldAndAwait(c, submission)
+	completion, err := gocoro.YieldAndAwait(c, submission)
+	if err != nil {
+		return nil, t_api.NewError(t_api.StatusAIOEchoError, err)
+	}
 
 	return &t_api.Response{
 		Kind: t_api.Echo,

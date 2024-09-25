@@ -7,6 +7,8 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
+	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
@@ -14,8 +16,8 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
 	util.Assert(r.ClaimTask.Frequency > 0, "frequency must be greater than 0")
 
-	var status t_api.ResponseStatus
-	var t *task.Task
+	var status t_api.StatusCode
+	var mesg *message.Mesg
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -35,7 +37,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	})
 	if err != nil {
 		slog.Error("failed to read task", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read task", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -43,10 +45,10 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
-		t, err = result.Records[0].Task()
+		t, err := result.Records[0].Task()
 		if err != nil {
-			slog.Error("failed to parse task record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse task record", err)
+			slog.Error("failed to parse task", "req", r, "err", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if t.State == task.Claimed {
@@ -83,7 +85,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 			})
 			if err != nil {
 				slog.Error("failed to claim task", "req", r, "err", err)
-				return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to claim task", err)
+				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
@@ -91,20 +93,59 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				status = t_api.StatusCreated
-				t = &task.Task{
-					Id:          r.ClaimTask.Id,
-					ProcessId:   &r.ClaimTask.ProcessId,
-					State:       task.Claimed,
-					Message:     t.Message,
-					Timeout:     t.Timeout,
-					Counter:     r.ClaimTask.Counter,
-					Attempt:     t.Attempt,
-					Frequency:   r.ClaimTask.Frequency,
-					Expiration:  expiration,
-					CreatedOn:   t.CreatedOn,
-					CompletedOn: t.CompletedOn,
+				commands := []*t_aio.Command{{
+					Kind:        t_aio.ReadPromise,
+					ReadPromise: &t_aio.ReadPromiseCommand{Id: t.Mesg.Root},
+				}}
+
+				if t.Mesg.Type == message.Resume {
+					commands = append(commands, &t_aio.Command{
+						Kind:        t_aio.ReadPromise,
+						ReadPromise: &t_aio.ReadPromiseCommand{Id: t.Mesg.Leaf},
+					})
 				}
+
+				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+					Kind: t_aio.Store,
+					Tags: r.Tags,
+					Store: &t_aio.StoreSubmission{
+						Transaction: &t_aio.Transaction{
+							Commands: commands,
+						},
+					},
+				})
+
+				if err != nil {
+					slog.Error("failed to read promises", "req", r, "err", err)
+					return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+				}
+
+				util.Assert(completion.Store != nil, "completion must not be nil")
+				util.Assert(len(completion.Store.Results) == len(commands), "number of results must match number of commands")
+				util.Assert(completion.Store.Results[0].ReadPromise != nil, "result must not be nil")
+				util.Assert(t.Mesg.Type != message.Resume || completion.Store.Results[1].ReadPromise != nil, "if resume, result must not be nil")
+
+				var root, leaf *promise.Promise
+
+				if completion.Store.Results[0].ReadPromise.RowsReturned == 1 {
+					root, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
+					if err != nil {
+						slog.Error("failed to parse promises", "err", err)
+					}
+				}
+
+				if t.Mesg.Type == message.Resume && completion.Store.Results[1].ReadPromise.RowsReturned == 1 {
+					leaf, err = completion.Store.Results[1].ReadPromise.Records[0].Promise()
+					if err != nil {
+						slog.Error("failed to parse promises", "err", err)
+					}
+				}
+
+				// set promises for response
+				t.Mesg.SetPromises(root, leaf)
+
+				status = t_api.StatusCreated
+				mesg = t.Mesg
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to claim. In that case, we should just retry.
@@ -116,14 +157,14 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	}
 
 	util.Assert(status != 0, "status must be set")
-	util.Assert(status != t_api.StatusCreated || t != nil, "task must be non nil if status created")
+	util.Assert(status != t_api.StatusCreated || mesg != nil, "mesg must be non nil if status created")
 
 	return &t_api.Response{
 		Kind: t_api.ClaimTask,
 		Tags: r.Tags,
 		ClaimTask: &t_api.ClaimTaskResponse{
 			Status: status,
-			Task:   t,
+			Mesg:   mesg,
 		},
 	}, nil
 }

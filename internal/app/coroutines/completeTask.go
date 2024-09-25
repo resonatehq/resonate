@@ -11,8 +11,7 @@ import (
 )
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	var status t_api.ResponseStatus
-	var t *task.Task
+	var status t_api.StatusCode
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -32,7 +31,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	})
 	if err != nil {
 		slog.Error("failed to read task", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read task", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -40,10 +39,10 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
-		t, err = result.Records[0].Task()
+		t, err := result.Records[0].Task()
 		if err != nil {
-			slog.Error("failed to parse task record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse task record", err)
+			slog.Error("failed to parse task", "req", r, "err", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		if t.State == task.Completed || t.State == task.Timedout {
@@ -81,7 +80,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			})
 			if err != nil {
 				slog.Error("failed to complete task", "req", r, "err", err)
-				return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to complete task", err)
+				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
@@ -90,19 +89,6 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 			if result.RowsAffected == 1 {
 				status = t_api.StatusCreated
-				t = &task.Task{
-					Id:          r.CompleteTask.Id,
-					ProcessId:   nil,
-					State:       task.Completed,
-					Message:     t.Message,
-					Timeout:     t.Timeout,
-					Counter:     r.CompleteTask.Counter,
-					Attempt:     0,
-					Frequency:   0,
-					Expiration:  0,
-					CreatedOn:   t.CreatedOn,
-					CompletedOn: &completedOn,
-				}
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to complete. In that case, we should just retry.
@@ -118,7 +104,6 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		Tags: r.Tags,
 		CompleteTask: &t_api.CompleteTaskResponse{
 			Status: status,
-			Task:   t,
 		},
 	}, nil
 }

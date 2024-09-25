@@ -1,6 +1,9 @@
 package service
 
 import (
+	"encoding/json"
+
+	"github.com/google/uuid"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -9,6 +12,14 @@ import (
 
 type Header struct {
 	RequestId string `header:"request-id"`
+}
+
+func (h *Header) Id() string {
+	if h.RequestId == "" {
+		h.RequestId = uuid.New().String()
+	}
+
+	return h.RequestId
 }
 
 type SearchPromisesParams struct {
@@ -20,13 +31,13 @@ type SearchPromisesParams struct {
 }
 
 type CreatePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
 }
 
 type CompletePromiseHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key,omitempty"`
 	Strict         bool             `header:"strict"`
 }
@@ -39,10 +50,10 @@ type CompletePromiseBody struct {
 // CALLBACKS
 
 type CreateCallbackBody struct {
-	PromiseId string `json:"promiseId" binding:"required"`
-	Timeout   int64  `json:"timeout" binding:"required"`
-	Recv      string `json:"recv" binding:"required"`
-	Data      []byte `json:"data" binding:"required"`
+	PromiseId     string          `json:"promiseId" binding:"required"`
+	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
+	Timeout       int64           `json:"timeout" binding:"required"`
+	Recv          json.RawMessage `json:"recv" binding:"required"`
 }
 
 // SCHEDULES
@@ -55,7 +66,7 @@ type SearchSchedulesParams struct {
 }
 
 type CreateScheduleHeader struct {
-	RequestId      string           `header:"request-id"`
+	Header
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 }
 

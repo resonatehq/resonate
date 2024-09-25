@@ -1,9 +1,6 @@
 package service
 
 import (
-	"errors"
-
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -11,7 +8,7 @@ import (
 
 // ACQUIRE
 
-func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, error) {
+func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.AcquireLockResponse, *Error) {
 	util.Assert(body.ResourceId != "", "lock.resource_id must be provided")
 	util.Assert(body.ExecutionId != "", "lock.execution_id must be provided")
 	util.Assert(body.ProcessId != "", "lock.process_id must be provided")
@@ -24,72 +21,35 @@ func (s *Service) AcquireLock(header *Header, body *AcquireLockBody) (*t_api.Acq
 		ExpiryInMilliseconds: body.ExpiryInMilliseconds,
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:        t_api.AcquireLock,
-			Tags:        s.tags(header.RequestId, "AcquireLock"),
+			Kind: t_api.AcquireLock,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "AcquireLock",
+				"protocol": s.protocol,
+			},
 			AcquireLock: acquireLock,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.AcquireLock != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.AcquireLock.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.AcquireLock.Status)
-	}
-
-	return cqe.Completion.AcquireLock, nil
-}
-
-// HEARTBEAT
-
-func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, error) {
-	util.Assert(body.ProcessId != "", "process_id must be provided")
-
-	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
-		ProcessId: body.ProcessId,
-	}
-
-	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
-
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
-		Submission: &t_api.Request{
-			Kind:           t_api.HeartbeatLocks,
-			Tags:           s.tags(header.RequestId, "HeartbeatLocks"),
-			HeartbeatLocks: HeartbeatLocks,
-		},
-	})
-
-	cqe := <-cq
-	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
-	}
-
-	util.Assert(cqe.Completion.HeartbeatLocks != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.HeartbeatLocks.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.HeartbeatLocks.Status)
-	}
-
-	return cqe.Completion.HeartbeatLocks, nil
+	return cqe.Completion.AcquireLock, RequestError(cqe.Completion.Status())
 }
 
 // RELEASE
 
-func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.ReleaseLockResponse, error) {
+func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.ReleaseLockResponse, *Error) {
 	util.Assert(body.ResourceId != "", "resource_id must be provided")
 	util.Assert(body.ExecutionId != "", "execution_id must be provided")
 
@@ -98,29 +58,63 @@ func (s *Service) ReleaseLock(header *Header, body *ReleaseLockBody) (*t_api.Rel
 		ExecutionId: body.ExecutionId,
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:        t_api.ReleaseLock,
-			Tags:        s.tags(header.RequestId, "ReleaseLock"),
+			Kind: t_api.ReleaseLock,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReleaseLock",
+				"protocol": s.protocol,
+			},
 			ReleaseLock: releaseLock,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ReleaseLock != nil, "response must not be nil")
+	return cqe.Completion.ReleaseLock, RequestError(cqe.Completion.Status())
+}
 
-	if api.IsRequestError(cqe.Completion.ReleaseLock.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ReleaseLock.Status)
+// HEARTBEAT
+
+func (s *Service) Heartbeat(header *Header, body *HeartbeatBody) (*t_api.HeartbeatLocksResponse, *Error) {
+	util.Assert(body.ProcessId != "", "process_id must be provided")
+
+	HeartbeatLocks := &t_api.HeartbeatLocksRequest{
+		ProcessId: body.ProcessId,
 	}
 
-	return cqe.Completion.ReleaseLock, nil
+	id := header.Id()
+	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
+
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
+		Submission: &t_api.Request{
+			Kind: t_api.HeartbeatLocks,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "HeartbeatLocks",
+				"protocol": s.protocol,
+			},
+			HeartbeatLocks: HeartbeatLocks,
+		},
+	})
+
+	cqe := s.api.DequeueCQE(cq)
+	if cqe.Error != nil {
+		return nil, ServerError(cqe.Error)
+	}
+
+	util.Assert(cqe.Completion.HeartbeatLocks != nil, "response must not be nil")
+	return cqe.Completion.HeartbeatLocks, RequestError(cqe.Completion.Status())
 }

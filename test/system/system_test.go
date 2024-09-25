@@ -23,7 +23,7 @@ func TestSystemLoop(t *testing.T) {
 	api := api.New(100, metrics)
 	aio := aio.New(100, metrics)
 
-	echo, err := echo.New(aio, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
+	echo, err := echo.New(aio, metrics, &echo.Config{Size: 100, BatchSize: 1, Workers: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,10 +53,10 @@ func TestSystemLoop(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		data := strconv.Itoa(i)
 
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
-				Tags: map[string]string{},
+				Tags: map[string]string{"id": "test"},
 				Echo: &t_api.EchoRequest{
 					Data: data,
 				},
@@ -74,10 +74,10 @@ func TestSystemLoop(t *testing.T) {
 
 	// all requests made after shutdown should fail
 	for i := 0; i < 5; i++ {
-		api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
+		api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 			Submission: &t_api.Request{
 				Kind: t_api.Echo,
-				Tags: map[string]string{},
+				Tags: map[string]string{"id": "test"},
 				Echo: &t_api.EchoRequest{
 					Data: "nope",
 				},
@@ -85,10 +85,10 @@ func TestSystemLoop(t *testing.T) {
 			Callback: func(res *t_api.Response, err error) {
 				received <- 1
 
-				var apiErr *t_api.ResonateError
-				assert.True(t, errors.As(err, &apiErr))
+				var error *t_api.Error
+				assert.True(t, errors.As(err, &error))
 				assert.NotNil(t, err)
-				assert.ErrorContains(t, apiErr, "system is shutting down")
+				assert.ErrorContains(t, error, "system is shutting down")
 			},
 		})
 	}

@@ -274,7 +274,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		model = model.Copy()
 		model.callbacks.set(res.CreateCallback.Callback.Id, res.CreateCallback.Callback)
 		return model, nil
-	case t_api.StatusPromiseAlreadyResolved, t_api.StatusPromiseAlreadyRejected, t_api.StatusPromiseAlreadyCanceled, t_api.StatusPromiseAlreadyTimedout:
+	case t_api.StatusOK:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
 		}
@@ -468,6 +468,8 @@ func (v *Validator) ValidateHeartbeatLocks(model *Model, reqTime int64, resTime 
 		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatLocks.Status)
 	}
 }
+
+// TASKS
 
 func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	t := model.tasks.get(req.ClaimTask.Id)

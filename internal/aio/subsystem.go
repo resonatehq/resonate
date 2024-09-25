@@ -5,13 +5,22 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 )
 
-type Subsystem interface {
+type subsystem interface {
 	String() string
 	Kind() t_aio.Kind
-
 	Start() error
 	Stop() error
+}
 
-	SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
+type Subsystem interface {
+	subsystem
+
+	Enqueue(*bus.SQE[t_aio.Submission, t_aio.Completion]) bool
 	Flush(int64)
+}
+
+type SubsystemDST interface {
+	subsystem
+
+	Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion]
 }

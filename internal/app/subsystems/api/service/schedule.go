@@ -1,10 +1,8 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -12,39 +10,37 @@ import (
 
 // READ
 
-func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, error) {
+func (s *Service) ReadSchedule(id string, header *Header) (*t_api.ReadScheduleResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadSchedule,
-			Tags: s.tags(header.RequestId, "ReadSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReadSchedule",
+				"protocol": s.protocol,
+			},
 			ReadSchedule: &t_api.ReadScheduleRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.ReadSchedule != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.ReadSchedule.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ReadSchedule.Status)
-	}
-
-	return cqe.Completion.ReadSchedule, nil
+	return cqe.Completion.ReadSchedule, RequestError(cqe.Completion.Status())
 }
 
 // SEARCH
 
-func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams) (*t_api.SearchSchedulesResponse, error) {
+func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams) (*t_api.SearchSchedulesResponse, *Error) {
 	if params == nil {
 		params = &SearchSchedulesParams{}
 	}
@@ -52,7 +48,7 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 	if params.Cursor != nil && *params.Cursor != "" {
 		cursor, err := t_api.NewCursor[t_api.SearchSchedulesRequest](*params.Cursor)
 		if err != nil {
-			return nil, api.HandleValidationError(err)
+			return nil, RequestValidationError(err)
 		}
 		searchSchedules = cursor.Next
 	} else {
@@ -73,51 +69,57 @@ func (s *Service) SearchSchedules(header *Header, params *SearchSchedulesParams)
 		}
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:            t_api.SearchSchedules,
-			Tags:            s.tags(header.RequestId, "SearchSchedules"),
+			Kind: t_api.SearchSchedules,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "SearchSchedules",
+				"protocol": s.protocol,
+			},
 			SearchSchedules: searchSchedules,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.SearchSchedules != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.SearchSchedules.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.SearchSchedules.Status)
-	}
-
-	// success
-	return cqe.Completion.SearchSchedules, nil
+	return cqe.Completion.SearchSchedules, RequestError(cqe.Completion.Status())
 }
 
 // CREATE
 
-func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateScheduleBody) (*t_api.CreateScheduleResponse, error) {
+func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateScheduleBody) (*t_api.CreateScheduleResponse, *Error) {
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
 	// validation
 	if err := validateSchedule(body.Cron); err != nil {
-		return nil, api.HandleValidationError(err)
+		return nil, RequestValidationError(err)
 	}
 
 	if err := validatePromiseId(body.PromiseId); err != nil {
-		return nil, api.HandleValidationError(err)
+		return nil, RequestValidationError(err)
 	}
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreateSchedule,
-			Tags: s.tags(header.RequestId, "CreateSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreateSchedule",
+				"protocol": s.protocol,
+			},
 			CreateSchedule: &t_api.CreateScheduleRequest{
 				Id:             body.Id,
 				Description:    body.Description,
@@ -132,60 +134,50 @@ func (s *Service) CreateSchedule(header CreateScheduleHeader, body *CreateSchedu
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CreateSchedule != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.CreateSchedule.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.CreateSchedule.Status)
-	}
-
-	return cqe.Completion.CreateSchedule, nil
+	return cqe.Completion.CreateSchedule, RequestError(cqe.Completion.Status())
 }
 
 // DELETE
 
-func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, error) {
+func (s *Service) DeleteSchedule(id string, header *Header) (*t_api.DeleteScheduleResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.DeleteSchedule,
-			Tags: s.tags(header.RequestId, "DeleteSchedule"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "DeleteSchedule",
+				"protocol": s.protocol,
+			},
 			DeleteSchedule: &t_api.DeleteScheduleRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, resErr
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.DeleteSchedule != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.DeleteSchedule.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.DeleteSchedule.Status)
-	}
-
-	return cqe.Completion.DeleteSchedule, nil
+	return cqe.Completion.DeleteSchedule, RequestError(cqe.Completion.Status())
 }
 
 // validations
 
 func validateSchedule(schedule string) error {
-	// Validate schedule is valid cron expression.
-	_, err := util.ParseCron(schedule)
-	if err != nil {
+	// Validate schedule is valid cron expression
+	if _, err := util.ParseCron(schedule); err != nil {
 		return fmt.Errorf("invalid cron schedule: %v", err)
 	}
 

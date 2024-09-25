@@ -2,12 +2,9 @@ package grpc
 
 import (
 	"context"
-	"errors"
 
-	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -38,15 +35,13 @@ func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockReques
 		ExpiryInMilliseconds: req.ExpiryInMilliseconds,
 	}
 
-	resp, err := s.service.AcquireLock(header, body)
+	res, err := s.service.AcquireLock(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.AcquireLockResponse{
-		Lock: protoLock(resp.Lock),
+		Lock: protoLock(res.Lock),
 	}, nil
 }
 
@@ -69,9 +64,7 @@ func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockReques
 
 	_, err := s.service.ReleaseLock(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.ReleaseLockResponse{}, nil
@@ -92,9 +85,7 @@ func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocks
 
 	res, err := s.service.Heartbeat(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.HeartbeatLocksResponse{

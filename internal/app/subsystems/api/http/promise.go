@@ -2,11 +2,8 @@ package http
 
 import (
 	"errors"
-	"net/http"
 
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/gin-gonic/gin"
@@ -19,21 +16,22 @@ func (s *server) readPromise(c *gin.Context) {
 
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.ReadPromise(id, &header)
+	res, err := s.service.ReadPromise(id, &header)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(http.StatusOK, resp.Promise)
+	c.JSON(s.code(res.Status), res.Promise)
 }
 
 // Search Promise
@@ -41,13 +39,19 @@ func (s *server) readPromise(c *gin.Context) {
 func (s *server) searchPromises(c *gin.Context) {
 	var header service.Header
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var params service.SearchPromisesParams
 	if err := c.ShouldBindQuery(&params); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
@@ -55,19 +59,17 @@ func (s *server) searchPromises(c *gin.Context) {
 	// see: https://github.com/gin-gonic/gin/issues/2606
 	params.Tags = c.QueryMap("tags")
 
-	resp, err := s.service.SearchPromises(&header, &params)
+	res, err := s.service.SearchPromises(&header, &params)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"cursor":   resp.Cursor,
-		"promises": resp.Promises,
+	c.JSON(s.code(res.Status), gin.H{
+		"cursor":   res.Cursor,
+		"promises": res.Promises,
 	})
 }
 
@@ -76,27 +78,31 @@ func (s *server) searchPromises(c *gin.Context) {
 func (s *server) createPromise(c *gin.Context) {
 	var header service.CreatePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *promise.Promise
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err := s.service.CreatePromise(&header, body)
+	res, err := s.service.CreatePromise(&header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise)
+	c.JSON(s.code(res.Status), res.Promise)
 }
 
 // Complete Promise
@@ -106,35 +112,37 @@ func (s *server) completePromise(c *gin.Context) {
 
 	var header service.CompletePromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
 	var body *service.CompletePromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(err))
+		err := service.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
-
-	var (
-		resp *t_api.CompletePromiseResponse
-		err  error
-	)
 
 	if !body.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
-		c.JSON(http.StatusBadRequest, api.HandleValidationError(errors.New("invalid state")))
+		err := service.RequestValidationError(errors.New("invalid state"))
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
 		return
 	}
 
-	resp, err = s.service.CompletePromise(id, body.State, &header, body)
+	res, err := s.service.CompletePromise(id, body.State, &header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		if errors.As(err, &apiErr) {
-			c.JSON(apiErr.APIError.Code.HTTP(), apiErr)
-			return
-		}
-		panic(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
 	}
 
-	c.JSON(resp.Status.HTTP(), resp.Promise)
+	c.JSON(s.code(res.Status), res.Promise)
 }

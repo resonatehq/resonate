@@ -1,9 +1,13 @@
 package echo
 
 import (
+	"log/slog"
+	"strconv"
+
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -19,20 +23,21 @@ type Config struct {
 
 type Echo struct {
 	config  *Config
-	sq      chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	sq      chan<- *bus.SQE[t_aio.Submission, t_aio.Completion]
 	workers []*EchoWorker
 }
 
-func New(aio aio.AIO, config *Config) (*Echo, error) {
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Echo, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 	workers := make([]*EchoWorker, config.Workers)
 
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &EchoWorker{
-			config: config,
-			sq:     sq,
-			aio:    aio,
-			flush:  make(chan int64, 1),
+			i:       i,
+			sq:      sq,
+			flush:   make(chan int64, 1),
+			aio:     aio,
+			metrics: metrics,
 		}
 	}
 
@@ -44,7 +49,7 @@ func New(aio aio.AIO, config *Config) (*Echo, error) {
 }
 
 func (e *Echo) String() string {
-	return "echo"
+	return t_aio.Echo.String()
 }
 
 func (e *Echo) Kind() t_aio.Kind {
@@ -63,68 +68,71 @@ func (e *Echo) Stop() error {
 	return nil
 }
 
-func (e *Echo) SQ() chan<- *bus.SQE[t_aio.Submission, t_aio.Completion] {
-	return e.sq
-}
-
-func (e *Echo) Flush(t int64) {
-	for _, worker := range e.workers {
-		worker.Flush(t)
+func (e *Echo) Enqueue(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) bool {
+	select {
+	case e.sq <- sqe:
+		return true
+	default:
+		return false
 	}
 }
 
+func (e *Echo) Flush(t int64) {}
+
 func (e *Echo) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
 	util.Assert(len(e.workers) > 0, "must be at least one worker")
-	return e.workers[0].Process(sqes)
+
+	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
+	for i, sqe := range sqes {
+		cqes[i] = e.workers[0].Process(sqe)
+	}
+
+	return cqes
 }
 
 // Worker
 
 type EchoWorker struct {
-	config *Config
-	sq     <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
-	aio    aio.AIO
-	flush  chan int64
+	i       int
+	sq      <-chan *bus.SQE[t_aio.Submission, t_aio.Completion]
+	flush   chan int64
+	aio     aio.AIO
+	metrics *metrics.Metrics
+}
+
+func (w *EchoWorker) String() string {
+	return t_aio.Echo.String()
 }
 
 func (w *EchoWorker) Start() {
+	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
+	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
+	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
+
 	for {
-		sqes, ok := util.Collect(w.sq, w.flush, w.config.BatchSize)
-		if len(sqes) > 0 {
-			for _, cqe := range w.Process(sqes) {
-				w.aio.Enqueue(cqe)
-			}
-		}
+		sqe, ok := <-w.sq
 		if !ok {
 			return
 		}
+
+		slog.Debug("api:sqe:dequeue", "id", sqe.Id, "sqe", sqe)
+
+		counter.Inc()
+		w.aio.EnqueueCQE(w.Process(sqe)) // process one at a time
+		counter.Dec()
 	}
 }
 
-func (w *EchoWorker) Flush(t int64) {
-	// ignore case where flush channel is full,
-	// this means the flush is waiting on the cq
-	select {
-	case w.flush <- t:
-	default:
-	}
-}
-
-func (w *EchoWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
-	cqes := make([]*bus.CQE[t_aio.Submission, t_aio.Completion], len(sqes))
-
-	for i, sqe := range sqes {
-		cqes[i] = &bus.CQE[t_aio.Submission, t_aio.Completion]{
-			Completion: &t_aio.Completion{
-				Kind: t_aio.Echo,
-				Tags: sqe.Submission.Tags, // propagate the tags
-				Echo: &t_aio.EchoCompletion{
-					Data: sqe.Submission.Echo.Data,
-				},
+func (w *EchoWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) *bus.CQE[t_aio.Submission, t_aio.Completion] {
+	return &bus.CQE[t_aio.Submission, t_aio.Completion]{
+		Id: sqe.Id,
+		Completion: &t_aio.Completion{
+			Kind: t_aio.Echo,
+			Tags: sqe.Submission.Tags, // propagate the tags
+			Echo: &t_aio.EchoCompletion{
+				Data: sqe.Submission.Echo.Data,
 			},
-			Callback: sqe.Callback,
-		}
+		},
+		Callback: sqe.Callback,
 	}
-
-	return cqes
 }

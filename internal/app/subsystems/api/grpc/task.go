@@ -2,11 +2,10 @@ package grpc
 
 import (
 	"context"
-	"errors"
 
-	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
@@ -30,18 +29,25 @@ func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (
 	body := &service.ClaimTaskBody{
 		Id:        req.Id,
 		ProcessId: req.ProcessId,
+		Counter:   int(req.Counter),
 		Frequency: int(req.Frequency),
 	}
 
 	res, err := s.service.ClaimTask(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.Status != t_api.StatusCreated || res.Mesg != nil, "message must not be nil if created")
+
+	promises := map[string]*grpcApi.Promise{}
+	for k, promise := range res.Mesg.Promises {
+		promises[k] = protoPromise(promise)
 	}
 
 	return &grpcApi.ClaimTaskResponse{
-		Data: res.Task.Message.Data,
+		Type:     string(res.Mesg.Type),
+		Promises: promises,
 	}, nil
 }
 
@@ -61,9 +67,7 @@ func (s *server) CompleteTask(ctx context.Context, req *grpcApi.CompleteTaskRequ
 
 	_, err := s.service.CompleteTask(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CompleteTaskResponse{}, nil
@@ -84,12 +88,10 @@ func (s *server) HeartbeatTasks(ctx context.Context, req *grpcApi.HeartbeatTasks
 
 	res, err := s.service.HeartbeatTasks(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.HeartbeatTasksResponse{
-		TasksAffected: int32(res.TasksAffected),
+		TasksAffected: res.TasksAffected,
 	}, nil
 }

@@ -28,7 +28,7 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	})
 	if err != nil {
 		slog.Error("failed to read schedule", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read schedule", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -49,7 +49,7 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		s, err := result.Records[0].Schedule()
 		if err != nil {
 			slog.Error("failed to parse schedule record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse schedule record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
 		res = &t_api.Response{

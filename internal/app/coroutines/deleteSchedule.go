@@ -28,14 +28,14 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	})
 	if err != nil {
 		slog.Error("failed to delete schedule", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to delete schedule", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
 	result := completion.Store.Results[0].DeleteSchedule
 	util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-	var status t_api.ResponseStatus
+	var status t_api.StatusCode
 	if result.RowsAffected == 1 {
 		status = t_api.StatusNoContent
 	} else {

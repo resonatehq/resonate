@@ -1,11 +1,9 @@
 package service
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -14,41 +12,37 @@ import (
 
 // Read Promise
 
-func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, error) {
+func (s *Service) ReadPromise(id string, header *Header) (*t_api.ReadPromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.ReadPromise,
-			Tags: s.tags(header.RequestId, "ReadPromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "ReadPromise",
+				"protocol": s.protocol,
+			},
 			ReadPromise: &t_api.ReadPromiseRequest{
 				Id: id,
 			},
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandleResonateError(resErr)
+		return nil, ServerError(cqe.Error)
 	}
 
-	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil") // WHY AM I GETTING NIL RESPONSES?
-
-	// application level error - 3xx, 4xx
-	if api.IsRequestError(cqe.Completion.ReadPromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.ReadPromise.Status)
-	}
-
-	// success
-	return cqe.Completion.ReadPromise, nil
+	util.Assert(cqe.Completion.ReadPromise != nil, "response must not be nil")
+	return cqe.Completion.ReadPromise, RequestError(cqe.Completion.Status())
 }
 
 // Search Promise
 
-func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (*t_api.SearchPromisesResponse, error) {
+func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (*t_api.SearchPromisesResponse, *Error) {
 	if params == nil {
 		params = &SearchPromisesParams{}
 	}
@@ -56,7 +50,7 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 	if params.Cursor != nil && *params.Cursor != "" {
 		cursor, err := t_api.NewCursor[t_api.SearchPromisesRequest](*params.Cursor)
 		if err != nil {
-			return nil, api.HandleValidationError(err)
+			return nil, RequestValidationError(err)
 		}
 		searchPromises = cursor.Next
 	} else {
@@ -108,42 +102,48 @@ func (s *Service) SearchPromises(header *Header, params *SearchPromisesParams) (
 		}
 	}
 
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
-			Kind:           t_api.SearchPromises,
-			Tags:           s.tags(header.RequestId, "SearchPromises"),
+			Kind: t_api.SearchPromises,
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "SearchPromises",
+				"protocol": s.protocol,
+			},
 			SearchPromises: searchPromises,
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		return nil, cqe.Error
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.SearchPromises != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.SearchPromises.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.SearchPromises.Status)
-	}
-
-	// success
-	return cqe.Completion.SearchPromises, nil
+	return cqe.Completion.SearchPromises, RequestError(cqe.Completion.Status())
 }
 
 // Create Promise
 
-func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, error) {
+func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promise) (*t_api.CreatePromiseResponse, *Error) {
+	id := header.Id()
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       id,
+		Callback: s.sendOrPanic(id, cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CreatePromise,
-			Tags: s.tags(header.RequestId, "CreatePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CreatePromise",
+				"protocol": s.protocol,
+			},
 			CreatePromise: &t_api.CreatePromiseRequest{
 				Id:             body.Id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -155,32 +155,29 @@ func (s *Service) CreatePromise(header *CreatePromiseHeader, body *promise.Promi
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandleResonateError(resErr)
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CreatePromise != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.CreatePromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.CreatePromise.Status)
-	}
-
-	// success
-	return cqe.Completion.CreatePromise, nil
+	return cqe.Completion.CreatePromise, RequestError(cqe.Completion.Status())
 }
 
 // Complete Promise
-func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, error) {
+func (s *Service) CompletePromise(id string, state promise.State, header *CompletePromiseHeader, body *CompletePromiseBody) (*t_api.CompletePromiseResponse, *Error) {
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)
 
-	s.api.Enqueue(&bus.SQE[t_api.Request, t_api.Response]{
-		Callback: s.sendOrPanic(cq),
+	s.api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
+		Id:       header.Id(),
+		Callback: s.sendOrPanic(header.Id(), cq),
 		Submission: &t_api.Request{
 			Kind: t_api.CompletePromise,
-			Tags: s.tags(header.RequestId, "CompletePromise"),
+			Tags: map[string]string{
+				"id":       header.Id(),
+				"name":     "CompletePromise",
+				"protocol": s.protocol,
+			},
 			CompletePromise: &t_api.CompletePromiseRequest{
 				Id:             id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -191,19 +188,11 @@ func (s *Service) CompletePromise(id string, state promise.State, header *Comple
 		},
 	})
 
-	cqe := <-cq
+	cqe := s.api.DequeueCQE(cq)
 	if cqe.Error != nil {
-		var resErr *t_api.ResonateError
-		util.Assert(errors.As(cqe.Error, &resErr), "err must be a ResonateError")
-		return nil, api.HandleResonateError(resErr)
+		return nil, ServerError(cqe.Error)
 	}
 
 	util.Assert(cqe.Completion.CompletePromise != nil, "response must not be nil")
-
-	if api.IsRequestError(cqe.Completion.CompletePromise.Status) {
-		return nil, api.HandleRequestError(cqe.Completion.CompletePromise.Status)
-	}
-
-	// success
-	return cqe.Completion.CompletePromise, nil
+	return cqe.Completion.CompletePromise, RequestError(cqe.Completion.Status())
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/task"
 )
@@ -37,7 +36,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 		if err != nil {
 			slog.Error("failed to read tasks", "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read tasks", err)
+			return nil, nil
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -49,18 +48,18 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		commands := []*t_aio.Command{}
 		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(result.Records))
 
-		for i, t := range result.Records {
-			t, err := t.Task()
-			if err != nil {
-				slog.Error("failed to parse task, skipping", "err", err)
-				continue
-			}
+		for i, r := range result.Records {
+			if c.Time() < r.Timeout {
+				t, err := r.Task()
+				if err != nil {
+					slog.Warn("failed to parse task", "err", err)
+					continue
+				}
 
-			if c.Time() < t.Timeout {
 				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
-					Kind: t_aio.Queue,
+					Kind: t_aio.Sender,
 					Tags: tags,
-					Queue: &t_aio.QueueSubmission{
+					Sender: &t_aio.SenderSubmission{
 						Task: t,
 					},
 				})
@@ -69,16 +68,16 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
-						Id:             t.Id,
+						Id:             r.Id,
 						ProcessId:      nil,
 						State:          task.Timedout,
-						Counter:        t.Counter,
-						Attempt:        t.Attempt,
+						Counter:        r.Counter,
+						Attempt:        r.Attempt,
 						Frequency:      0,
 						Expiration:     0,
-						CompletedOn:    &t.Timeout,
+						CompletedOn:    &r.Timeout,
 						CurrentStates:  []task.State{task.Init},
-						CurrentCounter: t.Counter,
+						CurrentCounter: r.Counter,
 					},
 				})
 			}
@@ -91,11 +90,10 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 			completion, err := gocoro.Await(c, awaiting[i])
 			if err != nil {
-				slog.Error("failed to enqueue task", "err", err)
-				continue
+				slog.Warn("failed to enqueue task", "err", err)
 			}
 
-			if completion.Queue.Success {
+			if err == nil && completion.Sender.Success {
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{

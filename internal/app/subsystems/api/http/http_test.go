@@ -17,7 +17,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/task"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -87,7 +86,8 @@ func TestHttpServer(t *testing.T) {
 				path    string
 				method  string
 				headers map[string]string
-				body    []byte
+				reqBody []byte
+				resBody []byte
 				req     *t_api.Request
 				res     *t_api.Response
 				status  int
@@ -103,9 +103,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromise",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromise",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "foo",
@@ -133,9 +133,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromiseWithSlash",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromiseWithSlash",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "foo/bar",
@@ -163,9 +163,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadPromise,
 						Tags: map[string]string{
-							"request_id": "ReadPromiseNotFound",
-							"name":       "ReadPromise",
-							"protocol":   "http",
+							"id":       "ReadPromiseNotFound",
+							"name":     "ReadPromise",
+							"protocol": "http",
 						},
 						ReadPromise: &t_api.ReadPromiseRequest{
 							Id: "bar",
@@ -190,9 +190,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromises",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromises",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -227,9 +227,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesCursor",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesCursor",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -261,9 +261,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesPending",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesPending",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -294,9 +294,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesResolved",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesResolved",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -327,9 +327,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesRejected",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesRejected",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -362,9 +362,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchPromises,
 						Tags: map[string]string{
-							"request_id": "SearchPromisesTags",
-							"name":       "SearchPromises",
-							"protocol":   "http",
+							"id":       "SearchPromisesTags",
+							"name":     "SearchPromises",
+							"protocol": "http",
 						},
 						SearchPromises: &t_api.SearchPromisesRequest{
 							Id: "*",
@@ -432,7 +432,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo/bar",
 						"param": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -443,9 +443,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreatePromise,
 						Tags: map[string]string{
-							"request_id": "CreatePromise",
-							"name":       "CreatePromise",
-							"protocol":   "http",
+							"id":       "CreatePromise",
+							"name":     "CreatePromise",
+							"protocol": "http",
 						},
 						CreatePromise: &t_api.CreatePromiseRequest{
 							Id:             "foo/bar",
@@ -477,16 +477,16 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CreatePromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"timeout": 1
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreatePromise,
 						Tags: map[string]string{
-							"request_id": "CreatePromiseMinimal",
-							"name":       "CreatePromise",
-							"protocol":   "http",
+							"id":       "CreatePromiseMinimal",
+							"name":     "CreatePromise",
+							"protocol": "http",
 						},
 						CreatePromise: &t_api.CreatePromiseRequest{
 							Id:             "foo",
@@ -520,7 +520,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED_CANCELED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -530,9 +530,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "CancelPromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "CancelPromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -564,15 +564,15 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CancelPromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED_CANCELED"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "CancelPromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "CancelPromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -606,7 +606,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "RESOLVED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -616,9 +616,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "ResolvePromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "ResolvePromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -650,15 +650,15 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ResolvePromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "RESOLVED"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "ResolvePromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "ResolvePromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -692,7 +692,7 @@ func TestHttpServer(t *testing.T) {
 						"Idempotency-Key": "bar",
 						"Strict":          "true",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED",
 						"value": {
 							"headers": {"a":"a","b":"b","c":"c"},
@@ -702,9 +702,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "RejectPromise",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "RejectPromise",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo/bar",
@@ -736,15 +736,15 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "RejectPromiseMinimal",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"state": "REJECTED"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CompletePromise,
 						Tags: map[string]string{
-							"request_id": "RejectPromiseMinimal",
-							"name":       "CompletePromise",
-							"protocol":   "http",
+							"id":       "RejectPromiseMinimal",
+							"name":     "CompletePromise",
+							"protocol": "http",
 						},
 						CompletePromise: &t_api.CompletePromiseRequest{
 							Id:             "foo",
@@ -778,26 +778,59 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CreateCallback",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"promiseId": "foo",
+						"rootPromiseId": "bar",
 						"timeout": 1,
-						"recv": "http://localhost:3000",
-						"data": "e30="
+						"recv": "foo"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
 						Tags: map[string]string{
-							"request_id": "CreateCallback",
-							"name":       "CreateCallback",
-							"protocol":   "http",
+							"id":       "CreateCallback",
+							"name":     "CreateCallback",
+							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
-							PromiseId: "foo",
-							Timeout:   1,
-							Message: &message.Message{
-								Recv: "http://localhost:3000",
-								Data: []byte("{}"),
-							},
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`"foo"`),
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.CreateCallback,
+						CreateCallback: &t_api.CreateCallbackResponse{
+							Status: t_api.StatusCreated,
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "CreateCallbackPhysicalReceiver",
+					path:   "callbacks",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "CreateCallbackPhysicalReceiver",
+					},
+					reqBody: []byte(`{
+						"promiseId": "foo",
+						"rootPromiseId": "bar",
+						"timeout": 1,
+						"recv": {"type": "http", "data": {"url": "http://localhost:3000"}}
+					}`),
+					req: &t_api.Request{
+						Kind: t_api.CreateCallback,
+						Tags: map[string]string{
+							"id":       "CreateCallbackPhysicalReceiver",
+							"name":     "CreateCallback",
+							"protocol": "http",
+						},
+						CreateCallback: &t_api.CreateCallbackRequest{
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`{"type": "http", "data": {"url": "http://localhost:3000"}}`),
 						},
 					},
 					res: &t_api.Response{
@@ -813,28 +846,26 @@ func TestHttpServer(t *testing.T) {
 					path:   "callbacks",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "CreateCallback",
+						"Request-Id": "CreateCallbackNotFound",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"promiseId": "foo",
+						"rootPromiseId": "bar",
 						"timeout": 1,
-						"recv": "http://localhost:3000",
-						"data": "e30="
+						"recv": "foo"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CreateCallback,
 						Tags: map[string]string{
-							"request_id": "CreateCallback",
-							"name":       "CreateCallback",
-							"protocol":   "http",
+							"id":       "CreateCallbackNotFound",
+							"name":     "CreateCallback",
+							"protocol": "http",
 						},
 						CreateCallback: &t_api.CreateCallbackRequest{
-							PromiseId: "foo",
-							Timeout:   1,
-							Message: &message.Message{
-								Recv: "http://localhost:3000",
-								Data: []byte("{}"),
-							},
+							PromiseId:     "foo",
+							RootPromiseId: "bar",
+							Timeout:       1,
+							Recv:          []byte(`"foo"`),
 						},
 					},
 					res: &t_api.Response{
@@ -857,9 +888,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ReadSchedule,
 						Tags: map[string]string{
-							"request_id": "ReadSchedule",
-							"name":       "ReadSchedule",
-							"protocol":   "http",
+							"id":       "ReadSchedule",
+							"name":     "ReadSchedule",
+							"protocol": "http",
 						},
 						ReadSchedule: &t_api.ReadScheduleRequest{
 							Id: "foo",
@@ -890,9 +921,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchSchedules,
 						Tags: map[string]string{
-							"request_id": "SearchSchedules",
-							"name":       "SearchSchedules",
-							"protocol":   "http",
+							"id":       "SearchSchedules",
+							"name":     "SearchSchedules",
+							"protocol": "http",
 						},
 						SearchSchedules: &t_api.SearchSchedulesRequest{
 							Id:    "*",
@@ -920,9 +951,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.SearchSchedules,
 						Tags: map[string]string{
-							"request_id": "SearchSchedulesTags",
-							"name":       "SearchSchedules",
-							"protocol":   "http",
+							"id":       "SearchSchedulesTags",
+							"name":     "SearchSchedules",
+							"protocol": "http",
 						},
 						SearchSchedules: &t_api.SearchSchedulesRequest{
 							Id: "*",
@@ -974,7 +1005,7 @@ func TestHttpServer(t *testing.T) {
 						"Request-Id":      "CreateSchedule",
 						"Idempotency-Key": "bar",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"desc": "",
 						"cron": "* * * * * *",
@@ -984,9 +1015,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.CreateSchedule,
 						Tags: map[string]string{
-							"request_id": "CreateSchedule",
-							"name":       "CreateSchedule",
-							"protocol":   "http",
+							"id":       "CreateSchedule",
+							"name":     "CreateSchedule",
+							"protocol": "http",
 						},
 						CreateSchedule: &t_api.CreateScheduleRequest{
 							Id:             "foo",
@@ -1021,9 +1052,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.DeleteSchedule,
 						Tags: map[string]string{
-							"request_id": "DeleteSchedule",
-							"name":       "DeleteSchedule",
-							"protocol":   "http",
+							"id":       "DeleteSchedule",
+							"name":     "DeleteSchedule",
+							"protocol": "http",
 						},
 						DeleteSchedule: &t_api.DeleteScheduleRequest{
 							Id: "foo",
@@ -1046,7 +1077,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ClaimTask",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"processId": "bar",
 						"counter": 0,
@@ -1055,9 +1086,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
-							"request_id": "ClaimTask",
-							"name":       "ClaimTask",
-							"protocol":   "http",
+							"id":       "ClaimTask",
+							"name":     "ClaimTask",
+							"protocol": "http",
 						},
 						ClaimTask: &t_api.ClaimTaskRequest{
 							Id:        "foo",
@@ -1070,8 +1101,91 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
 							Status: t_api.StatusCreated,
-							Task: &task.Task{
-								Message: &message.Message{},
+							Mesg:   &message.Mesg{},
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "ClaimTaskInvoke",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTaskInvoke",
+					},
+					reqBody: []byte(`{
+						"id": "foo",
+						"processId": "bar",
+						"counter": 1,
+						"frequency": 1
+					}`),
+					resBody: []byte(`{"type":"invoke","promises":{"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					req: &t_api.Request{
+						Kind: t_api.ClaimTask,
+						Tags: map[string]string{
+							"id":       "ClaimTaskInvoke",
+							"name":     "ClaimTask",
+							"protocol": "http",
+						},
+						ClaimTask: &t_api.ClaimTaskRequest{
+							Id:        "foo",
+							ProcessId: "bar",
+							Counter:   1,
+							Frequency: 1,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.ClaimTask,
+						ClaimTask: &t_api.ClaimTaskResponse{
+							Status: t_api.StatusCreated,
+							Mesg: &message.Mesg{
+								Type: message.Invoke,
+								Promises: map[string]*promise.Promise{
+									"root": {Id: "foo", State: promise.Pending},
+								},
+							},
+						},
+					},
+					status: 201,
+				},
+				{
+					name:   "ClaimTaskResume",
+					path:   "tasks/claim",
+					method: "POST",
+					headers: map[string]string{
+						"Request-Id": "ClaimTaskResume",
+					},
+					reqBody: []byte(`{
+						"id": "foo",
+						"processId": "bar",
+						"counter": 2,
+						"frequency": 1
+					}`),
+					resBody: []byte(`{"type":"invoke","promises":{"leaf":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}}}`),
+					req: &t_api.Request{
+						Kind: t_api.ClaimTask,
+						Tags: map[string]string{
+							"id":       "ClaimTaskResume",
+							"name":     "ClaimTask",
+							"protocol": "http",
+						},
+						ClaimTask: &t_api.ClaimTaskRequest{
+							Id:        "foo",
+							ProcessId: "bar",
+							Counter:   2,
+							Frequency: 1,
+						},
+					},
+					res: &t_api.Response{
+						Kind: t_api.ClaimTask,
+						ClaimTask: &t_api.ClaimTaskResponse{
+							Status: t_api.StatusCreated,
+							Mesg: &message.Mesg{
+								Type: message.Invoke,
+								Promises: map[string]*promise.Promise{
+									"root": {Id: "foo", State: promise.Pending},
+									"leaf": {Id: "bar", State: promise.Resolved},
+								},
 							},
 						},
 					},
@@ -1082,9 +1196,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar",
 						"counter": 0,
 						"frequency": 1
@@ -1098,9 +1212,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoProcessId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0,
 						"frequency": 1
@@ -1114,9 +1228,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/claim",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "ClaimTask",
+						"Request-Id": "ClaimTaskNoFrequency",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0,
 						"frequency": 0
@@ -1132,16 +1246,16 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "CompleteTask",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"id": "foo",
 						"counter": 0
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.CompleteTask,
 						Tags: map[string]string{
-							"request_id": "CompleteTask",
-							"name":       "CompleteTask",
-							"protocol":   "http",
+							"id":       "CompleteTask",
+							"name":     "CompleteTask",
+							"protocol": "http",
 						},
 						CompleteTask: &t_api.CompleteTaskRequest{
 							Id:      "foo",
@@ -1152,7 +1266,6 @@ func TestHttpServer(t *testing.T) {
 						Kind: t_api.CompleteTask,
 						CompleteTask: &t_api.CompleteTaskResponse{
 							Status: t_api.StatusCreated,
-							Task:   &task.Task{},
 						},
 					},
 					status: 201,
@@ -1162,9 +1275,9 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/complete",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "CompleteTask",
+						"Request-Id": "CompleteTaskNoId",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"counter": 0
 					}`),
 					req:    nil,
@@ -1178,15 +1291,15 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "HeartbeatTasks",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.HeartbeatTasks,
 						Tags: map[string]string{
-							"request_id": "HeartbeatTasks",
-							"name":       "HeartbeatTasks",
-							"protocol":   "http",
+							"id":       "HeartbeatTasks",
+							"name":     "HeartbeatTasks",
+							"protocol": "http",
 						},
 						HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 							ProcessId: "bar",
@@ -1206,12 +1319,12 @@ func TestHttpServer(t *testing.T) {
 					path:   "tasks/heartbeat",
 					method: "POST",
 					headers: map[string]string{
-						"Request-Id": "HeartbeatTasks",
+						"Request-Id": "HeartbeatTasksNoProcessId",
 					},
-					body:   []byte(`{}`),
-					req:    nil,
-					res:    nil,
-					status: 400,
+					reqBody: []byte(`{}`),
+					req:     nil,
+					res:     nil,
+					status:  400,
 				},
 
 				// Locks
@@ -1222,7 +1335,7 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "AcquireLock",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"processId": "bar",
 						"executionId": "baz",
@@ -1231,9 +1344,9 @@ func TestHttpServer(t *testing.T) {
 					req: &t_api.Request{
 						Kind: t_api.AcquireLock,
 						Tags: map[string]string{
-							"request_id": "AcquireLock",
-							"name":       "AcquireLock",
-							"protocol":   "http",
+							"id":       "AcquireLock",
+							"name":     "AcquireLock",
+							"protocol": "http",
 						},
 						AcquireLock: &t_api.AcquireLockRequest{
 							ResourceId:           "foo",
@@ -1260,7 +1373,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "AcquireLockNoExecutionId",
 					path:   "locks/acquire",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"processId": "bar",
 						"executionId": "",
@@ -1277,16 +1390,16 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "ReleaseLock",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "foo",
 						"executionId": "baz"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.ReleaseLock,
 						Tags: map[string]string{
-							"request_id": "ReleaseLock",
-							"name":       "ReleaseLock",
-							"protocol":   "http",
+							"id":       "ReleaseLock",
+							"name":     "ReleaseLock",
+							"protocol": "http",
 						},
 						ReleaseLock: &t_api.ReleaseLockRequest{
 							ResourceId:  "foo",
@@ -1305,7 +1418,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "ReleaseLockNoResourceId",
 					path:   "locks/release",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"resourceId": "",
 						"executionId": "baz"
 					}`),
@@ -1320,15 +1433,15 @@ func TestHttpServer(t *testing.T) {
 					headers: map[string]string{
 						"Request-Id": "HeartbeatLocks",
 					},
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "bar"
 					}`),
 					req: &t_api.Request{
 						Kind: t_api.HeartbeatLocks,
 						Tags: map[string]string{
-							"request_id": "HeartbeatLocks",
-							"name":       "HeartbeatLocks",
-							"protocol":   "http",
+							"id":       "HeartbeatLocks",
+							"name":     "HeartbeatLocks",
+							"protocol": "http",
 						},
 						HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 							ProcessId: "bar",
@@ -1347,7 +1460,7 @@ func TestHttpServer(t *testing.T) {
 					name:   "HeartbeatLocksNoProcessId",
 					path:   "locks/heartbeat",
 					method: "POST",
-					body: []byte(`{
+					reqBody: []byte(`{
 						"processId": "",
 						"timeout": 1736571600000
 					}`),
@@ -1359,7 +1472,7 @@ func TestHttpServer(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					httpTest.Load(t, tc.req, tc.res)
 
-					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.body))
+					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.reqBody))
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1394,7 +1507,9 @@ func TestHttpServer(t *testing.T) {
 
 					assert.Equal(t, status, res.StatusCode, string(body))
 
-					// TODO: assert body
+					if tc.resBody != nil && status >= 200 && status < 300 {
+						assert.Equal(t, tc.resBody, body)
+					}
 
 					select {
 					case err := <-httpTest.errors:

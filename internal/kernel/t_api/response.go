@@ -5,9 +5,9 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
-	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -43,37 +43,33 @@ type Response struct {
 	Echo *EchoResponse
 }
 
-func (r *Response) Id() string {
-	return r.Tags["request_id"]
-}
-
 // Promises
 
 type CreatePromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
+	Status  StatusCode       `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
 type ReadPromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
+	Status  StatusCode       `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
 type SearchPromisesResponse struct {
-	Status   ResponseStatus                 `json:"status"`
+	Status   StatusCode                     `json:"status"`
 	Cursor   *Cursor[SearchPromisesRequest] `json:"cursor,omitempty"`
 	Promises []*promise.Promise             `json:"promises,omitempty"`
 }
 
 type CompletePromiseResponse struct {
-	Status  ResponseStatus   `json:"status"`
+	Status  StatusCode       `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
 // Callbacks
 
 type CreateCallbackResponse struct {
-	Status   ResponseStatus     `json:"status"`
+	Status   StatusCode         `json:"status"`
 	Promise  *promise.Promise   `json:"promise,omitempty"`
 	Callback *callback.Callback `json:"callback,omitempty"`
 }
@@ -81,56 +77,55 @@ type CreateCallbackResponse struct {
 // Schedules
 
 type CreateScheduleResponse struct {
-	Status   ResponseStatus     `json:"status"`
+	Status   StatusCode         `json:"status"`
 	Schedule *schedule.Schedule `json:"schedule,omitempty"`
 }
 
 type SearchSchedulesResponse struct {
-	Status    ResponseStatus                  `json:"status"`
+	Status    StatusCode                      `json:"status"`
 	Cursor    *Cursor[SearchSchedulesRequest] `json:"cursor,omitempty"`
 	Schedules []*schedule.Schedule            `json:"schedules,omitempty"`
 }
 
 type ReadScheduleResponse struct {
-	Status   ResponseStatus     `json:"status"`
+	Status   StatusCode         `json:"status"`
 	Schedule *schedule.Schedule `json:"schedule,omitempty"`
 }
 
 type DeleteScheduleResponse struct {
-	Status ResponseStatus `json:"status"`
+	Status StatusCode `json:"status"`
 }
 
 // Locks
 
 type AcquireLockResponse struct {
-	Status ResponseStatus `json:"status"`
-	Lock   *lock.Lock     `json:"lock,omitempty"`
+	Status StatusCode `json:"status"`
+	Lock   *lock.Lock `json:"lock,omitempty"`
 }
 
 type ReleaseLockResponse struct {
-	Status ResponseStatus `json:"status"`
+	Status StatusCode `json:"status"`
 }
 
 type HeartbeatLocksResponse struct {
-	Status        ResponseStatus `json:"status"`
-	LocksAffected int64          `json:"locksAffected"`
+	Status        StatusCode `json:"status"`
+	LocksAffected int64      `json:"locksAffected"`
 }
 
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status ResponseStatus `json:"status"`
-	Task   *task.Task     `json:"task"`
+	Status StatusCode    `json:"status"`
+	Mesg   *message.Mesg `json:"mesg,omitempty"`
 }
 
 type CompleteTaskResponse struct {
-	Status ResponseStatus `json:"status"`
-	Task   *task.Task     `json:"task"`
+	Status StatusCode `json:"status"`
 }
 
 type HeartbeatTasksResponse struct {
-	Status        ResponseStatus `json:"status"`
-	TasksAffected int64          `json:"tasksAffected"`
+	Status        StatusCode `json:"status"`
+	TasksAffected int64      `json:"tasksAffected"`
 }
 
 // Echo
@@ -139,7 +134,7 @@ type EchoResponse struct {
 	Data string `json:"data"`
 }
 
-func (r *Response) Status() ResponseStatus {
+func (r *Response) Status() StatusCode {
 	switch r.Kind {
 	// PROMISES
 	case ReadPromise:
@@ -176,8 +171,11 @@ func (r *Response) Status() ResponseStatus {
 		return r.CompleteTask.Status
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.Status
+	// ECHO
+	case Echo:
+		return 200
 	default:
-		return 0
+		panic(fmt.Sprintf("invalid response kind: %s", r.Kind))
 	}
 }
 
@@ -267,15 +265,14 @@ func (r *Response) String() string {
 	// TASKS
 	case ClaimTask:
 		return fmt.Sprintf(
-			"ClaimTask(status=%d, task=%s)",
+			"ClaimTask(status=%d, mesg=%s)",
 			r.ClaimTask.Status,
-			r.ClaimTask.Task,
+			r.ClaimTask.Mesg,
 		)
 	case CompleteTask:
 		return fmt.Sprintf(
-			"CompleteTask(status=%d, task=%s)",
+			"CompleteTask(status=%d)",
 			r.CompleteTask.Status,
-			r.CompleteTask.Task,
 		)
 	case HeartbeatTasks:
 		return fmt.Sprintf(

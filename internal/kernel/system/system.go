@@ -11,6 +11,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/metrics"
 
+	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -98,7 +99,7 @@ func (s *System) Loop() error {
 		}
 
 		// create signals
-		cancel := make(chan interface{})
+		cancel := make(chan any)
 		apiSignal := s.api.Signal(cancel)
 		aioSignal := s.aio.Signal(cancel)
 
@@ -124,7 +125,7 @@ func (s *System) Tick(t int64) {
 	util.Assert(s.config.CompletionBatchSize > 0, "completion batch size must be greater than zero")
 
 	// dequeue cqes
-	for i, cqe := range s.aio.Dequeue(s.config.CompletionBatchSize) {
+	for i, cqe := range s.aio.DequeueCQE(s.config.CompletionBatchSize) {
 		util.Assert(i < s.config.CompletionBatchSize, "cqes length be no greater than the completion batch size")
 		cqe.Callback(cqe.Completion, cqe.Error)
 	}
@@ -135,8 +136,8 @@ func (s *System) Tick(t int64) {
 			bg.last = t
 
 			tags := map[string]string{
-				"request_id": fmt.Sprintf("%s:%d", bg.name, t),
-				"name":       bg.name,
+				"id":   fmt.Sprintf("%s:%d", bg.name, t),
+				"name": bg.name,
 			}
 
 			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(s.config, tags)); ok {
@@ -149,7 +150,7 @@ func (s *System) Tick(t int64) {
 	}
 
 	// dequeue sqes
-	for i, sqe := range s.api.Dequeue(s.config.SubmissionBatchSize) {
+	for i, sqe := range s.api.DequeueSQE(s.config.SubmissionBatchSize) {
 		util.Assert(i < s.config.SubmissionBatchSize, "sqes length be no greater than the submission batch size")
 
 		coroutine, ok := s.onRequest[sqe.Submission.Kind]
@@ -159,7 +160,7 @@ func (s *System) Tick(t int64) {
 			s.coroutineMetrics(p, sqe.Submission.Tags)
 		} else {
 			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
-			sqe.Callback(nil, t_api.NewResonateError(t_api.ErrSchedulerQueueFull, "scheduler queue full", nil))
+			sqe.Callback(nil, t_api.NewError(t_api.StatusSchedulerQueueFull, nil))
 		}
 	}
 
@@ -187,9 +188,20 @@ func (s *System) Done() bool {
 }
 
 func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], *t_api.Request) (*t_api.Response, error)) {
-	s.onRequest[kind] = func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	s.onRequest[kind] = func(req *t_api.Request, callback func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
 		return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
-			res(constructor(c, req))
+			util.Assert(req.Tags != nil, "request tags must be non nil")
+			util.Assert(req.Tags["id"] != "", "id tag must be set")
+
+			res, err := constructor(c, req)
+
+			s.api.EnqueueCQE(&bus.CQE[t_api.Request, t_api.Response]{
+				Id:         req.Tags["id"],
+				Completion: res,
+				Callback:   callback,
+				Error:      err,
+			})
+
 			return nil, nil
 		}
 	}
@@ -206,16 +218,13 @@ func (s *System) AddBackground(name string, constructor func(*Config, map[string
 func (s *System) coroutineMetrics(p promise.Promise[any], tags map[string]string) {
 	util.Assert(tags != nil, "tags must be set")
 
-	id := tags["request_id"]
-	name := tags["name"]
-
-	slog.Debug("scheduler:add", "id", id, "coroutine", name)
-	s.metrics.CoroutinesTotal.WithLabelValues(name).Inc()
-	s.metrics.CoroutinesInFlight.WithLabelValues(name).Inc()
+	slog.Debug("scheduler:add", "id", tags["id"], "coroutine", tags["name"])
+	s.metrics.CoroutinesTotal.WithLabelValues(tags["name"]).Inc()
+	s.metrics.CoroutinesInFlight.WithLabelValues(tags["name"]).Inc()
 
 	go func() {
 		_, _ = p.Await()
-		slog.Debug("scheduler:rmv", "id", id, "coroutine", name)
-		s.metrics.CoroutinesInFlight.WithLabelValues(name).Dec()
+		slog.Debug("scheduler:rmv", "id", tags["id"], "coroutine", tags["name"])
+		s.metrics.CoroutinesInFlight.WithLabelValues(tags["name"]).Dec()
 	}()
 }

@@ -2,86 +2,9 @@ syntax = "proto3";
 
 package schedule;
 
+import "internal/app/subsystems/api/grpc/api/promise.proto";
+
 option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
-
-message PromiseValue {
-    bytes data = 1; 
-    map<string, string> headers = 2;   
-}
-
-// SCHEDULES -> to match promise proto.  
-
-message Schedule {
-    string id = 1;
-    string description = 2; 
-    string cron = 3;
-    map<string, string> tags = 4;
-    string promiseId = 5;
-    int64 promiseTimeout = 6;
-    PromiseValue promiseParam = 7;
-    map<string, string> promiseTags = 8;
-    string idempotencyKey = 9; 
-    int64 lastRunTime = 10;
-    int64 nextRunTime = 11; 
-    int64 createdOn = 12;    
-}
-
-// CREATE 
-
-message CreateScheduleRequest {
-    string id = 1;
-    string description = 2; 
-    string cron = 3;
-    map<string, string> tags = 4;
-    string promiseId = 5;
-    int64 promiseTimeout = 6;
-    PromiseValue promiseParam = 7;
-    map<string, string> promiseTags = 8;
-    string idempotencyKey = 9; 
-    string requestId = 10;
-} 
-
-message CreatedScheduleResponse {
-    bool noop = 1; 
-    Schedule schedule = 2; 
-} 
-
-// READ
-
-message ReadScheduleRequest {
-    string id = 1; 
-    string requestId = 2;
-} 
-
-message ReadScheduleResponse {
-    Schedule schedule = 1; 
-} 
-
-// SEARCH 
-
-message SearchSchedulesRequest {
-    string id = 1; 
-    map<string, string> tags = 2;
-    int32 limit = 3; 
-    string cursor = 4; 
-    string requestId = 5;
-}
-
-message SearchSchedulesResponse {
-    string cursor = 1; 
-    repeated Schedule schedules = 2; 
-}
-
-// DELETE 
-
-message DeleteScheduleRequest {
-    string id = 1; 
-    string requestId = 2;
-} 
-
-message DeleteScheduleResponse {} 
-
-// SERVICE 
 
 service Schedules {
     rpc CreateSchedule (CreateScheduleRequest) returns (CreatedScheduleResponse) {}
@@ -89,3 +12,73 @@ service Schedules {
     rpc SearchSchedules (SearchSchedulesRequest) returns (SearchSchedulesResponse) {}
     rpc DeleteSchedule (DeleteScheduleRequest) returns (DeleteScheduleResponse) {}
 }
+
+message Schedule {
+    string id = 1;
+    string description = 2;
+    string cron = 3;
+    map<string, string> tags = 4;
+    string promiseId = 5;
+    int64 promiseTimeout = 6;
+    promise.Value promiseParam = 7;
+    map<string, string> promiseTags = 8;
+    string idempotencyKey = 9;
+    int64 lastRunTime = 10;
+    int64 nextRunTime = 11;
+    int64 createdOn = 12;
+}
+
+// CREATE
+
+message CreateScheduleRequest {
+    string id = 1;
+    string description = 2;
+    string cron = 3;
+    map<string, string> tags = 4;
+    string promiseId = 5;
+    int64 promiseTimeout = 6;
+    promise.Value promiseParam = 7;
+    map<string, string> promiseTags = 8;
+    string idempotencyKey = 9;
+    string requestId = 10;
+}
+
+message CreatedScheduleResponse {
+    bool noop = 1;
+    Schedule schedule = 2;
+}
+
+// READ
+
+message ReadScheduleRequest {
+    string id = 1;
+    string requestId = 2;
+}
+
+message ReadScheduleResponse {
+    Schedule schedule = 1;
+}
+
+// SEARCH
+
+message SearchSchedulesRequest {
+    string id = 1;
+    map<string, string> tags = 2;
+    int32 limit = 3;
+    string cursor = 4;
+    string requestId = 5;
+}
+
+message SearchSchedulesResponse {
+    string cursor = 1;
+    repeated Schedule schedules = 2;
+}
+
+// DELETE
+
+message DeleteScheduleRequest {
+    string id = 1;
+    string requestId = 2;
+}
+
+message DeleteScheduleResponse {}

@@ -10,7 +10,8 @@ type TaskRecord struct {
 	Id          string
 	ProcessId   *string
 	State       State
-	Message     []byte
+	Recv        []byte
+	Mesg        []byte
 	Timeout     int64
 	Counter     int
 	Attempt     int
@@ -21,8 +22,8 @@ type TaskRecord struct {
 }
 
 func (r *TaskRecord) Task() (*Task, error) {
-	message, err := bytesToMessage(r.Message)
-	if err != nil {
+	var mesg *message.Mesg
+	if err := json.Unmarshal(r.Mesg, &mesg); err != nil {
 		return nil, err
 	}
 
@@ -30,7 +31,8 @@ func (r *TaskRecord) Task() (*Task, error) {
 		Id:          r.Id,
 		ProcessId:   r.ProcessId,
 		State:       r.State,
-		Message:     message,
+		Recv:        r.Recv,
+		Mesg:        mesg,
 		Timeout:     r.Timeout,
 		Counter:     r.Counter,
 		Attempt:     r.Attempt,
@@ -39,16 +41,4 @@ func (r *TaskRecord) Task() (*Task, error) {
 		CreatedOn:   r.CreatedOn,
 		CompletedOn: r.CompletedOn,
 	}, nil
-}
-
-func bytesToMessage(b []byte) (*message.Message, error) {
-	var m *message.Message
-
-	if b != nil {
-		if err := json.Unmarshal(b, &m); err != nil {
-			return nil, err
-		}
-	}
-
-	return m, nil
 }

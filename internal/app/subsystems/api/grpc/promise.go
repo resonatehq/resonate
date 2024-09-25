@@ -2,13 +2,11 @@ package grpc
 
 import (
 	"context"
-	"errors"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 
-	"github.com/resonatehq/resonate/internal/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -21,15 +19,13 @@ func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseReques
 		RequestId: req.RequestId,
 	}
 
-	resp, err := s.service.ReadPromise(req.Id, header)
+	res, err := s.service.ReadPromise(req.Id, header)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be an api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.ReadPromiseResponse{
-		Promise: protoPromise(resp.Promise),
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 
@@ -43,8 +39,7 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 	// can't check if limit was set or not in proto3. see above issue
 	// so can't check for 0.
 	if req.Limit > 100 || req.Limit < 0 {
-		err := api.HandleValidationError(errors.New("field limit must be greater than 0 and less than or equal to 100"))
-		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+		return nil, grpcStatus.Error(codes.InvalidArgument, "field limit must be greater than 0 and less than or equal to 100")
 	}
 
 	params := &service.SearchPromisesParams{
@@ -55,22 +50,20 @@ func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromises
 		Cursor: &req.Cursor,
 	}
 
-	resp, err := s.service.SearchPromises(header, params)
+	res, err := s.service.SearchPromises(header, params)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	promises := make([]*grpcApi.Promise, len(resp.Promises))
-	for i, promise := range resp.Promises {
+	promises := make([]*grpcApi.Promise, len(res.Promises))
+	for i, promise := range res.Promises {
 		promises[i] = protoPromise(promise)
 	}
 
 	cursor := ""
-	if resp.Cursor != nil {
+	if res.Cursor != nil {
 		var err error
-		cursor, err = resp.Cursor.Encode()
+		cursor, err = res.Cursor.Encode()
 		if err != nil {
 			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
@@ -100,12 +93,11 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 
 	// TODO: for now, look at at protobuf validators
 	if req.Timeout < 0 || req.Timeout == 0 {
-		err := api.HandleValidationError(errors.New("timeout must be greater than 0"))
-		return nil, grpcStatus.Error(codes.InvalidArgument, err.Error())
+		return nil, grpcStatus.Error(codes.InvalidArgument, "timeout must be greater than 0")
 	}
 
 	header := &service.CreatePromiseHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -119,16 +111,14 @@ func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRe
 		Timeout: req.Timeout,
 	}
 
-	resp, err := s.service.CreatePromise(header, body)
+	res, err := s.service.CreatePromise(header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CreatePromiseResponse{
-		Noop:    resp.Status == t_api.StatusOK,
-		Promise: protoPromise(resp.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 
@@ -149,7 +139,7 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 	}
 
 	header := &service.CompletePromiseHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -160,16 +150,14 @@ func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRe
 			Data:    data,
 		},
 	}
-	resp, err := s.service.CompletePromise(req.Id, promise.Canceled, header, body)
+	res, err := s.service.CompletePromise(req.Id, promise.Canceled, header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.CancelPromiseResponse{
-		Noop:    resp.Status == t_api.StatusOK,
-		Promise: protoPromise(resp.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 
@@ -190,7 +178,7 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 	}
 
 	header := &service.CompletePromiseHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -202,16 +190,14 @@ func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromise
 		},
 	}
 
-	resp, err := s.service.CompletePromise(req.Id, promise.Resolved, header, body)
+	res, err := s.service.CompletePromise(req.Id, promise.Resolved, header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.ResolvePromiseResponse{
-		Noop:    resp.Status == t_api.StatusOK,
-		Promise: protoPromise(resp.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 
@@ -232,7 +218,7 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 	}
 
 	header := &service.CompletePromiseHeader{
-		RequestId:      req.RequestId,
+		Header:         service.Header{RequestId: req.RequestId},
 		Strict:         req.Strict,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -244,16 +230,14 @@ func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRe
 		},
 	}
 
-	resp, err := s.service.CompletePromise(req.Id, promise.Rejected, header, body)
+	res, err := s.service.CompletePromise(req.Id, promise.Rejected, header, body)
 	if err != nil {
-		var apiErr *api.APIErrorResponse
-		util.Assert(errors.As(err, &apiErr), "err must be api error")
-		return nil, grpcStatus.Error(apiErr.APIError.Code.GRPC(), err.Error())
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
 	return &grpcApi.RejectPromiseResponse{
-		Noop:    resp.Status == t_api.StatusOK,
-		Promise: protoPromise(resp.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.Promise),
 	}, nil
 }
 

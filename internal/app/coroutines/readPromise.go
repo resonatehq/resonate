@@ -30,7 +30,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
-		return nil, t_api.NewResonateError(t_api.ErrAIOStoreFailure, "failed to read promise", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -44,18 +44,19 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		p, err := result.Records[0].Promise()
 		if err != nil {
 			slog.Error("failed to parse promise record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewResonateError(t_api.ErrAIOStoreSerializationFailure, "failed to parse promise record", err)
+			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
-		if p.State == promise.Pending && c.Time() >= p.Timeout {
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(p.Timeout, &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:    p.Id,
-					State: promise.GetTimedoutState(p),
-				},
-			}))
+		if p.State == promise.Pending && p.Timeout <= c.Time() {
+			cmd := &t_aio.UpdatePromiseCommand{
+				Id:             r.ReadPromise.Id,
+				State:          promise.GetTimedoutState(p),
+				Value:          promise.Value{},
+				IdempotencyKey: nil,
+				CompletedOn:    p.Timeout,
+			}
+
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -73,15 +74,15 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
 						Id:                        p.Id,
-						State:                     promise.GetTimedoutState(p),
+						State:                     cmd.State,
 						Param:                     p.Param,
-						Value:                     promise.Value{Headers: map[string]string{}, Data: nil},
+						Value:                     cmd.Value,
 						Timeout:                   p.Timeout,
 						IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
-						IdempotencyKeyForComplete: nil,
+						IdempotencyKeyForComplete: cmd.IdempotencyKey,
 						Tags:                      p.Tags,
 						CreatedOn:                 p.CreatedOn,
-						CompletedOn:               &p.Timeout,
+						CompletedOn:               &cmd.CompletedOn,
 					},
 				},
 			}
