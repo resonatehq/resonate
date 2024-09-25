@@ -6,7 +6,6 @@ import * as a from "../lib/resonate";
 jest.setTimeout(10000);
 
 async function aTest(ctx: a.Context, opts: Partial<Options> = {}) {
-  console.log({ optsOverrides: opts });
   return [
     ctx.invocationData.opts,
     ...(await ctx.run(
@@ -72,11 +71,9 @@ describe("Options", () => {
 
   test("registered options propagate down", async () => {
     const a = await resonate.run<[Options, Options, Options]>("test.2", `test.2.1`);
-    console.log({ a });
 
     const [top, middle, bottom] = a;
     for (const opts of [top, middle, bottom]) {
-      console.log({ opts });
       expect(opts.durable).toBe(overrides.durable);
       expect(opts.shouldLock).toBe(overrides.shouldLock);
       expect(opts.pollFrequency).toBe(overrides.pollFrequency);

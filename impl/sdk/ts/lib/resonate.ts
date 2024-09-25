@@ -40,6 +40,7 @@ export class Resonate {
   #registeredFunctions: Record<string, Record<number, { func: Func; opts: Options }>> = {};
   #invocationHandles: Map<string, InvocationHandle<any>>;
   #interval: NodeJS.Timeout | undefined;
+  #resources: Map<string, any>;
   readonly store: IStore;
   readonly logger: ILogger;
   readonly defaultInvocationOptions: Options;
@@ -79,6 +80,7 @@ export class Resonate {
 
     this.logger = logger;
     this.#invocationHandles = new Map();
+    this.#resources = new Map();
 
     this.defaultInvocationOptions = {
       __resonate: true,
@@ -148,6 +150,41 @@ export class Resonate {
     }
 
     return this.#registeredFunctions[funcName][version];
+  }
+
+  /**
+   * Sets a global named resource for the Resonate instace. This resource will be available
+   * in all the children Contexts of the current top level execution.
+   *
+   * Caller is responsible of the life cycle of the resource.
+   *
+   * @param name - A unique string identifier for the resource.
+   * @param resource - The resource to be stored. Can be of any type.
+   * @throws {Error} Throws an error if a resource with the same name already exists in the current Resonate instace.
+   *
+   */
+  setResource(name: string, resource: any): void {
+    if (this.#resources.has(name)) {
+      throw new Error("Resource already set for this instance");
+    }
+
+    this.#resources.set(name, resource);
+  }
+
+  /**
+   * Retrieves a resource by name from the Resonate instance.
+   *
+   * @template R - The expected type of the resource.
+   * @param name - The unique string identifier of the resource to retrieve.
+   * @returns The resource of type R if found, or undefined if not found.
+   *
+   * @remarks
+   * The method uses type assertion to cast the resource to type R.
+   * Ensure that the type parameter R matches the actual type of the stored resource
+   * to avoid runtime type errors.
+   */
+  getResource<R>(name: string): R | undefined {
+    return this.#resources.get(name);
   }
 
   register(name: string, func: Func, opts: Partial<Options> = {}): void {
@@ -533,12 +570,17 @@ export class Context {
    * to avoid runtime type errors.
    */
   getResource<R>(name: string): R | undefined {
-    const resource = this.#resources.get(name);
+    let resource = this.#resources.get(name);
     if (resource) {
       return resource as R;
     }
 
-    return this.parent ? this.parent.getResource<R>(name) : undefined;
+    resource = this.parent ? this.parent.getResource<R>(name) : undefined;
+    if (!resource) {
+      return this.#resonate.getResource(name);
+    }
+
+    return resource;
   }
 
   options(opts: Partial<Options>): PartialOptions {
