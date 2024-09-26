@@ -4,104 +4,78 @@ import (
 	"context"
 
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
-func (s *server) ClaimTask(ctx context.Context, req *grpcApi.ClaimTaskRequest) (*grpcApi.ClaimTaskResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.Id == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.id must be provided")
-	}
-	if req.ProcessId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.processId must be provided")
-	}
-	if req.Frequency == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.frequency must be provided")
-	}
-
-	body := &service.ClaimTaskBody{
-		Id:        req.Id,
-		ProcessId: req.ProcessId,
-		Counter:   int(req.Counter),
-		Frequency: int(req.Frequency),
-	}
-
-	res, err := s.service.ClaimTask(header, body)
+func (s *server) ClaimTask(c context.Context, r *grpcApi.ClaimTaskRequest) (*grpcApi.ClaimTaskResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.ClaimTask,
+		ClaimTask: &t_api.ClaimTaskRequest{
+			Id:        r.Id,
+			ProcessId: r.ProcessId,
+			Counter:   int(r.Counter),
+			Frequency: int(r.Frequency),
+		},
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.Status != t_api.StatusCreated || res.Task != nil, "task must not be nil if created")
+	util.Assert(res.ClaimTask != nil, "result must not be nil")
+	util.Assert(res.ClaimTask.Status != t_api.StatusCreated || (res.ClaimTask.Task != nil && res.ClaimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
 
 	var mesg *grpcApi.Mesg
-	if res.Status == t_api.StatusCreated {
+	if res.ClaimTask.Status == t_api.StatusCreated {
 		promises := map[string]*grpcApi.Promise{}
-		for k, promise := range res.Task.Mesg.Promises {
+		for k, promise := range res.ClaimTask.Task.Mesg.Promises {
 			promises[k] = protoPromise(promise)
 		}
 
 		mesg = &grpcApi.Mesg{
-			Type:     string(res.Task.Mesg.Type),
+			Type:     string(res.ClaimTask.Task.Mesg.Type),
 			Promises: promises,
 		}
 	}
 
 	return &grpcApi.ClaimTaskResponse{
-		Claimed: res.Status == t_api.StatusCreated,
+		Claimed: res.ClaimTask.Status == t_api.StatusCreated,
 		Mesg:    mesg,
 	}, nil
 }
 
-func (s *server) CompleteTask(ctx context.Context, req *grpcApi.CompleteTaskRequest) (*grpcApi.CompleteTaskResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.Id == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.id must be provided")
-	}
-
-	body := &service.CompleteTaskBody{
-		Id:      req.Id,
-		Counter: int(req.Counter),
-	}
-
-	res, err := s.service.CompleteTask(header, body)
+func (s *server) CompleteTask(c context.Context, r *grpcApi.CompleteTaskRequest) (*grpcApi.CompleteTaskResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CompleteTask,
+		CompleteTask: &t_api.CompleteTaskRequest{
+			Id:      r.Id,
+			Counter: int(r.Counter),
+		},
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
+	util.Assert(res.CompleteTask != nil, "result must not be nil")
 	return &grpcApi.CompleteTaskResponse{
-		Completed: res.Status == t_api.StatusCreated,
+		Completed: res.CompleteTask.Status == t_api.StatusCreated,
 	}, nil
 }
 
-func (s *server) HeartbeatTasks(ctx context.Context, req *grpcApi.HeartbeatTasksRequest) (*grpcApi.HeartbeatTasksResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.ProcessId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "task.process_id must be provided")
-	}
-
-	body := &service.HeartbeatTaskBody{
-		ProcessId: req.ProcessId,
-	}
-
-	res, err := s.service.HeartbeatTasks(header, body)
+func (s *server) HeartbeatTasks(c context.Context, r *grpcApi.HeartbeatTasksRequest) (*grpcApi.HeartbeatTasksResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.HeartbeatTasks,
+		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+			ProcessId: r.ProcessId,
+		},
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
+	util.Assert(res.HeartbeatTasks != nil, "result must not be nil")
 	return &grpcApi.HeartbeatTasksResponse{
-		TasksAffected: res.TasksAffected,
+		TasksAffected: res.HeartbeatTasks.TasksAffected,
 	}, nil
 }

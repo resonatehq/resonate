@@ -3,7 +3,6 @@ package test
 import (
 	"testing"
 
-	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/stretchr/testify/assert"
@@ -23,10 +22,6 @@ func (a *API) Load(t *testing.T, req *t_api.Request, res *t_api.Response) {
 
 func (a *API) String() string {
 	return "api:test"
-}
-
-func (a *API) AddSubsystem(subsystem api.Subsystem) {
-	panic("not implemented")
 }
 
 func (a *API) Start() error {

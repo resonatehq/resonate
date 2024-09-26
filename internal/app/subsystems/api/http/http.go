@@ -10,12 +10,12 @@ import (
 	"log/slog"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/resonatehq/resonate/internal/api"
+	i_api "github.com/resonatehq/resonate/internal/api"
 )
 
 type Config struct {
@@ -31,11 +31,11 @@ type Http struct {
 	server *http.Server
 }
 
-func New(api api.API, config *Config) api.Subsystem {
+func New(a i_api.API, config *Config) i_api.Subsystem {
 	gin.SetMode(gin.ReleaseMode)
 
 	r := gin.New()
-	s := &server{service: service.New(api, "http")}
+	s := &server{api: api.New(a, "http")}
 
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 
@@ -107,7 +107,7 @@ func (h *Http) Stop() error {
 }
 
 type server struct {
-	service *service.Service
+	api *api.API
 }
 
 func (s *server) code(status t_api.StatusCode) int {
@@ -118,6 +118,8 @@ func (s *server) log(c *gin.Context) {
 	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
 	c.Next()
 }
+
+// Helper functions
 
 func oneOfCaseInsensitive(f validator.FieldLevel) bool {
 	fieldValue := f.Field().String()

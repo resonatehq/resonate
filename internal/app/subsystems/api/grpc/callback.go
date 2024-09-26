@@ -5,26 +5,18 @@ import (
 	"encoding/json"
 
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
-func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallbackRequest) (*grpcApi.CreateCallbackResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.PromiseId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "callback.promiseId must be provided")
-	}
-
+func (s *server) CreateCallback(c context.Context, r *grpcApi.CreateCallbackRequest) (*grpcApi.CreateCallbackResponse, error) {
 	var recv []byte
 	var rErr error
-	switch r := req.Recv.(type) {
+	switch r := r.Recv.(type) {
 	case *grpcApi.CreateCallbackRequest_Logical:
 		recv, rErr = json.Marshal(&r.Logical)
 	case *grpcApi.CreateCallbackRequest_Physical:
@@ -34,28 +26,29 @@ func (s *server) CreateCallback(ctx context.Context, req *grpcApi.CreateCallback
 	if rErr != nil {
 		return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
 	}
-	if recv == nil {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "callback.recv must be provided")
-	}
 
-	body := &service.CreateCallbackBody{
-		PromiseId:     req.PromiseId,
-		RootPromiseId: req.RootPromiseId,
-		Timeout:       req.Timeout,
-		Recv:          recv,
-	}
-
-	res, err := s.service.CreateCallback(header, body)
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CreateCallback,
+		CreateCallback: &t_api.CreateCallbackRequest{
+			PromiseId:     r.PromiseId,
+			RootPromiseId: r.RootPromiseId,
+			Timeout:       r.Timeout,
+			Recv:          recv,
+		},
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
+	util.Assert(res.CreateCallback != nil, "result must not be nil")
 	return &grpcApi.CreateCallbackResponse{
-		Noop:     res.Status == t_api.StatusOK,
-		Callback: protoCallback(res.Callback),
-		Promise:  protoPromise(res.Promise),
+		Noop:     res.CreateCallback.Status == t_api.StatusOK,
+		Callback: protoCallback(res.CreateCallback.Callback),
+		Promise:  protoPromise(res.CreateCallback.Promise),
 	}, nil
 }
+
+// Helper functions
 
 func protoCallback(callback *callback.Callback) *grpcApi.Callback {
 	if callback == nil {

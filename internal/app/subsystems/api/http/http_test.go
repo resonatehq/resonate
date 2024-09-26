@@ -33,7 +33,7 @@ func setup(auth map[string]string) *httpTest {
 	errors := make(chan error)
 	subsystem := New(api, &Config{
 		Host:    "127.0.0.1",
-		Port:    8888,
+		Port:    6001,
 		Auth:    auth,
 		Timeout: 1 * time.Second,
 	})
@@ -56,7 +56,7 @@ func (t *httpTest) teardown() error {
 	return t.subsystem.Stop()
 }
 
-func TestHttpServer(t *testing.T) {
+func TestHttp(t *testing.T) {
 	for _, ts := range []struct {
 		name          string
 		auth          map[string]string
@@ -1472,7 +1472,7 @@ func TestHttpServer(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					httpTest.Load(t, tc.req, tc.res)
 
-					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:8888/%s", tc.path), bytes.NewBuffer(tc.reqBody))
+					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:6001/%s", tc.path), bytes.NewBuffer(tc.reqBody))
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -4,7 +4,7 @@ import (
 	"context"
 
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -13,89 +13,48 @@ import (
 	grpcStatus "google.golang.org/grpc/status"
 )
 
-// CREATE
-
-func (s *server) CreateSchedule(ctx context.Context, req *grpcApi.CreateScheduleRequest) (*grpcApi.CreatedScheduleResponse, error) {
-	ikey := idempotency.Key(req.IdempotencyKey)
-
-	header := service.CreateScheduleHeader{
-		Header:         service.Header{RequestId: req.RequestId},
-		IdempotencyKey: &ikey,
-	}
-
-	body := service.CreateScheduleBody{
-		Id:             req.Id,
-		Description:    req.Description,
-		Cron:           req.Cron,
-		Tags:           req.Tags,
-		PromiseId:      req.PromiseId,
-		PromiseTimeout: req.PromiseTimeout,
-		PromiseParam: promise.Value{
-			Headers: req.PromiseParam.Headers,
-			Data:    []byte(req.PromiseParam.Data),
+func (s *server) ReadSchedule(c context.Context, r *grpcApi.ReadScheduleRequest) (*grpcApi.ReadScheduleResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.ReadSchedule,
+		ReadSchedule: &t_api.ReadScheduleRequest{
+			Id: r.Id,
 		},
-		PromiseTags: req.PromiseTags,
-	}
-
-	res, err := s.service.CreateSchedule(header, &body)
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.CreatedScheduleResponse{
-		Schedule: protoSchedule(res.Schedule),
-	}, nil
-}
-
-// READ
-
-func (s *server) ReadSchedule(ctx context.Context, req *grpcApi.ReadScheduleRequest) (*grpcApi.ReadScheduleResponse, error) {
-	header := service.Header{
-		RequestId: req.RequestId,
-	}
-
-	res, err := s.service.ReadSchedule(req.Id, &header)
-	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
-	}
-
+	util.Assert(res.ReadSchedule != nil, "result must not be nil")
 	return &grpcApi.ReadScheduleResponse{
-		Schedule: protoSchedule(res.Schedule),
+		Schedule: protoSchedule(res.ReadSchedule.Schedule),
 	}, nil
 }
 
-// SEARCH
-
-func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedulesRequest) (*grpcApi.SearchSchedulesResponse, error) {
-	headers := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.Limit > 100 || req.Limit < 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "field limit must be greater than 0 and less than or equal to 100")
-	}
-
-	params := &service.SearchSchedulesParams{
-		Id:     &req.Id,
-		Tags:   req.Tags,
-		Limit:  util.ToPointer(int(req.Limit)),
-		Cursor: &req.Cursor,
-	}
-
-	res, err := s.service.SearchSchedules(headers, params)
+func (s *server) SearchSchedules(c context.Context, r *grpcApi.SearchSchedulesRequest) (*grpcApi.SearchSchedulesResponse, error) {
+	req, err := s.api.SearchSchedules(r.Id, r.Tags, int(r.Limit), r.Cursor)
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	schedules := make([]*grpcApi.Schedule, len(res.Schedules))
-	for i, schedule := range res.Schedules {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind:            t_api.SearchSchedules,
+		SearchSchedules: req,
+	})
+	if err != nil {
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.SearchSchedules != nil, "result must not be nil")
+
+	schedules := make([]*grpcApi.Schedule, len(res.SearchSchedules.Schedules))
+	for i, schedule := range res.SearchSchedules.Schedules {
 		schedules[i] = protoSchedule(schedule)
 	}
 
 	var cursor string
-	if res.Cursor != nil {
+	if res.SearchSchedules.Cursor != nil {
 		var err error
-		cursor, err = res.Cursor.Encode()
+		cursor, err = res.SearchSchedules.Cursor.Encode()
 		if err != nil {
 			return nil, grpcStatus.Error(codes.Internal, err.Error())
 		}
@@ -107,20 +66,66 @@ func (s *server) SearchSchedules(ctx context.Context, req *grpcApi.SearchSchedul
 	}, nil
 }
 
-// DELETE
-
-func (s *server) DeleteSchedule(ctx context.Context, req *grpcApi.DeleteScheduleRequest) (*grpcApi.DeleteScheduleResponse, error) {
-	header := service.Header{
-		RequestId: req.RequestId,
+func (s *server) CreateSchedule(c context.Context, r *grpcApi.CreateScheduleRequest) (*grpcApi.CreatedScheduleResponse, error) {
+	if err := s.api.ValidateCron(r.Cron); err != nil {
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
-	_, err := s.service.DeleteSchedule(req.Id, &header)
+	var idempotencyKey *idempotency.Key
+	if r.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
+	}
+
+	var headers map[string]string
+	if r.PromiseParam != nil {
+		headers = r.PromiseParam.Headers
+	}
+
+	var data []byte
+	if r.PromiseParam != nil {
+		data = r.PromiseParam.Data
+	}
+
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CreateSchedule,
+		CreateSchedule: &t_api.CreateScheduleRequest{
+			Id:             r.Id,
+			Description:    r.Description,
+			Cron:           r.Cron,
+			Tags:           r.Tags,
+			PromiseId:      r.PromiseId,
+			PromiseTimeout: r.PromiseTimeout,
+			PromiseParam:   promise.Value{Headers: headers, Data: data},
+			PromiseTags:    r.PromiseTags,
+			IdempotencyKey: idempotencyKey,
+		},
+	})
 	if err != nil {
 		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
 	}
 
+	util.Assert(res.CreateSchedule != nil, "result must not be nil")
+	return &grpcApi.CreatedScheduleResponse{
+		Schedule: protoSchedule(res.CreateSchedule.Schedule),
+	}, nil
+}
+
+func (s *server) DeleteSchedule(c context.Context, r *grpcApi.DeleteScheduleRequest) (*grpcApi.DeleteScheduleResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.DeleteSchedule,
+		DeleteSchedule: &t_api.DeleteScheduleRequest{
+			Id: r.Id,
+		},
+	})
+	if err != nil {
+		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.DeleteSchedule != nil, "result must not be nil")
 	return &grpcApi.DeleteScheduleResponse{}, nil
 }
+
+// Helper functions
 
 func protoSchedule(schedule *schedule.Schedule) *grpcApi.Schedule {
 	if schedule == nil {
@@ -134,10 +139,7 @@ func protoSchedule(schedule *schedule.Schedule) *grpcApi.Schedule {
 		Tags:           schedule.Tags,
 		PromiseId:      schedule.PromiseId,
 		PromiseTimeout: schedule.PromiseTimeout,
-		PromiseParam: &grpcApi.Value{
-			Headers: schedule.PromiseParam.Headers,
-			Data:    schedule.PromiseParam.Data,
-		},
+		PromiseParam:   &grpcApi.Value{Headers: schedule.PromiseParam.Headers, Data: schedule.PromiseParam.Data},
 		PromiseTags:    schedule.PromiseTags,
 		LastRunTime:    util.SafeDeref(schedule.LastRunTime),
 		NextRunTime:    schedule.NextRunTime,

@@ -1,4 +1,4 @@
-package service
+package api
 
 import (
 	"errors"
@@ -63,10 +63,6 @@ func ServerError(err error) *Error {
 }
 
 func RequestError(status t_api.StatusCode) *Error {
-	if status.IsSuccessful() {
-		return nil
-	}
-
 	return &Error{
 		Code:    status,
 		Message: status.String(),
@@ -121,36 +117,35 @@ func parseBindingError(errs ...error) []string {
 }
 
 func parseFieldError(e validator.FieldError) string {
-	fieldPrefix := fmt.Sprintf("The field %s", e.Field())
-	tag := strings.Split(e.Tag(), "|")[0]
+	field := strings.ToLower(e.Field())
 
-	switch tag {
+	switch e.Tag() {
 	case "required":
-		return fmt.Sprintf("%s is required", fieldPrefix)
+		return fmt.Sprintf("The field %s is required.", field)
 	case "min":
 		param := e.Param()
-		return fmt.Sprintf("%s must be be at least length %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be be at least length %s.", field, param)
 	case "max":
 		param := e.Param()
-		return fmt.Sprintf("%s must be be at most length %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be be at most length %s.", field, param)
 	case "gt":
 		param := e.Param()
-		return fmt.Sprintf("%s must be greater than %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be greater than %s.", field, param)
 	case "gte":
 		param := e.Param()
-		return fmt.Sprintf("%s must be greater than or equal to %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be greater than or equal to %s.", field, param)
 	case "lt":
 		param := e.Param()
-		return fmt.Sprintf("%s must be less than %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be less than %s.", field, param)
 	case "lte":
 		param := e.Param()
-		return fmt.Sprintf("%s must be less than or equal to %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be less than or equal to %s.", field, param)
 	case "oneof", "oneofcaseinsensitive":
 		param := e.Param()
 		paramArr := strings.Split(param, " ")
 		paramArr[len(paramArr)-1] = "or " + paramArr[len(paramArr)-1]
 		param = strings.Join(paramArr, ", ")
-		return fmt.Sprintf("%s must be either %s", fieldPrefix, param)
+		return fmt.Sprintf("The field %s must be one of %s.", field, param)
 	default:
 		return e.Error()
 	}

@@ -23,6 +23,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 type grpcTest struct {
@@ -42,14 +44,14 @@ func setup() (*grpcTest, error) {
 	errors := make(chan error)
 	subsystem := New(api, &Config{
 		Host: "127.0.0.1",
-		Port: 5555,
+		Port: 6002,
 	})
 
 	// start grpc server
 	go subsystem.Start(errors)
 	time.Sleep(100 * time.Millisecond)
 
-	conn, err := grpc.NewClient("127.0.0.1:5555", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient("127.0.0.1:6002", grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
@@ -77,9 +79,7 @@ func (t *grpcTest) teardown() error {
 	return t.subsystem.Stop()
 }
 
-// Promises
-
-func TestReadPromise(t *testing.T) {
+func TestGrpc(t *testing.T) {
 	grpcTest, err := setup()
 	if err != nil {
 		t.Fatal(err)
@@ -87,11 +87,13 @@ func TestReadPromise(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
-		grpcReq *grpcApi.ReadPromiseRequest
+		grpcReq protoreflect.ProtoMessage
+		grpcRes protoreflect.ProtoMessage
 		req     *t_api.Request
 		res     *t_api.Response
 		code    codes.Code // grpc error code
 	}{
+		// Promises
 		{
 			name: "ReadPromise",
 			grpcReq: &grpcApi.ReadPromiseRequest{
@@ -119,7 +121,6 @@ func TestReadPromise(t *testing.T) {
 					},
 				},
 			},
-			code: codes.OK,
 		},
 		{
 			name: "ReadPromiseNotFound",
@@ -147,51 +148,6 @@ func TestReadPromise(t *testing.T) {
 			},
 			code: codes.NotFound,
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.promises.ReadPromise(ctx, tc.grpcReq)
-			if err != nil {
-				// actual grpc error
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSearchPromises(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name    string
-		grpcReq *grpcApi.SearchPromisesRequest
-		req     *t_api.Request
-		res     *t_api.Response
-	}{
 		{
 			name: "SearchPromises",
 			grpcReq: &grpcApi.SearchPromisesRequest{
@@ -398,45 +354,6 @@ func TestSearchPromises(t *testing.T) {
 				},
 			},
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.promises.SearchPromises(ctx, tc.grpcReq)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCreatePromise(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name        string
-		grpcReq     *grpcApi.CreatePromiseRequest
-		req         *t_api.Request
-		res         *t_api.Response
-		noop        bool
-		expectedErr codes.Code
-	}{
 		{
 			name: "CreatePromise",
 			grpcReq: &grpcApi.CreatePromiseRequest{
@@ -449,6 +366,20 @@ func TestCreatePromise(t *testing.T) {
 					Data:    []byte("pending"),
 				},
 				Timeout: 1,
+			},
+			grpcRes: &grpcApi.CreatePromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                      "foo",
+					State:                   grpcApi.State_PENDING,
+					IdempotencyKeyForCreate: "bar",
+					Param: &grpcApi.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+					Value:   &grpcApi.Value{},
+					Timeout: 1,
+				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
@@ -473,12 +404,17 @@ func TestCreatePromise(t *testing.T) {
 				CreatePromise: &t_api.CreatePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Pending,
+						Id:                      "foo",
+						State:                   promise.Pending,
+						IdempotencyKeyForCreate: util.ToPointer(idempotency.Key("bar")),
+						Param: promise.Value{
+							Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+							Data:    []byte("pending"),
+						},
+						Timeout: 1,
 					},
 				},
 			},
-			noop: false,
 		},
 		{
 			name: "CreatePromiseMinimal",
@@ -486,6 +422,17 @@ func TestCreatePromise(t *testing.T) {
 				RequestId: "CreatePromiseMinimal",
 				Id:        "foo",
 				Timeout:   1,
+			},
+			grpcRes: &grpcApi.CreatePromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                      "foo",
+					State:                   grpcApi.State_PENDING,
+					IdempotencyKeyForCreate: "",
+					Param:                   &grpcApi.Value{},
+					Value:                   &grpcApi.Value{},
+					Timeout:                 1,
+				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.CreatePromise,
@@ -498,11 +445,8 @@ func TestCreatePromise(t *testing.T) {
 					Id:             "foo",
 					IdempotencyKey: nil,
 					Strict:         false,
-					Param: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
-					Timeout: 1,
+					Param:          promise.Value{},
+					Timeout:        1,
 				},
 			},
 			res: &t_api.Response{
@@ -510,257 +454,15 @@ func TestCreatePromise(t *testing.T) {
 				CreatePromise: &t_api.CreatePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Pending,
+						Id:                      "foo",
+						State:                   promise.Pending,
+						IdempotencyKeyForCreate: nil,
+						Param:                   promise.Value{},
+						Timeout:                 1,
 					},
 				},
 			},
-			noop: false,
 		},
-		{
-			name: "CreatePromiseNoTimeout",
-			grpcReq: &grpcApi.CreatePromiseRequest{
-				RequestId: "CreatePromiseNoTimeout",
-				Id:        "foo",
-			},
-			req: &t_api.Request{
-				Kind: t_api.CreatePromise,
-				Tags: map[string]string{
-					"id":       "CreatePromiseNoTimeout",
-					"name":     "CreatePromise",
-					"protocol": "grpc",
-				},
-				CreatePromise: &t_api.CreatePromiseRequest{
-					Id:             "foo",
-					IdempotencyKey: nil,
-					Strict:         false,
-					Param: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
-					Timeout: 1,
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CreatePromise,
-				CreatePromise: &t_api.CreatePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Pending,
-					},
-				},
-			},
-			noop:        false,
-			expectedErr: codes.InvalidArgument,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.promises.CreatePromise(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.expectedErr, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.noop, res.Noop)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCancelPromise(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name        string
-		grpcReq     *grpcApi.CancelPromiseRequest
-		req         *t_api.Request
-		res         *t_api.Response
-		noop        bool
-		expectedErr codes.Code
-	}{
-		{
-			name: "CancelPromise",
-			grpcReq: &grpcApi.CancelPromiseRequest{
-				RequestId:      "CancelPromise",
-				Id:             "foo",
-				IdempotencyKey: "bar",
-				Strict:         true,
-				Value: &grpcApi.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("cancel"),
-				},
-			},
-			req: &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: map[string]string{
-					"id":       "CancelPromise",
-					"name":     "CompletePromise",
-					"protocol": "grpc",
-				},
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:             "foo",
-					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-					Strict:         true,
-					State:          promise.Canceled,
-					Value: promise.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("cancel"),
-					},
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Canceled,
-					},
-				},
-			},
-			noop: false,
-		},
-		{
-			name: "CancelPromiseMinimal",
-			grpcReq: &grpcApi.CancelPromiseRequest{
-				RequestId: "CancelPromiseMinimal",
-				Id:        "foo",
-			},
-			req: &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: map[string]string{
-					"id":       "CancelPromiseMinimal",
-					"name":     "CompletePromise",
-					"protocol": "grpc",
-				},
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:             "foo",
-					IdempotencyKey: nil,
-					Strict:         false,
-					State:          promise.Canceled,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusCreated,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Canceled,
-					},
-				},
-			},
-			noop: false,
-		},
-		{
-			name: "CancelPromiseAlreadyResolved",
-			grpcReq: &grpcApi.CancelPromiseRequest{
-				RequestId: "CancelPromiseAlreadyResolved",
-				Id:        "foo",
-			},
-			req: &t_api.Request{
-				Kind: t_api.CompletePromise,
-				Tags: map[string]string{
-					"id":       "CancelPromiseAlreadyResolved",
-					"name":     "CompletePromise",
-					"protocol": "grpc",
-				},
-				CompletePromise: &t_api.CompletePromiseRequest{
-					Id:             "foo",
-					IdempotencyKey: nil,
-					Strict:         false,
-					State:          promise.Canceled,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CompletePromise,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: t_api.StatusPromiseAlreadyResolved,
-					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Resolved,
-					},
-				},
-			},
-			noop:        false,
-			expectedErr: codes.PermissionDenied,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.promises.CancelPromise(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.expectedErr, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.noop, res.Noop)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestResolvePromise(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name        string
-		grpcReq     *grpcApi.ResolvePromiseRequest
-		req         *t_api.Request
-		res         *t_api.Response
-		noop        bool
-		expectedErr codes.Code
-	}{
 		{
 			name: "ResolvePromise",
 			grpcReq: &grpcApi.ResolvePromiseRequest{
@@ -771,6 +473,19 @@ func TestResolvePromise(t *testing.T) {
 				Value: &grpcApi.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
+				},
+			},
+			grpcRes: &grpcApi.ResolvePromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_RESOLVED,
+					IdempotencyKeyForComplete: "bar",
+					Param:                     &grpcApi.Value{},
+					Value: &grpcApi.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("cancel"),
+					},
 				},
 			},
 			req: &t_api.Request{
@@ -796,18 +511,32 @@ func TestResolvePromise(t *testing.T) {
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Resolved,
+						Id:                        "foo",
+						State:                     promise.Resolved,
+						IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+						Value: promise.Value{
+							Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+							Data:    []byte("cancel"),
+						},
 					},
 				},
 			},
-			noop: false,
 		},
 		{
 			name: "ResolvePromiseMinimal",
 			grpcReq: &grpcApi.ResolvePromiseRequest{
 				RequestId: "ResolvePromiseMinimal",
 				Id:        "foo",
+			},
+			grpcRes: &grpcApi.ResolvePromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_RESOLVED,
+					IdempotencyKeyForComplete: "",
+					Param:                     &grpcApi.Value{},
+					Value:                     &grpcApi.Value{},
+				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
@@ -821,10 +550,7 @@ func TestResolvePromise(t *testing.T) {
 					IdempotencyKey: nil,
 					Strict:         false,
 					State:          promise.Resolved,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
+					Value:          promise.Value{},
 				},
 			},
 			res: &t_api.Response{
@@ -832,12 +558,13 @@ func TestResolvePromise(t *testing.T) {
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Resolved,
+						Id:                        "foo",
+						State:                     promise.Resolved,
+						IdempotencyKeyForComplete: nil,
+						Value:                     promise.Value{},
 					},
 				},
 			},
-			noop: false,
 		},
 		{
 			name: "ResolvePromiseAlreadyRejected",
@@ -857,10 +584,7 @@ func TestResolvePromise(t *testing.T) {
 					IdempotencyKey: nil,
 					Strict:         false,
 					State:          promise.Resolved,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
+					Value:          promise.Value{},
 				},
 			},
 			res: &t_api.Response{
@@ -873,55 +597,8 @@ func TestResolvePromise(t *testing.T) {
 					},
 				},
 			},
-			noop:        false,
-			expectedErr: codes.PermissionDenied,
+			code: codes.PermissionDenied,
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.promises.ResolvePromise(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.expectedErr, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.noop, res.Noop)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestRejectPromise(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name        string
-		grpcReq     *grpcApi.RejectPromiseRequest
-		req         *t_api.Request
-		res         *t_api.Response
-		noop        bool
-		expectedErr codes.Code
-	}{
 		{
 			name: "RejectPromise",
 			grpcReq: &grpcApi.RejectPromiseRequest{
@@ -932,6 +609,19 @@ func TestRejectPromise(t *testing.T) {
 				Value: &grpcApi.Value{
 					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
 					Data:    []byte("cancel"),
+				},
+			},
+			grpcRes: &grpcApi.RejectPromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_REJECTED,
+					IdempotencyKeyForComplete: "bar",
+					Param:                     &grpcApi.Value{},
+					Value: &grpcApi.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("cancel"),
+					},
 				},
 			},
 			req: &t_api.Request{
@@ -957,18 +647,32 @@ func TestRejectPromise(t *testing.T) {
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Rejected,
+						Id:                        "foo",
+						State:                     promise.Rejected,
+						IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+						Value: promise.Value{
+							Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+							Data:    []byte("cancel"),
+						},
 					},
 				},
 			},
-			noop: false,
 		},
 		{
 			name: "RejectPromiseMinimal",
 			grpcReq: &grpcApi.RejectPromiseRequest{
 				RequestId: "RejectPromiseMinimal",
 				Id:        "foo",
+			},
+			grpcRes: &grpcApi.RejectPromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_REJECTED,
+					IdempotencyKeyForComplete: "",
+					Param:                     &grpcApi.Value{},
+					Value:                     &grpcApi.Value{},
+				},
 			},
 			req: &t_api.Request{
 				Kind: t_api.CompletePromise,
@@ -982,10 +686,7 @@ func TestRejectPromise(t *testing.T) {
 					IdempotencyKey: nil,
 					Strict:         false,
 					State:          promise.Rejected,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
+					Value:          promise.Value{},
 				},
 			},
 			res: &t_api.Response{
@@ -993,12 +694,13 @@ func TestRejectPromise(t *testing.T) {
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: t_api.StatusCreated,
 					Promise: &promise.Promise{
-						Id:    "foo",
-						State: promise.Rejected,
+						Id:                        "foo",
+						State:                     promise.Rejected,
+						IdempotencyKeyForComplete: nil,
+						Value:                     promise.Value{},
 					},
 				},
 			},
-			noop: false,
 		},
 		{
 			name: "RejectPromiseAlreadyResolved",
@@ -1018,10 +720,7 @@ func TestRejectPromise(t *testing.T) {
 					IdempotencyKey: nil,
 					Strict:         false,
 					State:          promise.Rejected,
-					Value: promise.Value{
-						Headers: nil,
-						Data:    nil,
-					},
+					Value:          promise.Value{},
 				},
 			},
 			res: &t_api.Response{
@@ -1034,56 +733,146 @@ func TestRejectPromise(t *testing.T) {
 					},
 				},
 			},
-			noop:        false,
-			expectedErr: codes.PermissionDenied,
+			code: codes.PermissionDenied,
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
+		{
+			name: "CancelPromise",
+			grpcReq: &grpcApi.CancelPromiseRequest{
+				RequestId:      "CancelPromise",
+				Id:             "foo",
+				IdempotencyKey: "bar",
+				Strict:         true,
+				Value: &grpcApi.Value{
+					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+					Data:    []byte("cancel"),
+				},
+			},
+			grpcRes: &grpcApi.CancelPromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_REJECTED_CANCELED,
+					IdempotencyKeyForComplete: "bar",
+					Param:                     &grpcApi.Value{},
+					Value: &grpcApi.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("cancel"),
+					},
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.CompletePromise,
+				Tags: map[string]string{
+					"id":       "CancelPromise",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
+				},
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
+					Strict:         true,
+					State:          promise.Canceled,
+					Value: promise.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("cancel"),
+					},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompletePromise,
+				CompletePromise: &t_api.CompletePromiseResponse{
+					Status: t_api.StatusCreated,
+					Promise: &promise.Promise{
+						Id:                        "foo",
+						State:                     promise.Canceled,
+						IdempotencyKeyForComplete: util.ToPointer(idempotency.Key("bar")),
+						Value: promise.Value{
+							Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+							Data:    []byte("cancel"),
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "CancelPromiseMinimal",
+			grpcReq: &grpcApi.CancelPromiseRequest{
+				RequestId: "CancelPromiseMinimal",
+				Id:        "foo",
+			},
+			grpcRes: &grpcApi.CancelPromiseResponse{
+				Noop: false,
+				Promise: &grpcApi.Promise{
+					Id:                        "foo",
+					State:                     grpcApi.State_REJECTED_CANCELED,
+					IdempotencyKeyForComplete: "",
+					Param:                     &grpcApi.Value{},
+					Value:                     &grpcApi.Value{},
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.CompletePromise,
+				Tags: map[string]string{
+					"id":       "CancelPromiseMinimal",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
+				},
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					State:          promise.Canceled,
+					Value:          promise.Value{},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompletePromise,
+				CompletePromise: &t_api.CompletePromiseResponse{
+					Status: t_api.StatusCreated,
+					Promise: &promise.Promise{
+						Id:                        "foo",
+						State:                     promise.Canceled,
+						IdempotencyKeyForComplete: nil,
+						Value:                     promise.Value{},
+					},
+				},
+			},
+		},
+		{
+			name: "CancelPromiseAlreadyResolved",
+			grpcReq: &grpcApi.CancelPromiseRequest{
+				RequestId: "CancelPromiseAlreadyResolved",
+				Id:        "foo",
+			},
+			req: &t_api.Request{
+				Kind: t_api.CompletePromise,
+				Tags: map[string]string{
+					"id":       "CancelPromiseAlreadyResolved",
+					"name":     "CompletePromise",
+					"protocol": "grpc",
+				},
+				CompletePromise: &t_api.CompletePromiseRequest{
+					Id:             "foo",
+					IdempotencyKey: nil,
+					Strict:         false,
+					State:          promise.Canceled,
+					Value:          promise.Value{},
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CompletePromise,
+				CompletePromise: &t_api.CompletePromiseResponse{
+					Status: t_api.StatusPromiseAlreadyResolved,
+					Promise: &promise.Promise{
+						Id:    "foo",
+						State: promise.Resolved,
+					},
+				},
+			},
+			code: codes.PermissionDenied,
+		},
 
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.promises.RejectPromise(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.expectedErr, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.noop, res.Noop)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Callbacks
-
-func TestCreateCallback(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.CreateCallbackRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
+		// Callbacks
 		{
 			name: "CreateCallback",
 			grpcReq: &grpcApi.CreateCallbackRequest{
@@ -1147,18 +936,6 @@ func TestCreateCallback(t *testing.T) {
 			code: codes.OK,
 		},
 		{
-			name: "CreateCallbackNoRecv",
-			grpcReq: &grpcApi.CreateCallbackRequest{
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				RequestId:     "CreateCallbackNoRecv",
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
 			name: "CreateCallbackInvalidPhysicalReceiver",
 			grpcReq: &grpcApi.CreateCallbackRequest{
 				PromiseId:     "foo",
@@ -1200,154 +977,8 @@ func TestCreateCallback(t *testing.T) {
 			},
 			code: codes.NotFound,
 		},
-	}
 
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.callbacks.CreateCallback(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Schedules
-
-func TestCreateSchedule(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name        string
-		grpcReq     *grpcApi.CreateScheduleRequest
-		req         *t_api.Request
-		res         *t_api.Response
-		noop        bool
-		expectedErr codes.Code
-	}{
-		{
-			name: "CreateSchedule",
-			grpcReq: &grpcApi.CreateScheduleRequest{
-				RequestId:      "CreateSchedule",
-				Id:             "foo",
-				Description:    "bar",
-				Cron:           "* * * * *",
-				Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
-				PromiseId:      "foo",
-				PromiseTimeout: 1,
-				PromiseParam: &grpcApi.Value{
-					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-					Data:    []byte("pending"),
-				},
-				PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
-				IdempotencyKey: "bar",
-			},
-			req: &t_api.Request{
-				Kind: t_api.CreateSchedule,
-				Tags: map[string]string{
-					"id":       "CreateSchedule",
-					"name":     "CreateSchedule",
-					"protocol": "grpc",
-				},
-				CreateSchedule: &t_api.CreateScheduleRequest{
-					Id:             "foo",
-					Description:    "bar",
-					Cron:           "* * * * *",
-					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
-					PromiseId:      "foo",
-					PromiseTimeout: 1,
-					PromiseParam: promise.Value{
-						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
-						Data:    []byte("pending"),
-					},
-					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
-					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
-				},
-			},
-			res: &t_api.Response{
-				Kind: t_api.CreateSchedule,
-				CreateSchedule: &t_api.CreateScheduleResponse{
-					Status: t_api.StatusCreated,
-					Schedule: &schedule.Schedule{
-						Id:          "foo",
-						Description: "bar",
-					},
-				},
-			},
-			noop: false,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.schedules.CreateSchedule(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.expectedErr, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.noop, res.Noop)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReadSchedule(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.ReadScheduleRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
+		// Schedules
 		{
 			name: "ReadSchedule",
 			grpcReq: &grpcApi.ReadScheduleRequest{
@@ -1377,52 +1008,6 @@ func TestReadSchedule(t *testing.T) {
 			},
 			code: codes.OK,
 		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.schedules.ReadSchedule(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestSearchSchedule(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.SearchSchedulesRequest
-		req     *t_api.Request
-		res     *t_api.Response
-	}{
 		{
 			name: "SearchSchedules",
 			grpcReq: &grpcApi.SearchSchedulesRequest{
@@ -1451,46 +1036,83 @@ func TestSearchSchedule(t *testing.T) {
 				},
 			},
 		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.schedules.SearchSchedules(ctx, tc.grpcReq)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestDeleteSchedule(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.DeleteScheduleRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
+		{
+			name: "CreateSchedule",
+			grpcReq: &grpcApi.CreateScheduleRequest{
+				RequestId:      "CreateSchedule",
+				Id:             "foo",
+				Description:    "bar",
+				Cron:           "* * * * *",
+				Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+				PromiseId:      "foo",
+				PromiseTimeout: 1,
+				PromiseParam: &grpcApi.Value{
+					Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+					Data:    []byte("pending"),
+				},
+				PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+				IdempotencyKey: "bar",
+			},
+			grpcRes: &grpcApi.CreatedScheduleResponse{
+				Noop: false,
+				Schedule: &grpcApi.Schedule{
+					Id:             "foo",
+					Description:    "bar",
+					Cron:           "* * * * *",
+					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+					PromiseId:      "foo",
+					PromiseTimeout: 1,
+					PromiseParam: &grpcApi.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+					IdempotencyKey: "bar",
+				},
+			},
+			req: &t_api.Request{
+				Kind: t_api.CreateSchedule,
+				Tags: map[string]string{
+					"id":       "CreateSchedule",
+					"name":     "CreateSchedule",
+					"protocol": "grpc",
+				},
+				CreateSchedule: &t_api.CreateScheduleRequest{
+					Id:             "foo",
+					Description:    "bar",
+					Cron:           "* * * * *",
+					Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+					PromiseId:      "foo",
+					PromiseTimeout: 1,
+					PromiseParam: promise.Value{
+						Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+						Data:    []byte("pending"),
+					},
+					PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+					IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
+				},
+			},
+			res: &t_api.Response{
+				Kind: t_api.CreateSchedule,
+				CreateSchedule: &t_api.CreateScheduleResponse{
+					Status: t_api.StatusCreated,
+					Schedule: &schedule.Schedule{
+						Id:             "foo",
+						Description:    "bar",
+						Cron:           "* * * * *",
+						Tags:           map[string]string{"a": "a", "b": "b", "c": "c"},
+						PromiseId:      "foo",
+						PromiseTimeout: 1,
+						PromiseParam: promise.Value{
+							Headers: map[string]string{"a": "a", "b": "b", "c": "c"},
+							Data:    []byte("pending"),
+						},
+						PromiseTags:    map[string]string{"a": "a", "b": "b", "c": "c"},
+						IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
+					},
+				},
+			},
+		},
 		{
 			name: "DeleteSchedule",
 			grpcReq: &grpcApi.DeleteScheduleRequest{
@@ -1514,57 +1136,10 @@ func TestDeleteSchedule(t *testing.T) {
 					Status: t_api.StatusNoContent,
 				},
 			},
-			code: codes.OK,
 		},
-	}
 
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
+		// Locks
 
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.schedules.DeleteSchedule(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Locks
-
-func TestAcquireLock(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.AcquireLockRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
 		{
 			name: "AcquireLock",
 			grpcReq: &grpcApi.AcquireLockRequest{
@@ -1600,102 +1175,7 @@ func TestAcquireLock(t *testing.T) {
 					},
 				},
 			},
-			code: codes.OK,
 		},
-		{
-			name: "AcquireLockNoResourceId",
-			grpcReq: &grpcApi.AcquireLockRequest{
-				ResourceId:           "",
-				ProcessId:            "bar",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "AcquireLockNoProcessId",
-			grpcReq: &grpcApi.AcquireLockRequest{
-				ResourceId:           "foo",
-				ProcessId:            "",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "AcquireLockNoExecutionId",
-			grpcReq: &grpcApi.AcquireLockRequest{
-				ProcessId:            "bar",
-				ExecutionId:          "",
-				ExpiryInMilliseconds: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "AcquireLockNoTimeout",
-			grpcReq: &grpcApi.AcquireLockRequest{
-				ResourceId:           "foo",
-				ProcessId:            "bar",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 0,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.locks.AcquireLock(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestReleaseLock(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.ReleaseLockRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
 		{
 			name: "ReleaseLock",
 			grpcReq: &grpcApi.ReleaseLockRequest{
@@ -1723,73 +1203,6 @@ func TestReleaseLock(t *testing.T) {
 			},
 		},
 		{
-			name: "ReleaseLockNoResourceId",
-			grpcReq: &grpcApi.ReleaseLockRequest{
-				ResourceId:  "",
-				ExecutionId: "bar",
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "ReleaseLockNoExecutionId",
-			grpcReq: &grpcApi.ReleaseLockRequest{
-				ResourceId:  "foo",
-				ExecutionId: "",
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.locks.ReleaseLock(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHeartbeatLocks(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.HeartbeatLocksRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
-		{
 			name: "HeartbeatLocks",
 			grpcReq: &grpcApi.HeartbeatLocksRequest{
 				RequestId: "HeartbeatLocks",
@@ -1812,67 +1225,9 @@ func TestHeartbeatLocks(t *testing.T) {
 					Status: t_api.StatusOK,
 				},
 			},
-			code: codes.OK,
 		},
-		{
-			name: "HeartbeatLocksNoProcessId",
-			grpcReq: &grpcApi.HeartbeatLocksRequest{
-				ProcessId: "",
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
 
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.locks.HeartbeatLocks(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Tasks
-
-func TestClaimTask(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.ClaimTaskRequest
-		grpcRes *grpcApi.ClaimTaskResponse
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
+		// Tasks
 		{
 			name: "ClaimTask",
 			grpcReq: &grpcApi.ClaimTaskRequest{
@@ -1903,7 +1258,6 @@ func TestClaimTask(t *testing.T) {
 					Task:   &task.Task{Mesg: &message.Mesg{}},
 				},
 			},
-			code: codes.OK,
 		},
 		{
 			name: "ClaimTaskInvoke",
@@ -1949,7 +1303,6 @@ func TestClaimTask(t *testing.T) {
 					},
 				},
 			},
-			code: codes.OK,
 		},
 		{
 			name: "ClaimTaskResume",
@@ -1996,93 +1349,7 @@ func TestClaimTask(t *testing.T) {
 					},
 				},
 			},
-			code: codes.OK,
 		},
-		{
-			name: "ClaimTaskNoId",
-			grpcReq: &grpcApi.ClaimTaskRequest{
-				ProcessId: "bar",
-				Counter:   0,
-				Frequency: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "ClaimTaskNoProcessId",
-			grpcReq: &grpcApi.ClaimTaskRequest{
-				Id:        "foo",
-				Counter:   0,
-				Frequency: 1,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-		{
-			name: "ClaimTaskNoFrequency",
-			grpcReq: &grpcApi.ClaimTaskRequest{
-				Id:        "foo",
-				ProcessId: "bar",
-				Counter:   0,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			res, err := grpcTest.tasks.ClaimTask(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			if tc.grpcRes != nil {
-				assert.Equal(t, tc.grpcRes.Claimed, res.Claimed)
-				assert.Equal(t, tc.grpcRes.Mesg, res.Mesg)
-			}
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestCompleteTask(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.CompleteTaskRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
 		{
 			name: "CompleteTask",
 			grpcReq: &grpcApi.CompleteTaskRequest{
@@ -2108,64 +1375,7 @@ func TestCompleteTask(t *testing.T) {
 					Status: t_api.StatusCreated,
 				},
 			},
-			code: codes.OK,
 		},
-		{
-			name: "CompleteTaskNoId",
-			grpcReq: &grpcApi.CompleteTaskRequest{
-				Counter: 0,
-			},
-			req:  nil,
-			res:  nil,
-			code: codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
-		t.Run(tc.name, func(t *testing.T) {
-			grpcTest.Load(t, tc.req, tc.res)
-
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			_, err := grpcTest.tasks.CompleteTask(ctx, tc.grpcReq)
-			if err != nil {
-				s, ok := status.FromError(err)
-				if !ok {
-					t.Fatal(err)
-				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
-
-			assert.Equal(t, tc.code, codes.OK)
-
-			select {
-			case err := <-grpcTest.errors:
-				t.Fatal(err)
-			default:
-			}
-		})
-	}
-
-	if err := grpcTest.teardown(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestHeartbeatTasks(t *testing.T) {
-	grpcTest, err := setup()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tcs := []struct {
-		name    string
-		grpcReq *grpcApi.HeartbeatTasksRequest
-		req     *t_api.Request
-		res     *t_api.Response
-		code    codes.Code
-	}{
 		{
 			name: "HeartbeatTasks",
 			grpcReq: &grpcApi.HeartbeatTasksRequest{
@@ -2190,35 +1400,71 @@ func TestHeartbeatTasks(t *testing.T) {
 					TasksAffected: 1,
 				},
 			},
-			code: codes.OK,
 		},
-		{
-			name:    "HeartbeatTasksNoProcessId",
-			grpcReq: &grpcApi.HeartbeatTasksRequest{},
-			req:     nil,
-			res:     nil,
-			code:    codes.InvalidArgument,
-		},
-	}
-
-	for _, tc := range tcs {
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			grpcTest.Load(t, tc.req, tc.res)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := grpcTest.tasks.HeartbeatTasks(ctx, tc.grpcReq)
+			var res protoreflect.ProtoMessage
+			var err error
+
+			switch req := tc.grpcReq.(type) {
+			case *grpcApi.ReadPromiseRequest:
+				_, err = grpcTest.promises.ReadPromise(ctx, req)
+			case *grpcApi.SearchPromisesRequest:
+				_, err = grpcTest.promises.SearchPromises(ctx, req)
+			case *grpcApi.CreatePromiseRequest:
+				res, err = grpcTest.promises.CreatePromise(ctx, req)
+			case *grpcApi.ResolvePromiseRequest:
+				res, err = grpcTest.promises.ResolvePromise(ctx, req)
+			case *grpcApi.RejectPromiseRequest:
+				res, err = grpcTest.promises.RejectPromise(ctx, req)
+			case *grpcApi.CancelPromiseRequest:
+				res, err = grpcTest.promises.CancelPromise(ctx, req)
+			case *grpcApi.CreateCallbackRequest:
+				_, err = grpcTest.callbacks.CreateCallback(ctx, req)
+			case *grpcApi.ReadScheduleRequest:
+				_, err = grpcTest.schedules.ReadSchedule(ctx, req)
+			case *grpcApi.SearchSchedulesRequest:
+				_, err = grpcTest.schedules.SearchSchedules(ctx, req)
+			case *grpcApi.CreateScheduleRequest:
+				res, err = grpcTest.schedules.CreateSchedule(ctx, req)
+			case *grpcApi.DeleteScheduleRequest:
+				_, err = grpcTest.schedules.DeleteSchedule(ctx, req)
+			case *grpcApi.AcquireLockRequest:
+				_, err = grpcTest.locks.AcquireLock(ctx, req)
+			case *grpcApi.ReleaseLockRequest:
+				_, err = grpcTest.locks.ReleaseLock(ctx, req)
+			case *grpcApi.HeartbeatLocksRequest:
+				_, err = grpcTest.locks.HeartbeatLocks(ctx, req)
+			case *grpcApi.ClaimTaskRequest:
+				res, err = grpcTest.tasks.ClaimTask(ctx, req)
+			case *grpcApi.CompleteTaskRequest:
+				_, err = grpcTest.tasks.CompleteTask(ctx, req)
+			case *grpcApi.HeartbeatTasksRequest:
+				_, err = grpcTest.tasks.HeartbeatTasks(ctx, req)
+			default:
+				t.Fatalf("unexpected type %T", req)
+			}
+
+			// assert successful response
+			if tc.grpcRes != nil {
+				assert.True(t, proto.Equal(tc.grpcRes, res))
+			}
+
+			// assert error response
 			if err != nil {
+				// actual grpc error
 				s, ok := status.FromError(err)
 				if !ok {
 					t.Fatal(err)
 				}
-				assert.Equal(t, tc.code, s.Code())
-				return
-			}
 
-			assert.Equal(t, tc.code, codes.OK)
+				assert.Equal(t, tc.code, s.Code())
+			}
 
 			select {
 			case err := <-grpcTest.errors:

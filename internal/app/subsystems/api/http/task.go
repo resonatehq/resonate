@@ -2,114 +2,147 @@ package http
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-// CLAIM
+// Claim
+
+type claimTaskHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type claimTaskBody struct {
+	Id        string `json:"id" binding:"required"`
+	ProcessId string `json:"processId" binding:"required"`
+	Counter   int    `json:"counter"`
+	Frequency int    `json:"frequency" binding:"required"`
+}
 
 func (s *server) claimTask(c *gin.Context) {
-	var header service.Header
+	var header claimTaskHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var body *service.ClaimTaskBody
+	var body claimTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	res, err := s.service.ClaimTask(&header, body)
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.ClaimTask,
+		ClaimTask: &t_api.ClaimTaskRequest{
+			Id:        body.Id,
+			ProcessId: body.ProcessId,
+			Counter:   body.Counter,
+			Frequency: body.Frequency,
+		},
+	})
 	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	util.Assert(res.Status != t_api.StatusCreated || (res.Task != nil && res.Task.Mesg != nil), "task and mesg must not be nil if created")
+	util.Assert(res.ClaimTask != nil, "result must not be nil")
+	util.Assert(res.ClaimTask.Status != t_api.StatusCreated || (res.ClaimTask.Task != nil && res.ClaimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
 
-	if res.Status == t_api.StatusCreated {
-		c.JSON(s.code(res.Status), gin.H{
-			"type":     res.Task.Mesg.Type,
-			"promises": res.Task.Mesg.Promises,
-		})
-	} else {
-		c.JSON(s.code(res.Status), nil)
+	var r gin.H
+	if res.ClaimTask.Status == t_api.StatusCreated {
+		r = gin.H{
+			"type":     res.ClaimTask.Task.Mesg.Type,
+			"promises": res.ClaimTask.Task.Mesg.Promises,
+		}
 	}
+
+	c.JSON(s.code(res.ClaimTask.Status), r)
 }
 
-// COMPLETE
+// Complete
+
+type completeTaskHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type completeTaskBody struct {
+	Id      string `json:"id" binding:"required"`
+	Counter int    `json:"counter"`
+}
 
 func (s *server) completeTask(c *gin.Context) {
-	var header service.Header
+	var header completeTaskHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var body *service.CompleteTaskBody
+	var body completeTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	res, err := s.service.CompleteTask(&header, body)
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CompleteTask,
+		CompleteTask: &t_api.CompleteTaskRequest{
+			Id:      body.Id,
+			Counter: body.Counter,
+		},
+	})
 	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	c.JSON(s.code(res.Status), nil)
+	util.Assert(res.CompleteTask != nil, "result must not be nil")
+	c.JSON(s.code(res.CompleteTask.Status), nil)
 }
 
-// HEARTBEAT
+// Heartbeat
+
+type heartbeatTasksHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type heartbeatTaskBody struct {
+	ProcessId string `json:"processId" binding:"required"`
+}
 
 func (s *server) heartbeatTasks(c *gin.Context) {
-	var header service.Header
+	var header heartbeatTasksHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var body *service.HeartbeatTaskBody
+	var body heartbeatTaskBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	res, err := s.service.HeartbeatTasks(&header, body)
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.HeartbeatTasks,
+		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+			ProcessId: body.ProcessId,
+		},
+	})
 	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	c.JSON(s.code(res.Status), gin.H{
-		"tasksAffected": res.TasksAffected,
+	util.Assert(res.HeartbeatTasks != nil, "result must not be nil")
+	c.JSON(s.code(res.HeartbeatTasks.Status), gin.H{
+		"tasksAffected": res.HeartbeatTasks.TasksAffected,
 	})
 }

@@ -6,11 +6,10 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
-
-	"github.com/resonatehq/resonate/internal/api"
+	i_api "github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 )
@@ -25,8 +24,8 @@ type Grpc struct {
 	server *grpc.Server
 }
 
-func New(api api.API, config *Config) api.Subsystem {
-	s := &server{service: service.New(api, "grpc")}
+func New(a i_api.API, config *Config) i_api.Subsystem {
+	s := &server{api: api.New(a, "grpc")}
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromisesServer(server, s)
@@ -73,7 +72,7 @@ type server struct {
 	grpcApi.UnimplementedSchedulesServer
 	grpcApi.UnimplementedLocksServer
 	grpcApi.UnimplementedTasksServer
-	service *service.Service
+	api *api.API
 }
 
 func (s *server) code(status t_api.StatusCode) codes.Code {

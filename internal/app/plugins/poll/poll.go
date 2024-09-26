@@ -23,7 +23,7 @@ type Config struct {
 	BufferSize     int           `flag:"buffer-size" desc:"connection buffer size" default:"100"`
 	MaxConnections int           `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
 	Host           string        `flag:"host" desc:"http server host" default:"0.0.0.0"`
-	Port           int           `flag:"port" desc:"http server port" default:"9001"`
+	Port           int           `flag:"port" desc:"http server port" default:"8002"`
 	Timeout        time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 }
 
