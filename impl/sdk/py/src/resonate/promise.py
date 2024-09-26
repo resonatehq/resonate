@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
-from typing import Any, Generic, TypeVar, final
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
-from resonate.actions import Invocation, Sleep
+from resonate.actions import All, AllSettled, Invocation, Race, Sleep
 from resonate.result import Err, Ok, Result
+
+if TYPE_CHECKING:
+    from resonate.typing import Combinator
 
 T = TypeVar("T")
 
@@ -16,12 +19,12 @@ class Promise(Generic[T]):
     def __init__(
         self,
         promise_id: str,
-        action: Invocation | Sleep,
+        action: Invocation | Sleep | Combinator,
     ) -> None:
         self.promise_id = promise_id
         self.f = Future[T]()
         self.action = action
-        if isinstance(action, Invocation):
+        if isinstance(action, (Invocation, All, AllSettled, Race)):
             self.durable = action.opts.durable
         elif isinstance(action, Sleep):
             raise NotImplementedError

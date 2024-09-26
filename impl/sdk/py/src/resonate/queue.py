@@ -24,6 +24,9 @@ class Queue(Generic[T]):
                 self._q.task_done()
         return elements
 
+    def dequeue_all(self) -> list[T]:
+        return self.dequeue_batch(self.qsize())
+
     def dequeue(self, timeout: float | None = None) -> T:
         qe = self._q.get(timeout=timeout)
         self._q.task_done()

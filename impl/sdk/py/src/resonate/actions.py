@@ -10,9 +10,16 @@ from resonate.options import Options
 if TYPE_CHECKING:
     from resonate.dataclasses import FnOrCoroutine
     from resonate.retry_policy import RetryPolicy
+from typing import TYPE_CHECKING, Any, TypeVar
+
+from resonate.retry_policy import never
+
+if TYPE_CHECKING:
+    from resonate.promise import Promise
     from resonate.typing import ExecutionUnit
 
 P = ParamSpec("P")
+T = TypeVar("T")
 
 
 @final
@@ -79,3 +86,127 @@ class Invocation:
 @dataclass(frozen=True)
 class Sleep:
     seconds: int
+
+
+@final
+@dataclass
+class All:
+    """
+    A combinator that waits for all promises to complete.
+
+    Attributes:
+        promises (list[Promise[Any]]): A list of promises to be combined.
+    """
+
+    def __init__(self, promises: list[Promise[Any]]) -> None:
+        self.opts = Options(retry_policy=never())
+        self.promises = promises
+
+    def with_options(
+        self,
+        *,
+        durable: bool = True,
+        promise_id: str | None = None,
+        retry_policy: RetryPolicy | None = None,
+    ) -> Self:
+        """
+        Set options for the combinator.
+
+        Args:
+            durable (bool): Whether the promise is durable. Defaults to True.
+            promise_id (str | None): An optional identifier for the promise.
+            retry_policy (RetryPolicy | None): An optional retry policy for the promise.
+
+        Returns:
+            Self: The combinator instance with updated options.
+        """
+        self.opts = Options(
+            durable=durable,
+            promise_id=promise_id,
+            retry_policy=retry_policy if retry_policy is not None else never(),
+        )
+        return self
+
+
+@final
+@dataclass
+class AllSettled:
+    """
+    A combinator that waits for all promises to complete and returns a list of results
+    or Errors.
+
+    Attributes:
+        promises (list[Promise[Any]]): A list of promises to be combined.
+    """
+
+    def __init__(self, promises: list[Promise[Any]]) -> None:
+        self.opts = Options(retry_policy=never())
+        self.promises = promises
+
+    def with_options(
+        self,
+        *,
+        durable: bool = True,
+        promise_id: str | None = None,
+        retry_policy: RetryPolicy | None = None,
+    ) -> Self:
+        """
+        Set options for the combinator.
+
+        Args:
+            durable (bool): Whether the promise is durable. Defaults to True.
+            promise_id (str | None): An optional identifier for the promise.
+            retry_policy (RetryPolicy | None): An optional retry policy for the promise.
+
+        Returns:
+            Self: The combinator instance with updated options.
+        """
+        self.opts = Options(
+            durable=durable,
+            promise_id=promise_id,
+            retry_policy=retry_policy if retry_policy is not None else never(),
+        )
+        return self
+
+
+@final
+@dataclass
+class Race:
+    """
+    A combinator that completes when any of the promises completes.
+
+    Attributes:
+        promises (list[Promise[Any]]): A list of promises to race.
+    """
+
+    def __init__(self, promises: list[Promise[Any]]) -> None:
+        assert (
+            len(promises) > 0
+        ), "Race combinator requires a non empty list of promises"
+        self.opts = Options(retry_policy=never())
+        self.promises = promises
+
+    def with_options(
+        self,
+        *,
+        durable: bool = True,
+        promise_id: str | None = None,
+        retry_policy: RetryPolicy | None = None,
+    ) -> Self:
+        """
+        Set options for the combinator.
+
+        Args:
+            durable (bool): Whether the promise is durable. Defaults to True.
+            promise_id (str | None): An optional identifier for the promise.
+            retry_policy (RetryPolicy | None): An optional retry policy for the promise.
+
+        Returns:
+            Self: The combinator instance with updated options.
+        """
+        self.opts = Options(
+            durable=durable,
+            promise_id=promise_id,
+            retry_policy=retry_policy if retry_policy is not None else never(),
+        )
+        return self

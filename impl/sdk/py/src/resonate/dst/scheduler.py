@@ -8,7 +8,15 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Union, final
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
 from resonate import utils
-from resonate.actions import Call, DeferredInvocation, Invocation, Sleep
+from resonate.actions import (
+    All,
+    AllSettled,
+    Call,
+    DeferredInvocation,
+    Invocation,
+    Race,
+    Sleep,
+)
 from resonate.batching import CmdBuffer
 from resonate.contants import CWD
 from resonate.context import (
@@ -16,7 +24,7 @@ from resonate.context import (
 )
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
-from resonate.encoders import ErrorEncoder, JsonEncoder
+from resonate.encoders import JsonEncoder
 from resonate.events import (
     ExecutionAwaited,
     ExecutionInvoked,
@@ -344,7 +352,7 @@ class DSTScheduler:
             if durable_promise_record.value.data is None:
                 raise NotImplementedError
 
-            v = Err(ErrorEncoder.decode(durable_promise_record.value.data))
+            v = Err(self._json_encoder.decode(durable_promise_record.value.data))
         else:
             assert durable_promise_record.is_resolved()
             if durable_promise_record.value.data is None:
@@ -530,7 +538,7 @@ class DSTScheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=ErrorEncoder.encode(value.err()),
+                data=self._json_encoder.encode(value.err()),
             )
         assert_never(value)
 
@@ -652,8 +660,11 @@ class DSTScheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, (Sleep, DeferredInvocation)):
+        elif isinstance(
+            yieldable_or_final_value, (Sleep, DeferredInvocation, All, AllSettled, Race)
+        ):
             raise NotImplementedError
+
         else:
             assert_never(yieldable_or_final_value)
 

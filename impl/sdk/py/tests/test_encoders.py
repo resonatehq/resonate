@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from resonate.encoders import Base64Encoder, ErrorEncoder, JsonEncoder
+from resonate.encoders import Base64Encoder, JsonEncoder
 from resonate.errors import ResonateError
 
 
@@ -37,6 +37,6 @@ class _CustomerError(Exception):
     ],
 )
 def test_error_encoder(data: Exception) -> None:
-    encoder = ErrorEncoder()
+    encoder = JsonEncoder()
     encoded = encoder.encode(data=data)
     assert isinstance(encoder.decode(encoded), type(data))

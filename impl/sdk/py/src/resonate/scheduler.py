@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import sys
 from inspect import isgenerator, isgeneratorfunction
@@ -10,13 +9,19 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 from typing_extensions import ParamSpec, Self, assert_never
 
 from resonate import utils
-from resonate.actions import Call, DeferredInvocation, Invocation, Sleep
-from resonate.context import (
-    Context,
+from resonate.actions import (
+    All,
+    AllSettled,
+    Call,
+    DeferredInvocation,
+    Invocation,
+    Race,
+    Sleep,
 )
+from resonate.context import Context
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
-from resonate.encoders import ErrorEncoder, JsonEncoder
+from resonate.encoders import JsonEncoder
 from resonate.events import (
     ExecutionAwaited,
     ExecutionInvoked,
@@ -34,6 +39,7 @@ from resonate.result import Err, Ok
 from resonate.retry_policy import Never
 from resonate.time import now
 from resonate.tracing.stdout import StdOutAdapter
+from resonate.typing import Combinator
 
 if TYPE_CHECKING:
     from resonate.record import DurablePromiseRecord
@@ -126,6 +132,7 @@ class Scheduler:
         self._stg_queue = Queue[tuple[Invocation, Promise[Any], Context]]()
         self._completion_queue = Queue[_CQE[Any]]()
         self._submission_queue = Queue[_SQE[Any]]()
+        self._combinators_queue = Queue[tuple[Combinator, Promise[Any]]]()
 
         self._worker_continue = Event()
 
@@ -173,6 +180,15 @@ class Scheduler:
         self._completion_queue.put(_CQE[Any](sqe=sqe, fn_result=value))
         self._signal()
 
+    def _enqueue_combinator(
+        self, combinator: Combinator, promise: Promise[Any]
+    ) -> None:
+        assert (
+            not promise.done()
+        ), "Do not enqueue done promises associated to a combinator."
+        self._combinators_queue.put_nowait((combinator, promise))
+        self._signal()
+
     def _signal(self) -> None:
         self._worker_continue.set()
 
@@ -193,7 +209,7 @@ class Scheduler:
                 ikey=utils.string_to_ikey(promise_id),
                 strict=False,
                 headers=None,
-                data=ErrorEncoder.encode(value.err()),
+                data=self._json_encoder.encode(value.err()),
             )
         assert_never(value)
 
@@ -222,13 +238,13 @@ class Scheduler:
             if durable_promise_record.value.data is None:
                 raise NotImplementedError
 
-            v = Err(ErrorEncoder.decode(durable_promise_record.value.data))
+            v = Err(self._json_encoder.decode(durable_promise_record.value.data))
         else:
             assert durable_promise_record.is_resolved()
             if durable_promise_record.value.data is None:
                 v = Ok(None)
             else:
-                v = Ok(json.loads(durable_promise_record.value.data))
+                v = Ok(self._json_encoder.decode(durable_promise_record.value.data))
         return v
 
     def _get_ctx_from_ephemeral_memo(
@@ -238,7 +254,9 @@ class Scheduler:
             return self._emphemeral_promise_memo.pop(promise_id)[-1]
         return self._emphemeral_promise_memo[promise_id][-1]
 
-    def _create_promise(self, ctx: Context, action: Invocation | Sleep) -> Promise[Any]:
+    def _create_promise(
+        self, ctx: Context, action: Invocation | Sleep | Combinator
+    ) -> Promise[Any]:
         p = Promise[Any](promise_id=ctx.ctx_id, action=action)
         assert (
             p.promise_id not in self._emphemeral_promise_memo
@@ -254,6 +272,10 @@ class Scheduler:
                 }
             else:
                 assert_never(action.exec_unit)
+
+        elif isinstance(action, (All, AllSettled, Race)):
+            data = {}
+
         elif isinstance(action, Sleep):
             raise NotImplementedError
         else:
@@ -380,7 +402,7 @@ class Scheduler:
                 else:
                     assert_never(delay_e)
 
-            top_lvls = self._stg_queue.dequeue_batch(self._stg_queue.qsize())
+            top_lvls = self._stg_queue.dequeue_all()
             for top_lvl, p, root_ctx in top_lvls:
                 assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
                 if p.done():
@@ -388,7 +410,7 @@ class Scheduler:
                 else:
                     self._route_fn_or_coroutine(root_ctx, p, top_lvl.exec_unit)
 
-            cqes = self._completion_queue.dequeue_batch(self._completion_queue.qsize())
+            cqes = self._completion_queue.dequeue_all()
             for cqe in cqes:
                 next_retry_attempt = cqe.sqe.retry_attempt + 1
                 if (
@@ -432,6 +454,18 @@ class Scheduler:
 
                     self._unblock_coros_waiting_on_promise(prom)
                     self._promises_to_be_resolved.remove(p_to_b_resolved)
+
+            combinators = self._combinators_queue.dequeue_all()
+            for combinator, p in combinators:
+                assert not p.done(), (
+                    "If the promise related to a combinator is resolved"
+                    "already the combinator should not be in the combinators queue"
+                )
+                if self._combinator_done(combinator):
+                    self._resolve_promise(p, self._combinator_result(combinator))
+                    self._unblock_coros_waiting_on_promise(p)
+                else:
+                    self._enqueue_combinator(combinator, p)
 
             while self._runnable_coros:
                 runnable, was_awaited = self._runnable_coros.pop()
@@ -508,7 +542,7 @@ class Scheduler:
             )
         )
 
-    def _advance_runnable_span(  # noqa: C901, PLR0912
+    def _advance_runnable_span(  # noqa: C901, PLR0912. Note: We want to keep all the control flow in the function
         self, runnable: Runnable[Any], *, was_awaited: bool
     ) -> None:
         assert isgenerator(
@@ -580,8 +614,12 @@ class Scheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, Sleep):
-            raise NotImplementedError
+        elif isinstance(yieldable_or_final_value, (All, AllSettled, Race)):
+            p = self._process_combinator(yieldable_or_final_value, runnable)
+            self._add_coro_to_runnables(
+                runnable.coro_and_promise, Ok(p), was_awaited=False
+            )
+
         elif isinstance(yieldable_or_final_value, DeferredInvocation):
             deferred_p: Promise[Any] = self.with_options(
                 retry_policy=yieldable_or_final_value.opts.retry_policy
@@ -594,6 +632,10 @@ class Scheduler:
             self._add_coro_to_runnables(
                 runnable.coro_and_promise, Ok(deferred_p), was_awaited=False
             )
+
+        elif isinstance(yieldable_or_final_value, Sleep):
+            raise NotImplementedError
+
         else:
             assert_never(yieldable_or_final_value)
 
@@ -616,3 +658,59 @@ class Scheduler:
         else:
             assert_never(invokation.exec_unit)
         return p
+
+    def _process_combinator(
+        self, combinator: Combinator, runnable: Runnable[Any]
+    ) -> Promise[Any]:
+        child_ctx = runnable.coro_and_promise.ctx.new_child(
+            ctx_id=combinator.opts.promise_id
+        )
+        p = self._create_promise(child_ctx, combinator)
+        if p.done():
+            self._unblock_coros_waiting_on_promise(p)
+        else:
+            self._enqueue_combinator(combinator, p)
+
+        return p
+
+    def _combinator_done(self, combinator: Combinator) -> bool:
+        if isinstance(combinator, (All, AllSettled)):
+            return all(p.done() for p in combinator.promises)
+
+        if isinstance(combinator, Race):
+            return any(p.done() for p in combinator.promises)
+
+        assert_never(combinator)
+
+    def _combinator_result(
+        self, combinator: Combinator
+    ) -> Result[
+        Any | list[Any], Exception
+    ]:  # Note: We can't possible have single type for all the promises of a Combinator
+        if isinstance(combinator, All):
+            try:
+                return Ok([p.result() for p in combinator.promises])
+            except Exception as err:  # noqa: BLE001, Note: We can not predict which Exception we will receive from the user
+                return Err(err)
+
+        if isinstance(combinator, AllSettled):
+            if not combinator.promises:
+                return Ok([])
+
+            res = []
+            for p in combinator.promises:
+                try:
+                    ok = p.result()
+                    res.append(ok)
+                except Exception as err:  # noqa: BLE001, PERF203
+                    res.append(err)
+
+            return Ok(res)
+
+        if isinstance(combinator, Race):
+            try:
+                return Ok(next(p.result() for p in combinator.promises if p.done()))
+            except Exception as err:  # noqa: BLE001, Note: We can not predict which Exception we will receive from the user
+                return Err(err)
+
+        assert_never(combinator)
