@@ -133,23 +133,23 @@ func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime i
 		if res.CreatePromise.Promise.State != promise.Pending {
 			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.CreatePromise.Promise.State, req.CreatePromise.Id)
 		}
-		if req.CreatePromise.Task != nil && model.tasks.get(res.CreatePromise.Task.Id) != nil {
-			return model, fmt.Errorf("task '%s' exists", res.CreatePromise.Task.Id)
-		}
-		if req.CreatePromise.Callback != nil && model.callbacks.get(res.CreatePromise.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%s' exists", res.CreatePromise.Callback.Id)
-		}
+		// if req.CreatePromise.Task != nil && model.tasks.get(res.CreatePromise.Task.Id) != nil {
+		// 	return model, fmt.Errorf("task '%s' exists", res.CreatePromise.Task.Id)
+		// }
+		// if req.CreatePromise.Callback != nil && model.callbacks.get(res.CreatePromise.Callback.Id) != nil {
+		// 	return model, fmt.Errorf("callback '%s' exists", res.CreatePromise.Callback.Id)
+		// }
 
 		// update model state
 		model = model.Copy()
 		model.promises.set(req.CreatePromise.Id, res.CreatePromise.Promise)
 
-		if req.CreatePromise.Task != nil {
-			model.tasks.set(res.CreatePromise.Task.Id, res.CreatePromise.Task)
-		}
-		if req.CreatePromise.Callback != nil {
-			model.callbacks.set(res.CreatePromise.Callback.Id, res.CreatePromise.Callback)
-		}
+		// if req.CreatePromise.Task != nil {
+		// 	model.tasks.set(res.CreatePromise.Task.Id, res.CreatePromise.Task)
+		// }
+		// if req.CreatePromise.Callback != nil {
+		// 	model.callbacks.set(res.CreatePromise.Callback.Id, res.CreatePromise.Callback)
+		// }
 
 		return model, nil
 	case t_api.StatusOK:

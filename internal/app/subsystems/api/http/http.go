@@ -55,6 +55,8 @@ func New(a i_api.API, config *Config) i_api.Subsystem {
 
 	// Promises API
 	authorized.POST("/promises", s.createPromise)
+	authorized.POST("/promises/task", s.createPromiseAndTask)
+	authorized.POST("/promises/callback", s.createPromiseAndCallback)
 	authorized.GET("/promises", s.searchPromises)
 	authorized.GET("/promises/*id", s.readPromise)
 	authorized.PATCH("/promises/*id", s.completePromise)

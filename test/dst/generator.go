@@ -170,25 +170,25 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
-	var task *t_api.CreatePromiseTask
-	var callback *t_api.CreatePromiseCallback
+	// var task *t_api.CreatePromiseTask
+	// var callback *t_api.CreatePromiseCallback
 
-	switch r.Intn(3) {
-	case 0:
-		task = &t_api.CreatePromiseTask{
-			ProcessId: id,
-			Frequency: RangeIntn(r, 1000, 5000),
-			Recv:      []byte(`"dst"`),
-		}
-	case 1:
-		callback = &t_api.CreatePromiseCallback{
-			RootPromiseId: g.promiseId(r),
-			Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
-			Recv:          []byte(`"dst"`),
-		}
-	case 2:
-		// do nothing
-	}
+	// switch r.Intn(3) {
+	// case 0:
+	// 	task = &t_api.CreatePromiseTask{
+	// 		ProcessId: id,
+	// 		Frequency: RangeIntn(r, 1000, 5000),
+	// 		Recv:      []byte(`"dst"`),
+	// 	}
+	// case 1:
+	// 	callback = &t_api.CreatePromiseCallback{
+	// 		RootPromiseId: g.promiseId(r),
+	// 		Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
+	// 		Recv:          []byte(`"dst"`),
+	// 	}
+	// case 2:
+	// 	// do nothing
+	// }
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
@@ -199,8 +199,6 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 			Param:          promise.Value{Headers: headers, Data: data},
 			Timeout:        timeout,
 			Tags:           tags,
-			Task:           task,
-			Callback:       callback,
 		},
 	}
 }

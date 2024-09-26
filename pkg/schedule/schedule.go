@@ -26,7 +26,7 @@ type Schedule struct {
 
 func (s *Schedule) String() string {
 	return fmt.Sprintf(
-		"Schedule(id=%s, description=%s, cron=%s, tags=%s, promiseId=%s, promiseTimeout=%d, promiseParam=%s, promiseTags=%s, lastRunTime=%d, nextRunTime=%d, idempotencyKey=%s, createdOn=%d)",
+		"Schedule(id=%s, desc=%s, cron=%s, tags=%s, promiseId=%s, promiseTimeout=%d, promiseParam=%s, promiseTags=%s, lastRunTime=%d, nextRunTime=%d, idempotencyKey=%s, createdOn=%d)",
 		s.Id,
 		s.Description,
 		s.Cron,

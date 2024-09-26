@@ -2,7 +2,6 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -10,7 +9,6 @@ import (
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
-	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
 	grpcStatus "google.golang.org/grpc/status"
 )
@@ -84,51 +82,6 @@ func (s *server) CreatePromise(c context.Context, r *grpcApi.CreatePromiseReques
 		data = r.Param.Data
 	}
 
-	var task *t_api.CreatePromiseTask
-	var callback *t_api.CreatePromiseCallback
-
-	if r.Task != nil {
-		var recv []byte
-		var rErr error
-		switch r := r.Task.Recv.(type) {
-		case *grpcApi.CreatePromiseTask_Logical:
-			recv, rErr = json.Marshal(&r.Logical)
-		case *grpcApi.CreatePromiseTask_Physical:
-			recv, rErr = json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
-		}
-
-		if rErr != nil {
-			return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
-		}
-
-		task = &t_api.CreatePromiseTask{
-			ProcessId: r.Task.ProcessId,
-			Frequency: int(r.Task.Frequency),
-			Recv:      recv,
-		}
-	}
-
-	if r.Callback != nil {
-		var recv []byte
-		var rErr error
-		switch r := r.Callback.Recv.(type) {
-		case *grpcApi.CreatePromiseCallback_Logical:
-			recv, rErr = json.Marshal(&r.Logical)
-		case *grpcApi.CreatePromiseCallback_Physical:
-			recv, rErr = json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
-		}
-
-		if rErr != nil {
-			return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
-		}
-
-		callback = &t_api.CreatePromiseCallback{
-			RootPromiseId: r.Callback.RootPromiseId,
-			Timeout:       r.Callback.Timeout,
-			Recv:          recv,
-		}
-	}
-
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.CreatePromise,
 		CreatePromise: &t_api.CreatePromiseRequest{
@@ -138,8 +91,6 @@ func (s *server) CreatePromise(c context.Context, r *grpcApi.CreatePromiseReques
 			Param:          promise.Value{Headers: headers, Data: data},
 			Timeout:        r.Timeout,
 			Tags:           r.Tags,
-			Task:           task,
-			Callback:       callback,
 		},
 	})
 	if err != nil {

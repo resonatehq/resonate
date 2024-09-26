@@ -3,8 +3,8 @@ package t_api
 import (
 	"encoding/json"
 	"fmt"
-	"strconv"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -14,10 +14,12 @@ type Request struct {
 	Tags map[string]string
 
 	// PROMISES
-	ReadPromise     *ReadPromiseRequest
-	SearchPromises  *SearchPromisesRequest
-	CreatePromise   *CreatePromiseRequest
-	CompletePromise *CompletePromiseRequest
+	ReadPromise              *ReadPromiseRequest
+	SearchPromises           *SearchPromisesRequest
+	CreatePromise            *CreatePromiseRequest
+	CreatePromiseAndTask     *CreatePromiseAndTaskRequest
+	CreatePromiseAndCallback *CreatePromiseAndCallbackRequest
+	CompletePromise          *CompletePromiseRequest
 
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
@@ -48,6 +50,10 @@ type ReadPromiseRequest struct {
 	Id string `json:"id"`
 }
 
+func (r *ReadPromiseRequest) String() string {
+	return fmt.Sprintf("ReadPromise(id=%s)", r.Id)
+}
+
 type SearchPromisesRequest struct {
 	Id     string            `json:"id"`
 	States []promise.State   `json:"states"`
@@ -56,35 +62,39 @@ type SearchPromisesRequest struct {
 	SortId *int64            `json:"sortId"`
 }
 
+func (r *SearchPromisesRequest) String() string {
+	return fmt.Sprintf("SearchPromises(id=%s, states=%v, tags=%v, limit=%d, sortId=%d)", r.Id, r.States, r.Tags, r.Limit, util.SafeDeref(r.SortId))
+}
+
 type CreatePromiseRequest struct {
-	Id             string                 `json:"id"`
-	IdempotencyKey *idempotency.Key       `json:"idemptencyKey,omitempty"`
-	Strict         bool                   `json:"strict"`
-	Param          promise.Value          `json:"param,omitempty"`
-	Timeout        int64                  `json:"timeout"`
-	Tags           map[string]string      `json:"tags,omitempty"`
-	Task           *CreatePromiseTask     `json:"task,omitempty"`
-	Callback       *CreatePromiseCallback `json:"callback,omitempty"`
+	Id             string            `json:"id"`
+	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
+	Strict         bool              `json:"strict"`
+	Param          promise.Value     `json:"param,omitempty"`
+	Timeout        int64             `json:"timeout"`
+	Tags           map[string]string `json:"tags,omitempty"`
 }
 
-type CreatePromiseTask struct {
-	ProcessId string          `json:"processId"`
-	Frequency int             `json:"frequency"`
-	Recv      json.RawMessage `json:"recv"`
+func (r *CreatePromiseRequest) String() string {
+	return fmt.Sprintf("CreatePromise(id=%s, idempotencyKey=%v, strict=%v, param=%v, timeout=%d, tags=%v)", r.Id, r.IdempotencyKey, r.Strict, r.Param, r.Timeout, r.Tags)
 }
 
-func (t *CreatePromiseTask) String() string {
-	return fmt.Sprintf("Task(processId=%s, frequency=%d)", t.ProcessId, t.Frequency)
+type CreatePromiseAndTaskRequest struct {
+	Promise *CreatePromiseRequest
+	Task    *CreateTaskRequest
 }
 
-type CreatePromiseCallback struct {
-	RootPromiseId string          `json:"rootPromiseId"`
-	Timeout       int64           `json:"timeout"`
-	Recv          json.RawMessage `json:"recv"`
+func (r *CreatePromiseAndTaskRequest) String() string {
+	return fmt.Sprintf("CreatePromiseAndTask(promise=%v, task=%v)", r.Promise, r.Task)
 }
 
-func (c *CreatePromiseCallback) String() string {
-	return fmt.Sprintf("Callback(rootPromiseId=%s, timeout=%d)", c.RootPromiseId, c.Timeout)
+type CreatePromiseAndCallbackRequest struct {
+	Promise  *CreatePromiseRequest
+	Callback *CreateCallbackRequest
+}
+
+func (r *CreatePromiseAndCallbackRequest) String() string {
+	return fmt.Sprintf("CreatePromiseAndCallback(promise=%v, callback=%v)", r.Promise, r.Callback)
 }
 
 type CompletePromiseRequest struct {
@@ -95,34 +105,21 @@ type CompletePromiseRequest struct {
 	Value          promise.Value    `json:"value,omitempty"`
 }
 
-type CancelPromiseRequest struct {
-	Id             string           `json:"id"`
-	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
-	Strict         bool             `json:"strict"`
-	Value          promise.Value    `json:"value,omitempty"`
-}
-
-type ResolvePromiseRequest struct {
-	Id             string           `json:"id"`
-	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
-	Strict         bool             `json:"strict"`
-	Value          promise.Value    `json:"value,omitempty"`
-}
-
-type RejectPromiseRequest struct {
-	Id             string           `json:"id"`
-	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
-	Strict         bool             `json:"strict"`
-	Value          promise.Value    `json:"value,omitempty"`
+func (r *CompletePromiseRequest) String() string {
+	return fmt.Sprintf("CompletePromise(id=%s, idempotencyKey=%v, strict=%v, state=%v, value=%v)", r.Id, r.IdempotencyKey, r.Strict, r.State, r.Value)
 }
 
 // Callbacks
 
 type CreateCallbackRequest struct {
-	PromiseId     string `json:"promiseId"`
-	RootPromiseId string `json:"rootPromiseId"` // TODO: we should be able to know this from the promise itself
-	Timeout       int64  `json:"timeout"`
-	Recv          []byte `json:"recv"`
+	PromiseId     string          `json:"promiseId"`
+	RootPromiseId string          `json:"rootPromiseId"` // TODO: we should be able to know this from the promise itself
+	Timeout       int64           `json:"timeout"`
+	Recv          json.RawMessage `json:"recv"`
+}
+
+func (r *CreateCallbackRequest) String() string {
+	return fmt.Sprintf("CreateCallback(promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
 }
 
 // Schedules
@@ -131,11 +128,19 @@ type ReadScheduleRequest struct {
 	Id string `json:"id"`
 }
 
+func (r *ReadScheduleRequest) String() string {
+	return fmt.Sprintf("ReadSchedule(id=%s)", r.Id)
+}
+
 type SearchSchedulesRequest struct {
 	Id     string            `json:"id"`
 	Tags   map[string]string `json:"tags"`
 	Limit  int               `json:"limit"`
 	SortId *int64            `json:"sortId"`
+}
+
+func (r *SearchSchedulesRequest) String() string {
+	return fmt.Sprintf("SearchSchedules(id=%s, tags=%v, limit=%d, sortId=%d)", r.Id, r.Tags, r.Limit, util.SafeDeref(r.SortId))
 }
 
 type CreateScheduleRequest struct {
@@ -150,8 +155,27 @@ type CreateScheduleRequest struct {
 	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
 }
 
+func (r *CreateScheduleRequest) String() string {
+	return fmt.Sprintf(
+		"CreateSchedule(id=%s, desc=%s, cron=%s, tags=%v, promiseId=%s, promiseTimeout=%d, promiseParam=%v, promiseTags=%v, idempotencyKey=%v)",
+		r.Id,
+		r.Description,
+		r.Cron,
+		r.Tags,
+		r.PromiseId,
+		r.PromiseTimeout,
+		r.PromiseParam,
+		r.PromiseTags,
+		r.IdempotencyKey,
+	)
+}
+
 type DeleteScheduleRequest struct {
 	Id string `json:"id"`
+}
+
+func (r *DeleteScheduleRequest) String() string {
+	return fmt.Sprintf("DeleteSchedule(id=%s)", r.Id)
 }
 
 // Locks
@@ -163,16 +187,39 @@ type AcquireLockRequest struct {
 	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
 }
 
+func (r *AcquireLockRequest) String() string {
+	return fmt.Sprintf("AcquireLock(resourceId=%s, executionId=%s, processId=%s, expiryInMilliseconds=%d)", r.ResourceId, r.ExecutionId, r.ProcessId, r.ExpiryInMilliseconds)
+}
+
 type ReleaseLockRequest struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
+}
+
+func (r *ReleaseLockRequest) String() string {
+	return fmt.Sprintf("ReleaseLock(resourceId=%s, executionId=%s)", r.ResourceId, r.ExecutionId)
 }
 
 type HeartbeatLocksRequest struct {
 	ProcessId string `json:"processId"`
 }
 
+func (r *HeartbeatLocksRequest) String() string {
+	return fmt.Sprintf("HeartbeatLocks(processId=%s)", r.ProcessId)
+}
+
 // Tasks
+
+type CreateTaskRequest struct {
+	PromiseId string          `json:"promiseId"`
+	ProcessId string          `json:"processId"`
+	Frequency int             `json:"frequency"`
+	Recv      json.RawMessage `json:"recv"`
+}
+
+func (r *CreateTaskRequest) String() string {
+	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, frequency=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Frequency, r.Recv)
+}
 
 type ClaimTaskRequest struct {
 	Id        string `json:"id"`
@@ -181,13 +228,25 @@ type ClaimTaskRequest struct {
 	Frequency int    `json:"frequency"`
 }
 
+func (r *ClaimTaskRequest) String() string {
+	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, frequency=%d)", r.Id, r.Counter, r.ProcessId, r.Frequency)
+}
+
 type CompleteTaskRequest struct {
 	Id      string `json:"id"`
 	Counter int    `json:"counter"`
 }
 
+func (r *CompleteTaskRequest) String() string {
+	return fmt.Sprintf("CompleteTask(id=%s, counter=%d)", r.Id, r.Counter)
+}
+
 type HeartbeatTasksRequest struct {
 	ProcessId string `json:"processId"`
+}
+
+func (r *HeartbeatTasksRequest) String() string {
+	return fmt.Sprintf("HeartbeatTasks(processId=%s)", r.ProcessId)
 }
 
 // Echo
@@ -196,137 +255,60 @@ type EchoRequest struct {
 	Data string `json:"data"`
 }
 
+func (r *EchoRequest) String() string {
+	return fmt.Sprintf("Echo(data=%s)", r.Data)
+}
+
 func (r *Request) String() string {
 	switch r.Kind {
 	// PROMISES
 	case ReadPromise:
-		return fmt.Sprintf(
-			"ReadPromise(id=%s)",
-			r.ReadPromise.Id,
-		)
+		return r.ReadPromise.String()
 	case SearchPromises:
-		sortId := "<nil>"
-		if r.SearchPromises.SortId != nil {
-			sortId = strconv.FormatInt(*r.SearchPromises.SortId, 10)
-		}
-
-		return fmt.Sprintf(
-			"SearchPromises(id=%s, states=%s, tags=%s, limit=%d, sortId=%s)",
-			r.SearchPromises.Id,
-			r.SearchPromises.States,
-			r.SearchPromises.Tags,
-			r.SearchPromises.Limit,
-			sortId,
-		)
+		return r.SearchPromises.String()
 	case CreatePromise:
-		return fmt.Sprintf(
-			"CreatePromise(id=%s, idempotencyKey=%s, strict=%t, timeout=%d, task=%s, callback=%s)",
-			r.CreatePromise.Id,
-			r.CreatePromise.IdempotencyKey,
-			r.CreatePromise.Strict,
-			r.CreatePromise.Timeout,
-			r.CreatePromise.Task,
-			r.CreatePromise.Callback,
-		)
+		return r.CreatePromise.String()
+	case CreatePromiseAndTask:
+		return r.CreatePromiseAndTask.String()
+	case CreatePromiseAndCallback:
+		return r.CreatePromiseAndCallback.String()
 	case CompletePromise:
-		return fmt.Sprintf(
-			"CompletePromise(id=%s, idempotencyKey=%s, strict=%t, state=%s)",
-			r.CompletePromise.Id,
-			r.CompletePromise.IdempotencyKey,
-			r.CompletePromise.Strict,
-			r.CompletePromise.State,
-		)
+		return r.CompletePromise.String()
 
 	// CALLBACKS
 	case CreateCallback:
-		return fmt.Sprintf(
-			"CreateCallback(promiseId=%s, rootPromiseId=%s, timeout=%d)",
-			r.CreateCallback.PromiseId,
-			r.CreateCallback.RootPromiseId,
-			r.CreateCallback.Timeout,
-		)
+		return r.CreateCallback.String()
 
 	// SCHEDULES
 	case ReadSchedule:
-		return fmt.Sprintf(
-			"ReadSchedule(id=%s)",
-			r.ReadSchedule.Id,
-		)
+		return r.ReadSchedule.String()
 	case SearchSchedules:
-		sortId := "<nil>"
-		if r.SearchSchedules.SortId != nil {
-			sortId = strconv.FormatInt(*r.SearchSchedules.SortId, 10)
-		}
-
-		return fmt.Sprintf(
-			"SearchSchedules(id=%s, tags=%s, limit=%d, sortId=%s)",
-			r.SearchSchedules.Id,
-			r.SearchSchedules.Tags,
-			r.SearchSchedules.Limit,
-			sortId,
-		)
+		return r.SearchSchedules.String()
 	case CreateSchedule:
-		return fmt.Sprintf(
-			"CreateSchedule(id=%s, idempotencyKey=%s, description=%s, cron=%s)",
-			r.CreateSchedule.Id,
-			r.CreateSchedule.IdempotencyKey,
-			r.CreateSchedule.Description,
-			r.CreateSchedule.Cron,
-		)
+		return r.CreateSchedule.String()
 	case DeleteSchedule:
-		return fmt.Sprintf(
-			"DeleteSchedule(id=%s)",
-			r.DeleteSchedule.Id,
-		)
+		return r.DeleteSchedule.String()
 
 	// LOCKS
 	case AcquireLock:
-		return fmt.Sprintf(
-			"AcquireLock(resourceId=%s, executionId=%s, processId=%s, expiryInMilliseconds=%d)",
-			r.AcquireLock.ResourceId,
-			r.AcquireLock.ExecutionId,
-			r.AcquireLock.ProcessId,
-			r.AcquireLock.ExpiryInMilliseconds,
-		)
+		return r.AcquireLock.String()
 	case ReleaseLock:
-		return fmt.Sprintf(
-			"ReleaseLock(resourceId=%s, executionId=%s)",
-			r.ReleaseLock.ResourceId,
-			r.ReleaseLock.ExecutionId,
-		)
+		return r.ReleaseLock.String()
 	case HeartbeatLocks:
-		return fmt.Sprintf(
-			"HeartbeatLocks(processId=%s)",
-			r.HeartbeatLocks.ProcessId,
-		)
+		return r.HeartbeatLocks.String()
 
 	// TASKS
 	case ClaimTask:
-		return fmt.Sprintf(
-			"ClaimTask(id=%s, processId=%s, counter=%d, frequency=%d)",
-			r.ClaimTask.Id,
-			r.ClaimTask.ProcessId,
-			r.ClaimTask.Counter,
-			r.ClaimTask.Frequency,
-		)
+		return r.ClaimTask.String()
 	case CompleteTask:
-		return fmt.Sprintf(
-			"CompleteTask(id=%s, counter=%d)",
-			r.CompleteTask.Id,
-			r.CompleteTask.Counter,
-		)
+		return r.CompleteTask.String()
 	case HeartbeatTasks:
-		return fmt.Sprintf(
-			"HeartbeatTasks(processId=%s)",
-			r.HeartbeatTasks.ProcessId,
-		)
+		return r.HeartbeatTasks.String()
 
 	// ECHO
 	case Echo:
-		return fmt.Sprintf(
-			"Echo(data=%s)",
-			r.Echo.Data,
-		)
+		return r.Echo.String()
+
 	default:
 		return "Request"
 	}
