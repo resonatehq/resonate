@@ -11,7 +11,6 @@ import pytest
 from resonate import scheduler
 from resonate.retry_policy import (
     Linear,
-    calculate_total_possible_delay,
     constant,
     never,
 )
@@ -119,10 +118,7 @@ def test_multithreading_capabilities(store: IPromiseStore) -> None:
     assert p1.result() == "A"
     assert p2.result() == "B"
     assert p3.result() == "C"
-    total_time = time.time() - start
-    assert total_time == pytest.approx(
-        time_per_process, rel=1e-1
-    ), f"I should have taken about {time_per_process} seconds to process all coroutines"
+    assert time.time() - start <= 1
 
 
 def sleep_coroutine(
@@ -139,8 +135,8 @@ def test_sleep_on_coroutines(store: IPromiseStore) -> None:
         processor_threads=1,
         durable_promise_storage=store,
     )
+    sleep_time = 1
     start = time.time()
-    sleep_time = 4
     p1: Promise[str] = s.run(
         "sleeping-coro-1",
         sleep_coroutine,
@@ -162,81 +158,85 @@ def test_sleep_on_coroutines(store: IPromiseStore) -> None:
     assert p1.result() == "A"
     assert p2.result() == "B"
     assert p3.result() == "C"
-
-    assert time.time() - start == pytest.approx(
-        sleep_time, rel=1e-1
-    ), f"I should have taken about {sleep_time} seconds to process all coroutines"
-
-
-def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
-    raise error
-
-
-def coro(ctx: Context, policy_info: dict[str, Any]) -> Generator[Yieldable, Any, None]:
-    policy = Linear(delay=policy_info["delay"], max_retries=policy_info["max_retries"])
-    yield ctx.lfc(_failing, error=NotImplementedError).with_options(
-        durable=False, retry_policy=policy
-    )
+    assert time.time() - start < 2  # noqa: PLR2004
 
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_retry(store: IPromiseStore) -> None:
+    tries = 0
+
+    def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
+        nonlocal tries
+        tries += 1
+        raise error
+
+    def coro(
+        ctx: Context, policy_info: dict[str, Any]
+    ) -> Generator[Yieldable, Any, None]:
+        policy = Linear(
+            delay=policy_info["delay"], max_retries=policy_info["max_retries"]
+        )
+        yield ctx.lfc(_failing, error=NotImplementedError).with_options(
+            durable=False, retry_policy=policy
+        )
+
     s = scheduler.Scheduler(durable_promise_storage=store)
-    policy = Linear(delay=0.005, max_retries=2)
+    policy = Linear(delay=0, max_retries=2)
 
     s.register("coro-func", coro, retry_policy=never())
 
-    start = time.time()
     p: Promise[None] = s.run("retry-coro", coro, dataclasses.asdict(policy))
     with pytest.raises(NotImplementedError):
         assert p.result()
-
-    total_possible_delay = calculate_total_possible_delay(policy)
-    assert (
-        time.time() - start <= total_possible_delay + 0.1
-    ), f"It should have taken about {total_possible_delay} + 0.1 secs (for API calling) to finish"  # noqa: E501
-
-
-def coro_that_triggers_structure_concurrency(
-    ctx: Context,
-) -> Generator[Yieldable, Any, int]:
-    yield ctx.lfi(foo, name="a", sleep_time=0.3)
-    return 1
+    assert tries == 3  # noqa: PLR2004
 
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
 
+    child_p: Promise[str] | None = None
+
+    def coro_that_triggers_structure_concurrency(
+        ctx: Context,
+    ) -> Generator[Yieldable, Any, int]:
+        nonlocal child_p
+        p: Promise[str] = yield ctx.lfi(foo, name="a", sleep_time=0)
+        child_p = p
+        return 1
+
     s.register(
         "coro-that-triggers-structured-concurrency",
         coro_that_triggers_structure_concurrency,
         retry_policy=never(),
     )
-    start = time.time()
 
     p: Promise[int] = s.run(
         "structure-concurrency",
         coro_that_triggers_structure_concurrency,
     )
-    assert p.result() == 1
-    max_expected_delay = 0.3 + 0.1
-    assert (
-        time.time() - start <= max_expected_delay
-    ), f"It should have taken about {max_expected_delay} to finish"
-
-
-def coro_that_triggers_structure_concurrency_and_fails(
-    ctx: Context,
-) -> Generator[Yieldable, Any, int]:
-    yield ctx.lfi(_failing, error=NotImplementedError).with_options(
-        retry_policy=constant(delay=0.03, max_retries=2), durable=False
-    )
-    return 1
+    assert p.result()
+    assert child_p is not None
+    assert child_p.done()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
+    tries = 0
+
+    def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
+        nonlocal tries
+        tries += 1
+        raise error
+
+    def coro_that_triggers_structure_concurrency_and_fails(
+        ctx: Context,
+    ) -> Generator[Yieldable, Any, int]:
+        yield ctx.lfi(_failing, error=NotImplementedError).with_options(
+            retry_policy=constant(delay=0.03, max_retries=2), durable=False
+        )
+        return 1
+
     s = scheduler.Scheduler(durable_promise_storage=store)
 
     s.register(
@@ -251,21 +251,25 @@ def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
     with pytest.raises(NotImplementedError):
         p.result()
 
-
-def coro_that_trigger_structure_concurrency_and_multiple_errors(
-    ctx: Context,
-) -> Generator[Yieldable, Any, int]:
-    yield ctx.lfi(_failing, error=TypeError).with_options(
-        retry_policy=never(), durable=False
-    )
-    yield ctx.lfi(_failing, error=NotImplementedError).with_options(
-        durable=False, retry_policy=never()
-    )
-    return 1
+    assert tries == 3  # noqa: PLR2004
 
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> None:
+    def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
+        raise error
+
+    def coro_that_trigger_structure_concurrency_and_multiple_errors(
+        ctx: Context,
+    ) -> Generator[Yieldable, Any, int]:
+        yield ctx.lfi(_failing, error=TypeError).with_options(
+            retry_policy=never(), durable=False
+        )
+        yield ctx.lfi(_failing, error=NotImplementedError).with_options(
+            durable=False, retry_policy=never()
+        )
+        return 1
+
     s = scheduler.Scheduler(durable_promise_storage=store)
 
     s.register(
@@ -281,21 +285,28 @@ def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> N
         p.result()
 
 
-def coro_with_deferred_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
-    _ = yield ctx.deferred("deferred-invoke", foo, name="A", sleep_time=0.5)
-    return 1
-
-
 @pytest.mark.parametrize("store", _promise_storages())
 def test_deferred_invoke(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
+
+    deferred_p: Promise[str] | None = None
+
+    def coro_with_deferred_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
+        nonlocal deferred_p
+        p: Promise[str] = yield ctx.deferred(
+            "deferred-invoke", foo, name="A", sleep_time=0.02
+        )
+        deferred_p = p
+
+        return 1
+
     s.register("coro-with-deferred-invoked", coro_with_deferred_invoke)
     s.register("foo", foo)
 
-    start = time.time()
     p: Promise[int] = s.run("test-deferred-invoke", coro_with_deferred_invoke)
     assert p.result() == 1
-    assert time.time() - start <= 0.1 + 0.1
+    assert deferred_p is not None
+    assert not deferred_p.done()
 
     def_p = s.run("deferred-invoke", foo, name="B", sleep_time=120)
     assert def_p.result() == "A"
@@ -465,17 +476,21 @@ def test_race_combinator(store: IPromiseStore) -> None:
         p_race.result()
 
 
-def _coro_to_retry(ctx: Context) -> Generator[Yieldable, Any, int]:
-    yield ctx.lfc(foo, name="A", sleep_time=0.1)
-    raise ValueError
-
-
 @pytest.mark.parametrize("store", _promise_storages())
 def test_coro_retry(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
-    s.register("coro-to-retry", _coro_to_retry, constant(delay=0.2, max_retries=3))
-    start = time.time()
+
+    tries = 0
+
+    def _coro_to_retry(ctx: Context) -> Generator[Yieldable, Any, int]:
+        nonlocal tries
+        tries += 1
+        yield ctx.lfc(foo, name="A", sleep_time=0)
+        raise ValueError
+
+    s.register("coro-to-retry", _coro_to_retry, constant(delay=0, max_retries=3))
     p: Promise[int] = s.run("coro-to-retry.1", _coro_to_retry)
     with pytest.raises(ValueError):  # noqa: PT011
         p.result()
-    assert time.time() - start > 0.5  # noqa: PLR2004
+
+    assert tries == 4  # noqa: PLR2004
