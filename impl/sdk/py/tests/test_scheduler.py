@@ -436,7 +436,7 @@ def test_race_combinator(store: IPromiseStore) -> None:
     # Test case 1
     waits_results = [(0.03, "A"), (0.03, "B"), (0.01, "C"), (0.03, "D"), (0.03, "E")]
     expected = "C"
-    s.register("race-coro", race_coro)
+    s.register("race-coro", race_coro, retry_policy=never())
     p_race: Promise[str] = s.run("race-coro-0", race_coro, waits_results=waits_results)
     assert p_race.result() == expected
 
@@ -463,3 +463,19 @@ def test_race_combinator(store: IPromiseStore) -> None:
     p_race = s.run("race-coro-4", race_coro, waits_results=waits_results)
     with pytest.raises(AssertionError):
         p_race.result()
+
+
+def _coro_to_retry(ctx: Context) -> Generator[Yieldable, Any, int]:
+    yield ctx.lfc(foo, name="A", sleep_time=0.1)
+    raise ValueError
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_coro_retry(store: IPromiseStore) -> None:
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register("coro-to-retry", _coro_to_retry, constant(delay=0.2, max_retries=3))
+    start = time.time()
+    p: Promise[int] = s.run("coro-to-retry.1", _coro_to_retry)
+    with pytest.raises(ValueError):  # noqa: PT011
+        p.result()
+    assert time.time() - start > 0.5  # noqa: PLR2004

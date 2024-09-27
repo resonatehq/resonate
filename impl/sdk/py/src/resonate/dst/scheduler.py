@@ -22,7 +22,13 @@ from resonate.contants import CWD
 from resonate.context import (
     Context,
 )
-from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
+from resonate.dataclasses import (
+    Command,
+    CoroAndPromise,
+    FnOrCoroutine,
+    RouteInfo,
+    Runnable,
+)
 from resonate.dependency_injection import Dependencies
 from resonate.encoders import JsonEncoder
 from resonate.events import (
@@ -255,37 +261,40 @@ class DSTScheduler:
         )
 
     def _route_fn_or_coroutine(
-        self, ctx: Context, promise: Promise[Any], fn_or_coroutine: FnOrCoroutine
+        self,
+        info: RouteInfo,
     ) -> None:
         assert (
-            not promise.done()
-        ), "Only executions of unresolved promises can be passed here."
-        if isgeneratorfunction(fn_or_coroutine.exec_unit):
-            coro = fn_or_coroutine.exec_unit(
-                ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
+            not info.promise.done()
+        ), "Only unresolved executions of unresolved promises can be passed here."
+        if isgeneratorfunction(info.fn_or_coroutine.exec_unit):
+            coro = info.fn_or_coroutine.exec_unit(
+                info.ctx, *info.fn_or_coroutine.args, **info.fn_or_coroutine.kwargs
             )
             self._add_coro_to_runnables(
-                CoroAndPromise(coro, promise, ctx), None, was_awaited=False
+                CoroAndPromise(info, coro),
+                None,
+                was_awaited=False,
             )
         else:
             self._add_function_to_runnables(
                 wrap_fn(
-                    ctx,
-                    fn_or_coroutine.exec_unit,
-                    *fn_or_coroutine.args,
-                    **fn_or_coroutine.kwargs,
+                    info.ctx,
+                    info.fn_or_coroutine.exec_unit,
+                    *info.fn_or_coroutine.args,
+                    **info.fn_or_coroutine.kwargs,
                 ),
-                promise,
+                info.promise,
             )
 
         self._events.append(
             ExecutionInvoked(
-                promise.promise_id,
-                ctx.parent_promise_id(),
+                info.promise.promise_id,
+                info.ctx.parent_promise_id(),
                 self.tick,
-                fn_or_coroutine.exec_unit.__name__,
-                fn_or_coroutine.args,
-                fn_or_coroutine.kwargs,
+                info.fn_or_coroutine.exec_unit.__name__,
+                info.fn_or_coroutine.args,
+                info.fn_or_coroutine.kwargs,
             )
         )
 
@@ -373,11 +382,7 @@ class DSTScheduler:
         if p.done():
             self._unblock_coros_waiting_on_promise(p)
         else:
-            self._route_fn_or_coroutine(
-                ctx=root_ctx,
-                promise=p,
-                fn_or_coroutine=top_lvl.exec_unit,
-            )
+            self._route_fn_or_coroutine(RouteInfo(root_ctx, p, top_lvl.exec_unit, 0))
         return p
 
     def _get_random_element(self, array: list[T]) -> T:
@@ -574,7 +579,9 @@ class DSTScheduler:
             if p.done():
                 self._unblock_coros_waiting_on_promise(p)
             else:
-                self._route_fn_or_coroutine(child_ctx, p, invokation.exec_unit)
+                self._route_fn_or_coroutine(
+                    RouteInfo(child_ctx, p, invokation.exec_unit, 0)
+                )
         else:
             assert_never(invokation.exec_unit)
         return p

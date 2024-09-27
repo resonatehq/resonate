@@ -20,7 +20,13 @@ from resonate.actions import (
 )
 from resonate.collections import DoubleDict
 from resonate.context import Context
-from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
+from resonate.dataclasses import (
+    Command,
+    CoroAndPromise,
+    FnOrCoroutine,
+    RouteInfo,
+    Runnable,
+)
 from resonate.dependency_injection import Dependencies
 from resonate.encoders import JsonEncoder
 from resonate.events import (
@@ -42,7 +48,6 @@ from resonate.promise import (
 )
 from resonate.queue import DelayQueue, Queue
 from resonate.result import Err, Ok
-from resonate.retry_policy import Never
 from resonate.time import now
 from resonate.tracing.stdout import StdOutAdapter
 from resonate.typing import Combinator
@@ -70,14 +75,10 @@ P = ParamSpec("P")
 class _SQE(Generic[T]):
     def __init__(
         self,
-        promise_id: str,
-        retry_attempt: int,
-        policy: RetryPolicy,
+        route_info: RouteInfo,
         fn: FnWrapper[T] | AsyncFnWrapper[T],
     ) -> None:
-        self.promise_id = promise_id
-        self.retry_attempt = retry_attempt
-        self.policy = policy
+        self.route_info = route_info
         self.fn = fn
 
 
@@ -147,7 +148,7 @@ class Scheduler:
 
         self._worker_continue = Event()
 
-        self._delay_queue = DelayQueue[_SQE[Any]](caller_event=self._worker_continue)
+        self._delay_queue = DelayQueue[RouteInfo](caller_event=self._worker_continue)
 
         self._deps = Dependencies()
         self._json_encoder = JsonEncoder()
@@ -363,45 +364,45 @@ class Scheduler:
         return p
 
     def _route_fn_or_coroutine(
-        self, ctx: Context, promise: Promise[Any], fn_or_coroutine: FnOrCoroutine
+        self,
+        route_info: RouteInfo,
     ) -> None:
         assert (
-            not promise.done()
+            not route_info.promise.done()
         ), "Only unresolved executions of unresolved promises can be passed here."
-        if isgeneratorfunction(fn_or_coroutine.exec_unit):
-            coro = fn_or_coroutine.exec_unit(
-                ctx, *fn_or_coroutine.args, **fn_or_coroutine.kwargs
+        if isgeneratorfunction(route_info.fn_or_coroutine.exec_unit):
+            coro = route_info.fn_or_coroutine.exec_unit(
+                route_info.ctx,
+                *route_info.fn_or_coroutine.args,
+                **route_info.fn_or_coroutine.kwargs,
             )
             self._add_coro_to_runnables(
-                CoroAndPromise(coro, promise, ctx),
+                CoroAndPromise(route_info, coro),
                 None,
                 was_awaited=False,
             )
 
         else:
-            assert isinstance(promise.action, Invocation)
             self._processor.enqueue(
                 _SQE(
-                    promise_id=promise.promise_id,
-                    retry_attempt=0,
-                    policy=promise.action.opts.retry_policy,
+                    route_info=route_info,
                     fn=wrap_fn(
-                        ctx,
-                        fn_or_coroutine.exec_unit,
-                        *fn_or_coroutine.args,
-                        **fn_or_coroutine.kwargs,
+                        route_info.ctx,
+                        route_info.fn_or_coroutine.exec_unit,
+                        *route_info.fn_or_coroutine.args,
+                        **route_info.fn_or_coroutine.kwargs,
                     ),
                 )
             )
 
         self._tracing_adapter.process_event(
             ExecutionInvoked(
-                promise.promise_id,
-                ctx.parent_promise_id(),
+                route_info.promise.promise_id,
+                route_info.ctx.parent_promise_id(),
                 now(),
-                fn_or_coroutine.exec_unit.__name__,
-                fn_or_coroutine.args,
-                fn_or_coroutine.kwargs,
+                route_info.fn_or_coroutine.exec_unit.__name__,
+                route_info.fn_or_coroutine.args,
+                route_info.fn_or_coroutine.kwargs,
             )
         )
 
@@ -411,8 +412,8 @@ class Scheduler:
 
             delay_es = self._delay_queue.dequeue_all()
             for delay_e in delay_es:
-                if isinstance(delay_e, _SQE):
-                    self._processor.enqueue(delay_e)
+                if isinstance(delay_e, RouteInfo):
+                    self._route_fn_or_coroutine(delay_e)
                 else:
                     assert_never(delay_e)
 
@@ -422,21 +423,21 @@ class Scheduler:
                 if p.done():
                     self._unblock_coros_waiting_on_promise(p)
                 else:
-                    self._route_fn_or_coroutine(root_ctx, p, top_lvl.exec_unit)
+                    self._route_fn_or_coroutine(
+                        RouteInfo(root_ctx, p, top_lvl.exec_unit, retry_attempt=0)
+                    )
 
             cqes = self._completion_queue.dequeue_all()
             for cqe in cqes:
-                next_retry_attempt = cqe.sqe.retry_attempt + 1
-                if (
-                    isinstance(cqe.fn_result, Ok)
-                    or isinstance(cqe.sqe.policy, Never)
-                    or not cqe.sqe.policy.should_retry(next_retry_attempt)
-                ):
+                if not cqe.sqe.route_info.to_be_retried(cqe.fn_result):
+                    promise_to_resolve = cqe.sqe.route_info.promise
                     assert (
-                        cqe.sqe.promise_id in self._emphemeral_promise_memo
+                        promise_to_resolve.promise_id in self._emphemeral_promise_memo
                     ), "Promise must be recorded in ephemeral storage."
 
-                    promise, ctx = self._emphemeral_promise_memo[cqe.sqe.promise_id]
+                    promise, ctx = self._emphemeral_promise_memo[
+                        promise_to_resolve.promise_id
+                    ]
                     self._tracing_adapter.process_event(
                         ExecutionTerminated(
                             promise_id=promise.promise_id,
@@ -448,13 +449,8 @@ class Scheduler:
                     self._unblock_coros_waiting_on_promise(promise)
                 else:
                     self._delay_queue.put_nowait(
-                        _SQE(
-                            promise_id=cqe.sqe.promise_id,
-                            retry_attempt=next_retry_attempt,
-                            policy=cqe.sqe.policy,
-                            fn=cqe.sqe.fn,
-                        ),
-                        delay=cqe.sqe.policy.calculate_delay(next_retry_attempt),
+                        cqe.sqe.route_info.next_retry_attempt(),
+                        delay=cqe.sqe.route_info.next_retry_delay(),
                     )
 
             for p_to_b_resolved in self._promises_to_be_resolved:
@@ -575,27 +571,34 @@ class Scheduler:
             )
 
         if isinstance(yieldable_or_final_value, FinalValue):
-            self._tracing_adapter.process_event(
-                ExecutionTerminated(
-                    promise_id=runnable.coro_and_promise.prom.promise_id,
-                    tick=now(),
-                    parent_promise_id=runnable.coro_and_promise.ctx.parent_promise_id(),
-                )
-            )
-            if all_promises_are_done(runnable.coro_and_promise.children_promises):
-                self._resolve_promise(
-                    runnable.coro_and_promise.prom, yieldable_or_final_value.v
-                )
-                self._unblock_coros_waiting_on_promise(runnable.coro_and_promise.prom)
-            else:
-                self._promises_to_be_resolved.append(
-                    (
-                        runnable.coro_and_promise.prom,
-                        yieldable_or_final_value.v,
-                        runnable.coro_and_promise.children_promises,
+            final_value = yieldable_or_final_value.v
+            if not runnable.coro_and_promise.route_info.to_be_retried(final_value):
+                self._tracing_adapter.process_event(
+                    ExecutionTerminated(
+                        promise_id=runnable.coro_and_promise.prom.promise_id,
+                        tick=now(),
+                        parent_promise_id=runnable.coro_and_promise.ctx.parent_promise_id(),
                     )
                 )
-            del runnable
+                if all_promises_are_done(runnable.coro_and_promise.children_promises):
+                    self._resolve_promise(runnable.coro_and_promise.prom, final_value)
+                    self._unblock_coros_waiting_on_promise(
+                        runnable.coro_and_promise.prom
+                    )
+                else:
+                    self._promises_to_be_resolved.append(
+                        (
+                            runnable.coro_and_promise.prom,
+                            final_value,
+                            runnable.coro_and_promise.children_promises,
+                        )
+                    )
+                del runnable
+            else:
+                self._delay_queue.put_nowait(
+                    runnable.coro_and_promise.route_info.next_retry_attempt(),
+                    delay=runnable.coro_and_promise.route_info.next_retry_delay(),
+                )
 
         elif isinstance(yieldable_or_final_value, Call):
             p = self._process_invocation(
@@ -666,7 +669,9 @@ class Scheduler:
             if p.done():
                 self._unblock_coros_waiting_on_promise(p)
             else:
-                self._route_fn_or_coroutine(child_ctx, p, invokation.exec_unit)
+                self._route_fn_or_coroutine(
+                    RouteInfo(child_ctx, p, invokation.exec_unit, retry_attempt=0)
+                )
         else:
             assert_never(invokation.exec_unit)
         return p
