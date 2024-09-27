@@ -68,11 +68,6 @@ class OpenTelemetryAdapter(IAdapter):
             span = self._get_span(event.promise_id)
             span.add_event(
                 ExecutionInvoked.__name__,
-                attributes={
-                    "function-name": event.fn_name,
-                    "args": event.args,
-                    "kwargs": self._json_serialize_or_default(event.kwargs),
-                },
             )
         elif isinstance(event, ExecutionTerminated):
             span = self._get_span(event.promise_id)

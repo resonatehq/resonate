@@ -299,10 +299,7 @@ class DSTScheduler:
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
             if isinstance(action.exec_unit, FnOrCoroutine):
-                data = {
-                    "args": action.exec_unit.args,
-                    "kwargs": action.exec_unit.kwargs,
-                }
+                data = action.exec_unit.json_data()
             else:
                 assert_never(action.exec_unit)
         elif isinstance(action, Sleep):

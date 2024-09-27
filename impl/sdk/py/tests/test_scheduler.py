@@ -66,22 +66,24 @@ def test_coro_return_promise(store: IPromiseStore) -> None:
         processor_threads=1,
         durable_promise_storage=store,
     )
-    p: Promise[Promise[str]] = s.with_options(retry_policy=never()).run(
-        "bar", bar, name="A", sleep_time=0.01
-    )
+    s.register("bar-function", bar, retry_policy=never())
+    p: Promise[Promise[str]] = s.run("bar", bar, name="A", sleep_time=0.01)
     assert p.result(timeout=2) == "A"
 
 
 @pytest.mark.parametrize("store", _promise_storages())
 def test_scheduler(store: IPromiseStore) -> None:
-    p = scheduler.Scheduler(
+    s = scheduler.Scheduler(
         durable_promise_storage=store,
     )
 
-    promise: Promise[str] = p.run("baz-1", baz, name="A", sleep_time=0.02)
+    s.register("baz-function", baz, retry_policy=never())
+    s.register("foo-function", foo, retry_policy=never())
+
+    promise: Promise[str] = s.run("baz-1", baz, name="A", sleep_time=0.02)
     assert promise.result(timeout=4) == "A"
 
-    promise = p.run("foo-1", foo, name="B", sleep_time=0.02)
+    promise = s.run("foo-1", foo, name="B", sleep_time=0.02)
     assert promise.result(timeout=4) == "B"
 
 
@@ -91,6 +93,7 @@ def test_multithreading_capabilities(store: IPromiseStore) -> None:
         processor_threads=3,
         durable_promise_storage=store,
     )
+    s.register("baz", baz)
 
     time_per_process: float = 0.5
     start = time.time()
@@ -181,10 +184,10 @@ def test_retry(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
     policy = Linear(delay=0.005, max_retries=2)
 
+    s.register("coro-func", coro, retry_policy=never())
+
     start = time.time()
-    p: Promise[None] = s.with_options(retry_policy=never()).run(
-        "retry-coro", coro, dataclasses.asdict(policy)
-    )
+    p: Promise[None] = s.run("retry-coro", coro, dataclasses.asdict(policy))
     with pytest.raises(NotImplementedError):
         assert p.result()
 
@@ -204,9 +207,17 @@ def coro_that_triggers_structure_concurrency(
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
+
+    s.register(
+        "coro-that-triggers-structured-concurrency",
+        coro_that_triggers_structure_concurrency,
+        retry_policy=never(),
+    )
     start = time.time()
-    p: Promise[int] = s.with_options(retry_policy=never()).run(
-        "structure-concurrency", coro_that_triggers_structure_concurrency
+
+    p: Promise[int] = s.run(
+        "structure-concurrency",
+        coro_that_triggers_structure_concurrency,
     )
     assert p.result() == 1
     max_expected_delay = 0.3 + 0.1
@@ -227,7 +238,13 @@ def coro_that_triggers_structure_concurrency_and_fails(
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
-    p: Promise[int] = s.with_options(retry_policy=never()).run(
+
+    s.register(
+        "coro-structured-concurrency-and-failure",
+        coro_that_triggers_structure_concurrency_and_fails,
+        retry_policy=never(),
+    )
+    p: Promise[int] = s.run(
         "structure-concurrency-with-failure",
         coro_that_triggers_structure_concurrency_and_fails,
     )
@@ -250,7 +267,13 @@ def coro_that_trigger_structure_concurrency_and_multiple_errors(
 @pytest.mark.parametrize("store", _promise_storages())
 def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
-    p: Promise[int] = s.with_options(retry_policy=never()).run(
+
+    s.register(
+        "ss-and-multiple-errors",
+        coro_that_trigger_structure_concurrency_and_multiple_errors,
+        retry_policy=never(),
+    )
+    p: Promise[int] = s.run(
         "structure-concurrency-with-many-failure",
         coro_that_trigger_structure_concurrency_and_multiple_errors,
     )
@@ -266,6 +289,9 @@ def coro_with_deferred_invoke(ctx: Context) -> Generator[Yieldable, Any, int]:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_deferred_invoke(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register("coro-with-deferred-invoked", coro_with_deferred_invoke)
+    s.register("foo", foo)
+
     start = time.time()
     p: Promise[int] = s.run("test-deferred-invoke", coro_with_deferred_invoke)
     assert p.result() == 1
@@ -335,6 +361,7 @@ def test_all_combinator(store: IPromiseStore) -> None:
     # Test case 1
     waits_results = [(0.02, "A"), (0.03, "B"), (0.01, "C"), (0.02, "D"), (0.02, "E")]
     expected = ["A", "B", "C", "D", "E"]
+    s.register("all-coro", all_coro)
     p_all: Promise[list[str]] = s.run(
         "all-coro-0", all_coro, waits_results=waits_results
     )
@@ -372,6 +399,7 @@ def test_all_settled_combinator(store: IPromiseStore) -> None:
     # Test case 1
     vals = ["A", "B", "C", "D", "E"]
     expected = ["A", "B", "C", "D", "E"]
+    s.register("all-settled-coro", all_settled_coro)
     p_all_settled: Promise[list[Any]] = s.run(
         "all-settled-coro-0", all_settled_coro, vals=vals
     )
@@ -408,6 +436,7 @@ def test_race_combinator(store: IPromiseStore) -> None:
     # Test case 1
     waits_results = [(0.03, "A"), (0.03, "B"), (0.01, "C"), (0.03, "D"), (0.03, "E")]
     expected = "C"
+    s.register("race-coro", race_coro)
     p_race: Promise[str] = s.run("race-coro-0", race_coro, waits_results=waits_results)
     assert p_race.result() == expected
 

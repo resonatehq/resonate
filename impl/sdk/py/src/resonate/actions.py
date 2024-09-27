@@ -89,7 +89,6 @@ class Sleep:
 
 
 @final
-@dataclass
 class All:
     """
     A combinator that waits for all promises to complete.
@@ -129,7 +128,6 @@ class All:
 
 
 @final
-@dataclass
 class AllSettled:
     """
     A combinator that waits for all promises to complete and returns a list of results
@@ -170,7 +168,6 @@ class AllSettled:
 
 
 @final
-@dataclass
 class Race:
     """
     A combinator that completes when any of the promises completes.

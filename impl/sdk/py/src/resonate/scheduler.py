@@ -6,7 +6,7 @@ from inspect import isgenerator, isgeneratorfunction
 from threading import Event, Thread
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 
-from typing_extensions import ParamSpec, Self, assert_never
+from typing_extensions import ParamSpec, assert_never
 
 from resonate import utils
 from resonate.actions import (
@@ -18,6 +18,7 @@ from resonate.actions import (
     Race,
     Sleep,
 )
+from resonate.collections import DoubleDict
 from resonate.context import Context
 from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.dependency_injection import Dependencies
@@ -33,7 +34,12 @@ from resonate.events import (
 from resonate.functools import AsyncFnWrapper, FnWrapper, wrap_fn
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.options import Options
-from resonate.promise import Promise, all_promises_are_done, get_first_error_if_any
+from resonate.promise import (
+    Promise,
+    all_promises_are_done,
+    any_promise_is_done,
+    get_first_error_if_any,
+)
 from resonate.queue import DelayQueue, Queue
 from resonate.result import Err, Ok
 from resonate.retry_policy import Never
@@ -42,6 +48,8 @@ from resonate.tracing.stdout import StdOutAdapter
 from resonate.typing import Combinator
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
     from resonate.record import DurablePromiseRecord
     from resonate.result import Result
     from resonate.retry_policy import RetryPolicy
@@ -129,6 +137,9 @@ class Scheduler:
         tracing_adapter: IAdapter | None = None,
         processor_threads: int | None = None,
     ) -> None:
+        self._registered_function = DoubleDict[str, Any]()
+        self._attached_options_to_top_lvl: dict[str, Options] = {}
+
         self._stg_queue = Queue[tuple[Invocation, Promise[Any], Context]]()
         self._completion_queue = Queue[_CQE[Any]]()
         self._submission_queue = Queue[_SQE[Any]]()
@@ -159,22 +170,8 @@ class Scheduler:
         self._durable_promise_storage = durable_promise_storage
         self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
 
-        # Note: There's a potential race condition with this attribute.
-        # since we do scheduler.run() on both application thread and scheduler thread
-        # there's a risk of overwriting options.
-        self._top_level_options: Options | None = None
-
         self._worker_thread = Thread(target=self._run, daemon=True)
         self._worker_thread.start()
-
-    def with_options(
-        self,
-        *,
-        retry_policy: RetryPolicy | None = None,
-    ) -> Self:
-        assert self._top_level_options is None
-        self._top_level_options = Options(retry_policy=retry_policy)
-        return self
 
     def enqueue_cqe(self, sqe: _SQE[T], value: Result[T, Exception]) -> None:
         self._completion_queue.put(_CQE[Any](sqe=sqe, fn_result=value))
@@ -266,10 +263,7 @@ class Scheduler:
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
             if isinstance(action.exec_unit, FnOrCoroutine):
-                data = {
-                    "args": action.exec_unit.args,
-                    "kwargs": action.exec_unit.kwargs,
-                }
+                data = action.exec_unit.json_data()
             else:
                 assert_never(action.exec_unit)
 
@@ -315,6 +309,23 @@ class Scheduler:
         self._resolve_promise(p, v)
         return p
 
+    def register(
+        self,
+        name: str,
+        func: DurableCoro[P, Hashable] | DurableFn[P, Hashable],
+        retry_policy: RetryPolicy | None = None,
+    ) -> None:
+        assert (
+            self._registered_function.get(name) is None
+        ), "There's already a coroutine registered with this name."
+        assert (
+            name not in self._attached_options_to_top_lvl
+        ), "There's already a coroutine registered with this name."
+        self._registered_function.add(name, func)
+        self._attached_options_to_top_lvl[name] = Options(
+            durable=True, promise_id=None, retry_policy=retry_policy
+        )
+
     def run(
         self,
         promise_id: str,
@@ -323,18 +334,21 @@ class Scheduler:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Promise[T]:
-        if self._top_level_options is None:
-            self._top_level_options = Options()
-
         if promise_id in self._emphemeral_promise_memo:
             return self._emphemeral_promise_memo[promise_id][0]
 
-        assert self._top_level_options.durable, "Top lvl invocation must be durable."
+        function_name = self._registered_function.get_from_value(coro)
+        assert (
+            function_name is not None
+        ), f"There's no function registed for function {coro.__name__}."
+        attached_options = self._attached_options_to_top_lvl[function_name]
+
+        assert attached_options.durable, "All top level invocation must be durable."
         top_lvl = Invocation(
             FnOrCoroutine(coro, *args, **kwargs),
-            opts=self._top_level_options,
+            opts=attached_options,
         )
-        self._top_level_options = None
+
         root_ctx = Context(
             ctx_id=promise_id,
             seed=None,
@@ -395,7 +409,7 @@ class Scheduler:
         while self._worker_continue.wait():
             self._worker_continue.clear()
 
-            delay_es = self._delay_queue.dequeue_batch(self._delay_queue.qsize())
+            delay_es = self._delay_queue.dequeue_all()
             for delay_e in delay_es:
                 if isinstance(delay_e, _SQE):
                     self._processor.enqueue(delay_e)
@@ -621,9 +635,7 @@ class Scheduler:
             )
 
         elif isinstance(yieldable_or_final_value, DeferredInvocation):
-            deferred_p: Promise[Any] = self.with_options(
-                retry_policy=yieldable_or_final_value.opts.retry_policy
-            ).run(
+            deferred_p: Promise[Any] = self.run(
                 yieldable_or_final_value.promise_id,
                 yieldable_or_final_value.coro.exec_unit,
                 *yieldable_or_final_value.coro.args,
@@ -675,17 +687,17 @@ class Scheduler:
 
     def _combinator_done(self, combinator: Combinator) -> bool:
         if isinstance(combinator, (All, AllSettled)):
-            return all(p.done() for p in combinator.promises)
+            return all_promises_are_done(combinator.promises)
 
         if isinstance(combinator, Race):
-            return any(p.done() for p in combinator.promises)
+            return any_promise_is_done(combinator.promises)
 
         assert_never(combinator)
 
     def _combinator_result(
         self, combinator: Combinator
     ) -> Result[
-        Any | list[Any], Exception
+        Any | list[Any | Exception], Exception
     ]:  # Note: We can't possible have single type for all the promises of a Combinator
         if isinstance(combinator, All):
             try:

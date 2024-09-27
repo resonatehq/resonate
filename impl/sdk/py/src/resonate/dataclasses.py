@@ -52,6 +52,13 @@ class FnOrCoroutine:
         self.args = args
         self.kwargs = kwargs
 
+    def json_data(self) -> dict[str, Any]:
+        return {
+            "func": self.exec_unit.__name__,
+            "args": self.args,
+            "kwargs": self.kwargs,
+        }
+
 
 class Command:
     def __call__(self, ctx: Context) -> None:

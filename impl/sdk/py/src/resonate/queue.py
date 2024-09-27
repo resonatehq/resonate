@@ -111,3 +111,6 @@ class DelayQueue(Generic[T]):
 
     def qsize(self) -> int:
         return self._outq.qsize()
+
+    def dequeue_all(self) -> list[T]:
+        return self._outq.dequeue_all()
