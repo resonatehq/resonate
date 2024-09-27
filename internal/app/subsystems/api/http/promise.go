@@ -198,6 +198,7 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 				PromiseId: body.Promise.Id,
 				ProcessId: body.Task.ProcessId,
 				Frequency: body.Task.Frequency,
+				Timeout:   body.Promise.Timeout,
 				Recv:      body.Task.Recv,
 			},
 		},

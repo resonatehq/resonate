@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -15,10 +14,54 @@ import (
 )
 
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	// request data
-	var createPromiseReq *t_api.CreatePromiseRequest
-	var createTaskReq *t_api.CreateTaskRequest
-	var createCallbackReq *t_api.CreateCallbackRequest
+	util.Assert(r.Kind == t_api.CreatePromise, "must be create promise")
+
+	return createPromiseAndTaskOrCallback(c, r, r.CreatePromise)
+}
+
+func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	util.Assert(r.Kind == t_api.CreatePromiseAndTask, "must be create promise and task")
+	util.Assert(r.CreatePromiseAndTask.Promise.Id == r.CreatePromiseAndTask.Task.PromiseId, "promise ids must match")
+	util.Assert(r.CreatePromiseAndTask.Promise.Timeout == r.CreatePromiseAndTask.Task.Timeout, "timeouts must match")
+
+	return createPromiseAndTaskOrCallback(c, r, r.CreatePromiseAndTask.Promise, &t_aio.Command{
+		Kind: t_aio.CreateTask,
+		CreateTask: &t_aio.CreateTaskCommand{
+			Recv:       r.CreatePromiseAndTask.Task.Recv,
+			Mesg:       &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
+			Timeout:    r.CreatePromiseAndTask.Task.Timeout,
+			ProcessId:  &r.CreatePromiseAndTask.Task.ProcessId,
+			State:      task.Claimed,
+			Frequency:  r.CreatePromiseAndTask.Task.Frequency,
+			Expiration: c.Time() + int64(r.CreatePromiseAndTask.Task.Frequency),
+			CreatedOn:  c.Time(),
+		},
+	})
+}
+
+func CreatePromiseAndCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	util.Assert(r.Kind == t_api.CreatePromiseAndCallback, "must be create promise and callback")
+	util.Assert(r.CreatePromiseAndCallback.Promise.Id == r.CreatePromiseAndCallback.Callback.PromiseId, "promise ids must match")
+
+	return createPromiseAndTaskOrCallback(c, r, r.CreatePromiseAndCallback.Promise, &t_aio.Command{
+		Kind: t_aio.CreateCallback,
+		CreateCallback: &t_aio.CreateCallbackCommand{
+			PromiseId: r.CreatePromiseAndCallback.Callback.PromiseId,
+			Recv:      r.CreatePromiseAndCallback.Callback.Recv,
+			Mesg:      &message.Mesg{Type: message.Resume, Root: r.CreatePromiseAndCallback.Callback.RootPromiseId, Leaf: r.CreatePromiseAndCallback.Callback.PromiseId},
+			Timeout:   r.CreatePromiseAndCallback.Callback.Timeout,
+			CreatedOn: c.Time(),
+		},
+	})
+}
+
+func createPromiseAndTaskOrCallback(
+	c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
+	r *t_api.Request,
+	createPromiseReq *t_api.CreatePromiseRequest,
+	additionalCmds ...*t_aio.Command,
+) (*t_api.Response, error) {
+	util.Assert(r.Kind == t_api.CreatePromise || r.Kind == t_api.CreatePromiseAndTask || r.Kind == t_api.CreatePromiseAndCallback, "must be create promise or variant")
 
 	// response status
 	var status t_api.StatusCode
@@ -27,23 +70,6 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 	var p *promise.Promise
 	var t *task.Task
 	var cb *callback.Callback
-
-	switch r.Kind {
-	case t_api.CreatePromise:
-		createPromiseReq = r.CreatePromise
-	case t_api.CreatePromiseAndTask:
-		createPromiseReq = r.CreatePromiseAndTask.Promise
-		createTaskReq = r.CreatePromiseAndTask.Task
-	case t_api.CreatePromiseAndCallback:
-		createPromiseReq = r.CreatePromiseAndCallback.Promise
-		createCallbackReq = r.CreatePromiseAndCallback.Callback
-	default:
-		panic(fmt.Sprintf("invalid kind '%s'", r.Kind))
-	}
-
-	util.Assert(createPromiseReq != nil, "create promise must not be nil")
-	util.Assert(r.Kind != t_api.CreatePromiseAndTask || createTaskReq != nil, "create task must not be nil")
-	util.Assert(r.Kind != t_api.CreatePromiseAndCallback || createCallbackReq != nil, "create callback must not be nil")
 
 	// first read the promise to see if it already exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -83,38 +109,6 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			CreatedOn:      c.Time(),
 		}
 
-		var additionalCmds []*t_aio.Command
-
-		switch r.Kind {
-		case t_api.CreatePromiseAndTask:
-			// create task
-			additionalCmds = []*t_aio.Command{{
-				Kind: t_aio.CreateTask,
-				CreateTask: &t_aio.CreateTaskCommand{
-					Recv:       createTaskReq.Recv,
-					Mesg:       &message.Mesg{Type: message.Invoke, Root: createTaskReq.PromiseId, Leaf: createTaskReq.PromiseId},
-					Timeout:    createPromiseReq.Timeout,
-					ProcessId:  &createTaskReq.ProcessId,
-					State:      task.Claimed,
-					Frequency:  createTaskReq.Frequency,
-					Expiration: c.Time() + int64(createTaskReq.Frequency),
-					CreatedOn:  c.Time(),
-				},
-			}}
-		case t_api.CreatePromiseAndCallback:
-			// create callback
-			additionalCmds = []*t_aio.Command{{
-				Kind: t_aio.CreateCallback,
-				CreateCallback: &t_aio.CreateCallbackCommand{
-					PromiseId: createCallbackReq.PromiseId,
-					Recv:      createCallbackReq.Recv,
-					Mesg:      &message.Mesg{Type: message.Resume, Root: createCallbackReq.RootPromiseId, Leaf: createCallbackReq.PromiseId},
-					Timeout:   createCallbackReq.Timeout,
-					CreatedOn: c.Time(),
-				},
-			}}
-		}
-
 		// if the promise does not exist, create it
 		completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Tags, cmd, additionalCmds...))
 		if err != nil {
@@ -124,7 +118,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
 			// It's possible that the promise was created by another coroutine
 			// while we were creating. In that case, we should just retry.
-			return CreatePromise(c, r)
+			return createPromiseAndTaskOrCallback(c, r, createPromiseReq, additionalCmds...)
 		}
 
 		// set status
@@ -183,7 +177,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			cmd := &t_aio.UpdatePromiseCommand{
-				Id:             r.CreatePromise.Id,
+				Id:             createPromiseReq.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
 				IdempotencyKey: nil,
@@ -198,7 +192,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			if !ok {
 				// It's possible that the promise was created by another coroutine
 				// while we were timing out. In that case, we should just retry.
-				return CreatePromise(c, r)
+				return createPromiseAndTaskOrCallback(c, r, createPromiseReq, additionalCmds...)
 			}
 
 			// set status to ok if not strict and idempotency keys match
@@ -213,7 +207,7 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 			p.Value = cmd.Value
 			p.IdempotencyKeyForComplete = cmd.IdempotencyKey
 			p.CompletedOn = &cmd.CompletedOn
-		} else if !(createPromiseReq.Strict && p.State != promise.Pending) && p.IdempotencyKeyForCreate.Match(r.CreatePromise.IdempotencyKey) {
+		} else if !(createPromiseReq.Strict && p.State != promise.Pending) && p.IdempotencyKeyForCreate.Match(createPromiseReq.IdempotencyKey) {
 			// switch status to ok if not strict and idempotency keys match
 			status = t_api.StatusOK
 		} else {
@@ -221,28 +215,18 @@ func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]
 		}
 	}
 
+	res := &t_api.Response{Kind: r.Kind, Tags: r.Tags}
+
 	switch r.Kind {
 	case t_api.CreatePromise:
-		return &t_api.Response{
-			Kind:          t_api.CreatePromise,
-			Tags:          r.Tags,
-			CreatePromise: &t_api.CreatePromiseResponse{Status: status, Promise: p},
-		}, nil
+		res.CreatePromise = &t_api.CreatePromiseResponse{Status: status, Promise: p}
 	case t_api.CreatePromiseAndTask:
-		return &t_api.Response{
-			Kind:                 t_api.CreatePromiseAndTask,
-			Tags:                 r.Tags,
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{Status: status, Promise: p, Task: t},
-		}, nil
+		res.CreatePromiseAndTask = &t_api.CreatePromiseAndTaskResponse{Status: status, Promise: p, Task: t}
 	case t_api.CreatePromiseAndCallback:
-		return &t_api.Response{
-			Kind:                     t_api.CreatePromiseAndCallback,
-			Tags:                     r.Tags,
-			CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackResponse{Status: status, Promise: p, Callback: cb},
-		}, nil
-	default:
-		panic(fmt.Sprintf("invalid kind '%s'", r.Kind))
+		res.CreatePromiseAndCallback = &t_api.CreatePromiseAndCallbackResponse{Status: status, Promise: p, Callback: cb}
 	}
+
+	return res, nil
 }
 
 func createPromise(tags map[string]string, cmd *t_aio.CreatePromiseCommand, additionalCmds ...*t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *t_aio.Completion] {

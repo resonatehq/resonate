@@ -123,61 +123,96 @@ func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime 
 }
 
 func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	p := model.promises.get(req.CreatePromise.Id)
+	return v.validateCreatePromise(model, reqTime, resTime, req.CreatePromise, res.CreatePromise)
+}
 
-	switch res.CreatePromise.Status {
+func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	// Do NOT validate the create promise, as a workaround we create a
+	// "duplicate" CreatePromise request and map the requests as
+	// follows:
+	// CreatePromise        -> p partition
+	// CreatePromiseAndTask -> t partition
+
+	switch res.CreatePromiseAndTask.Status {
+	case t_api.StatusCreated:
+		if model.tasks.get(res.CreatePromiseAndTask.Task.Id) != nil {
+			return model, fmt.Errorf("task '%s' exists", res.CreatePromiseAndTask.Task.Id)
+		}
+
+		model = model.Copy()
+		model.tasks.set(res.CreatePromiseAndTask.Task.Id, res.CreatePromiseAndTask.Task)
+	}
+
+	return model, nil
+}
+
+func (v *Validator) ValidateCreatePromiseAndCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	// first validate the create promise
+	model, err := v.validateCreatePromise(model, reqTime, resTime, req.CreatePromiseAndCallback.Promise, &t_api.CreatePromiseResponse{
+		Status:  res.CreatePromiseAndCallback.Status,
+		Promise: res.CreatePromiseAndCallback.Promise,
+	})
+	if err != nil {
+		return model, err
+	}
+
+	// now validate the callback
+	switch res.CreatePromiseAndCallback.Status {
+	case t_api.StatusCreated:
+		if model.callbacks.get(res.CreatePromiseAndCallback.Callback.Id) != nil {
+			return model, fmt.Errorf("callback '%s' exists", res.CreatePromiseAndCallback.Callback.Id)
+		}
+
+		// model has already been copied
+		model.callbacks.set(res.CreatePromiseAndCallback.Callback.Id, res.CreatePromiseAndCallback.Callback)
+	}
+
+	return model, nil
+}
+
+func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.CreatePromiseRequest, res *t_api.CreatePromiseResponse) (*Model, error) {
+	p := model.promises.get(req.Id)
+
+	switch res.Status {
 	case t_api.StatusCreated:
 		if p != nil {
-			return model, fmt.Errorf("promise '%s' exists", req.CreatePromise.Id)
+			return model, fmt.Errorf("promise '%s' exists", req.Id)
 		}
-		if res.CreatePromise.Promise.State != promise.Pending {
-			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.CreatePromise.Promise.State, req.CreatePromise.Id)
+		if res.Promise.State != promise.Pending {
+			return model, fmt.Errorf("invalid state transition (INIT -> %s) for promise '%s'", res.Promise.State, req.Id)
 		}
-		// if req.CreatePromise.Task != nil && model.tasks.get(res.CreatePromise.Task.Id) != nil {
-		// 	return model, fmt.Errorf("task '%s' exists", res.CreatePromise.Task.Id)
-		// }
-		// if req.CreatePromise.Callback != nil && model.callbacks.get(res.CreatePromise.Callback.Id) != nil {
-		// 	return model, fmt.Errorf("callback '%s' exists", res.CreatePromise.Callback.Id)
-		// }
 
 		// update model state
 		model = model.Copy()
-		model.promises.set(req.CreatePromise.Id, res.CreatePromise.Promise)
-
-		// if req.CreatePromise.Task != nil {
-		// 	model.tasks.set(res.CreatePromise.Task.Id, res.CreatePromise.Task)
-		// }
-		// if req.CreatePromise.Callback != nil {
-		// 	model.callbacks.set(res.CreatePromise.Callback.Id, res.CreatePromise.Callback)
-		// }
+		model.promises.set(req.Id, res.Promise)
 
 		return model, nil
 	case t_api.StatusOK:
 		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", req.CreatePromise.Id)
+			return model, fmt.Errorf("promise '%s' does not exist", req.Id)
 		}
-		if p.State != res.CreatePromise.Promise.State {
+		if p.State != res.Promise.State {
 			// the only way this can happen is if the promise timedout
-			if res.CreatePromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if res.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
-				model.promises.set(req.CreatePromise.Id, res.CreatePromise.Promise)
+				model.promises.set(req.Id, res.Promise)
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.CreatePromise.Promise.State, req.CreatePromise.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
 			}
 		}
-		if !p.IdempotencyKeyForCreate.Match(res.CreatePromise.Promise.IdempotencyKeyForCreate) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, res.CreatePromise.Promise.IdempotencyKeyForCreate, req.CreatePromise.Id)
-		} else if req.CreatePromise.Strict && p.State != promise.Pending {
-			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, req.CreatePromise.Id)
+		if !p.IdempotencyKeyForCreate.Match(res.Promise.IdempotencyKeyForCreate) {
+			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, res.Promise.IdempotencyKeyForCreate, req.Id)
+		} else if req.Strict && p.State != promise.Pending {
+			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, req.Id)
 		}
 		return model, nil
 	case t_api.StatusPromiseAlreadyExists:
 		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", req.CreatePromise.Id)
+			return model, fmt.Errorf("promise '%s' does not exist", req.Id)
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.CreatePromise.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 

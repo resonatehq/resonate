@@ -214,11 +214,12 @@ type CreateTaskRequest struct {
 	PromiseId string          `json:"promiseId"`
 	ProcessId string          `json:"processId"`
 	Frequency int             `json:"frequency"`
+	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv"`
 }
 
 func (r *CreateTaskRequest) String() string {
-	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, frequency=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Frequency, r.Recv)
+	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, frequency=%d, timeout=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Frequency, r.Timeout, r.Recv)
 }
 
 type ClaimTaskRequest struct {
