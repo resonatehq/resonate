@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
+	"net"
 	"strings"
 	"time"
 
@@ -22,8 +23,7 @@ type Config struct {
 	Size           int           `flag:"size" desc:"submission buffered channel size" default:"100"`
 	BufferSize     int           `flag:"buffer-size" desc:"connection buffer size" default:"100"`
 	MaxConnections int           `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
-	Host           string        `flag:"host" desc:"http server host" default:"0.0.0.0"`
-	Port           int           `flag:"port" desc:"http server port" default:"8002"`
+	Addr           string        `flag:"addr" desc:"http server address" default:":8002"`
 	Timeout        time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 }
 
@@ -122,12 +122,15 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Poll, error) {
 		disconnect: disconnect,
 	}
 
-	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	listen, err := net.Listen("tcp", config.Addr)
+	if err != nil {
+		return nil, err
+	}
 
 	server := &PollServer{
-		addr:   addr,
 		config: config,
-		server: &http.Server{Addr: addr, Handler: handler},
+		listen: listen,
+		server: &http.Server{Handler: handler},
 	}
 
 	counter := metrics.AioConnection.WithLabelValues((&Poll{}).String())
@@ -307,15 +310,14 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 // Server
 
 type PollServer struct {
-	addr   string
 	config *Config
+	listen net.Listener
 	server *http.Server
 }
 
 func (s *PollServer) Start(errors chan<- error) {
-	slog.Info("starting poll server", "addr", s.addr)
-
-	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	slog.Info("starting poll server", "addr", s.config.Addr)
+	if err := s.server.Serve(s.listen); err != nil && err != http.ErrServerClosed {
 		errors <- err
 	}
 }

@@ -185,8 +185,12 @@ func (r *HeartbeatLocksResponse) String() string {
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status StatusCode `json:"status"`
-	Task   *task.Task `json:"task,omitempty"`
+	Status          StatusCode       `json:"status"`
+	Task            *task.Task       `json:"task,omitempty"`
+	RootPromise     *promise.Promise `json:"rootPromise,omitempty"`
+	LeafPromise     *promise.Promise `json:"leafPromise,omitempty"`
+	RootPromiseHref string           `json:"rootPromiseHref,omitempty"`
+	LeafPromiseHref string           `json:"leafPromiseHref,omitempty"`
 }
 
 func (r *ClaimTaskResponse) String() string {

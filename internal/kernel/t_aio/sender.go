@@ -7,7 +7,10 @@ import (
 )
 
 type SenderSubmission struct {
-	Task *task.Task
+	Task          *task.Task
+	ClaimHref     string
+	CompleteHref  string
+	HeartbeatHref string
 }
 
 func (s *SenderSubmission) String() string {

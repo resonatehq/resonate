@@ -47,7 +47,12 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Router, error)
 	workers := make([]*RouterWorker, config.Workers)
 	sources := make([]func(*promise.Promise) (any, bool), len(config.Sources))
 
+	var found bool
 	for i, source := range config.Sources {
+		if source.Name == "default" {
+			found = true
+		}
+
 		switch source.Type {
 		case "tag":
 			var config *TagSourceConfig
@@ -59,6 +64,11 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Router, error)
 		default:
 			return nil, fmt.Errorf("unknown source type: %s", source.Type)
 		}
+	}
+
+	if !found {
+		// add default source if none found
+		sources = append(sources, TagSource(&TagSourceConfig{Key: "resonate:invoke"}))
 	}
 
 	for i := 0; i < config.Workers; i++ {

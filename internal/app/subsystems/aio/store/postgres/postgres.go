@@ -80,7 +80,7 @@ const (
 		recv         BYTEA,
 		mesg         BYTEA,
 		timeout      BIGINT,
-		counter      INTEGER DEFAULT 0,
+		counter      INTEGER DEFAULT 1,
 		attempt      INTEGER DEFAULT 0,
 		frequency    INTEGER DEFAULT 0,
 		expiration   BIGINT DEFAULT 0,

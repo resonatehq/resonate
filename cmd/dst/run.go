@@ -79,10 +79,7 @@ func RunDSTCmd() *cobra.Command {
 
 			mux := netHttp.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-			metricsServer := &netHttp.Server{
-				Addr:    ":9090",
-				Handler: mux,
-			}
+			metricsServer := &netHttp.Server{Addr: ":9090", Handler: mux}
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
@@ -112,16 +109,20 @@ func RunDSTCmd() *cobra.Command {
 			aio := aio.NewDST(r, p, metrics)
 
 			// api subsystems
-			for _, subsystem := range config.API.Subsystems.Instantiate(api) {
+			apiSubsystems, err := config.APISubsystems(api)
+			if err != nil {
+				return err
+			}
+			for _, subsystem := range apiSubsystems {
 				api.AddSubsystem(subsystem)
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics, r, backchannel)
+			aioSubsystems, err := config.AIOSubsystems(aio, metrics, r, backchannel)
 			if err != nil {
 				return err
 			}
-			for _, subsystem := range subsystems {
+			for _, subsystem := range aioSubsystems {
 				aio.AddSubsystem(subsystem)
 			}
 

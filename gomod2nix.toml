@@ -125,8 +125,8 @@ schema = 3
     version = "v0.15.1"
     hash = "sha256-H+WXJemFFwdoglmD6p7JRjrJJZmIVAmJwYmLbZ8Q9sw="
   [mod."github.com/resonatehq/gocoro"]
-    version = "v0.0.0-20240826185351-0a04f9fd5761"
-    hash = "sha256-5WPQojJvkXBIhoAX8uTPLFYxgBVKG0LoA3nKhmJYPuE="
+    version = "v0.0.0-20240928015848-78539a59dab0"
+    hash = "sha256-4hDOb1dx+jl0EvruOcgVJF17fFeGLsFNM9yhpw5jyHw="
   [mod."github.com/robfig/cron/v3"]
     version = "v3.0.1"
     hash = "sha256-FUdqNbWYi5biQc/tjCeqzxu4iy4ot1ZvDU1M1wRf/6k="

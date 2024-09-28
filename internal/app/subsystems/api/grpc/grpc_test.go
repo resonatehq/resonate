@@ -42,16 +42,16 @@ type grpcTest struct {
 func setup() (*grpcTest, error) {
 	api := &test.API{}
 	errors := make(chan error)
-	subsystem := New(api, &Config{
-		Host: "127.0.0.1",
-		Port: 6002,
-	})
+	subsystem, err := New(api, &Config{Addr: ":0"})
+	if err != nil {
+		return nil, err
+	}
 
 	// start grpc server
 	go subsystem.Start(errors)
 	time.Sleep(100 * time.Millisecond)
 
-	conn, err := grpc.NewClient("127.0.0.1:6002", grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(subsystem.Addr(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
@@ -1232,8 +1232,8 @@ func TestGrpc(t *testing.T) {
 			name: "ClaimTask",
 			grpcReq: &grpcApi.ClaimTaskRequest{
 				Id:        "foo",
+				Counter:   1,
 				ProcessId: "bar",
-				Counter:   0,
 				Frequency: 1,
 				RequestId: "ClaimTask",
 			},
@@ -1246,8 +1246,8 @@ func TestGrpc(t *testing.T) {
 				},
 				ClaimTask: &t_api.ClaimTaskRequest{
 					Id:        "foo",
+					Counter:   1,
 					ProcessId: "bar",
-					Counter:   0,
 					Frequency: 1,
 				},
 			},
@@ -1263,8 +1263,8 @@ func TestGrpc(t *testing.T) {
 			name: "ClaimTaskInvoke",
 			grpcReq: &grpcApi.ClaimTaskRequest{
 				Id:        "foo",
-				ProcessId: "bar",
 				Counter:   1,
+				ProcessId: "bar",
 				Frequency: 1,
 				RequestId: "ClaimTaskInvoke",
 			},
@@ -1272,8 +1272,8 @@ func TestGrpc(t *testing.T) {
 				Claimed: true,
 				Mesg: &grpcApi.Mesg{
 					Type: "invoke",
-					Promises: map[string]*grpcApi.Promise{
-						"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+					Promises: map[string]*grpcApi.PromiseOrHref{
+						"root": {Data: &grpcApi.PromiseOrHref_Promise{Promise: &grpcApi.Promise{Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}}}},
 					},
 				},
 			},
@@ -1294,13 +1294,10 @@ func TestGrpc(t *testing.T) {
 			res: &t_api.Response{
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
-					Status: t_api.StatusCreated,
-					Task: &task.Task{
-						Mesg: &message.Mesg{
-							Type:     message.Invoke,
-							Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}},
-						},
-					},
+					Status:          t_api.StatusCreated,
+					Task:            &task.Task{Mesg: &message.Mesg{Type: message.Invoke, Root: "foo"}},
+					RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
+					RootPromiseHref: "http://localhost:8001/promises/foo",
 				},
 			},
 		},
@@ -1308,8 +1305,8 @@ func TestGrpc(t *testing.T) {
 			name: "ClaimTaskResume",
 			grpcReq: &grpcApi.ClaimTaskRequest{
 				Id:        "foo",
-				ProcessId: "bar",
 				Counter:   2,
+				ProcessId: "bar",
 				Frequency: 1,
 				RequestId: "ClaimTaskResume",
 			},
@@ -1317,9 +1314,9 @@ func TestGrpc(t *testing.T) {
 				Claimed: true,
 				Mesg: &grpcApi.Mesg{
 					Type: "resume",
-					Promises: map[string]*grpcApi.Promise{
-						"root": {Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
-						"leaf": {Id: "bar", State: grpcApi.State_RESOLVED, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}},
+					Promises: map[string]*grpcApi.PromiseOrHref{
+						"root": {Data: &grpcApi.PromiseOrHref_Promise{Promise: &grpcApi.Promise{Id: "foo", State: grpcApi.State_PENDING, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}}}},
+						"leaf": {Data: &grpcApi.PromiseOrHref_Promise{Promise: &grpcApi.Promise{Id: "bar", State: grpcApi.State_RESOLVED, Param: &grpcApi.Value{}, Value: &grpcApi.Value{}}}},
 					},
 				},
 			},
@@ -1332,21 +1329,20 @@ func TestGrpc(t *testing.T) {
 				},
 				ClaimTask: &t_api.ClaimTaskRequest{
 					Id:        "foo",
-					ProcessId: "bar",
 					Counter:   2,
+					ProcessId: "bar",
 					Frequency: 1,
 				},
 			},
 			res: &t_api.Response{
 				Kind: t_api.ClaimTask,
 				ClaimTask: &t_api.ClaimTaskResponse{
-					Status: t_api.StatusCreated,
-					Task: &task.Task{
-						Mesg: &message.Mesg{
-							Type:     message.Resume,
-							Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}, "leaf": {Id: "bar", State: promise.Resolved}},
-						},
-					},
+					Status:          t_api.StatusCreated,
+					Task:            &task.Task{Mesg: &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"}},
+					RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
+					LeafPromise:     &promise.Promise{Id: "bar", State: promise.Resolved},
+					RootPromiseHref: "http://localhost:8001/promises/foo",
+					LeafPromiseHref: "http://localhost:8001/promises/bar",
 				},
 			},
 		},

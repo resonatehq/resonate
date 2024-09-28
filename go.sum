@@ -105,6 +105,8 @@ github.com/prometheus/procfs v0.15.1 h1:YagwOFzUgYfKKHX6Dr+sHT7km/hxC76UB0leargg
 github.com/prometheus/procfs v0.15.1/go.mod h1:fB45yRUv8NstnjriLhBQLuOUt+WW4BsoGhij/e3PBqk=
 github.com/resonatehq/gocoro v0.0.0-20240826185351-0a04f9fd5761 h1:SgiU7IlcLMxipFSx9SiSBTo1vOqkMNQTFRpzPCdTvds=
 github.com/resonatehq/gocoro v0.0.0-20240826185351-0a04f9fd5761/go.mod h1:MiSQNx9BVIPobnUhUrf83L43RteI/m+NIYT9CXMFQHw=
+github.com/resonatehq/gocoro v0.0.0-20240928015848-78539a59dab0 h1:VctdW61gs6QxU1f3McnF1vz7IrhyJtLpCYBBuPny3tM=
+github.com/resonatehq/gocoro v0.0.0-20240928015848-78539a59dab0/go.mod h1:MiSQNx9BVIPobnUhUrf83L43RteI/m+NIYT9CXMFQHw=
 github.com/robfig/cron/v3 v3.0.1 h1:WdRxkvbJztn8LMz/QEvLN5sBU+xKpSqwwUO1Pjr4qDs=
 github.com/robfig/cron/v3 v3.0.1/go.mod h1:eQICP3HwyT7UooqI/z+Ov+PtYAWygg1TEWWzGIFLtro=
 github.com/rogpeppe/go-internal v1.11.0 h1:cWPaGQEPrBb5/AsnsZesgZZ9yb1OQ+GOISoDNXVBh4M=

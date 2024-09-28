@@ -93,7 +93,7 @@ const (
 		recv         BLOB,
 		mesg         BLOB,
 		timeout      INTEGER,
-		counter      INTEGER DEFAULT 0,
+		counter      INTEGER DEFAULT 1,
 		attempt      INTEGER DEFAULT 0,
 		frequency    INTEGER DEFAULT 0,
 		expiration   INTEGER DEFAULT 0,

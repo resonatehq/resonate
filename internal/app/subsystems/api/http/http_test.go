@@ -28,15 +28,18 @@ type httpTest struct {
 	client    *http.Client
 }
 
-func setup(auth map[string]string) *httpTest {
+func setup(auth map[string]string) (*httpTest, error) {
 	api := &test.API{}
 	errors := make(chan error)
-	subsystem := New(api, &Config{
-		Host:    "127.0.0.1",
-		Port:    6001,
+	subsystem, err := New(api, &Config{
+		Addr:    ":0",
 		Auth:    auth,
 		Timeout: 1 * time.Second,
 	})
+
+	if err != nil {
+		return nil, err
+	}
 
 	// start http server
 	go subsystem.Start(errors)
@@ -47,7 +50,7 @@ func setup(auth map[string]string) *httpTest {
 		subsystem: subsystem,
 		errors:    errors,
 		client:    &http.Client{Timeout: 1 * time.Second},
-	}
+	}, nil
 }
 
 func (t *httpTest) teardown() error {
@@ -79,7 +82,10 @@ func TestHttp(t *testing.T) {
 		},
 	} {
 		// start the server
-		httpTest := setup(ts.auth)
+		httpTest, err := setup(ts.auth)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		t.Run(ts.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -1080,8 +1086,8 @@ func TestHttp(t *testing.T) {
 					},
 					reqBody: []byte(`{
 						"id": "foo",
+						"counter": 1,
 						"processId": "bar",
-						"counter": 0,
 						"frequency": 1
 					}`),
 					req: &t_api.Request{
@@ -1093,8 +1099,8 @@ func TestHttp(t *testing.T) {
 						},
 						ClaimTask: &t_api.ClaimTaskRequest{
 							Id:        "foo",
+							Counter:   1,
 							ProcessId: "bar",
-							Counter:   0,
 							Frequency: 1,
 						},
 					},
@@ -1116,11 +1122,11 @@ func TestHttp(t *testing.T) {
 					},
 					reqBody: []byte(`{
 						"id": "foo",
-						"processId": "bar",
 						"counter": 1,
+						"processId": "bar",
 						"frequency": 1
 					}`),
-					resBody: []byte(`{"promises":{"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}},"type":"invoke"}`),
+					resBody: []byte(`{"promises":{"root":{"data":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0},"href":"http://localhost:8001/promises/foo","id":"foo"}},"type":"invoke"}`),
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
@@ -1130,21 +1136,18 @@ func TestHttp(t *testing.T) {
 						},
 						ClaimTask: &t_api.ClaimTaskRequest{
 							Id:        "foo",
-							ProcessId: "bar",
 							Counter:   1,
+							ProcessId: "bar",
 							Frequency: 1,
 						},
 					},
 					res: &t_api.Response{
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
-							Status: t_api.StatusCreated,
-							Task: &task.Task{
-								Mesg: &message.Mesg{
-									Type:     message.Invoke,
-									Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}},
-								},
-							},
+							Status:          t_api.StatusCreated,
+							Task:            &task.Task{Mesg: &message.Mesg{Type: message.Invoke, Root: "foo"}},
+							RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
+							RootPromiseHref: "http://localhost:8001/promises/foo",
 						},
 					},
 					status: 201,
@@ -1162,7 +1165,7 @@ func TestHttp(t *testing.T) {
 						"counter": 2,
 						"frequency": 1
 					}`),
-					resBody: []byte(`{"promises":{"leaf":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"root":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0}},"type":"invoke"}`),
+					resBody: []byte(`{"promises":{"leaf":{"data":{"id":"bar","state":"RESOLVED","param":{},"value":{},"timeout":0},"href":"http://localhost:8001/promises/bar","id":"bar"},"root":{"data":{"id":"foo","state":"PENDING","param":{},"value":{},"timeout":0},"href":"http://localhost:8001/promises/foo","id":"foo"}},"type":"resume"}`),
 					req: &t_api.Request{
 						Kind: t_api.ClaimTask,
 						Tags: map[string]string{
@@ -1172,21 +1175,20 @@ func TestHttp(t *testing.T) {
 						},
 						ClaimTask: &t_api.ClaimTaskRequest{
 							Id:        "foo",
-							ProcessId: "bar",
 							Counter:   2,
+							ProcessId: "bar",
 							Frequency: 1,
 						},
 					},
 					res: &t_api.Response{
 						Kind: t_api.ClaimTask,
 						ClaimTask: &t_api.ClaimTaskResponse{
-							Status: t_api.StatusCreated,
-							Task: &task.Task{
-								Mesg: &message.Mesg{
-									Type:     message.Invoke,
-									Promises: map[string]*promise.Promise{"root": {Id: "foo", State: promise.Pending}, "leaf": {Id: "bar", State: promise.Resolved}},
-								},
-							},
+							Status:          t_api.StatusCreated,
+							Task:            &task.Task{Mesg: &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"}},
+							RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
+							LeafPromise:     &promise.Promise{Id: "bar", State: promise.Resolved},
+							RootPromiseHref: "http://localhost:8001/promises/foo",
+							LeafPromiseHref: "http://localhost:8001/promises/bar",
 						},
 					},
 					status: 201,
@@ -1472,7 +1474,7 @@ func TestHttp(t *testing.T) {
 				t.Run(tc.name, func(t *testing.T) {
 					httpTest.Load(t, tc.req, tc.res)
 
-					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://127.0.0.1:6001/%s", tc.path), bytes.NewBuffer(tc.reqBody))
+					req, err := http.NewRequest(tc.method, fmt.Sprintf("http://%s/%s", httpTest.subsystem.Addr(), tc.path), bytes.NewBuffer(tc.reqBody))
 					if err != nil {
 						t.Fatal(err)
 					}

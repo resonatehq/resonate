@@ -174,3 +174,7 @@ func (a *API) ValidateCron(cron string) *Error {
 
 	return nil
 }
+
+func (a *API) TaskProcessId(id string, counter int) string {
+	return fmt.Sprintf("%s/%d", id, counter)
+}

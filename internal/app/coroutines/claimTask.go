@@ -1,9 +1,11 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
+	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
@@ -16,8 +18,15 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
 	util.Assert(r.ClaimTask.Frequency > 0, "frequency must be greater than 0")
 
+	config, ok := c.Get("config").(*system.Config)
+	if !ok {
+		panic("coroutine must have config dependency")
+	}
+
 	var status t_api.StatusCode
 	var t *task.Task
+	var rp, lp *promise.Promise
+	var rh, lh string
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -125,19 +134,24 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 				util.Assert(completion.Store.Results[0].ReadPromise != nil, "result must not be nil")
 				util.Assert(t.Mesg.Type != message.Resume || completion.Store.Results[1].ReadPromise != nil, "if resume, result must not be nil")
 
-				var root, leaf *promise.Promise
+				// set promises
+				rh = fmt.Sprintf("%s/promises/%s", config.Url, t.Mesg.Root)
+
+				if t.Mesg.Type == message.Resume {
+					lh = fmt.Sprintf("%s/promises/%s", config.Url, t.Mesg.Leaf)
+				}
 
 				if completion.Store.Results[0].ReadPromise.RowsReturned == 1 {
-					root, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
+					rp, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
 					if err != nil {
-						slog.Error("failed to parse promises", "err", err)
+						slog.Error("failed to parse promise", "err", err)
 					}
 				}
 
 				if t.Mesg.Type == message.Resume && completion.Store.Results[1].ReadPromise.RowsReturned == 1 {
-					leaf, err = completion.Store.Results[1].ReadPromise.Records[0].Promise()
+					lp, err = completion.Store.Results[1].ReadPromise.Records[0].Promise()
 					if err != nil {
-						slog.Error("failed to parse promises", "err", err)
+						slog.Error("failed to parse promise", "err", err)
 					}
 				}
 
@@ -149,7 +163,6 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 				t.State = task.Claimed
 				t.Frequency = r.ClaimTask.Frequency
 				t.Expiration = expiration
-				t.Mesg.SetPromises(root, leaf)
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to claim. In that case, we should just retry.
@@ -167,8 +180,12 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		Kind: t_api.ClaimTask,
 		Tags: r.Tags,
 		ClaimTask: &t_api.ClaimTaskResponse{
-			Status: status,
-			Task:   t,
+			Status:          status,
+			Task:            t,
+			RootPromise:     rp,
+			LeafPromise:     lp,
+			RootPromiseHref: rh,
+			LeafPromiseHref: lh,
 		},
 	}, nil
 }

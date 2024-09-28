@@ -6,6 +6,7 @@ import (
 	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	grpcStatus "google.golang.org/grpc/status"
 )
 
@@ -28,9 +29,28 @@ func (s *server) ClaimTask(c context.Context, r *grpcApi.ClaimTaskRequest) (*grp
 
 	var mesg *grpcApi.Mesg
 	if res.ClaimTask.Status == t_api.StatusCreated {
-		promises := map[string]*grpcApi.Promise{}
-		for k, promise := range res.ClaimTask.Task.Mesg.Promises {
-			promises[k] = protoPromise(promise)
+		promises := map[string]*grpcApi.PromiseOrHref{}
+
+		if res.ClaimTask.RootPromise != nil {
+			promises["root"] = &grpcApi.PromiseOrHref{
+				Data: &grpcApi.PromiseOrHref_Promise{Promise: protoPromise(res.ClaimTask.RootPromise)},
+			}
+		} else {
+			promises["root"] = &grpcApi.PromiseOrHref{
+				Data: &grpcApi.PromiseOrHref_Href{Href: res.ClaimTask.RootPromiseHref},
+			}
+		}
+
+		if res.ClaimTask.Task.Mesg.Type == message.Resume {
+			if res.ClaimTask.LeafPromise != nil {
+				promises["leaf"] = &grpcApi.PromiseOrHref{
+					Data: &grpcApi.PromiseOrHref_Promise{Promise: protoPromise(res.ClaimTask.LeafPromise)},
+				}
+			} else {
+				promises["leaf"] = &grpcApi.PromiseOrHref{
+					Data: &grpcApi.PromiseOrHref_Href{Href: res.ClaimTask.LeafPromiseHref},
+				}
+			}
 		}
 
 		mesg = &grpcApi.Mesg{

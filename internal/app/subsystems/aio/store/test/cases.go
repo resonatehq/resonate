@@ -2793,6 +2793,7 @@ var TestCases = []*testCase{
 					Records: []*task.TaskRecord{
 						{
 							Id:        "1",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("foo"),
 							Mesg:      []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
@@ -2801,6 +2802,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:        "2",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("bar"),
 							Mesg:      []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
@@ -2902,6 +2904,7 @@ var TestCases = []*testCase{
 					Records: []*task.TaskRecord{
 						{
 							Id:        "1",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("foo"),
 							Mesg:      []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
@@ -2909,6 +2912,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:        "2",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("bar"),
 							Mesg:      []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
@@ -2916,6 +2920,7 @@ var TestCases = []*testCase{
 						},
 						{
 							Id:        "3",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("baz"),
 							Mesg:      []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
@@ -2957,28 +2962,13 @@ var TestCases = []*testCase{
 					Id:             "1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Enqueued,
-					Counter:        1,
+					Counter:        2,
 					Attempt:        1,
 					Frequency:      1,
 					Expiration:     1,
 					CompletedOn:    util.ToPointer[int64](1),
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
-				},
-			},
-			{
-				Kind: t_aio.UpdateTask,
-				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
-					ProcessId:      util.ToPointer("pid"),
-					State:          task.Claimed,
-					Counter:        2,
-					Attempt:        2,
-					Frequency:      2,
-					Expiration:     2,
-					CompletedOn:    util.ToPointer[int64](2),
-					CurrentStates:  []task.State{task.Enqueued},
-					CurrentCounter: 0, // mimatch
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -2988,12 +2978,12 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Claimed,
 					Counter:        3,
-					Attempt:        3,
-					Frequency:      3,
-					Expiration:     3,
-					CompletedOn:    util.ToPointer[int64](3),
+					Attempt:        2,
+					Frequency:      2,
+					Expiration:     2,
+					CompletedOn:    util.ToPointer[int64](2),
 					CurrentStates:  []task.State{task.Enqueued},
-					CurrentCounter: 1,
+					CurrentCounter: 1, // mismatch
 				},
 			},
 			{
@@ -3001,14 +2991,14 @@ var TestCases = []*testCase{
 				UpdateTask: &t_aio.UpdateTaskCommand{
 					Id:             "1",
 					ProcessId:      util.ToPointer("pid"),
-					State:          task.Completed,
+					State:          task.Claimed,
 					Counter:        4,
-					Attempt:        4,
-					Frequency:      4,
-					Expiration:     4,
-					CompletedOn:    util.ToPointer[int64](4),
-					CurrentStates:  []task.State{task.Enqueued}, // mismatch
-					CurrentCounter: 3,
+					Attempt:        3,
+					Frequency:      3,
+					Expiration:     3,
+					CompletedOn:    util.ToPointer[int64](3),
+					CurrentStates:  []task.State{task.Enqueued},
+					CurrentCounter: 2,
 				},
 			},
 			{
@@ -3018,12 +3008,27 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Completed,
 					Counter:        5,
+					Attempt:        4,
+					Frequency:      4,
+					Expiration:     4,
+					CompletedOn:    util.ToPointer[int64](4),
+					CurrentStates:  []task.State{task.Enqueued}, // mismatch
+					CurrentCounter: 4,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Completed,
+					Counter:        6,
 					Attempt:        5,
 					Frequency:      5,
 					Expiration:     5,
 					CompletedOn:    util.ToPointer[int64](5),
 					CurrentStates:  []task.State{task.Claimed},
-					CurrentCounter: 3,
+					CurrentCounter: 4,
 				},
 			},
 			{
@@ -3094,7 +3099,7 @@ var TestCases = []*testCase{
 							State:       task.Completed,
 							Recv:        []byte("foo"),
 							Mesg:        []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
-							Counter:     5,
+							Counter:     6,
 							Attempt:     5,
 							Frequency:   5,
 							Expiration:  5,
@@ -3154,7 +3159,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -3164,7 +3169,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -3174,7 +3179,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Completed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{

@@ -234,8 +234,12 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
-		"id":      sqe.Submission.Sender.Task.Id,
-		"counter": sqe.Submission.Sender.Task.Counter,
+		"task": sqe.Submission.Sender.Task,
+		"href": map[string]string{
+			"claim":     sqe.Submission.Sender.ClaimHref,
+			"complete":  sqe.Submission.Sender.CompleteHref,
+			"heartbeat": sqe.Submission.Sender.HeartbeatHref,
+		},
 	})
 	if err != nil {
 		cqe.Error = err

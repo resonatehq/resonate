@@ -193,6 +193,10 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			util.Assert(req.Tags != nil, "request tags must be non nil")
 			util.Assert(req.Tags["id"] != "", "id tag must be set")
 
+			// set config
+			c.Set("config", s.config)
+
+			// run coroutine
 			res, err := constructor(c, req)
 
 			s.api.EnqueueCQE(&bus.CQE[t_api.Request, t_api.Response]{

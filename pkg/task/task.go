@@ -10,15 +10,15 @@ import (
 
 type Task struct {
 	Id          string          `json:"id"`
-	ProcessId   *string         `json:"processId,omitempty"`
-	State       State           `json:"state"`
-	Recv        json.RawMessage `json:"recv,omitempty"`
-	Mesg        *message.Mesg   `json:"mesg,omitempty"`
-	Timeout     int64           `json:"timeout"`
 	Counter     int             `json:"counter"`
-	Attempt     int             `json:"attempt"`
-	Frequency   int             `json:"frequency"`
-	Expiration  int64           `json:"expiration"`
+	Timeout     int64           `json:"timeout"`
+	ProcessId   *string         `json:"processId,omitempty"`
+	State       State           `json:"-"`
+	Recv        json.RawMessage `json:"-"`
+	Mesg        *message.Mesg   `json:"-"`
+	Attempt     int             `json:"-"`
+	Frequency   int             `json:"-"`
+	Expiration  int64           `json:"-"`
 	CreatedOn   *int64          `json:"createdOn,omitempty"`
 	CompletedOn *int64          `json:"completedOn,omitempty"`
 }

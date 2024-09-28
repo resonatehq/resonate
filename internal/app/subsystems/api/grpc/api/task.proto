@@ -14,8 +14,8 @@ service Tasks {
 
 message ClaimTaskRequest {
     string id = 1;
-    string processId = 2;
-    int32 counter = 3;
+    int32 counter = 2;
+    string processId = 3;
     int32 frequency = 4;
     string requestId = 5;
 }
@@ -27,7 +27,14 @@ message ClaimTaskResponse {
 
 message Mesg {
     string type = 1;
-    map<string, promise.Promise> promises = 2;
+    map<string, PromiseOrHref> promises = 2;
+}
+
+message PromiseOrHref {
+    oneof data {
+        promise.Promise promise = 1;
+        string href = 2;
+    }
 }
 
 message CompleteTaskRequest {

@@ -54,16 +54,20 @@ func ServeCmd() *cobra.Command {
 			aio := aio.New(config.AIO.Size, metrics)
 
 			// api subsystems
-			for _, subsystem := range config.API.Subsystems.Instantiate(api) {
+			apiSubsystems, err := config.APISubsystems(api)
+			if err != nil {
+				return err
+			}
+			for _, subsystem := range apiSubsystems {
 				api.AddSubsystem(subsystem)
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics)
+			aioSubsystems, err := config.AIOSubsystems(aio, metrics)
 			if err != nil {
 				return err
 			}
-			for _, subsystem := range subsystems {
+			for _, subsystem := range aioSubsystems {
 				aio.AddSubsystem(subsystem)
 			}
 
@@ -75,6 +79,11 @@ func ServeCmd() *cobra.Command {
 			if err := aio.Start(); err != nil {
 				slog.Error("failed to start aio", "error", err)
 				return err
+			}
+
+			// set default url
+			if config.System.Url == "" {
+				config.System.Url = fmt.Sprintf("http://%s", api.Addr())
 			}
 
 			// instantiate system
@@ -109,24 +118,16 @@ func ServeCmd() *cobra.Command {
 			// metrics server
 			mux := http.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-
-			metricsServer := &http.Server{
-				Addr:    fmt.Sprintf(":%d", config.MetricsPort),
-				Handler: mux,
-			}
+			metricsServer := &http.Server{Addr: config.MetricsAddr, Handler: mux}
 
 			go func() {
 				for {
 					slog.Info("starting metrics server", "addr", metricsServer.Addr)
-
-					if err := metricsServer.ListenAndServe(); err != nil {
-						if err == http.ErrServerClosed {
-							return
-						}
-
-						slog.Error("error starting metrics server", "error", err)
+					if err := metricsServer.ListenAndServe(); err != nil && err == http.ErrServerClosed {
+						return
 					}
 
+					slog.Error("restarting metrics server...", "error", err)
 					time.Sleep(5 * time.Second)
 				}
 			}()

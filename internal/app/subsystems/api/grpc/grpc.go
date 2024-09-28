@@ -15,17 +15,23 @@ import (
 )
 
 type Config struct {
-	Host string `flag:"host" desc:"grpc server host" default:"0.0.0.0"`
-	Port int    `flag:"port" desc:"grpc server port" default:"50051"`
+	Addr string `flag:"addr" desc:"grpc server address" default:":50051"`
 }
 
 type Grpc struct {
 	config *Config
+	listen net.Listener
 	server *grpc.Server
 }
 
-func New(a i_api.API, config *Config) i_api.Subsystem {
+func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	s := &server{api: api.New(a, "grpc")}
+
+	// Create a listener on specified address
+	listen, err := net.Listen("tcp", config.Addr)
+	if err != nil {
+		return nil, err
+	}
 
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	grpcApi.RegisterPromisesServer(server, s)
@@ -36,27 +42,27 @@ func New(a i_api.API, config *Config) i_api.Subsystem {
 
 	return &Grpc{
 		config: config,
+		listen: listen,
 		server: server,
-	}
+	}, nil
 }
 
 func (g *Grpc) String() string {
 	return "grpc"
 }
 
+func (g *Grpc) Kind() string {
+	return "grpc"
+}
+
+func (g *Grpc) Addr() string {
+	return g.listen.Addr().String()
+}
+
 func (g *Grpc) Start(errors chan<- error) {
-	addr := fmt.Sprintf("%s:%d", g.config.Host, g.config.Port)
-
-	// Create a listener on a specific port
-	listen, err := net.Listen("tcp", addr)
-	if err != nil {
-		errors <- err
-		return
-	}
-
-	// Start the gRPC server
-	slog.Info("starting grpc server", "addr", addr)
-	if err := g.server.Serve(listen); err != nil {
+	// Start the grpc server
+	slog.Info("starting grpc server", "addr", g.config.Addr)
+	if err := g.server.Serve(g.listen); err != nil {
 		errors <- err
 	}
 }

@@ -41,7 +41,7 @@ type config[T t_api, U t_aio] struct {
 	System      system.Config `flag:"system"`
 	API         T             `flag:"api"`
 	AIO         U             `flag:"aio"`
-	MetricsPort int           `flag:"metrics-port" desc:"prometheus metrics server port" default:"9090"`
+	MetricsAddr string        `flag:"metrics-addr" desc:"prometheus metrics server address" default:":9090"`
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
 
@@ -64,35 +64,6 @@ func (c *Config) Parse() error {
 		return err
 	}
 
-	// TODO: rethink defaults
-
-	if c.System.Url == "" {
-		host := c.API.Subsystems.Http.Config.Host
-		if host == "0.0.0.0" {
-			host = "127.0.0.1"
-		}
-		c.System.Url = fmt.Sprintf("http://%s:%d", host, c.API.Subsystems.Http.Config.Port)
-	}
-
-	if c.AIO.Subsystems.Router.Enabled {
-		var found bool
-
-		for _, source := range c.AIO.Subsystems.Router.Config.Sources {
-			if source.Name == "default" {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			c.AIO.Subsystems.Router.Config.Sources = append(c.AIO.Subsystems.Router.Config.Sources, router.SourceConfig{
-				Name: "default",
-				Type: "tag",
-				Data: []byte(`{"key": "resonate:invoke"}`),
-			})
-		}
-	}
-
 	return nil
 }
 
@@ -107,27 +78,6 @@ func (c *ConfigDST) Parse(r *rand.Rand) error {
 	config := struct{ DST *ConfigDST }{DST: c}
 	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
 		return err
-	}
-
-	// TODO: rethink defaults
-
-	if c.AIO.Subsystems.Router.Enabled {
-		var found bool
-
-		for _, source := range c.AIO.Subsystems.Router.Config.Sources {
-			if source.Name == "default" {
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			c.AIO.Subsystems.Router.Config.Sources = append(c.AIO.Subsystems.Router.Config.Sources, router.SourceConfig{
-				Name: "default",
-				Type: "tag",
-				Data: []byte(`{"key": "resonate:invoke"}`),
-			})
-		}
 	}
 
 	return nil
@@ -176,38 +126,48 @@ type DisabledSubsystem[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (s *APISubsystems) Instantiate(a api.API) []api.Subsystem {
+func (c *Config) APISubsystems(a api.API) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
-	if s.Http.Enabled {
-		subsystems = append(subsystems, http.New(a, &s.Http.Config))
+	if c.API.Subsystems.Http.Enabled {
+		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
 	}
-	if s.Grpc.Enabled {
-		subsystems = append(subsystems, grpc.New(a, &s.Grpc.Config))
+	if c.API.Subsystems.Grpc.Enabled {
+		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
 	}
 
-	return subsystems
+	return subsystems, nil
 }
 
-func (s *AIOSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsystem, error) {
+func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsystem, error) {
 	subsystems := []aio.Subsystem{}
-	if s.Echo.Enabled {
-		subsystem, err := echo.New(a, metrics, &s.Echo.Config)
+	if c.AIO.Subsystems.Echo.Enabled {
+		subsystem, err := echo.New(a, metrics, &c.AIO.Subsystems.Echo.Config)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &s.Router.Config)
+	if c.AIO.Subsystems.Router.Enabled {
+		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Sender.Enabled {
-		subsystem, err := sender.New(a, metrics, &s.Sender.Config)
+	if c.AIO.Subsystems.Sender.Enabled {
+		subsystem, err := sender.New(a, metrics, &c.AIO.Subsystems.Sender.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -215,7 +175,7 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.
 		subsystems = append(subsystems, subsystem)
 	}
 
-	subsystem, err := s.instantiateStore(a, metrics)
+	subsystem, err := c.store(a, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -224,12 +184,13 @@ func (s *AIOSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.
 	return subsystems, nil
 }
 
-func (s *AIOSubsystems) instantiateStore(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
-	if s.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &s.StorePostgres.Config)
-	} else if s.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &s.StoreSqlite.Config)
+func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
+	if c.AIO.Subsystems.StorePostgres.Enabled {
+		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
+	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
+		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
 	}
+
 	return nil, fmt.Errorf("no store enabled")
 }
 
@@ -245,30 +206,40 @@ type AIODSTSubsystems struct {
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
 
-func (s *APIDSTSubsystems) Instantiate(a api.API) []api.Subsystem {
+func (c *ConfigDST) APISubsystems(a api.API) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
-	if s.Http.Enabled {
-		subsystems = append(subsystems, http.New(a, &s.Http.Config))
+	if c.API.Subsystems.Http.Enabled {
+		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
 	}
-	if s.Grpc.Enabled {
-		subsystems = append(subsystems, grpc.New(a, &s.Grpc.Config))
+	if c.API.Subsystems.Grpc.Enabled {
+		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
 	}
 
-	return subsystems
+	return subsystems, nil
 }
 
-func (s *AIODSTSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
+func (c *ConfigDST) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, r *rand.Rand, backchannel chan interface{}) ([]aio.SubsystemDST, error) {
 	subsystems := []aio.SubsystemDST{}
-	if s.Router.Enabled {
-		subsystem, err := router.New(a, metrics, &s.Router.Config)
+	if c.AIO.Subsystems.Router.Enabled {
+		subsystem, err := router.New(a, metrics, &c.AIO.Subsystems.Router.Config)
 		if err != nil {
 			return nil, err
 		}
 
 		subsystems = append(subsystems, subsystem)
 	}
-	if s.Sender.Enabled {
-		subsystem, err := sender.NewDST(r, backchannel, &s.Sender.Config)
+	if c.AIO.Subsystems.Sender.Enabled {
+		subsystem, err := sender.NewDST(r, backchannel, &c.AIO.Subsystems.Sender.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -276,7 +247,7 @@ func (s *AIODSTSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics, r *r
 		subsystems = append(subsystems, subsystem)
 	}
 
-	subsystem, err := s.instantiateStore(a, metrics)
+	subsystem, err := c.store(a, metrics)
 	if err != nil {
 		return nil, err
 	}
@@ -285,12 +256,13 @@ func (s *AIODSTSubsystems) Instantiate(a aio.AIO, metrics *metrics.Metrics, r *r
 	return subsystems, nil
 }
 
-func (s *AIODSTSubsystems) instantiateStore(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST, error) {
-	if s.StorePostgres.Enabled {
-		return postgres.New(a, metrics, &s.StorePostgres.Config)
-	} else if s.StoreSqlite.Enabled {
-		return sqlite.New(a, metrics, &s.StoreSqlite.Config)
+func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST, error) {
+	if c.AIO.Subsystems.StorePostgres.Enabled {
+		return postgres.New(a, metrics, &c.AIO.Subsystems.StorePostgres.Config)
+	} else if c.AIO.Subsystems.StoreSqlite.Enabled {
+		return sqlite.New(a, metrics, &c.AIO.Subsystems.StoreSqlite.Config)
 	}
+
 	return nil, fmt.Errorf("no store enabled")
 }
 

@@ -26,8 +26,8 @@ type ClaimTaskRequest struct {
 	unknownFields protoimpl.UnknownFields
 
 	Id        string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	ProcessId string `protobuf:"bytes,2,opt,name=processId,proto3" json:"processId,omitempty"`
-	Counter   int32  `protobuf:"varint,3,opt,name=counter,proto3" json:"counter,omitempty"`
+	Counter   int32  `protobuf:"varint,2,opt,name=counter,proto3" json:"counter,omitempty"`
+	ProcessId string `protobuf:"bytes,3,opt,name=processId,proto3" json:"processId,omitempty"`
 	Frequency int32  `protobuf:"varint,4,opt,name=frequency,proto3" json:"frequency,omitempty"`
 	RequestId string `protobuf:"bytes,5,opt,name=requestId,proto3" json:"requestId,omitempty"`
 }
@@ -71,18 +71,18 @@ func (x *ClaimTaskRequest) GetId() string {
 	return ""
 }
 
-func (x *ClaimTaskRequest) GetProcessId() string {
-	if x != nil {
-		return x.ProcessId
-	}
-	return ""
-}
-
 func (x *ClaimTaskRequest) GetCounter() int32 {
 	if x != nil {
 		return x.Counter
 	}
 	return 0
+}
+
+func (x *ClaimTaskRequest) GetProcessId() string {
+	if x != nil {
+		return x.ProcessId
+	}
+	return ""
 }
 
 func (x *ClaimTaskRequest) GetFrequency() int32 {
@@ -159,8 +159,8 @@ type Mesg struct {
 	sizeCache     protoimpl.SizeCache
 	unknownFields protoimpl.UnknownFields
 
-	Type     string              `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Promises map[string]*Promise `protobuf:"bytes,2,rep,name=promises,proto3" json:"promises,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Type     string                    `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Promises map[string]*PromiseOrHref `protobuf:"bytes,2,rep,name=promises,proto3" json:"promises,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
 }
 
 func (x *Mesg) Reset() {
@@ -202,12 +202,93 @@ func (x *Mesg) GetType() string {
 	return ""
 }
 
-func (x *Mesg) GetPromises() map[string]*Promise {
+func (x *Mesg) GetPromises() map[string]*PromiseOrHref {
 	if x != nil {
 		return x.Promises
 	}
 	return nil
 }
+
+type PromiseOrHref struct {
+	state         protoimpl.MessageState
+	sizeCache     protoimpl.SizeCache
+	unknownFields protoimpl.UnknownFields
+
+	// Types that are assignable to Data:
+	//
+	//	*PromiseOrHref_Promise
+	//	*PromiseOrHref_Href
+	Data isPromiseOrHref_Data `protobuf_oneof:"data"`
+}
+
+func (x *PromiseOrHref) Reset() {
+	*x = PromiseOrHref{}
+	if protoimpl.UnsafeEnabled {
+		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3]
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		ms.StoreMessageInfo(mi)
+	}
+}
+
+func (x *PromiseOrHref) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PromiseOrHref) ProtoMessage() {}
+
+func (x *PromiseOrHref) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3]
+	if protoimpl.UnsafeEnabled && x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PromiseOrHref.ProtoReflect.Descriptor instead.
+func (*PromiseOrHref) Descriptor() ([]byte, []int) {
+	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{3}
+}
+
+func (m *PromiseOrHref) GetData() isPromiseOrHref_Data {
+	if m != nil {
+		return m.Data
+	}
+	return nil
+}
+
+func (x *PromiseOrHref) GetPromise() *Promise {
+	if x, ok := x.GetData().(*PromiseOrHref_Promise); ok {
+		return x.Promise
+	}
+	return nil
+}
+
+func (x *PromiseOrHref) GetHref() string {
+	if x, ok := x.GetData().(*PromiseOrHref_Href); ok {
+		return x.Href
+	}
+	return ""
+}
+
+type isPromiseOrHref_Data interface {
+	isPromiseOrHref_Data()
+}
+
+type PromiseOrHref_Promise struct {
+	Promise *Promise `protobuf:"bytes,1,opt,name=promise,proto3,oneof"`
+}
+
+type PromiseOrHref_Href struct {
+	Href string `protobuf:"bytes,2,opt,name=href,proto3,oneof"`
+}
+
+func (*PromiseOrHref_Promise) isPromiseOrHref_Data() {}
+
+func (*PromiseOrHref_Href) isPromiseOrHref_Data() {}
 
 type CompleteTaskRequest struct {
 	state         protoimpl.MessageState
@@ -222,7 +303,7 @@ type CompleteTaskRequest struct {
 func (x *CompleteTaskRequest) Reset() {
 	*x = CompleteTaskRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3]
+		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[4]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -235,7 +316,7 @@ func (x *CompleteTaskRequest) String() string {
 func (*CompleteTaskRequest) ProtoMessage() {}
 
 func (x *CompleteTaskRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3]
+	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[4]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +329,7 @@ func (x *CompleteTaskRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteTaskRequest.ProtoReflect.Descriptor instead.
 func (*CompleteTaskRequest) Descriptor() ([]byte, []int) {
-	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{3}
+	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CompleteTaskRequest) GetId() string {
@@ -283,7 +364,7 @@ type CompleteTaskResponse struct {
 func (x *CompleteTaskResponse) Reset() {
 	*x = CompleteTaskResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[4]
+		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[5]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -296,7 +377,7 @@ func (x *CompleteTaskResponse) String() string {
 func (*CompleteTaskResponse) ProtoMessage() {}
 
 func (x *CompleteTaskResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[4]
+	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[5]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -309,7 +390,7 @@ func (x *CompleteTaskResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CompleteTaskResponse.ProtoReflect.Descriptor instead.
 func (*CompleteTaskResponse) Descriptor() ([]byte, []int) {
-	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{4}
+	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CompleteTaskResponse) GetCompleted() bool {
@@ -331,7 +412,7 @@ type HeartbeatTasksRequest struct {
 func (x *HeartbeatTasksRequest) Reset() {
 	*x = HeartbeatTasksRequest{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[5]
+		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[6]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -344,7 +425,7 @@ func (x *HeartbeatTasksRequest) String() string {
 func (*HeartbeatTasksRequest) ProtoMessage() {}
 
 func (x *HeartbeatTasksRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[5]
+	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[6]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +438,7 @@ func (x *HeartbeatTasksRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatTasksRequest.ProtoReflect.Descriptor instead.
 func (*HeartbeatTasksRequest) Descriptor() ([]byte, []int) {
-	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{5}
+	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *HeartbeatTasksRequest) GetProcessId() string {
@@ -385,7 +466,7 @@ type HeartbeatTasksResponse struct {
 func (x *HeartbeatTasksResponse) Reset() {
 	*x = HeartbeatTasksResponse{}
 	if protoimpl.UnsafeEnabled {
-		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[6]
+		mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[7]
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		ms.StoreMessageInfo(mi)
 	}
@@ -398,7 +479,7 @@ func (x *HeartbeatTasksResponse) String() string {
 func (*HeartbeatTasksResponse) ProtoMessage() {}
 
 func (x *HeartbeatTasksResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[6]
+	mi := &file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[7]
 	if protoimpl.UnsafeEnabled && x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,7 +492,7 @@ func (x *HeartbeatTasksResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HeartbeatTasksResponse.ProtoReflect.Descriptor instead.
 func (*HeartbeatTasksResponse) Descriptor() ([]byte, []int) {
-	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{6}
+	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *HeartbeatTasksResponse) GetTasksAffected() int64 {
@@ -433,10 +514,10 @@ var file_internal_app_subsystems_api_grpc_api_task_proto_rawDesc = []byte{
 	0x6f, 0x6d, 0x69, 0x73, 0x65, 0x2e, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x22, 0x96, 0x01, 0x0a, 0x10,
 	0x43, 0x6c, 0x61, 0x69, 0x6d, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74,
 	0x12, 0x0e, 0x0a, 0x02, 0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x02, 0x69, 0x64,
-	0x12, 0x1c, 0x0a, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x49, 0x64, 0x18, 0x02, 0x20,
-	0x01, 0x28, 0x09, 0x52, 0x09, 0x70, 0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x49, 0x64, 0x12, 0x18,
-	0x0a, 0x07, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x18, 0x03, 0x20, 0x01, 0x28, 0x05, 0x52,
-	0x07, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x12, 0x1c, 0x0a, 0x09, 0x66, 0x72, 0x65, 0x71,
+	0x12, 0x18, 0x0a, 0x07, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x18, 0x02, 0x20, 0x01, 0x28,
+	0x05, 0x52, 0x07, 0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x12, 0x1c, 0x0a, 0x09, 0x70, 0x72,
+	0x6f, 0x63, 0x65, 0x73, 0x73, 0x49, 0x64, 0x18, 0x03, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x70,
+	0x72, 0x6f, 0x63, 0x65, 0x73, 0x73, 0x49, 0x64, 0x12, 0x1c, 0x0a, 0x09, 0x66, 0x72, 0x65, 0x71,
 	0x75, 0x65, 0x6e, 0x63, 0x79, 0x18, 0x04, 0x20, 0x01, 0x28, 0x05, 0x52, 0x09, 0x66, 0x72, 0x65,
 	0x71, 0x75, 0x65, 0x6e, 0x63, 0x79, 0x12, 0x1c, 0x0a, 0x09, 0x72, 0x65, 0x71, 0x75, 0x65, 0x73,
 	0x74, 0x49, 0x64, 0x18, 0x05, 0x20, 0x01, 0x28, 0x09, 0x52, 0x09, 0x72, 0x65, 0x71, 0x75, 0x65,
@@ -445,17 +526,23 @@ var file_internal_app_subsystems_api_grpc_api_task_proto_rawDesc = []byte{
 	0x69, 0x6d, 0x65, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x08, 0x52, 0x07, 0x63, 0x6c, 0x61, 0x69,
 	0x6d, 0x65, 0x64, 0x12, 0x1e, 0x0a, 0x04, 0x6d, 0x65, 0x73, 0x67, 0x18, 0x02, 0x20, 0x01, 0x28,
 	0x0b, 0x32, 0x0a, 0x2e, 0x74, 0x61, 0x73, 0x6b, 0x2e, 0x4d, 0x65, 0x73, 0x67, 0x52, 0x04, 0x6d,
-	0x65, 0x73, 0x67, 0x22, 0x9f, 0x01, 0x0a, 0x04, 0x4d, 0x65, 0x73, 0x67, 0x12, 0x12, 0x0a, 0x04,
+	0x65, 0x73, 0x67, 0x22, 0xa2, 0x01, 0x0a, 0x04, 0x4d, 0x65, 0x73, 0x67, 0x12, 0x12, 0x0a, 0x04,
 	0x74, 0x79, 0x70, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x04, 0x74, 0x79, 0x70, 0x65,
 	0x12, 0x34, 0x0a, 0x08, 0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x73, 0x18, 0x02, 0x20, 0x03,
 	0x28, 0x0b, 0x32, 0x18, 0x2e, 0x74, 0x61, 0x73, 0x6b, 0x2e, 0x4d, 0x65, 0x73, 0x67, 0x2e, 0x50,
 	0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x52, 0x08, 0x70, 0x72,
-	0x6f, 0x6d, 0x69, 0x73, 0x65, 0x73, 0x1a, 0x4d, 0x0a, 0x0d, 0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73,
+	0x6f, 0x6d, 0x69, 0x73, 0x65, 0x73, 0x1a, 0x50, 0x0a, 0x0d, 0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73,
 	0x65, 0x73, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x12, 0x10, 0x0a, 0x03, 0x6b, 0x65, 0x79, 0x18, 0x01,
-	0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x26, 0x0a, 0x05, 0x76, 0x61, 0x6c,
-	0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x10, 0x2e, 0x70, 0x72, 0x6f, 0x6d, 0x69,
-	0x73, 0x65, 0x2e, 0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x52, 0x05, 0x76, 0x61, 0x6c, 0x75,
-	0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x5d, 0x0a, 0x13, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74,
+	0x20, 0x01, 0x28, 0x09, 0x52, 0x03, 0x6b, 0x65, 0x79, 0x12, 0x29, 0x0a, 0x05, 0x76, 0x61, 0x6c,
+	0x75, 0x65, 0x18, 0x02, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x13, 0x2e, 0x74, 0x61, 0x73, 0x6b, 0x2e,
+	0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x4f, 0x72, 0x48, 0x72, 0x65, 0x66, 0x52, 0x05, 0x76,
+	0x61, 0x6c, 0x75, 0x65, 0x3a, 0x02, 0x38, 0x01, 0x22, 0x5b, 0x0a, 0x0d, 0x50, 0x72, 0x6f, 0x6d,
+	0x69, 0x73, 0x65, 0x4f, 0x72, 0x48, 0x72, 0x65, 0x66, 0x12, 0x2c, 0x0a, 0x07, 0x70, 0x72, 0x6f,
+	0x6d, 0x69, 0x73, 0x65, 0x18, 0x01, 0x20, 0x01, 0x28, 0x0b, 0x32, 0x10, 0x2e, 0x70, 0x72, 0x6f,
+	0x6d, 0x69, 0x73, 0x65, 0x2e, 0x50, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x48, 0x00, 0x52, 0x07,
+	0x70, 0x72, 0x6f, 0x6d, 0x69, 0x73, 0x65, 0x12, 0x14, 0x0a, 0x04, 0x68, 0x72, 0x65, 0x66, 0x18,
+	0x02, 0x20, 0x01, 0x28, 0x09, 0x48, 0x00, 0x52, 0x04, 0x68, 0x72, 0x65, 0x66, 0x42, 0x06, 0x0a,
+	0x04, 0x64, 0x61, 0x74, 0x61, 0x22, 0x5d, 0x0a, 0x13, 0x43, 0x6f, 0x6d, 0x70, 0x6c, 0x65, 0x74,
 	0x65, 0x54, 0x61, 0x73, 0x6b, 0x52, 0x65, 0x71, 0x75, 0x65, 0x73, 0x74, 0x12, 0x0e, 0x0a, 0x02,
 	0x69, 0x64, 0x18, 0x01, 0x20, 0x01, 0x28, 0x09, 0x52, 0x02, 0x69, 0x64, 0x12, 0x18, 0x0a, 0x07,
 	0x63, 0x6f, 0x75, 0x6e, 0x74, 0x65, 0x72, 0x18, 0x02, 0x20, 0x01, 0x28, 0x05, 0x52, 0x07, 0x63,
@@ -507,33 +594,35 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_rawDescGZIP() []byte {
 	return file_internal_app_subsystems_api_grpc_api_task_proto_rawDescData
 }
 
-var file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_internal_app_subsystems_api_grpc_api_task_proto_goTypes = []interface{}{
 	(*ClaimTaskRequest)(nil),       // 0: task.ClaimTaskRequest
 	(*ClaimTaskResponse)(nil),      // 1: task.ClaimTaskResponse
 	(*Mesg)(nil),                   // 2: task.Mesg
-	(*CompleteTaskRequest)(nil),    // 3: task.CompleteTaskRequest
-	(*CompleteTaskResponse)(nil),   // 4: task.CompleteTaskResponse
-	(*HeartbeatTasksRequest)(nil),  // 5: task.HeartbeatTasksRequest
-	(*HeartbeatTasksResponse)(nil), // 6: task.HeartbeatTasksResponse
-	nil,                            // 7: task.Mesg.PromisesEntry
-	(*Promise)(nil),                // 8: promise.Promise
+	(*PromiseOrHref)(nil),          // 3: task.PromiseOrHref
+	(*CompleteTaskRequest)(nil),    // 4: task.CompleteTaskRequest
+	(*CompleteTaskResponse)(nil),   // 5: task.CompleteTaskResponse
+	(*HeartbeatTasksRequest)(nil),  // 6: task.HeartbeatTasksRequest
+	(*HeartbeatTasksResponse)(nil), // 7: task.HeartbeatTasksResponse
+	nil,                            // 8: task.Mesg.PromisesEntry
+	(*Promise)(nil),                // 9: promise.Promise
 }
 var file_internal_app_subsystems_api_grpc_api_task_proto_depIdxs = []int32{
 	2, // 0: task.ClaimTaskResponse.mesg:type_name -> task.Mesg
-	7, // 1: task.Mesg.promises:type_name -> task.Mesg.PromisesEntry
-	8, // 2: task.Mesg.PromisesEntry.value:type_name -> promise.Promise
-	0, // 3: task.Tasks.ClaimTask:input_type -> task.ClaimTaskRequest
-	3, // 4: task.Tasks.CompleteTask:input_type -> task.CompleteTaskRequest
-	5, // 5: task.Tasks.HeartbeatTasks:input_type -> task.HeartbeatTasksRequest
-	1, // 6: task.Tasks.ClaimTask:output_type -> task.ClaimTaskResponse
-	4, // 7: task.Tasks.CompleteTask:output_type -> task.CompleteTaskResponse
-	6, // 8: task.Tasks.HeartbeatTasks:output_type -> task.HeartbeatTasksResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	8, // 1: task.Mesg.promises:type_name -> task.Mesg.PromisesEntry
+	9, // 2: task.PromiseOrHref.promise:type_name -> promise.Promise
+	3, // 3: task.Mesg.PromisesEntry.value:type_name -> task.PromiseOrHref
+	0, // 4: task.Tasks.ClaimTask:input_type -> task.ClaimTaskRequest
+	4, // 5: task.Tasks.CompleteTask:input_type -> task.CompleteTaskRequest
+	6, // 6: task.Tasks.HeartbeatTasks:input_type -> task.HeartbeatTasksRequest
+	1, // 7: task.Tasks.ClaimTask:output_type -> task.ClaimTaskResponse
+	5, // 8: task.Tasks.CompleteTask:output_type -> task.CompleteTaskResponse
+	7, // 9: task.Tasks.HeartbeatTasks:output_type -> task.HeartbeatTasksResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_internal_app_subsystems_api_grpc_api_task_proto_init() }
@@ -580,7 +669,7 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_init() {
 			}
 		}
 		file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CompleteTaskRequest); i {
+			switch v := v.(*PromiseOrHref); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -592,7 +681,7 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_init() {
 			}
 		}
 		file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[4].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*CompleteTaskResponse); i {
+			switch v := v.(*CompleteTaskRequest); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -604,7 +693,7 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_init() {
 			}
 		}
 		file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[5].Exporter = func(v interface{}, i int) interface{} {
-			switch v := v.(*HeartbeatTasksRequest); i {
+			switch v := v.(*CompleteTaskResponse); i {
 			case 0:
 				return &v.state
 			case 1:
@@ -616,6 +705,18 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_init() {
 			}
 		}
 		file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[6].Exporter = func(v interface{}, i int) interface{} {
+			switch v := v.(*HeartbeatTasksRequest); i {
+			case 0:
+				return &v.state
+			case 1:
+				return &v.sizeCache
+			case 2:
+				return &v.unknownFields
+			default:
+				return nil
+			}
+		}
+		file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[7].Exporter = func(v interface{}, i int) interface{} {
 			switch v := v.(*HeartbeatTasksResponse); i {
 			case 0:
 				return &v.state
@@ -628,13 +729,17 @@ func file_internal_app_subsystems_api_grpc_api_task_proto_init() {
 			}
 		}
 	}
+	file_internal_app_subsystems_api_grpc_api_task_proto_msgTypes[3].OneofWrappers = []interface{}{
+		(*PromiseOrHref_Promise)(nil),
+		(*PromiseOrHref_Href)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: file_internal_app_subsystems_api_grpc_api_task_proto_rawDesc,
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
