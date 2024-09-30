@@ -165,6 +165,10 @@ func (p *Poll) Type() string {
 	return "poll"
 }
 
+func (p *Poll) Addr() string {
+	return p.server.listen.Addr().String()
+}
+
 func (p *Poll) Start(errors chan<- error) error {
 	go p.server.Start(errors)
 	go p.worker.Start()
@@ -240,7 +244,7 @@ func (w *PollWorker) Start() {
 			// been registered or after a connection has been closed
 
 			if closed {
-				break // skip sub select when already closed
+				break
 			}
 
 			select {
