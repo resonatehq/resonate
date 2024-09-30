@@ -4,27 +4,19 @@ import (
 	"context"
 	"encoding/json"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/receiver"
 	"google.golang.org/grpc/codes"
-	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 )
 
-func (s *server) CreateCallback(c context.Context, r *grpcApi.CreateCallbackRequest) (*grpcApi.CreateCallbackResponse, error) {
-	var recv []byte
-	var rErr error
-	switch r := r.Recv.(type) {
-	case *grpcApi.CreateCallbackRequest_Logical:
-		recv, rErr = json.Marshal(&r.Logical)
-	case *grpcApi.CreateCallbackRequest_Physical:
-		recv, rErr = json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
-	}
-
+func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) (*pb.CreateCallbackResponse, error) {
+	recv, rErr := protoRecv(r.Recv)
 	if rErr != nil {
-		return nil, grpcStatus.Error(codes.InvalidArgument, rErr.Error())
+		return nil, rErr
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
@@ -37,11 +29,11 @@ func (s *server) CreateCallback(c context.Context, r *grpcApi.CreateCallbackRequ
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CreateCallback != nil, "result must not be nil")
-	return &grpcApi.CreateCallbackResponse{
+	return &pb.CreateCallbackResponse{
 		Noop:     res.CreateCallback.Status == t_api.StatusOK,
 		Callback: protoCallback(res.CreateCallback.Callback),
 		Promise:  protoPromise(res.CreateCallback.Promise),
@@ -50,15 +42,26 @@ func (s *server) CreateCallback(c context.Context, r *grpcApi.CreateCallbackRequ
 
 // Helper functions
 
-func protoCallback(callback *callback.Callback) *grpcApi.Callback {
+func protoCallback(callback *callback.Callback) *pb.Callback {
 	if callback == nil {
 		return nil
 	}
 
-	return &grpcApi.Callback{
+	return &pb.Callback{
 		Id:        callback.Id,
 		PromiseId: callback.PromiseId,
 		Timeout:   callback.Timeout,
 		CreatedOn: callback.CreatedOn,
+	}
+}
+
+func protoRecv(recv *pb.Recv) ([]byte, error) {
+	switch r := recv.Recv.(type) {
+	case *pb.Recv_Logical:
+		return json.Marshal(&r.Logical)
+	case *pb.Recv_Physical:
+		return json.Marshal(&receiver.Recv{Type: r.Physical.Type, Data: r.Physical.Data})
+	default:
+		return nil, status.Error(codes.InvalidArgument, "The field recv is required.")
 	}
 }

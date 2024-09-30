@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package callback_t;
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
+
+message Callback {
+    string id = 1;
+    string promiseId = 2;
+    int64 timeout = 3;
+    int64 createdOn = 4;
+}
+
+message Recv {
+    oneof recv {
+        string logical = 1;
+        PhysicalRecv physical = 2;
+    }
+}
+
+message PhysicalRecv {
+    string type = 1;
+    bytes data = 2;
+}

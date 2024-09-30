@@ -6,7 +6,9 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/robfig/cron/v3"
 	"github.com/spf13/viper"
@@ -112,4 +114,13 @@ func UnmarshalChain(data []byte, vs ...any) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func RemoveWhitespace(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

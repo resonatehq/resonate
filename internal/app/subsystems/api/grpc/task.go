@@ -3,14 +3,14 @@ package grpc
 import (
 	"context"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
-	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 )
 
-func (s *server) ClaimTask(c context.Context, r *grpcApi.ClaimTaskRequest) (*grpcApi.ClaimTaskResponse, error) {
+func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.ClaimTaskResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.ClaimTask,
 		ClaimTask: &t_api.ClaimTaskRequest{
@@ -21,51 +21,43 @@ func (s *server) ClaimTask(c context.Context, r *grpcApi.ClaimTaskRequest) (*grp
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.ClaimTask != nil, "result must not be nil")
 	util.Assert(res.ClaimTask.Status != t_api.StatusCreated || (res.ClaimTask.Task != nil && res.ClaimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
 
-	var mesg *grpcApi.Mesg
+	var mesg *pb.Mesg
 	if res.ClaimTask.Status == t_api.StatusCreated {
-		promises := map[string]*grpcApi.PromiseOrHref{}
-
-		if res.ClaimTask.RootPromise != nil {
-			promises["root"] = &grpcApi.PromiseOrHref{
-				Data: &grpcApi.PromiseOrHref_Promise{Promise: protoPromise(res.ClaimTask.RootPromise)},
-			}
-		} else {
-			promises["root"] = &grpcApi.PromiseOrHref{
-				Data: &grpcApi.PromiseOrHref_Href{Href: res.ClaimTask.RootPromiseHref},
-			}
+		promises := map[string]*pb.MesgPromise{
+			"root": {
+				Id:   res.ClaimTask.Task.Mesg.Root,
+				Href: res.ClaimTask.RootPromiseHref,
+				Data: protoPromise(res.ClaimTask.RootPromise),
+			},
 		}
 
 		if res.ClaimTask.Task.Mesg.Type == message.Resume {
-			if res.ClaimTask.LeafPromise != nil {
-				promises["leaf"] = &grpcApi.PromiseOrHref{
-					Data: &grpcApi.PromiseOrHref_Promise{Promise: protoPromise(res.ClaimTask.LeafPromise)},
-				}
-			} else {
-				promises["leaf"] = &grpcApi.PromiseOrHref{
-					Data: &grpcApi.PromiseOrHref_Href{Href: res.ClaimTask.LeafPromiseHref},
-				}
+			promises["leaf"] = &pb.MesgPromise{
+				Id:   res.ClaimTask.Task.Mesg.Leaf,
+				Href: res.ClaimTask.LeafPromiseHref,
+				Data: protoPromise(res.ClaimTask.LeafPromise),
 			}
 		}
 
-		mesg = &grpcApi.Mesg{
+		mesg = &pb.Mesg{
 			Type:     string(res.ClaimTask.Task.Mesg.Type),
 			Promises: promises,
 		}
 	}
 
-	return &grpcApi.ClaimTaskResponse{
+	return &pb.ClaimTaskResponse{
 		Claimed: res.ClaimTask.Status == t_api.StatusCreated,
 		Mesg:    mesg,
 	}, nil
 }
 
-func (s *server) CompleteTask(c context.Context, r *grpcApi.CompleteTaskRequest) (*grpcApi.CompleteTaskResponse, error) {
+func (s *server) CompleteTask(c context.Context, r *pb.CompleteTaskRequest) (*pb.CompleteTaskResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.CompleteTask,
 		CompleteTask: &t_api.CompleteTaskRequest{
@@ -74,16 +66,16 @@ func (s *server) CompleteTask(c context.Context, r *grpcApi.CompleteTaskRequest)
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CompleteTask != nil, "result must not be nil")
-	return &grpcApi.CompleteTaskResponse{
+	return &pb.CompleteTaskResponse{
 		Completed: res.CompleteTask.Status == t_api.StatusCreated,
 	}, nil
 }
 
-func (s *server) HeartbeatTasks(c context.Context, r *grpcApi.HeartbeatTasksRequest) (*grpcApi.HeartbeatTasksResponse, error) {
+func (s *server) HeartbeatTasks(c context.Context, r *pb.HeartbeatTasksRequest) (*pb.HeartbeatTasksResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.HeartbeatTasks,
 		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
@@ -91,11 +83,11 @@ func (s *server) HeartbeatTasks(c context.Context, r *grpcApi.HeartbeatTasksRequ
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.HeartbeatTasks != nil, "result must not be nil")
-	return &grpcApi.HeartbeatTasksResponse{
+	return &pb.HeartbeatTasksResponse{
 		TasksAffected: res.HeartbeatTasks.TasksAffected,
 	}, nil
 }

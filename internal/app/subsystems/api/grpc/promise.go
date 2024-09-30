@@ -6,14 +6,14 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc/codes"
-	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 )
 
-func (s *server) ReadPromise(c context.Context, r *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
+func (s *server) ReadPromise(c context.Context, r *pb.ReadPromiseRequest) (*pb.ReadPromiseResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.ReadPromise,
 		ReadPromise: &t_api.ReadPromiseRequest{
@@ -21,19 +21,19 @@ func (s *server) ReadPromise(c context.Context, r *grpcApi.ReadPromiseRequest) (
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.ReadPromise != nil, "result must not be nil")
-	return &grpcApi.ReadPromiseResponse{
+	return &pb.ReadPromiseResponse{
 		Promise: protoPromise(res.ReadPromise.Promise),
 	}, nil
 }
 
-func (s *server) SearchPromises(c context.Context, r *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
+func (s *server) SearchPromises(c context.Context, r *pb.SearchPromisesRequest) (*pb.SearchPromisesResponse, error) {
 	req, err := s.api.SearchPromises(r.Id, searchState(r.State), r.Tags, int(r.Limit), r.Cursor)
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
@@ -41,12 +41,12 @@ func (s *server) SearchPromises(c context.Context, r *grpcApi.SearchPromisesRequ
 		SearchPromises: req,
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.SearchPromises != nil, "result must not be nil")
 
-	promises := make([]*grpcApi.Promise, len(res.SearchPromises.Promises))
+	promises := make([]*pb.Promise, len(res.SearchPromises.Promises))
 	for i, promise := range res.SearchPromises.Promises {
 		promises[i] = protoPromise(promise)
 	}
@@ -56,17 +56,17 @@ func (s *server) SearchPromises(c context.Context, r *grpcApi.SearchPromisesRequ
 		var err error
 		cursor, err = res.SearchPromises.Cursor.Encode()
 		if err != nil {
-			return nil, grpcStatus.Error(codes.Internal, err.Error())
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 	}
 
-	return &grpcApi.SearchPromisesResponse{
+	return &pb.SearchPromisesResponse{
 		Promises: promises,
 		Cursor:   cursor,
 	}, nil
 }
 
-func (s *server) CreatePromise(c context.Context, r *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
+func (s *server) CreatePromise(c context.Context, r *pb.CreatePromiseRequest) (*pb.CreatePromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
 	if r.IdempotencyKey != "" {
 		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
@@ -94,17 +94,136 @@ func (s *server) CreatePromise(c context.Context, r *grpcApi.CreatePromiseReques
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CreatePromise != nil, "result must not be nil")
-	return &grpcApi.CreatePromiseResponse{
+	return &pb.CreatePromiseResponse{
 		Noop:    res.CreatePromise.Status == t_api.StatusOK,
 		Promise: protoPromise(res.CreatePromise.Promise),
 	}, nil
 }
 
-func (s *server) ResolvePromise(c context.Context, r *grpcApi.ResolvePromiseRequest) (*grpcApi.ResolvePromiseResponse, error) {
+func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndTaskRequest) (*pb.CreatePromiseAndTaskResponse, error) {
+	if r.Promise == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field task is required.")
+	}
+
+	if r.Task == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field task is required.")
+	}
+
+	var idempotencyKey *idempotency.Key
+	if r.Promise.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.Promise.IdempotencyKey))
+	}
+
+	var headers map[string]string
+	if r.Promise.Param != nil {
+		headers = r.Promise.Param.Headers
+	}
+
+	var data []byte
+	if r.Promise.Param != nil {
+		data = r.Promise.Param.Data
+	}
+
+	recv, rErr := protoRecv(r.Task.Recv)
+	if rErr != nil {
+		return nil, rErr
+	}
+
+	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             r.Promise.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         r.Promise.Strict,
+				Param:          promise.Value{Headers: headers, Data: data},
+				Timeout:        r.Promise.Timeout,
+				Tags:           r.Promise.Tags,
+			},
+			Task: &t_api.CreateTaskRequest{
+				PromiseId: r.Promise.Id,
+				ProcessId: r.Task.ProcessId,
+				Frequency: int(r.Task.Frequency),
+				Timeout:   r.Promise.Timeout,
+				Recv:      recv,
+			},
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.CreatePromiseAndTask != nil, "result must not be nil")
+	return &pb.CreatePromiseAndTaskResponse{
+		Noop:    res.CreatePromiseAndTask.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CreatePromiseAndTask.Promise),
+	}, nil
+}
+
+func (s *server) CreatePromiseAndCallback(c context.Context, r *pb.CreatePromiseAndCallbackRequest) (*pb.CreatePromiseAndCallbackResponse, error) {
+	if r.Promise == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field promise is required.")
+	}
+
+	if r.Callback == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field callback is required.")
+	}
+
+	var idempotencyKey *idempotency.Key
+	if r.Promise.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.Promise.IdempotencyKey))
+	}
+
+	var headers map[string]string
+	if r.Promise.Param != nil {
+		headers = r.Promise.Param.Headers
+	}
+
+	var data []byte
+	if r.Promise.Param != nil {
+		data = r.Promise.Param.Data
+	}
+
+	recv, rErr := protoRecv(r.Callback.Recv)
+	if rErr != nil {
+		return nil, rErr
+	}
+
+	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndCallback,
+		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             r.Promise.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         r.Promise.Strict,
+				Param:          promise.Value{Headers: headers, Data: data},
+				Timeout:        r.Promise.Timeout,
+				Tags:           r.Promise.Tags,
+			},
+			Callback: &t_api.CreateCallbackRequest{
+				PromiseId:     r.Promise.Id,
+				RootPromiseId: r.Callback.RootPromiseId,
+				Timeout:       r.Callback.Timeout,
+				Recv:          recv,
+			},
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.CreatePromiseAndCallback != nil, "result must not be nil")
+	return &pb.CreatePromiseAndCallbackResponse{
+		Noop:    res.CreatePromiseAndCallback.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CreatePromiseAndCallback.Promise),
+	}, nil
+}
+
+func (s *server) ResolvePromise(c context.Context, r *pb.ResolvePromiseRequest) (*pb.ResolvePromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
 	if r.IdempotencyKey != "" {
 		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
@@ -131,17 +250,17 @@ func (s *server) ResolvePromise(c context.Context, r *grpcApi.ResolvePromiseRequ
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CompletePromise != nil, "result must not be nil")
-	return &grpcApi.ResolvePromiseResponse{
+	return &pb.ResolvePromiseResponse{
 		Noop:    res.CompletePromise.Status == t_api.StatusOK,
 		Promise: protoPromise(res.CompletePromise.Promise),
 	}, nil
 }
 
-func (s *server) RejectPromise(c context.Context, r *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
+func (s *server) RejectPromise(c context.Context, r *pb.RejectPromiseRequest) (*pb.RejectPromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
 	if r.IdempotencyKey != "" {
 		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
@@ -168,17 +287,17 @@ func (s *server) RejectPromise(c context.Context, r *grpcApi.RejectPromiseReques
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CompletePromise != nil, "result must not be nil")
-	return &grpcApi.RejectPromiseResponse{
+	return &pb.RejectPromiseResponse{
 		Noop:    res.CompletePromise.Status == t_api.StatusOK,
 		Promise: protoPromise(res.CompletePromise.Promise),
 	}, nil
 }
 
-func (s *server) CancelPromise(c context.Context, r *grpcApi.CancelPromiseRequest) (*grpcApi.CancelPromiseResponse, error) {
+func (s *server) CancelPromise(c context.Context, r *pb.CancelPromiseRequest) (*pb.CancelPromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
 	if r.IdempotencyKey != "" {
 		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
@@ -205,11 +324,11 @@ func (s *server) CancelPromise(c context.Context, r *grpcApi.CancelPromiseReques
 		},
 	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
 	util.Assert(res.CompletePromise != nil, "result must not be nil")
-	return &grpcApi.CancelPromiseResponse{
+	return &pb.CancelPromiseResponse{
 		Noop:    res.CompletePromise.Status == t_api.StatusOK,
 		Promise: protoPromise(res.CompletePromise.Promise),
 	}, nil
@@ -217,16 +336,16 @@ func (s *server) CancelPromise(c context.Context, r *grpcApi.CancelPromiseReques
 
 // Helper functions
 
-func protoPromise(promise *promise.Promise) *grpcApi.Promise {
+func protoPromise(promise *promise.Promise) *pb.Promise {
 	if promise == nil {
 		return nil
 	}
 
-	return &grpcApi.Promise{
+	return &pb.Promise{
 		Id:                        promise.Id,
 		State:                     protoState(promise.State),
-		Param:                     &grpcApi.Value{Headers: promise.Param.Headers, Data: promise.Param.Data},
-		Value:                     &grpcApi.Value{Headers: promise.Value.Headers, Data: promise.Value.Data},
+		Param:                     &pb.Value{Headers: promise.Param.Headers, Data: promise.Param.Data},
+		Value:                     &pb.Value{Headers: promise.Value.Headers, Data: promise.Value.Data},
 		Timeout:                   promise.Timeout,
 		IdempotencyKeyForCreate:   string(util.SafeDeref(promise.IdempotencyKeyForCreate)),
 		IdempotencyKeyForComplete: string(util.SafeDeref(promise.IdempotencyKeyForComplete)),
@@ -236,32 +355,34 @@ func protoPromise(promise *promise.Promise) *grpcApi.Promise {
 	}
 }
 
-func protoState(state promise.State) grpcApi.State {
+func protoState(state promise.State) pb.State {
 	switch state {
 	case promise.Pending:
-		return grpcApi.State_PENDING
+		return pb.State_PENDING
 	case promise.Resolved:
-		return grpcApi.State_RESOLVED
+		return pb.State_RESOLVED
 	case promise.Rejected:
-		return grpcApi.State_REJECTED
+		return pb.State_REJECTED
 	case promise.Timedout:
-		return grpcApi.State_REJECTED_TIMEDOUT
+		return pb.State_REJECTED_TIMEDOUT
 	case promise.Canceled:
-		return grpcApi.State_REJECTED_CANCELED
+		return pb.State_REJECTED_CANCELED
 	default:
 		panic("invalid state")
 	}
 }
 
-func searchState(searchState grpcApi.SearchState) string {
+func searchState(searchState pb.SearchState) string {
 	switch searchState {
-	case grpcApi.SearchState_SEARCH_PENDING:
+	case pb.SearchState_SEARCH_ALL:
+		return ""
+	case pb.SearchState_SEARCH_PENDING:
 		return "pending"
-	case grpcApi.SearchState_SEARCH_RESOLVED:
+	case pb.SearchState_SEARCH_RESOLVED:
 		return "resolved"
-	case grpcApi.SearchState_SEARCH_REJECTED:
+	case pb.SearchState_SEARCH_REJECTED:
 		return "rejected"
 	default:
-		return ""
+		return "INVALID" // will be validated in the helper function
 	}
 }

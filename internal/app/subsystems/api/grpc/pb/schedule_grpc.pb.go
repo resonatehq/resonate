@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.23.3
-// source: internal/app/subsystems/api/grpc/api/schedule.proto
+// source: internal/app/subsystems/api/grpc/pb/schedule.proto
 
-package api
+package pb
 
 import (
 	context "context"
@@ -19,9 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Schedules_CreateSchedule_FullMethodName  = "/schedule.Schedules/CreateSchedule"
 	Schedules_ReadSchedule_FullMethodName    = "/schedule.Schedules/ReadSchedule"
 	Schedules_SearchSchedules_FullMethodName = "/schedule.Schedules/SearchSchedules"
+	Schedules_CreateSchedule_FullMethodName  = "/schedule.Schedules/CreateSchedule"
 	Schedules_DeleteSchedule_FullMethodName  = "/schedule.Schedules/DeleteSchedule"
 )
 
@@ -29,9 +29,9 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SchedulesClient interface {
-	CreateSchedule(ctx context.Context, in *CreateScheduleRequest, opts ...grpc.CallOption) (*CreatedScheduleResponse, error)
 	ReadSchedule(ctx context.Context, in *ReadScheduleRequest, opts ...grpc.CallOption) (*ReadScheduleResponse, error)
 	SearchSchedules(ctx context.Context, in *SearchSchedulesRequest, opts ...grpc.CallOption) (*SearchSchedulesResponse, error)
+	CreateSchedule(ctx context.Context, in *CreateScheduleRequest, opts ...grpc.CallOption) (*CreatedScheduleResponse, error)
 	DeleteSchedule(ctx context.Context, in *DeleteScheduleRequest, opts ...grpc.CallOption) (*DeleteScheduleResponse, error)
 }
 
@@ -41,15 +41,6 @@ type schedulesClient struct {
 
 func NewSchedulesClient(cc grpc.ClientConnInterface) SchedulesClient {
 	return &schedulesClient{cc}
-}
-
-func (c *schedulesClient) CreateSchedule(ctx context.Context, in *CreateScheduleRequest, opts ...grpc.CallOption) (*CreatedScheduleResponse, error) {
-	out := new(CreatedScheduleResponse)
-	err := c.cc.Invoke(ctx, Schedules_CreateSchedule_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *schedulesClient) ReadSchedule(ctx context.Context, in *ReadScheduleRequest, opts ...grpc.CallOption) (*ReadScheduleResponse, error) {
@@ -70,6 +61,15 @@ func (c *schedulesClient) SearchSchedules(ctx context.Context, in *SearchSchedul
 	return out, nil
 }
 
+func (c *schedulesClient) CreateSchedule(ctx context.Context, in *CreateScheduleRequest, opts ...grpc.CallOption) (*CreatedScheduleResponse, error) {
+	out := new(CreatedScheduleResponse)
+	err := c.cc.Invoke(ctx, Schedules_CreateSchedule_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *schedulesClient) DeleteSchedule(ctx context.Context, in *DeleteScheduleRequest, opts ...grpc.CallOption) (*DeleteScheduleResponse, error) {
 	out := new(DeleteScheduleResponse)
 	err := c.cc.Invoke(ctx, Schedules_DeleteSchedule_FullMethodName, in, out, opts...)
@@ -83,9 +83,9 @@ func (c *schedulesClient) DeleteSchedule(ctx context.Context, in *DeleteSchedule
 // All implementations must embed UnimplementedSchedulesServer
 // for forward compatibility
 type SchedulesServer interface {
-	CreateSchedule(context.Context, *CreateScheduleRequest) (*CreatedScheduleResponse, error)
 	ReadSchedule(context.Context, *ReadScheduleRequest) (*ReadScheduleResponse, error)
 	SearchSchedules(context.Context, *SearchSchedulesRequest) (*SearchSchedulesResponse, error)
+	CreateSchedule(context.Context, *CreateScheduleRequest) (*CreatedScheduleResponse, error)
 	DeleteSchedule(context.Context, *DeleteScheduleRequest) (*DeleteScheduleResponse, error)
 	mustEmbedUnimplementedSchedulesServer()
 }
@@ -94,14 +94,14 @@ type SchedulesServer interface {
 type UnimplementedSchedulesServer struct {
 }
 
-func (UnimplementedSchedulesServer) CreateSchedule(context.Context, *CreateScheduleRequest) (*CreatedScheduleResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateSchedule not implemented")
-}
 func (UnimplementedSchedulesServer) ReadSchedule(context.Context, *ReadScheduleRequest) (*ReadScheduleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReadSchedule not implemented")
 }
 func (UnimplementedSchedulesServer) SearchSchedules(context.Context, *SearchSchedulesRequest) (*SearchSchedulesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchSchedules not implemented")
+}
+func (UnimplementedSchedulesServer) CreateSchedule(context.Context, *CreateScheduleRequest) (*CreatedScheduleResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateSchedule not implemented")
 }
 func (UnimplementedSchedulesServer) DeleteSchedule(context.Context, *DeleteScheduleRequest) (*DeleteScheduleResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteSchedule not implemented")
@@ -117,24 +117,6 @@ type UnsafeSchedulesServer interface {
 
 func RegisterSchedulesServer(s grpc.ServiceRegistrar, srv SchedulesServer) {
 	s.RegisterService(&Schedules_ServiceDesc, srv)
-}
-
-func _Schedules_CreateSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateScheduleRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SchedulesServer).CreateSchedule(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Schedules_CreateSchedule_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SchedulesServer).CreateSchedule(ctx, req.(*CreateScheduleRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _Schedules_ReadSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -173,6 +155,24 @@ func _Schedules_SearchSchedules_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Schedules_CreateSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateScheduleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SchedulesServer).CreateSchedule(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Schedules_CreateSchedule_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SchedulesServer).CreateSchedule(ctx, req.(*CreateScheduleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Schedules_DeleteSchedule_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteScheduleRequest)
 	if err := dec(in); err != nil {
@@ -199,10 +199,6 @@ var Schedules_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*SchedulesServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CreateSchedule",
-			Handler:    _Schedules_CreateSchedule_Handler,
-		},
-		{
 			MethodName: "ReadSchedule",
 			Handler:    _Schedules_ReadSchedule_Handler,
 		},
@@ -211,10 +207,14 @@ var Schedules_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Schedules_SearchSchedules_Handler,
 		},
 		{
+			MethodName: "CreateSchedule",
+			Handler:    _Schedules_CreateSchedule_Handler,
+		},
+		{
 			MethodName: "DeleteSchedule",
 			Handler:    _Schedules_DeleteSchedule_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/app/subsystems/api/grpc/api/schedule.proto",
+	Metadata: "internal/app/subsystems/api/grpc/pb/schedule.proto",
 }

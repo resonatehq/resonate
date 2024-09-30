@@ -51,7 +51,7 @@ type searchPromisesHeader struct {
 type searchPromisesParams struct {
 	Id     *string           `form:"id" json:"id" binding:"omitempty,min=1"`
 	State  *string           `form:"state" json:"state" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
-	Tags   map[string]string `form:"tags" json:"tags"`
+	Tags   map[string]string `form:"tags" json:"tags,omitempty"`
 	Limit  *int              `form:"limit" json:"limit" binding:"omitempty,gt=0,lte=100"`
 	Cursor *string           `form:"cursor" json:"cursor,omitempty"`
 }

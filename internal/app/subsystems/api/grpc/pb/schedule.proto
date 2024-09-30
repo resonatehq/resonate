@@ -2,30 +2,16 @@ syntax = "proto3";
 
 package schedule;
 
-import "internal/app/subsystems/api/grpc/api/promise.proto";
+import "internal/app/subsystems/api/grpc/pb/promise_t.proto";
+import "internal/app/subsystems/api/grpc/pb/schedule_t.proto";
 
-option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
 
 service Schedules {
-    rpc CreateSchedule (CreateScheduleRequest) returns (CreatedScheduleResponse) {}
     rpc ReadSchedule (ReadScheduleRequest) returns (ReadScheduleResponse) {}
     rpc SearchSchedules (SearchSchedulesRequest) returns (SearchSchedulesResponse) {}
+    rpc CreateSchedule (CreateScheduleRequest) returns (CreatedScheduleResponse) {}
     rpc DeleteSchedule (DeleteScheduleRequest) returns (DeleteScheduleResponse) {}
-}
-
-message Schedule {
-    string id = 1;
-    string description = 2;
-    string cron = 3;
-    map<string, string> tags = 4;
-    string promiseId = 5;
-    int64 promiseTimeout = 6;
-    promise.Value promiseParam = 7;
-    map<string, string> promiseTags = 8;
-    string idempotencyKey = 9;
-    int64 lastRunTime = 10;
-    int64 nextRunTime = 11;
-    int64 createdOn = 12;
 }
 
 // CREATE
@@ -37,7 +23,7 @@ message CreateScheduleRequest {
     map<string, string> tags = 4;
     string promiseId = 5;
     int64 promiseTimeout = 6;
-    promise.Value promiseParam = 7;
+    promise_t.Value promiseParam = 7;
     map<string, string> promiseTags = 8;
     string idempotencyKey = 9;
     string requestId = 10;
@@ -45,7 +31,7 @@ message CreateScheduleRequest {
 
 message CreatedScheduleResponse {
     bool noop = 1;
-    Schedule schedule = 2;
+    schedule_t.Schedule schedule = 2;
 }
 
 // READ
@@ -56,7 +42,7 @@ message ReadScheduleRequest {
 }
 
 message ReadScheduleResponse {
-    Schedule schedule = 1;
+    schedule_t.Schedule schedule = 1;
 }
 
 // SEARCH
@@ -70,8 +56,8 @@ message SearchSchedulesRequest {
 }
 
 message SearchSchedulesResponse {
-    string cursor = 1;
-    repeated Schedule schedules = 2;
+    repeated schedule_t.Schedule schedules = 1;
+    string cursor = 2;
 }
 
 // DELETE

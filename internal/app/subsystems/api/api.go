@@ -84,13 +84,15 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 		return cursor.Next, nil
 	}
 
-	// set default query
+	// validate id
 	if id == "" {
-		id = "*"
+		return nil, RequestValidationError(errors.New("The field id is required."))
 	}
 
+	// set states
 	var states []promise.State
-	if state == "" {
+	switch strings.ToLower(state) {
+	case "":
 		states = []promise.State{
 			promise.Pending,
 			promise.Resolved,
@@ -98,33 +100,31 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 			promise.Timedout,
 			promise.Canceled,
 		}
-	} else {
-		switch strings.ToLower(state) {
-		case "pending":
-			states = []promise.State{
-				promise.Pending,
-			}
-		case "resolved":
-			states = []promise.State{
-				promise.Resolved,
-			}
-		case "rejected":
-			states = []promise.State{
-				promise.Rejected,
-				promise.Timedout,
-				promise.Canceled,
-			}
-		default:
-			panic(fmt.Sprintf("invalid state: %s", state))
+	case "pending":
+		states = []promise.State{
+			promise.Pending,
 		}
+	case "resolved":
+		states = []promise.State{
+			promise.Resolved,
+		}
+	case "rejected":
+		states = []promise.State{
+			promise.Rejected,
+			promise.Timedout,
+			promise.Canceled,
+		}
+	default:
+		return nil, RequestValidationError(errors.New("The field state must be one of pending, resolved, rejected."))
 	}
 
-	// set default limit
-	if limit == 0 {
-		limit = 100
+	// set default tags
+	if tags == nil {
+		tags = map[string]string{}
 	}
 
-	if limit < 0 || limit > 100 {
+	// validate limit
+	if limit < 1 || limit > 100 {
 		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))
 	}
 
@@ -146,17 +146,18 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 		return cursor.Next, nil
 	}
 
-	// set default query
+	// validate id
 	if id == "" {
-		id = "*"
+		return nil, RequestValidationError(errors.New("The field id is required."))
 	}
 
-	// set default limit
-	if limit == 0 {
-		limit = 100
+	// set default tags
+	if tags == nil {
+		tags = map[string]string{}
 	}
 
-	if limit < 0 || limit > 100 {
+	// validate limit
+	if limit < 1 || limit > 100 {
 		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))
 	}
 

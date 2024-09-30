@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.23.3
-// source: internal/app/subsystems/api/grpc/api/lock.proto
+// source: internal/app/subsystems/api/grpc/pb/lock.proto
 
-package api
+package pb
 
 import (
 	context "context"
@@ -20,8 +20,8 @@ const _ = grpc.SupportPackageIsVersion7
 
 const (
 	Locks_AcquireLock_FullMethodName    = "/lock.Locks/AcquireLock"
-	Locks_HeartbeatLocks_FullMethodName = "/lock.Locks/HeartbeatLocks"
 	Locks_ReleaseLock_FullMethodName    = "/lock.Locks/ReleaseLock"
+	Locks_HeartbeatLocks_FullMethodName = "/lock.Locks/HeartbeatLocks"
 )
 
 // LocksClient is the client API for Locks service.
@@ -29,8 +29,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type LocksClient interface {
 	AcquireLock(ctx context.Context, in *AcquireLockRequest, opts ...grpc.CallOption) (*AcquireLockResponse, error)
-	HeartbeatLocks(ctx context.Context, in *HeartbeatLocksRequest, opts ...grpc.CallOption) (*HeartbeatLocksResponse, error)
 	ReleaseLock(ctx context.Context, in *ReleaseLockRequest, opts ...grpc.CallOption) (*ReleaseLockResponse, error)
+	HeartbeatLocks(ctx context.Context, in *HeartbeatLocksRequest, opts ...grpc.CallOption) (*HeartbeatLocksResponse, error)
 }
 
 type locksClient struct {
@@ -50,18 +50,18 @@ func (c *locksClient) AcquireLock(ctx context.Context, in *AcquireLockRequest, o
 	return out, nil
 }
 
-func (c *locksClient) HeartbeatLocks(ctx context.Context, in *HeartbeatLocksRequest, opts ...grpc.CallOption) (*HeartbeatLocksResponse, error) {
-	out := new(HeartbeatLocksResponse)
-	err := c.cc.Invoke(ctx, Locks_HeartbeatLocks_FullMethodName, in, out, opts...)
+func (c *locksClient) ReleaseLock(ctx context.Context, in *ReleaseLockRequest, opts ...grpc.CallOption) (*ReleaseLockResponse, error) {
+	out := new(ReleaseLockResponse)
+	err := c.cc.Invoke(ctx, Locks_ReleaseLock_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *locksClient) ReleaseLock(ctx context.Context, in *ReleaseLockRequest, opts ...grpc.CallOption) (*ReleaseLockResponse, error) {
-	out := new(ReleaseLockResponse)
-	err := c.cc.Invoke(ctx, Locks_ReleaseLock_FullMethodName, in, out, opts...)
+func (c *locksClient) HeartbeatLocks(ctx context.Context, in *HeartbeatLocksRequest, opts ...grpc.CallOption) (*HeartbeatLocksResponse, error) {
+	out := new(HeartbeatLocksResponse)
+	err := c.cc.Invoke(ctx, Locks_HeartbeatLocks_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +73,8 @@ func (c *locksClient) ReleaseLock(ctx context.Context, in *ReleaseLockRequest, o
 // for forward compatibility
 type LocksServer interface {
 	AcquireLock(context.Context, *AcquireLockRequest) (*AcquireLockResponse, error)
-	HeartbeatLocks(context.Context, *HeartbeatLocksRequest) (*HeartbeatLocksResponse, error)
 	ReleaseLock(context.Context, *ReleaseLockRequest) (*ReleaseLockResponse, error)
+	HeartbeatLocks(context.Context, *HeartbeatLocksRequest) (*HeartbeatLocksResponse, error)
 	mustEmbedUnimplementedLocksServer()
 }
 
@@ -85,11 +85,11 @@ type UnimplementedLocksServer struct {
 func (UnimplementedLocksServer) AcquireLock(context.Context, *AcquireLockRequest) (*AcquireLockResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AcquireLock not implemented")
 }
-func (UnimplementedLocksServer) HeartbeatLocks(context.Context, *HeartbeatLocksRequest) (*HeartbeatLocksResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method HeartbeatLocks not implemented")
-}
 func (UnimplementedLocksServer) ReleaseLock(context.Context, *ReleaseLockRequest) (*ReleaseLockResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseLock not implemented")
+}
+func (UnimplementedLocksServer) HeartbeatLocks(context.Context, *HeartbeatLocksRequest) (*HeartbeatLocksResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HeartbeatLocks not implemented")
 }
 func (UnimplementedLocksServer) mustEmbedUnimplementedLocksServer() {}
 
@@ -122,24 +122,6 @@ func _Locks_AcquireLock_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Locks_HeartbeatLocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HeartbeatLocksRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(LocksServer).HeartbeatLocks(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Locks_HeartbeatLocks_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(LocksServer).HeartbeatLocks(ctx, req.(*HeartbeatLocksRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Locks_ReleaseLock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReleaseLockRequest)
 	if err := dec(in); err != nil {
@@ -158,6 +140,24 @@ func _Locks_ReleaseLock_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Locks_HeartbeatLocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HeartbeatLocksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(LocksServer).HeartbeatLocks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Locks_HeartbeatLocks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(LocksServer).HeartbeatLocks(ctx, req.(*HeartbeatLocksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Locks_ServiceDesc is the grpc.ServiceDesc for Locks service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -170,14 +170,14 @@ var Locks_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Locks_AcquireLock_Handler,
 		},
 		{
-			MethodName: "HeartbeatLocks",
-			Handler:    _Locks_HeartbeatLocks_Handler,
-		},
-		{
 			MethodName: "ReleaseLock",
 			Handler:    _Locks_ReleaseLock_Handler,
 		},
+		{
+			MethodName: "HeartbeatLocks",
+			Handler:    _Locks_HeartbeatLocks_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/app/subsystems/api/grpc/api/lock.proto",
+	Metadata: "internal/app/subsystems/api/grpc/pb/lock.proto",
 }

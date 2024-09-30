@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.23.3
-// source: internal/app/subsystems/api/grpc/api/task.proto
+// source: internal/app/subsystems/api/grpc/pb/task.proto
 
-package api
+package pb
 
 import (
 	context "context"
@@ -179,5 +179,5 @@ var Tasks_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/app/subsystems/api/grpc/api/task.proto",
+	Metadata: "internal/app/subsystems/api/grpc/pb/task.proto",
 }

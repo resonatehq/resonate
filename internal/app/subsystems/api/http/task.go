@@ -110,7 +110,7 @@ type completeTaskHeader struct {
 
 type completeTaskBody struct {
 	Id      string `json:"id" binding:"required"`
-	Counter int    `json:"counter"`
+	Counter int    `json:"counter" binding:"required"`
 }
 
 func (s *server) completeTask(c *gin.Context) {

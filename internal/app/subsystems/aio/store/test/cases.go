@@ -57,18 +57,18 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 				}
 			case t_aio.ReadSchedule:
 				for _, record := range result.ReadSchedule.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			case t_aio.ReadSchedules:
 				for _, record := range result.ReadSchedules.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			case t_aio.SearchSchedules:
 				for _, record := range result.SearchSchedules.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			}
 		}
