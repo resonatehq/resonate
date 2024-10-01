@@ -123,6 +123,11 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 		tags = map[string]string{}
 	}
 
+	// set default limit
+	if limit == 0 {
+		limit = 100
+	}
+
 	// validate limit
 	if limit < 1 || limit > 100 {
 		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))

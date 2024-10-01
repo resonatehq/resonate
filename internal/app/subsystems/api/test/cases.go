@@ -457,13 +457,56 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		Name: "SearchPromisesInvalidLimit",
+		Name: "SearchPromisesDefaultLimit",
+		Req: &t_api.Request{
+			Kind: t_api.SearchPromises,
+			Tags: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "SearchPromises"},
+			SearchPromises: &t_api.SearchPromisesRequest{
+				Id: "*",
+				States: []promise.State{
+					promise.Pending,
+					promise.Resolved,
+					promise.Rejected,
+					promise.Timedout,
+					promise.Canceled,
+				},
+				Tags:  map[string]string{},
+				Limit: 100,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.SearchPromises,
+			SearchPromises: &t_api.SearchPromisesResponse{
+				Status:   t_api.StatusOK,
+				Promises: []*promise.Promise{},
+				Cursor:   nil,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method:  "GET",
+				Path:    "promises?id=*",
+				Headers: map[string]string{"Request-Id": "SearchPromisesDefaultLimit"},
+			},
+			Res: &httpTestCaseResponse{
+				Code: 200,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.SearchPromisesRequest{
+				Id:        "*",
+				RequestId: "SearchPromisesDefaultLimit",
+			},
+		},
+	},
+	{
+		Name: "SearchPromisesInvalidLimitLower",
 		Req:  nil,
 		Res:  nil,
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "GET",
-				Path:   "promises?id=*&limit=0",
+				Path:   "promises?id=*&limit=-1",
 			},
 			Res: &httpTestCaseResponse{
 				Code: 400,
@@ -472,13 +515,13 @@ var TestCases = []*testCase{
 		Grpc: &grpcTestCase{
 			Req: &pb.SearchPromisesRequest{
 				Id:    "*",
-				Limit: 0,
+				Limit: -1,
 			},
 			Code: codes.InvalidArgument,
 		},
 	},
 	{
-		Name: "SearchPromisesInvalidLimit",
+		Name: "SearchPromisesInvalidLimitUpper",
 		Req:  nil,
 		Res:  nil,
 		Http: &httpTestCase{
