@@ -13,10 +13,10 @@ func (s *server) AcquireLock(c context.Context, r *pb.AcquireLockRequest) (*pb.A
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.AcquireLock,
 		AcquireLock: &t_api.AcquireLockRequest{
-			ResourceId:           r.ResourceId,
-			ExecutionId:          r.ExecutionId,
-			ProcessId:            r.ProcessId,
-			ExpiryInMilliseconds: r.ExpiryInMilliseconds,
+			ResourceId:  r.ResourceId,
+			ExecutionId: r.ExecutionId,
+			ProcessId:   r.ProcessId,
+			Ttl:         r.Ttl,
 		},
 	})
 	if err != nil {

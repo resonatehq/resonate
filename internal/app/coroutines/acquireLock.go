@@ -11,7 +11,7 @@ import (
 )
 
 func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	expiresAt := c.Time() + r.AcquireLock.ExpiryInMilliseconds
+	expiresAt := c.Time() + r.AcquireLock.Ttl
 
 	// Try to acquire lock, update lock if already acquired by the same execution id
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -23,11 +23,11 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					{
 						Kind: t_aio.AcquireLock,
 						AcquireLock: &t_aio.AcquireLockCommand{
-							ResourceId:           r.AcquireLock.ResourceId,
-							ExecutionId:          r.AcquireLock.ExecutionId,
-							ProcessId:            r.AcquireLock.ProcessId,
-							ExpiryInMilliseconds: r.AcquireLock.ExpiryInMilliseconds,
-							Timeout:              expiresAt,
+							ResourceId:  r.AcquireLock.ResourceId,
+							ExecutionId: r.AcquireLock.ExecutionId,
+							ProcessId:   r.AcquireLock.ProcessId,
+							Ttl:         r.AcquireLock.Ttl,
+							ExpiresAt:   expiresAt,
 						},
 					},
 				},
@@ -60,11 +60,11 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			AcquireLock: &t_api.AcquireLockResponse{
 				Status: t_api.StatusCreated,
 				Lock: &lock.Lock{
-					ResourceId:           r.AcquireLock.ResourceId,
-					ExecutionId:          r.AcquireLock.ExecutionId,
-					ProcessId:            r.AcquireLock.ProcessId,
-					ExpiryInMilliseconds: r.AcquireLock.ExpiryInMilliseconds,
-					ExpiresAt:            expiresAt,
+					ResourceId:  r.AcquireLock.ResourceId,
+					ExecutionId: r.AcquireLock.ExecutionId,
+					ProcessId:   r.AcquireLock.ProcessId,
+					Ttl:         r.AcquireLock.Ttl,
+					ExpiresAt:   expiresAt,
 				},
 			},
 		}

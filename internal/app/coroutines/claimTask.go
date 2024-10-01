@@ -16,7 +16,7 @@ import (
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
-	util.Assert(r.ClaimTask.Frequency > 0, "frequency must be greater than 0")
+	util.Assert(r.ClaimTask.Ttl > 0, "ttl must be greater than 0")
 
 	config, ok := c.Get("config").(*system.Config)
 	if !ok {
@@ -67,7 +67,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		} else if t.Counter != r.ClaimTask.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
-			expiration := c.Time() + int64(r.ClaimTask.Frequency)
+			expiresAt := c.Time() + int64(r.ClaimTask.Ttl)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -82,8 +82,8 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 									State:          task.Claimed,
 									Counter:        r.ClaimTask.Counter,
 									Attempt:        t.Attempt,
-									Frequency:      r.ClaimTask.Frequency,
-									Expiration:     expiration, // time to expire unless heartbeated
+									Ttl:            r.ClaimTask.Ttl,
+									ExpiresAt:      expiresAt, // time to expire unless heartbeated
 									CurrentStates:  []task.State{task.Init, task.Enqueued},
 									CurrentCounter: r.ClaimTask.Counter,
 								},
@@ -161,8 +161,8 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 				// update task
 				t.ProcessId = &r.ClaimTask.ProcessId
 				t.State = task.Claimed
-				t.Frequency = r.ClaimTask.Frequency
-				t.Expiration = expiration
+				t.Ttl = r.ClaimTask.Ttl
+				t.ExpiresAt = expiresAt
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to claim. In that case, we should just retry.

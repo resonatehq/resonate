@@ -14,10 +14,10 @@ type acquireLockHeader struct {
 }
 
 type acquireLockBody struct {
-	ResourceId           string `json:"resourceId" binding:"required"`
-	ExecutionId          string `json:"executionId" binding:"required"`
-	ProcessId            string `json:"processId" binding:"required"`
-	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds" binding:"required"`
+	ResourceId  string `json:"resourceId" binding:"required"`
+	ExecutionId string `json:"executionId" binding:"required"`
+	ProcessId   string `json:"processId" binding:"required"`
+	Ttl         int64  `json:"ttl" binding:"required"`
 }
 
 func (s *server) acquireLock(c *gin.Context) {
@@ -38,10 +38,10 @@ func (s *server) acquireLock(c *gin.Context) {
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Kind: t_api.AcquireLock,
 		AcquireLock: &t_api.AcquireLockRequest{
-			ResourceId:           body.ResourceId,
-			ExecutionId:          body.ExecutionId,
-			ProcessId:            body.ProcessId,
-			ExpiryInMilliseconds: body.ExpiryInMilliseconds,
+			ResourceId:  body.ResourceId,
+			ExecutionId: body.ExecutionId,
+			ProcessId:   body.ProcessId,
+			Ttl:         body.Ttl,
 		},
 	})
 	if err != nil {

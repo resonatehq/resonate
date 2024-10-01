@@ -27,14 +27,14 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	return createPromiseAndTaskOrCallback(c, r, r.CreatePromiseAndTask.Promise, &t_aio.Command{
 		Kind: t_aio.CreateTask,
 		CreateTask: &t_aio.CreateTaskCommand{
-			Recv:       r.CreatePromiseAndTask.Task.Recv,
-			Mesg:       &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
-			Timeout:    r.CreatePromiseAndTask.Task.Timeout,
-			ProcessId:  &r.CreatePromiseAndTask.Task.ProcessId,
-			State:      task.Claimed,
-			Frequency:  r.CreatePromiseAndTask.Task.Frequency,
-			Expiration: c.Time() + int64(r.CreatePromiseAndTask.Task.Frequency),
-			CreatedOn:  c.Time(),
+			Recv:      r.CreatePromiseAndTask.Task.Recv,
+			Mesg:      &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
+			Timeout:   r.CreatePromiseAndTask.Task.Timeout,
+			ProcessId: &r.CreatePromiseAndTask.Task.ProcessId,
+			State:     task.Claimed,
+			Ttl:       r.CreatePromiseAndTask.Task.Ttl,
+			ExpiresAt: c.Time() + int64(r.CreatePromiseAndTask.Task.Ttl),
+			CreatedOn: c.Time(),
 		},
 	})
 }
@@ -142,17 +142,17 @@ func createPromiseAndTaskOrCallback(
 			cmd := additionalCmds[0].CreateTask
 
 			t = &task.Task{
-				Id:         completion.Store.Results[1].CreateTask.LastInsertId,
-				ProcessId:  cmd.ProcessId,
-				State:      cmd.State,
-				Recv:       cmd.Recv,
-				Mesg:       cmd.Mesg,
-				Timeout:    cmd.Timeout,
-				Counter:    0,
-				Attempt:    0,
-				Frequency:  cmd.Frequency,
-				Expiration: cmd.Expiration,
-				CreatedOn:  &cmd.CreatedOn,
+				Id:        completion.Store.Results[1].CreateTask.LastInsertId,
+				ProcessId: cmd.ProcessId,
+				State:     cmd.State,
+				Recv:      cmd.Recv,
+				Mesg:      cmd.Mesg,
+				Timeout:   cmd.Timeout,
+				Counter:   0,
+				Attempt:   0,
+				Ttl:       cmd.Ttl,
+				ExpiresAt: cmd.ExpiresAt,
+				CreatedOn: &cmd.CreatedOn,
 			}
 		case t_api.CreatePromiseAndCallback:
 			util.Assert(additionalCmds[0].Kind == t_aio.CreateCallback, "command must be create callback")

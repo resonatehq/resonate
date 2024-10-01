@@ -17,15 +17,15 @@ type Task struct {
 	Recv        json.RawMessage `json:"-"`
 	Mesg        *message.Mesg   `json:"-"`
 	Attempt     int             `json:"-"`
-	Frequency   int             `json:"-"`
-	Expiration  int64           `json:"-"`
+	Ttl         int             `json:"-"`
+	ExpiresAt   int64           `json:"-"`
 	CreatedOn   *int64          `json:"createdOn,omitempty"`
 	CompletedOn *int64          `json:"completedOn,omitempty"`
 }
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%s, processId=%s, state=%s, recv=%s, mesg=%v, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d, createdOn=%d, completedOn=%d)",
+		"Task(id=%s, processId=%s, state=%s, recv=%s, mesg=%v, timeout=%d, counter=%d, attempt=%d, ttl=%d, expiresAt=%d, createdOn=%d, completedOn=%d)",
 		t.Id,
 		util.SafeDeref(t.ProcessId),
 		t.State,
@@ -34,8 +34,8 @@ func (t *Task) String() string {
 		t.Timeout,
 		t.Counter,
 		t.Attempt,
-		t.Frequency,
-		t.Expiration,
+		t.Ttl,
+		t.ExpiresAt,
 		util.SafeDeref(t.CreatedOn),
 		util.SafeDeref(t.CompletedOn),
 	)

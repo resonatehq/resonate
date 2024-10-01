@@ -697,7 +697,7 @@ var TestCases = []*testCase{
 				Task: &t_api.CreateTaskRequest{
 					PromiseId: "foo",
 					ProcessId: "bar",
-					Frequency: 2,
+					Ttl:       2,
 					Timeout:   1,
 					Recv:      []byte(`"baz"`),
 				},
@@ -725,7 +725,7 @@ var TestCases = []*testCase{
 				},
 				Body: []byte(`{
 					"promise": {"id": "foo", "timeout": 1},
-					"task": {"processId": "bar", "frequency": 2, "recv": "baz"}
+					"task": {"processId": "bar", "ttl": 2, "recv": "baz"}
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -741,7 +741,7 @@ var TestCases = []*testCase{
 				},
 				Task: &pb.CreatePromiseTaskRequest{
 					ProcessId: "bar",
-					Frequency: 2,
+					Ttl:       2,
 					Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "baz"}},
 				},
 			},
@@ -1854,10 +1854,10 @@ var TestCases = []*testCase{
 			Kind: t_api.AcquireLock,
 			Tags: map[string]string{"id": "AcquireLock", "name": "AcquireLock"},
 			AcquireLock: &t_api.AcquireLockRequest{
-				ResourceId:           "foo",
-				ProcessId:            "bar",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 1,
+				ResourceId:  "foo",
+				ProcessId:   "bar",
+				ExecutionId: "baz",
+				Ttl:         1,
 			},
 		},
 		Res: &t_api.Response{
@@ -1865,10 +1865,10 @@ var TestCases = []*testCase{
 			AcquireLock: &t_api.AcquireLockResponse{
 				Status: t_api.StatusCreated,
 				Lock: &lock.Lock{
-					ResourceId:           "foo",
-					ProcessId:            "bar",
-					ExecutionId:          "baz",
-					ExpiryInMilliseconds: 1,
+					ResourceId:  "foo",
+					ProcessId:   "bar",
+					ExecutionId: "baz",
+					Ttl:         1,
 				},
 			},
 		},
@@ -1883,7 +1883,7 @@ var TestCases = []*testCase{
 					"resourceId": "foo",
 					"processId": "bar",
 					"executionId": "baz",
-					"expiryInMilliseconds": 1
+					"ttl": 1
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -1892,11 +1892,11 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.AcquireLockRequest{
-				RequestId:            "AcquireLock",
-				ResourceId:           "foo",
-				ProcessId:            "bar",
-				ExecutionId:          "baz",
-				ExpiryInMilliseconds: 1,
+				RequestId:   "AcquireLock",
+				ResourceId:  "foo",
+				ProcessId:   "bar",
+				ExecutionId: "baz",
+				Ttl:         1,
 			},
 		},
 	},
@@ -1989,7 +1989,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 			},
 		},
 		Res: &t_api.Response{
@@ -2010,7 +2010,7 @@ var TestCases = []*testCase{
 					"id": "foo",
 					"counter": 1,
 					"processId": "bar",
-					"frequency": 1
+					"ttl": 1
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -2022,7 +2022,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 				RequestId: "ClaimTask",
 			},
 		},
@@ -2036,7 +2036,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "foo/1", // default process id for get endpoint
-				Frequency: 60000,
+				Ttl:       60000,
 			},
 		},
 		Res: &t_api.Response{
@@ -2063,7 +2063,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "foo/1",
-				Frequency: 60000,
+				Ttl:       60000,
 				RequestId: "ClaimTaskGet",
 			},
 		},
@@ -2077,7 +2077,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 			},
 		},
 		Res: &t_api.Response{
@@ -2100,7 +2100,7 @@ var TestCases = []*testCase{
 					"id": "foo",
 					"counter": 1,
 					"processId": "bar",
-					"frequency": 1
+					"ttl": 1
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -2118,7 +2118,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 				RequestId: "ClaimTaskInvoke",
 			},
 			Res: &pb.ClaimTaskResponse{
@@ -2149,7 +2149,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   2,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 			},
 		},
 		Res: &t_api.Response{
@@ -2174,7 +2174,7 @@ var TestCases = []*testCase{
 					"id": "foo",
 					"processId": "bar",
 					"counter": 2,
-					"frequency": 1
+					"ttl": 1
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -2193,7 +2193,7 @@ var TestCases = []*testCase{
 				Id:        "foo",
 				Counter:   2,
 				ProcessId: "bar",
-				Frequency: 1,
+				Ttl:       1,
 				RequestId: "ClaimTaskResume",
 			},
 			Res: &pb.ClaimTaskResponse{

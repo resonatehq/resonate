@@ -3,20 +3,20 @@ package lock
 import "fmt"
 
 type Lock struct {
-	ResourceId           string `json:"resourceId"`
-	ExecutionId          string `json:"executionId"`
-	ProcessId            string `json:"processId"`
-	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
-	ExpiresAt            int64  `json:"expiresAt"`
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
+	ProcessId   string `json:"processId"`
+	Ttl         int64  `json:"ttl"`
+	ExpiresAt   int64  `json:"expiresAt"`
 }
 
 func (l *Lock) String() string {
 	return fmt.Sprintf(
-		"Lock(resourceId=%s, executionId=%s, processId=%s, expiryInMilliseconds=%d, expiresAt=%d)",
+		"Lock(resourceId=%s, executionId=%s, processId=%s, ttl=%d, expiresAt=%d)",
 		l.ResourceId,
 		l.ExecutionId,
 		l.ProcessId,
-		l.ExpiryInMilliseconds,
+		l.Ttl,
 		l.ExpiresAt,
 	)
 }

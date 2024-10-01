@@ -147,7 +147,7 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: r.Promise.Id,
 				ProcessId: r.Task.ProcessId,
-				Frequency: int(r.Task.Frequency),
+				Ttl:       int(r.Task.Ttl),
 				Timeout:   r.Promise.Timeout,
 				Recv:      recv,
 			},

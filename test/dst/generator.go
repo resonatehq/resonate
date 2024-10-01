@@ -193,7 +193,7 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: req.CreatePromise.Id,
 				ProcessId: req.CreatePromise.Id,
-				Frequency: RangeIntn(r, 1000, 5000),
+				Ttl:       RangeIntn(r, 1000, 5000),
 				Timeout:   req.CreatePromise.Timeout,
 				Recv:      []byte(`"dst"`),
 			},
@@ -334,15 +334,15 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	resourceId := g.idSet[r.Intn(len(g.idSet))]
 	executionId := g.idSet[r.Intn(len(g.idSet))]
 	processId := g.idSet[r.Intn(len(g.idSet))]
-	expiryInMilliseconds := RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
+	ttl := RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
 
 	return &t_api.Request{
 		Kind: t_api.AcquireLock,
 		AcquireLock: &t_api.AcquireLockRequest{
-			ResourceId:           resourceId,
-			ExecutionId:          executionId,
-			ProcessId:            processId,
-			ExpiryInMilliseconds: expiryInMilliseconds,
+			ResourceId:  resourceId,
+			ExecutionId: executionId,
+			ProcessId:   processId,
+			Ttl:         ttl,
 		},
 	}
 }
@@ -444,7 +444,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 					Id:        id,
 					ProcessId: pid,
 					Counter:   counter,
-					Frequency: RangeIntn(r, 1000, 5000),
+					Ttl:       RangeIntn(r, 1000, 5000),
 				},
 			})
 		case 1:

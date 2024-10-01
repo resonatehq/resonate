@@ -17,7 +17,7 @@ func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.Claim
 			Id:        r.Id,
 			ProcessId: r.ProcessId,
 			Counter:   int(r.Counter),
-			Frequency: int(r.Frequency),
+			Ttl:       int(r.Ttl),
 		},
 	})
 	if err != nil {

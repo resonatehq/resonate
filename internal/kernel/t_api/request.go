@@ -181,14 +181,14 @@ func (r *DeleteScheduleRequest) String() string {
 // Locks
 
 type AcquireLockRequest struct {
-	ResourceId           string `json:"resourceId"`
-	ExecutionId          string `json:"executionId"`
-	ProcessId            string `json:"processId"`
-	ExpiryInMilliseconds int64  `json:"expiryInMilliseconds"`
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
+	ProcessId   string `json:"processId"`
+	Ttl         int64  `json:"ttl"`
 }
 
 func (r *AcquireLockRequest) String() string {
-	return fmt.Sprintf("AcquireLock(resourceId=%s, executionId=%s, processId=%s, expiryInMilliseconds=%d)", r.ResourceId, r.ExecutionId, r.ProcessId, r.ExpiryInMilliseconds)
+	return fmt.Sprintf("AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d)", r.ResourceId, r.ExecutionId, r.ProcessId, r.Ttl)
 }
 
 type ReleaseLockRequest struct {
@@ -213,24 +213,24 @@ func (r *HeartbeatLocksRequest) String() string {
 type CreateTaskRequest struct {
 	PromiseId string          `json:"promiseId"`
 	ProcessId string          `json:"processId"`
-	Frequency int             `json:"frequency"`
+	Ttl       int             `json:"ttl"`
 	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv"`
 }
 
 func (r *CreateTaskRequest) String() string {
-	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, frequency=%d, timeout=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Frequency, r.Timeout, r.Recv)
+	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, ttl=%d, timeout=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Ttl, r.Timeout, r.Recv)
 }
 
 type ClaimTaskRequest struct {
 	Id        string `json:"id"`
 	Counter   int    `json:"counter"`
 	ProcessId string `json:"processId"`
-	Frequency int    `json:"frequency"`
+	Ttl       int    `json:"ttl"`
 }
 
 func (r *ClaimTaskRequest) String() string {
-	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, frequency=%d)", r.Id, r.Counter, r.ProcessId, r.Frequency)
+	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, ttl=%d)", r.Id, r.Counter, r.ProcessId, r.Ttl)
 }
 
 type CompleteTaskRequest struct {
