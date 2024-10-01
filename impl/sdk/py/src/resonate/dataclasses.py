@@ -68,9 +68,6 @@ class CoroAndPromise(Generic[T]):
     ) -> None:
         self.route_info = route_info
         self.coro = coro
-        self.prom = route_info.promise
-        self.ctx = route_info.ctx
-        self.children_promises: list[Promise[Any]] = []
 
 
 @dataclass(frozen=True)

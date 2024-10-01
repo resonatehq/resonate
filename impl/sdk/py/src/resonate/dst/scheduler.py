@@ -63,6 +63,7 @@ if TYPE_CHECKING:
         DurableFn,
         EphemeralPromiseMemo,
         MockFn,
+        PromiseActions,
         RunnableCoroutines,
     )
 
@@ -290,7 +291,7 @@ class DSTScheduler:
         self._events.append(
             ExecutionInvoked(
                 info.promise.promise_id,
-                info.ctx.parent_promise_id(),
+                info.promise.parent_promise_id(),
                 self.tick,
                 info.fn_or_coroutine.exec_unit.__name__,
                 info.fn_or_coroutine.args,
@@ -298,12 +299,25 @@ class DSTScheduler:
             )
         )
 
-    def _create_promise(self, ctx: Context, action: Invocation | Sleep) -> Promise[Any]:
-        p = Promise[Any](ctx.ctx_id, action)
+    def _create_promise(
+        self,
+        parent_promise: Promise[Any] | None,
+        promise_id: str | None,
+        action: PromiseActions,
+    ) -> Promise[Any]:
+        if parent_promise is not None:
+            p = parent_promise.child_promise(promise_id=promise_id, action=action)
+        else:
+            assert (
+                promise_id is not None
+            ), "If creating a root promise must provide a promise id."
+            p = Promise[Any](
+                promise_id=promise_id, action=action, parent_promise=parent_promise
+            )
         assert (
             p.promise_id not in self._emphemeral_promise_memo
         ), "There should not be a new promise with same promise id."
-        self._emphemeral_promise_memo[p.promise_id] = (p, ctx)
+        self._emphemeral_promise_memo[p.promise_id] = p
         if isinstance(action, Invocation):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -311,7 +325,9 @@ class DSTScheduler:
                 data = action.exec_unit.json_data()
             else:
                 assert_never(action.exec_unit)
-        elif isinstance(action, Sleep):
+        elif isinstance(action, DeferredInvocation):
+            data = action.coro.json_data()
+        elif isinstance(action, (Sleep, All, AllSettled, Race)):
             raise NotImplementedError
         else:
             assert_never(action)
@@ -321,7 +337,7 @@ class DSTScheduler:
                 PromiseCreated(
                     promise_id=p.promise_id,
                     tick=self.tick,
-                    parent_promise_id=ctx.parent_promise_id(),
+                    parent_promise_id=p.parent_promise_id(),
                 )
             )
             return p
@@ -333,7 +349,7 @@ class DSTScheduler:
             PromiseCreated(
                 promise_id=p.promise_id,
                 tick=self.tick,
-                parent_promise_id=ctx.parent_promise_id(),
+                parent_promise_id=p.parent_promise_id(),
             )
         )
         if durable_promise_record.is_pending():
@@ -372,12 +388,14 @@ class DSTScheduler:
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
         root_ctx = Context(
-            ctx_id=promise_id,
             seed=self.seed,
-            parent_ctx=None,
             deps=self.deps,
         )
-        p = self._create_promise(root_ctx, top_lvl)
+        p = self._create_promise(
+            parent_promise=None,
+            promise_id=promise_id,
+            action=top_lvl,
+        )
         assert p.durable, "Top level invocations must be durable"
         if p.done():
             self._unblock_coros_waiting_on_promise(p)
@@ -451,12 +469,10 @@ class DSTScheduler:
                 promise_id=promise.promise_id,
                 tick=self.tick,
                 value=value,
-                parent_promise_id=self._get_ctx_from_ephemeral_memo(
-                    promise.promise_id,
-                    and_delete=True,
-                ).parent_promise_id(),
+                parent_promise_id=promise.parent_promise_id(),
             )
         )
+        self._emphemeral_promise_memo.pop(promise.promise_id)
 
     def _maybe_fail(self) -> None:
         if (
@@ -505,7 +521,7 @@ class DSTScheduler:
                     ExecutionTerminated(
                         promise_id=promise.promise_id,
                         tick=self.tick,
-                        parent_promise_id=fn_wrapper.ctx.parent_promise_id(),
+                        parent_promise_id=promise.parent_promise_id(),
                     )
                 )
 
@@ -557,20 +573,14 @@ class DSTScheduler:
             tags=None,
         )
 
-    def _get_ctx_from_ephemeral_memo(
-        self, promise_id: str, *, and_delete: bool
-    ) -> Context:
-        if and_delete:
-            return self._emphemeral_promise_memo.pop(promise_id)[-1]
-        return self._emphemeral_promise_memo[promise_id][-1]
-
     def _process_invocation(
         self, invokation: Invocation, runnable: Runnable[Any]
     ) -> Promise[Any]:
-        child_ctx = runnable.coro_and_promise.ctx.new_child(
-            ctx_id=invokation.opts.promise_id
+        p = self._create_promise(
+            parent_promise=runnable.coro_and_promise.route_info.promise,
+            promise_id=invokation.opts.promise_id,
+            action=invokation,
         )
-        p = self._create_promise(child_ctx, invokation)
         if isinstance(invokation.exec_unit, Command):
             self._handler_queues[type(invokation.exec_unit)].append(
                 (p, invokation.exec_unit)
@@ -580,7 +590,12 @@ class DSTScheduler:
                 self._unblock_coros_waiting_on_promise(p)
             else:
                 self._route_fn_or_coroutine(
-                    RouteInfo(child_ctx, p, invokation.exec_unit, 0)
+                    RouteInfo(
+                        runnable.coro_and_promise.route_info.ctx,
+                        p,
+                        invokation.exec_unit,
+                        0,
+                    )
                 )
         else:
             assert_never(invokation.exec_unit)
@@ -595,9 +610,9 @@ class DSTScheduler:
         self._awatiables.setdefault(p, []).append(coro_and_promise)
         self._events.append(
             ExecutionAwaited(
-                promise_id=coro_and_promise.prom.promise_id,
+                promise_id=coro_and_promise.route_info.promise.promise_id,
                 tick=self.tick,
-                parent_promise_id=coro_and_promise.ctx.parent_promise_id(),
+                parent_promise_id=coro_and_promise.route_info.promise.parent_promise_id(),
             )
         )
 
@@ -613,24 +628,26 @@ class DSTScheduler:
         if was_awaited:
             self._events.append(
                 ExecutionResumed(
-                    promise_id=runnable.coro_and_promise.prom.promise_id,
+                    promise_id=runnable.coro_and_promise.route_info.promise.promise_id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro_and_promise.ctx.parent_promise_id(),
+                    parent_promise_id=runnable.coro_and_promise.route_info.promise.parent_promise_id(),
                 )
             )
 
         if isinstance(yieldable_or_final_value, FinalValue):
             self._events.append(
                 ExecutionTerminated(
-                    promise_id=runnable.coro_and_promise.prom.promise_id,
+                    promise_id=runnable.coro_and_promise.route_info.promise.promise_id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro_and_promise.ctx.parent_promise_id(),
+                    parent_promise_id=runnable.coro_and_promise.route_info.promise.parent_promise_id(),
                 )
             )
             self._resolve_promise(
-                runnable.coro_and_promise.prom, yieldable_or_final_value.v
+                runnable.coro_and_promise.route_info.promise, yieldable_or_final_value.v
             )
-            self._unblock_coros_waiting_on_promise(p=runnable.coro_and_promise.prom)
+            self._unblock_coros_waiting_on_promise(
+                p=runnable.coro_and_promise.route_info.promise
+            )
         elif isinstance(yieldable_or_final_value, Call):
             p = self._process_invocation(
                 yieldable_or_final_value.to_invocation(), runnable

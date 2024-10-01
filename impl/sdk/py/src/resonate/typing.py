@@ -35,6 +35,7 @@ Yieldable: TypeAlias = Union[
     Sleep,
     DeferredInvocation,
 ]
+PromiseActions: TypeAlias = Union[Combinator, Invocation, Sleep, DeferredInvocation]
 
 DurableCoro: TypeAlias = Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]]
 DurableSyncFn: TypeAlias = Callable[Concatenate[Context, P], T]
@@ -65,4 +66,4 @@ State: TypeAlias = Literal[
     "PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"
 ]
 
-EphemeralPromiseMemo: TypeAlias = dict[str, tuple[Promise[Any], Context]]
+EphemeralPromiseMemo: TypeAlias = dict[str, Promise[Any]]

@@ -5,11 +5,18 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
-from resonate.actions import All, AllSettled, Invocation, Race, Sleep
+from resonate.actions import (
+    All,
+    AllSettled,
+    DeferredInvocation,
+    Invocation,
+    Race,
+    Sleep,
+)
 from resonate.result import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from resonate.typing import Combinator
+    from resonate.typing import PromiseActions
 
 T = TypeVar("T")
 
@@ -19,12 +26,19 @@ class Promise(Generic[T]):
     def __init__(
         self,
         promise_id: str,
-        action: Invocation | Sleep | Combinator,
+        action: PromiseActions,
+        parent_promise: Promise[Any] | None,
     ) -> None:
         self.promise_id = promise_id
         self.f = Future[T]()
+
+        self._num_children = 0
+
+        self.parent_promise = parent_promise
+        self.children_promises: list[Promise[Any]] = []
+
         self.action = action
-        if isinstance(action, (Invocation, All, AllSettled, Race)):
+        if isinstance(action, (DeferredInvocation, Invocation, All, AllSettled, Race)):
             self.durable = action.opts.durable
         elif isinstance(action, Sleep):
             raise NotImplementedError
@@ -65,6 +79,28 @@ class Promise(Generic[T]):
 
     def failure(self) -> bool:
         return not self.success()
+
+    def parent_promise_id(self) -> str | None:
+        return (
+            self.parent_promise.promise_id if self.parent_promise is not None else None
+        )
+
+    def child_promise(
+        self,
+        promise_id: str | None,
+        action: PromiseActions,
+    ) -> Promise[Any]:
+        self._num_children += 1
+        if promise_id is None:
+            promise_id = f"{self.promise_id}.{self._num_children}"
+        child = Promise[Any](
+            promise_id=promise_id,
+            action=action,
+            parent_promise=self,
+        )
+        self.children_promises.append(child)
+
+        return child
 
 
 def all_promises_are_done(promises: list[Promise[Any]]) -> bool:

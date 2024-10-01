@@ -45,30 +45,11 @@ def _wrap_into_execution_unit(
 class Context:
     def __init__(
         self,
-        ctx_id: str,
         seed: int | None,
-        parent_ctx: Context | None = None,
         deps: Dependencies | None = None,
     ) -> None:
-        self.ctx_id = ctx_id
         self.seed = seed
-        self.parent_ctx = parent_ctx
         self.deps = deps if deps is not None else Dependencies()
-        self._num_children = 0
-
-    def parent_promise_id(self) -> str | None:
-        return self.parent_ctx.ctx_id if self.parent_ctx is not None else None
-
-    def new_child(self, ctx_id: str | None) -> Context:
-        self._num_children += 1
-        if ctx_id is None:
-            ctx_id = f"{self.ctx_id}.{self._num_children}"
-        return Context(
-            seed=self.seed,
-            parent_ctx=self,
-            deps=self.deps,
-            ctx_id=ctx_id,
-        )
 
     def assert_statement(self, stmt: bool, msg: str) -> None:  # noqa: FBT001
         if self.seed is None:
