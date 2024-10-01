@@ -184,11 +184,12 @@ func TestPollPlugin(t *testing.T) {
 					t.Fatal(err)
 				}
 
+				reader := bufio.NewReader(res.Body)
+				defer res.Body.Close()
+
 				go func() {
-					defer res.Body.Close()
 					defer disconnected.Done()
 
-					reader := bufio.NewReader(res.Body)
 					for {
 						// read each SSE message
 						data, err := reader.ReadBytes('\n')
@@ -216,7 +217,7 @@ func TestPollPlugin(t *testing.T) {
 			for _, c := range poll.worker.connections.conns {
 				ac = ac + len(c)
 			}
-			assert.Equal(t, poll.worker.connections.len, ac)
+			assert.Equal(t, ac, poll.worker.connections.len)
 
 			// assert max connections is not exceeded
 			assert.LessOrEqual(t, ac, config.MaxConnections)
@@ -225,7 +226,7 @@ func TestPollPlugin(t *testing.T) {
 			uc := unique(tc.connections)
 
 			// assert ac is equal to min of uc/mc
-			assert.Equal(t, ac, min(uc, config.MaxConnections))
+			assert.Equal(t, min(uc, config.MaxConnections), ac)
 
 			// send messages
 			for _, mesg := range tc.messages {
