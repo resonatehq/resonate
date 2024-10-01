@@ -560,7 +560,7 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
-		if req.ClaimTask.Counter == t.Counter && t.Expiration >= resTime {
+		if req.ClaimTask.Counter == t.Counter && t.ExpiresAt >= resTime {
 			return model, fmt.Errorf("task '%s' counter match (%d == %d)", req.ClaimTask.Id, req.ClaimTask.Counter, t.Counter)
 		}
 		return model, nil
@@ -604,7 +604,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
-		if req.CompleteTask.Counter == t.Counter && t.Expiration >= resTime {
+		if req.CompleteTask.Counter == t.Counter && t.ExpiresAt >= resTime {
 			return model, fmt.Errorf("task '%s' counter match (%d == %d)", req.CompleteTask.Id, req.CompleteTask.Counter, t.Counter)
 		}
 		return model, nil
@@ -633,7 +633,7 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 			util.Assert(t.value.State != task.Claimed || t.value.ProcessId != nil, "process id must be set if claimed")
 			if t.value.State == task.Claimed && *t.value.ProcessId == req.HeartbeatTasks.ProcessId {
 				ub++
-				if t.value.Expiration > resTime && t.value.Timeout > resTime {
+				if t.value.ExpiresAt > resTime && t.value.Timeout > resTime {
 					lb++
 					tasks = append(tasks, t.value)
 				}
@@ -652,7 +652,7 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 
 			// we can only update the model for tasks that are unambiguously
 			// heartbeated, and it's only an approximation
-			t.Expiration = reqTime + int64(t.Frequency)
+			t.ExpiresAt = reqTime + int64(t.Ttl)
 			model.tasks.set(t.Id, t)
 		}
 

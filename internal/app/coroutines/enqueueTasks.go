@@ -77,8 +77,8 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Timedout,
 						Counter:        r.Counter,
 						Attempt:        r.Attempt,
-						Frequency:      0,
-						Expiration:     0,
+						Ttl:            0,
+						ExpiresAt:      0,
 						CompletedOn:    &r.Timeout,
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: r.Counter,
@@ -106,8 +106,8 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Enqueued,
 						Counter:        t.Counter,
 						Attempt:        t.Attempt,
-						Frequency:      0,
-						Expiration:     c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time to be claimed
+						Ttl:            0,
+						ExpiresAt:      c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time to be claimed
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
@@ -120,8 +120,8 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Init,
 						Counter:        t.Counter,
 						Attempt:        t.Attempt + 1,
-						Frequency:      0,
-						Expiration:     c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time until reenqueued
+						Ttl:            0,
+						ExpiresAt:      c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time until reenqueued
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},

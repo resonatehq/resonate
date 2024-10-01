@@ -58,8 +58,8 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Init,
 						Counter:        t.Counter + 1,
 						Attempt:        0,
-						Frequency:      0,
-						Expiration:     0, // time until reenqueued
+						Ttl:            0,
+						ExpiresAt:      0, // time until reenqueued
 						CurrentStates:  []task.State{t.State},
 						CurrentCounter: t.Counter,
 					},
@@ -73,8 +73,8 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						State:          task.Timedout,
 						Counter:        t.Counter,
 						Attempt:        t.Attempt,
-						Frequency:      0,
-						Expiration:     0,
+						Ttl:            0,
+						ExpiresAt:      0,
 						CompletedOn:    &t.Timeout,
 						CurrentStates:  []task.State{t.State},
 						CurrentCounter: t.Counter,

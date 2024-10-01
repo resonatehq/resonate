@@ -68,8 +68,8 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 									State:          task.Completed,
 									Counter:        r.CompleteTask.Counter,
 									Attempt:        0,
-									Frequency:      0,
-									Expiration:     0,
+									Ttl:            0,
+									ExpiresAt:      0,
 									CompletedOn:    &completedOn,
 									CurrentStates:  []task.State{task.Claimed},
 									CurrentCounter: r.CompleteTask.Counter,
@@ -96,8 +96,8 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				t.ProcessId = nil
 				t.State = task.Completed
 				t.Attempt = 0
-				t.Frequency = 0
-				t.Expiration = 0
+				t.Ttl = 0
+				t.ExpiresAt = 0
 				t.CompletedOn = &completedOn
 			} else {
 				// It's possible that the task was modified by another coroutine

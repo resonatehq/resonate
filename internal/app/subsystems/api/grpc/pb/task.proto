@@ -16,7 +16,7 @@ message ClaimTaskRequest {
     string id = 1;
     int32 counter = 2;
     string processId = 3;
-    int32 frequency = 4;
+    int32 ttl = 4;
     string requestId = 5;
 }
 

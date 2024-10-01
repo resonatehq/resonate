@@ -240,7 +240,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
-						Frequency: RangeIntn(r, 1000, 5000),
+						Ttl:       RangeIntn(r, 1000, 5000),
 					},
 				})
 			default:
@@ -551,7 +551,7 @@ func (d *DST) Model() porcupine.Model {
 							<td align="right">%d</td>
 							<td align="right">%d</td>
 						</tr>
-					`, t.value.Id, util.SafeDeref(t.value.ProcessId), t.value.State, t.value.Counter, t.value.Expiration, t.value.Timeout)
+					`, t.value.Id, util.SafeDeref(t.value.ProcessId), t.value.State, t.value.Counter, t.value.ExpiresAt, t.value.Timeout)
 				}
 
 				return fmt.Sprintf(`
@@ -571,7 +571,7 @@ func (d *DST) Model() porcupine.Model {
 													<td><b>processId</b></td>
 													<td><b>state</b></td>
 													<td><b>counter</b></td>
-													<td><b>expiration</b></td>
+													<td><b>expiresAt</b></td>
 													<td><b>timeout</b></td>
 												</tr>
 											</thead>

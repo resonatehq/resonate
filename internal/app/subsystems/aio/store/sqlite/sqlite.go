@@ -75,31 +75,34 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
 
 	CREATE TABLE IF NOT EXISTS locks (
-		resource_id            TEXT UNIQUE,
-		execution_id           TEXT,
-		process_id             TEXT,
-		expiry_in_milliseconds INTEGER,
-		timeout                INTEGER
+		resource_id  TEXT UNIQUE,
+		execution_id TEXT,
+		process_id   TEXT,
+		ttl          INTEGER,
+		expires_at   INTEGER
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_locks_acquire_id ON locks(resource_id, execution_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_heartbeat_id ON locks(process_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_timeout ON locks(timeout);
+	CREATE INDEX IF NOT EXISTS idx_locks_id ON locks(resource_id, execution_id);
+	CREATE INDEX IF NOT EXISTS idx_locks_process_id ON locks(process_id);
+	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
 		id           INTEGER PRIMARY KEY AUTOINCREMENT,
-		pid          TEXT,
+		process_id   TEXT,
 		state        INTEGER DEFAULT 1,
 		recv         BLOB,
 		mesg         BLOB,
 		timeout      INTEGER,
 		counter      INTEGER DEFAULT 1,
 		attempt      INTEGER DEFAULT 0,
-		frequency    INTEGER DEFAULT 0,
-		expiration   INTEGER DEFAULT 0,
+		ttl          INTEGER DEFAULT 0,
+		expires_at   INTEGER DEFAULT 0,
 		created_on   INTEGER,
 		completed_on INTEGER
 	);
+
+	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
+	CREATE INDEX IF NOT EXISTS idx_tasks_expires_at ON tasks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER PRIMARY KEY
@@ -220,7 +223,7 @@ const (
 
 	LOCK_READ_STATEMENT = `
 	SELECT
-		resource_id, process_id, execution_id, expiry_in_milliseconds, timeout
+		resource_id, process_id, execution_id, ttl, expires_at
 	FROM
 		locks
 	WHERE
@@ -228,14 +231,14 @@ const (
 
 	LOCK_ACQUIRE_STATEMENT = `
 	INSERT INTO locks
-		(resource_id, execution_id, process_id, expiry_in_milliseconds, timeout)
+		(resource_id, execution_id, process_id, ttl, expires_at)
 	VALUES
 		(?, ?, ?, ?, ?)
 	ON CONFLICT(resource_id)
 	DO UPDATE SET
 		process_id = EXCLUDED.process_id,
-		expiry_in_milliseconds = excluded.expiry_in_milliseconds,
-		timeout = excluded.timeout
+		ttl = excluded.ttl,
+		expires_at = excluded.expires_at
 	WHERE
 		 execution_id = excluded.execution_id`
 
@@ -246,16 +249,16 @@ const (
 	UPDATE
 		locks
 	SET
-		timeout = ? + expiry_in_milliseconds
+		expires_at = ? + ttl
 	WHERE
 		process_id = ?`
 
 	LOCK_TIMEOUT_STATEMENT = `
-	DELETE FROM locks WHERE timeout <= ?`
+	DELETE FROM locks WHERE expires_at <= ?`
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, pid, state, recv, mesg, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -263,11 +266,11 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, pid, state, recv, mesg, timeout, counter, attempt, frequency, expiration, created_on, completed_on
+		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
-		state & ? != 0 AND (expiration <= ? OR timeout <= ?)
+		state & ? != 0 AND (expires_at <= ? OR timeout <= ?)
 	ORDER BY
 		id
 	LIMIT
@@ -275,7 +278,7 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, pid, state, frequency, expiration, created_on)
+		(recv, mesg, timeout, process_id, state, ttl, expires_at, created_on)
 	VALUES
 		(?, ?, ?, ?, ?, ?, ?, ?)`
 
@@ -295,7 +298,7 @@ const (
 	UPDATE
 		tasks
 	SET
-		pid = ?, state = ?, counter = ?, attempt = ?, frequency = ?, expiration = ?, completed_on = ?
+		process_id = ?, state = ?, counter = ?, attempt = ?, ttl = ?, expires_at = ?, completed_on = ?
 	WHERE
 		id = ? AND state & ? != 0 AND counter = ?`
 
@@ -303,9 +306,9 @@ const (
 	UPDATE
 		tasks
 	SET
-		expiration = ? + frequency
+		expires_at = ? + ttl
 	WHERE
-		pid = ? AND state = 4`
+		process_id = ? AND state = 4`
 )
 
 // Config
@@ -1268,8 +1271,8 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 		&record.ResourceId,
 		&record.ProcessId,
 		&record.ExecutionId,
-		&record.ExpiryInMilliseconds,
-		&record.Timeout,
+		&record.Ttl,
+		&record.ExpiresAt,
 	); err != nil {
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
@@ -1294,7 +1297,7 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 
 func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
 	// insert
-	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.ExpiryInMilliseconds, cmd.Timeout)
+	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.Ttl, cmd.ExpiresAt)
 	if err != nil {
 		return nil, err
 	}
@@ -1388,8 +1391,8 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 		&record.Timeout,
 		&record.Counter,
 		&record.Attempt,
-		&record.Frequency,
-		&record.Expiration,
+		&record.Ttl,
+		&record.ExpiresAt,
 		&record.CreatedOn,
 		&record.CompletedOn,
 	); err != nil {
@@ -1442,8 +1445,8 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 			&record.Timeout,
 			&record.Counter,
 			&record.Attempt,
-			&record.Frequency,
-			&record.Expiration,
+			&record.Ttl,
+			&record.ExpiresAt,
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
@@ -1467,14 +1470,14 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
 	util.Assert(cmd.State.In(task.Init|task.Claimed), "state must be init or claimed")
-	util.Assert(cmd.State != task.Claimed || cmd.ProcessId != nil, "pid must be set if state is claimed")
+	util.Assert(cmd.State != task.Claimed || cmd.ProcessId != nil, "process id must be set if state is claimed")
 
 	mesg, err := json.Marshal(cmd.Mesg)
 	if err != nil {
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Frequency, cmd.Expiration, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -1535,8 +1538,8 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 		cmd.State,
 		cmd.Counter,
 		cmd.Attempt,
-		cmd.Frequency,
-		cmd.Expiration,
+		cmd.Ttl,
+		cmd.ExpiresAt,
 		cmd.CompletedOn,
 		cmd.Id,
 		currentStates,

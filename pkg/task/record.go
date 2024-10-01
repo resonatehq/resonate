@@ -15,8 +15,8 @@ type TaskRecord struct {
 	Timeout     int64
 	Counter     int
 	Attempt     int
-	Frequency   int
-	Expiration  int64
+	Ttl         int
+	ExpiresAt   int64
 	CreatedOn   *int64
 	CompletedOn *int64
 }
@@ -36,8 +36,8 @@ func (r *TaskRecord) Task() (*Task, error) {
 		Timeout:     r.Timeout,
 		Counter:     r.Counter,
 		Attempt:     r.Attempt,
-		Frequency:   r.Frequency,
-		Expiration:  r.Expiration,
+		Ttl:         r.Ttl,
+		ExpiresAt:   r.ExpiresAt,
 		CreatedOn:   r.CreatedOn,
 		CompletedOn: r.CompletedOn,
 	}, nil

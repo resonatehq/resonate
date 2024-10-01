@@ -350,14 +350,14 @@ type ReadTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
-	Recv       []byte
-	Mesg       *message.Mesg
-	Timeout    int64
-	ProcessId  *string
-	State      task.State
-	Frequency  int
-	Expiration int64
-	CreatedOn  int64
+	Recv      []byte
+	Mesg      *message.Mesg
+	Timeout   int64
+	ProcessId *string
+	State     task.State
+	Ttl       int
+	ExpiresAt int64
+	CreatedOn int64
 }
 
 type CreateTasksCommand struct {
@@ -371,8 +371,8 @@ type UpdateTaskCommand struct {
 	State          task.State
 	Counter        int
 	Attempt        int
-	Frequency      int
-	Expiration     int64
+	Ttl            int
+	ExpiresAt      int64
 	CompletedOn    *int64
 	CurrentStates  []task.State
 	CurrentCounter int
@@ -402,11 +402,11 @@ type ReadLockCommand struct {
 }
 
 type AcquireLockCommand struct {
-	ResourceId           string
-	ProcessId            string
-	ExecutionId          string
-	ExpiryInMilliseconds int64
-	Timeout              int64
+	ResourceId  string
+	ProcessId   string
+	ExecutionId string
+	Ttl         int64
+	ExpiresAt   int64
 }
 
 type ReleaseLockCommand struct {

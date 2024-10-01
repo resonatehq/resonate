@@ -162,7 +162,7 @@ type createPromiseAndTaskBody struct {
 
 type createPromiseTaskBody struct {
 	ProcessId string          `json:"processId" binding:"required"`
-	Frequency int             `json:"frequency" binding:"required"`
+	Ttl       int             `json:"ttl" binding:"required"`
 	Recv      json.RawMessage `json:"recv" binding:"required"`
 }
 
@@ -197,7 +197,7 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 			Task: &t_api.CreateTaskRequest{
 				PromiseId: body.Promise.Id,
 				ProcessId: body.Task.ProcessId,
-				Frequency: body.Task.Frequency,
+				Ttl:       body.Task.Ttl,
 				Timeout:   body.Promise.Timeout,
 				Recv:      body.Task.Recv,
 			},
