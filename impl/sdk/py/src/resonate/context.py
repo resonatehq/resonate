@@ -5,11 +5,13 @@ from typing import TYPE_CHECKING, Any, TypeVar, final
 from typing_extensions import ParamSpec
 
 from resonate.actions import (
+    LFC,
+    LFI,
+    RFC,
+    RFI,
     All,
     AllSettled,
-    Call,
     DeferredInvocation,
-    Invocation,
     Race,
     Sleep,
 )
@@ -18,6 +20,8 @@ from resonate.dependency_injection import Dependencies
 from resonate.promise import Promise
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
     from resonate.typing import (
         DurableCoro,
         DurableFn,
@@ -59,13 +63,34 @@ class Context:
     def get_dependency(self, key: str) -> Any:  # noqa: ANN401
         return self.deps.get(key)
 
+    def rfc(
+        self,
+        func: str,
+        args: tuple[Hashable, ...],
+        receiver: str = "default",
+    ) -> RFC:
+        return RFC(
+            promise_id=None,
+            func=func,
+            args=args,
+            tags={"resonate:invoke": receiver},
+        )
+
+    def rfi(
+        self,
+        func: str,
+        args: tuple[Hashable, ...],
+        receiver: str = "default",
+    ) -> RFI:
+        return self.rfc(func, args, receiver).to_invocation()
+
     def lfi(
         self,
         invokable: Invokable[P],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> Invocation:
+    ) -> LFI:
         """
         Local function invocation.
 
@@ -83,14 +108,14 @@ class Context:
         /,
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> Call:
+    ) -> LFC:
         """
         Local function call.
 
-        Call and await for the result of the execution. It's syntax
+        LFC and await for the result of the execution. It's syntax
         sugar for `yield (yield ctx.lfi(...))`
         """
-        return Call(_wrap_into_execution_unit(invokable, *args, **kwargs))
+        return LFC(_wrap_into_execution_unit(invokable, *args, **kwargs))
 
     def deferred(
         self,

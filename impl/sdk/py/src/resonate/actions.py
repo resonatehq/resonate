@@ -8,8 +8,11 @@ from typing_extensions import ParamSpec, Self
 from resonate.options import Options
 
 if TYPE_CHECKING:
+    from collections.abc import Hashable
+
     from resonate.dataclasses import FnOrCoroutine
     from resonate.retry_policy import RetryPolicy
+    from resonate.typing import Tags
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from resonate.retry_policy import never
@@ -24,7 +27,38 @@ T = TypeVar("T")
 
 @final
 @dataclass
-class Call:
+class RFI:
+    promise_id: str | None
+    func: str
+    args: tuple[Hashable, ...]
+    tags: Tags
+
+    def with_options(self, promise_id: str) -> Self:
+        assert self.promise_id is None, "promise ID has already been set"
+        self.promise_id = promise_id
+        return self
+
+
+@final
+@dataclass
+class RFC:
+    promise_id: str | None
+    func: str
+    args: tuple[Hashable, ...]
+    tags: Tags
+
+    def with_options(self, promise_id: str) -> Self:
+        assert self.promise_id is None, "promise ID has already been set"
+        self.promise_id = promise_id
+        return self
+
+    def to_invocation(self) -> RFI:
+        return RFI(self.promise_id, self.func, self.args, self.tags)
+
+
+@final
+@dataclass
+class LFC:
     exec_unit: ExecutionUnit
     opts: Options = field(default=Options())
 
@@ -40,8 +74,8 @@ class Call:
         )
         return self
 
-    def to_invocation(self) -> Invocation:
-        return Invocation(self.exec_unit, opts=self.opts)
+    def to_invocation(self) -> LFI:
+        return LFI(self.exec_unit, opts=self.opts)
 
 
 @final
@@ -65,7 +99,7 @@ class DeferredInvocation:
 
 @final
 @dataclass
-class Invocation:
+class LFI:
     exec_unit: ExecutionUnit
     opts: Options = field(default=Options())
 

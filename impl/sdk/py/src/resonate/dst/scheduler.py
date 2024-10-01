@@ -9,11 +9,13 @@ from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
 
 from resonate import utils
 from resonate.actions import (
+    LFC,
+    LFI,
+    RFC,
+    RFI,
     All,
     AllSettled,
-    Call,
     DeferredInvocation,
-    Invocation,
     Race,
     Sleep,
 )
@@ -112,7 +114,7 @@ class DSTScheduler:
         | None,
         durable_promise_storage: IPromiseStore,
     ) -> None:
-        self._stg_queue: list[tuple[Invocation, str]] = []
+        self._stg_queue: list[tuple[LFI, str]] = []
         self._runnable_coros: RunnableCoroutines = []
         self._awatiables: Awaitables = {}
         self._runnable_functions: RunnableFunctions = []
@@ -232,7 +234,7 @@ class DSTScheduler:
             promise_id not in self._emphemeral_promise_memo
         ), "There's already a promise with the same id"
 
-        top_lvl = Invocation(
+        top_lvl = LFI(
             FnOrCoroutine(coro, *args, **kwargs),
             opts=opts,
         )
@@ -318,16 +320,14 @@ class DSTScheduler:
             p.promise_id not in self._emphemeral_promise_memo
         ), "There should not be a new promise with same promise id."
         self._emphemeral_promise_memo[p.promise_id] = p
-        if isinstance(action, Invocation):
+        if isinstance(action, LFI):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
             if isinstance(action.exec_unit, FnOrCoroutine):
                 data = action.exec_unit.json_data()
             else:
                 assert_never(action.exec_unit)
-        elif isinstance(action, DeferredInvocation):
-            data = action.coro.json_data()
-        elif isinstance(action, (Sleep, All, AllSettled, Race)):
+        elif isinstance(action, (Sleep, All, AllSettled, Race, RFI)):
             raise NotImplementedError
         else:
             assert_never(action)
@@ -384,7 +384,7 @@ class DSTScheduler:
         return v
 
     def _move_next_top_lvl_invocation_to_runnables(
-        self, top_lvl: Invocation, promise_id: str
+        self, top_lvl: LFI, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
         root_ctx = Context(
@@ -506,7 +506,7 @@ class DSTScheduler:
                 ## This simulates the processor in the production scheduler.
                 fn_wrapper, promise = self._get_random_element(self._runnable_functions)
                 assert not promise.done(), "Only unresolve promises can be found here."
-                assert isinstance(promise.action, Invocation)
+                assert isinstance(promise.action, LFI)
 
                 v = (
                     _safe_run(self._mocks[fn_wrapper.fn])
@@ -561,31 +561,31 @@ class DSTScheduler:
         assert_never(value)
 
     def _create_durable_promise_record(
-        self, promise_id: str, data: dict[str, Any]
+        self, promise_id: str, data: dict[str, Any] | None
     ) -> DurablePromiseRecord:
         return self._durable_promise_storage.create(
             promise_id=promise_id,
             ikey=utils.string_to_ikey(promise_id),
             strict=False,
             headers=None,
-            data=self._json_encoder.encode(data),
+            data=self._json_encoder.encode(data) if data is not None else None,
             timeout=sys.maxsize,
             tags=None,
         )
 
-    def _process_invocation(
-        self, invokation: Invocation, runnable: Runnable[Any]
+    def _process_local_invocation(
+        self, invocation: LFI, runnable: Runnable[Any]
     ) -> Promise[Any]:
         p = self._create_promise(
             parent_promise=runnable.coro_and_promise.route_info.promise,
-            promise_id=invokation.opts.promise_id,
-            action=invokation,
+            promise_id=invocation.opts.promise_id,
+            action=invocation,
         )
-        if isinstance(invokation.exec_unit, Command):
-            self._handler_queues[type(invokation.exec_unit)].append(
-                (p, invokation.exec_unit)
+        if isinstance(invocation.exec_unit, Command):
+            self._handler_queues[type(invocation.exec_unit)].append(
+                (p, invocation.exec_unit)
             )
-        elif isinstance(invokation.exec_unit, FnOrCoroutine):
+        elif isinstance(invocation.exec_unit, FnOrCoroutine):
             if p.done():
                 self._unblock_coros_waiting_on_promise(p)
             else:
@@ -593,12 +593,12 @@ class DSTScheduler:
                     RouteInfo(
                         runnable.coro_and_promise.route_info.ctx,
                         p,
-                        invokation.exec_unit,
+                        invocation.exec_unit,
                         0,
                     )
                 )
         else:
-            assert_never(invokation.exec_unit)
+            assert_never(invocation.exec_unit)
         return p
 
     def _add_coro_to_awaitables(
@@ -648,8 +648,8 @@ class DSTScheduler:
             self._unblock_coros_waiting_on_promise(
                 p=runnable.coro_and_promise.route_info.promise
             )
-        elif isinstance(yieldable_or_final_value, Call):
-            p = self._process_invocation(
+        elif isinstance(yieldable_or_final_value, LFC):
+            p = self._process_local_invocation(
                 yieldable_or_final_value.to_invocation(), runnable
             )
             assert (
@@ -664,9 +664,9 @@ class DSTScheduler:
             else:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
-        elif isinstance(yieldable_or_final_value, Invocation):
-            p = self._process_invocation(
-                invokation=yieldable_or_final_value, runnable=runnable
+        elif isinstance(yieldable_or_final_value, LFI):
+            p = self._process_local_invocation(
+                invocation=yieldable_or_final_value, runnable=runnable
             )
             self._add_coro_to_runnables(
                 runnable.coro_and_promise, Ok(p), was_awaited=False
@@ -682,7 +682,8 @@ class DSTScheduler:
                 self._add_coro_to_awaitables(p, runnable.coro_and_promise)
 
         elif isinstance(
-            yieldable_or_final_value, (Sleep, DeferredInvocation, All, AllSettled, Race)
+            yieldable_or_final_value,
+            (Sleep, DeferredInvocation, All, AllSettled, Race, RFC, RFI),
         ):
             raise NotImplementedError
 

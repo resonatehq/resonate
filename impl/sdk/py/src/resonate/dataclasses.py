@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from typing_extensions import ParamSpec
 
-from resonate.actions import Invocation
+from resonate.actions import LFI
 from resonate.result import Ok
 from resonate.retry_policy import Never
 
@@ -33,7 +33,7 @@ class RouteInfo:
         fn_or_coroutine: FnOrCoroutine,
         retry_attempt: int,
     ) -> None:
-        assert isinstance(promise.action, Invocation)
+        assert isinstance(promise.action, LFI)
         self.ctx = ctx
         self.promise = promise
         self.fn_or_coroutine = fn_or_coroutine

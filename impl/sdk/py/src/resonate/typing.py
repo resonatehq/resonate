@@ -6,11 +6,13 @@ from typing import Any, Callable, Literal, TypeVar, Union
 from typing_extensions import Concatenate, ParamSpec, TypeAlias
 
 from resonate.actions import (
+    LFC,
+    LFI,
+    RFC,
+    RFI,
     All,
     AllSettled,
-    Call,
     DeferredInvocation,
-    Invocation,
     Race,
     Sleep,
 )
@@ -27,15 +29,9 @@ ExecutionUnit: TypeAlias = Union[Command, FnOrCoroutine]
 
 Combinator: TypeAlias = Union[All, AllSettled, Race]
 
-Yieldable: TypeAlias = Union[
-    Call,
-    Combinator,
-    Invocation,
-    Promise[Any],
-    Sleep,
-    DeferredInvocation,
-]
-PromiseActions: TypeAlias = Union[Combinator, Invocation, Sleep, DeferredInvocation]
+PromiseActions: TypeAlias = Union[Combinator, LFI, Sleep, RFI]
+
+Yieldable: TypeAlias = Union[LFC, Promise[Any], PromiseActions, DeferredInvocation, RFC]
 
 DurableCoro: TypeAlias = Callable[Concatenate[Context, P], Generator[Yieldable, Any, T]]
 DurableSyncFn: TypeAlias = Callable[Concatenate[Context, P], T]
