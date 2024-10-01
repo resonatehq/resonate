@@ -1,57 +1,73 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Read Promise
+// Read
 
-func (s *server) readPromise(c *gin.Context) {
-	id := extractId(c.Param("id"))
-
-	var header service.Header
-	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	res, err := s.service.ReadPromise(id, &header)
-	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	c.JSON(s.code(res.Status), res.Promise)
+type readPromiseHeader struct {
+	RequestId string `header:"request-id"`
 }
 
-// Search Promise
-
-func (s *server) searchPromises(c *gin.Context) {
-	var header service.Header
+func (s *server) readPromise(c *gin.Context) {
+	var header readPromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var params service.SearchPromisesParams
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.ReadPromise,
+		ReadPromise: &t_api.ReadPromiseRequest{
+			Id: extractId(c.Param("id")),
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.ReadPromise != nil, "result must not be nil")
+	c.JSON(s.code(res.ReadPromise.Status), res.ReadPromise.Promise)
+}
+
+// Search
+
+type searchPromisesHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type searchPromisesParams struct {
+	Id     *string           `form:"id" json:"id" binding:"omitempty,min=1"`
+	State  *string           `form:"state" json:"state" binding:"omitempty,oneofcaseinsensitive=pending resolved rejected"`
+	Tags   map[string]string `form:"tags" json:"tags,omitempty"`
+	Limit  *int              `form:"limit" json:"limit" binding:"omitempty,gte=0,lte=100"`
+	Cursor *string           `form:"cursor" json:"cursor,omitempty"`
+}
+
+func (s *server) searchPromises(c *gin.Context) {
+	var header searchPromisesHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	var params searchPromisesParams
 	if err := c.ShouldBindQuery(&params); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
@@ -59,90 +75,254 @@ func (s *server) searchPromises(c *gin.Context) {
 	// see: https://github.com/gin-gonic/gin/issues/2606
 	params.Tags = c.QueryMap("tags")
 
-	res, err := s.service.SearchPromises(&header, &params)
+	req, err := s.api.SearchPromises(
+		util.SafeDeref(params.Id),
+		util.SafeDeref(params.State),
+		params.Tags,
+		util.SafeDeref(params.Limit),
+		util.SafeDeref(params.Cursor),
+	)
 	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	c.JSON(s.code(res.Status), gin.H{
-		"cursor":   res.Cursor,
-		"promises": res.Promises,
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind:           t_api.SearchPromises,
+		SearchPromises: req,
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.SearchPromises != nil, "result must not be nil")
+	c.JSON(s.code(res.SearchPromises.Status), gin.H{
+		"promises": res.SearchPromises.Promises,
+		"cursor":   res.SearchPromises.Cursor,
 	})
 }
 
-// Create Promise
+// Create
 
-func (s *server) createPromise(c *gin.Context) {
-	var header service.CreatePromiseHeader
-	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	var body *promise.Promise
-	if err := c.ShouldBindJSON(&body); err != nil {
-		err := service.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	res, err := s.service.CreatePromise(&header, body)
-	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	c.JSON(s.code(res.Status), res.Promise)
+type createPromiseHeader struct {
+	RequestId      string           `header:"request-id"`
+	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
+	Strict         bool             `header:"strict"`
 }
 
-// Complete Promise
+type createPromiseBody struct {
+	Id      string            `json:"id" binding:"required"`
+	Param   promise.Value     `json:"param"`
+	Timeout int64             `json:"timeout" binding:"required"`
+	Tags    map[string]string `json:"tags,omitempty"`
+}
 
-func (s *server) completePromise(c *gin.Context) {
-	id := extractId(c.Param("id"))
-
-	var header service.CompletePromiseHeader
+func (s *server) createPromise(c *gin.Context) {
+	var header createPromiseHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
-		err := service.RequestValidationError(err)
+		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{
 			"error": err,
 		})
 		return
 	}
 
-	var body *service.CompletePromiseBody
+	var body createPromiseBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		err := service.RequestValidationError(err)
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromise,
+		CreatePromise: &t_api.CreatePromiseRequest{
+			Id:             body.Id,
+			IdempotencyKey: header.IdempotencyKey,
+			Strict:         header.Strict,
+			Param:          body.Param,
+			Timeout:        body.Timeout,
+			Tags:           body.Tags,
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.CreatePromise != nil, "result must not be nil")
+	c.JSON(s.code(res.CreatePromise.Status), res.CreatePromise.Promise)
+}
+
+type createPromiseAndTaskBody struct {
+	Promise createPromiseBody     `json:"promise" binding:"required"`
+	Task    createPromiseTaskBody `json:"task" binding:"required"`
+}
+
+type createPromiseTaskBody struct {
+	ProcessId string          `json:"processId" binding:"required"`
+	Frequency int             `json:"frequency" binding:"required"`
+	Recv      json.RawMessage `json:"recv" binding:"required"`
+}
+
+func (s *server) createPromiseAndTask(c *gin.Context) {
+	var header createPromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{
 			"error": err,
 		})
+		return
+	}
+
+	var body createPromiseAndTaskBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             body.Promise.Id,
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Param:          body.Promise.Param,
+				Timeout:        body.Promise.Timeout,
+				Tags:           body.Promise.Tags,
+			},
+			Task: &t_api.CreateTaskRequest{
+				PromiseId: body.Promise.Id,
+				ProcessId: body.Task.ProcessId,
+				Frequency: body.Task.Frequency,
+				Timeout:   body.Promise.Timeout,
+				Recv:      body.Task.Recv,
+			},
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.CreatePromiseAndTask != nil, "result must not be nil")
+	c.JSON(s.code(res.CreatePromiseAndTask.Status), gin.H{
+		"promise": res.CreatePromiseAndTask.Promise,
+		"task":    res.CreatePromiseAndTask.Task,
+	})
+}
+
+type createPromiseAndCallbackBody struct {
+	Promise  createPromiseBody         `json:"promise" binding:"required"`
+	Callback createPromiseCallbackBody `json:"callback" binding:"required"`
+}
+
+type createPromiseCallbackBody struct {
+	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
+	Timeout       int64           `json:"timeout" binding:"required"`
+	Recv          json.RawMessage `json:"recv" binding:"required"`
+}
+
+func (s *server) createPromiseAndCallback(c *gin.Context) {
+	var header createPromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{
+			"error": err,
+		})
+		return
+	}
+
+	var body createPromiseAndCallbackBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndCallback,
+		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             body.Promise.Id,
+				IdempotencyKey: header.IdempotencyKey,
+				Strict:         header.Strict,
+				Param:          body.Promise.Param,
+				Timeout:        body.Promise.Timeout,
+				Tags:           body.Promise.Tags,
+			},
+			Callback: &t_api.CreateCallbackRequest{
+				PromiseId:     body.Promise.Id,
+				RootPromiseId: body.Callback.RootPromiseId,
+				Timeout:       body.Callback.Timeout,
+				Recv:          body.Callback.Recv,
+			},
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.CreatePromiseAndCallback != nil, "result must not be nil")
+	c.JSON(s.code(res.CreatePromiseAndCallback.Status), gin.H{
+		"promise":  res.CreatePromiseAndCallback.Promise,
+		"callback": res.CreatePromiseAndCallback.Callback,
+	})
+}
+
+// Complete
+
+type completePromiseHeader struct {
+	RequestId      string           `header:"request-id"`
+	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
+	Strict         bool             `header:"strict"`
+}
+
+type completePromiseBody struct {
+	State promise.State `json:"state" binding:"required"`
+	Value promise.Value `json:"value"`
+}
+
+func (s *server) completePromise(c *gin.Context) {
+	var header completePromiseHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	var body completePromiseBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
 	if !body.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
-		err := service.RequestValidationError(errors.New("invalid state"))
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		err := api.RequestValidationError(errors.New("The field state must be one of resolved, rejected, rejected_canceled."))
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	res, err := s.service.CompletePromise(id, body.State, &header, body)
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CompletePromise,
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:             extractId(c.Param("id")),
+			IdempotencyKey: header.IdempotencyKey,
+			Strict:         header.Strict,
+			State:          body.State,
+			Value:          body.Value,
+		},
+	})
 	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
+		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	c.JSON(s.code(res.Status), res.Promise)
+	util.Assert(res.CompletePromise != nil, "result must not be nil")
+	c.JSON(s.code(res.CompletePromise.Status), res.CompletePromise.Promise)
 }

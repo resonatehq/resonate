@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.23.3
-// source: internal/app/subsystems/api/grpc/api/promise.proto
+// source: internal/app/subsystems/api/grpc/pb/promise.proto
 
-package api
+package pb
 
 import (
 	context "context"
@@ -19,12 +19,14 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Promises_ReadPromise_FullMethodName    = "/promise.Promises/ReadPromise"
-	Promises_SearchPromises_FullMethodName = "/promise.Promises/SearchPromises"
-	Promises_CreatePromise_FullMethodName  = "/promise.Promises/CreatePromise"
-	Promises_CancelPromise_FullMethodName  = "/promise.Promises/CancelPromise"
-	Promises_ResolvePromise_FullMethodName = "/promise.Promises/ResolvePromise"
-	Promises_RejectPromise_FullMethodName  = "/promise.Promises/RejectPromise"
+	Promises_ReadPromise_FullMethodName              = "/promise.Promises/ReadPromise"
+	Promises_SearchPromises_FullMethodName           = "/promise.Promises/SearchPromises"
+	Promises_CreatePromise_FullMethodName            = "/promise.Promises/CreatePromise"
+	Promises_CreatePromiseAndTask_FullMethodName     = "/promise.Promises/CreatePromiseAndTask"
+	Promises_CreatePromiseAndCallback_FullMethodName = "/promise.Promises/CreatePromiseAndCallback"
+	Promises_ResolvePromise_FullMethodName           = "/promise.Promises/ResolvePromise"
+	Promises_RejectPromise_FullMethodName            = "/promise.Promises/RejectPromise"
+	Promises_CancelPromise_FullMethodName            = "/promise.Promises/CancelPromise"
 )
 
 // PromisesClient is the client API for Promises service.
@@ -34,9 +36,11 @@ type PromisesClient interface {
 	ReadPromise(ctx context.Context, in *ReadPromiseRequest, opts ...grpc.CallOption) (*ReadPromiseResponse, error)
 	SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error)
 	CreatePromise(ctx context.Context, in *CreatePromiseRequest, opts ...grpc.CallOption) (*CreatePromiseResponse, error)
-	CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error)
+	CreatePromiseAndTask(ctx context.Context, in *CreatePromiseAndTaskRequest, opts ...grpc.CallOption) (*CreatePromiseAndTaskResponse, error)
+	CreatePromiseAndCallback(ctx context.Context, in *CreatePromiseAndCallbackRequest, opts ...grpc.CallOption) (*CreatePromiseAndCallbackResponse, error)
 	ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error)
 	RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error)
+	CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error)
 }
 
 type promisesClient struct {
@@ -74,9 +78,18 @@ func (c *promisesClient) CreatePromise(ctx context.Context, in *CreatePromiseReq
 	return out, nil
 }
 
-func (c *promisesClient) CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error) {
-	out := new(CancelPromiseResponse)
-	err := c.cc.Invoke(ctx, Promises_CancelPromise_FullMethodName, in, out, opts...)
+func (c *promisesClient) CreatePromiseAndTask(ctx context.Context, in *CreatePromiseAndTaskRequest, opts ...grpc.CallOption) (*CreatePromiseAndTaskResponse, error) {
+	out := new(CreatePromiseAndTaskResponse)
+	err := c.cc.Invoke(ctx, Promises_CreatePromiseAndTask_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *promisesClient) CreatePromiseAndCallback(ctx context.Context, in *CreatePromiseAndCallbackRequest, opts ...grpc.CallOption) (*CreatePromiseAndCallbackResponse, error) {
+	out := new(CreatePromiseAndCallbackResponse)
+	err := c.cc.Invoke(ctx, Promises_CreatePromiseAndCallback_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +114,15 @@ func (c *promisesClient) RejectPromise(ctx context.Context, in *RejectPromiseReq
 	return out, nil
 }
 
+func (c *promisesClient) CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error) {
+	out := new(CancelPromiseResponse)
+	err := c.cc.Invoke(ctx, Promises_CancelPromise_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // PromisesServer is the server API for Promises service.
 // All implementations must embed UnimplementedPromisesServer
 // for forward compatibility
@@ -108,9 +130,11 @@ type PromisesServer interface {
 	ReadPromise(context.Context, *ReadPromiseRequest) (*ReadPromiseResponse, error)
 	SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error)
 	CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error)
-	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
+	CreatePromiseAndTask(context.Context, *CreatePromiseAndTaskRequest) (*CreatePromiseAndTaskResponse, error)
+	CreatePromiseAndCallback(context.Context, *CreatePromiseAndCallbackRequest) (*CreatePromiseAndCallbackResponse, error)
 	ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error)
 	RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error)
+	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
 	mustEmbedUnimplementedPromisesServer()
 }
 
@@ -127,14 +151,20 @@ func (UnimplementedPromisesServer) SearchPromises(context.Context, *SearchPromis
 func (UnimplementedPromisesServer) CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePromise not implemented")
 }
-func (UnimplementedPromisesServer) CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CancelPromise not implemented")
+func (UnimplementedPromisesServer) CreatePromiseAndTask(context.Context, *CreatePromiseAndTaskRequest) (*CreatePromiseAndTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreatePromiseAndTask not implemented")
+}
+func (UnimplementedPromisesServer) CreatePromiseAndCallback(context.Context, *CreatePromiseAndCallbackRequest) (*CreatePromiseAndCallbackResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreatePromiseAndCallback not implemented")
 }
 func (UnimplementedPromisesServer) ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolvePromise not implemented")
 }
 func (UnimplementedPromisesServer) RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RejectPromise not implemented")
+}
+func (UnimplementedPromisesServer) CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CancelPromise not implemented")
 }
 func (UnimplementedPromisesServer) mustEmbedUnimplementedPromisesServer() {}
 
@@ -203,20 +233,38 @@ func _Promises_CreatePromise_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Promises_CancelPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CancelPromiseRequest)
+func _Promises_CreatePromiseAndTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreatePromiseAndTaskRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PromisesServer).CancelPromise(ctx, in)
+		return srv.(PromisesServer).CreatePromiseAndTask(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Promises_CancelPromise_FullMethodName,
+		FullMethod: Promises_CreatePromiseAndTask_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromisesServer).CancelPromise(ctx, req.(*CancelPromiseRequest))
+		return srv.(PromisesServer).CreatePromiseAndTask(ctx, req.(*CreatePromiseAndTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Promises_CreatePromiseAndCallback_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreatePromiseAndCallbackRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PromisesServer).CreatePromiseAndCallback(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Promises_CreatePromiseAndCallback_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PromisesServer).CreatePromiseAndCallback(ctx, req.(*CreatePromiseAndCallbackRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -257,6 +305,24 @@ func _Promises_RejectPromise_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Promises_CancelPromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CancelPromiseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PromisesServer).CancelPromise(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Promises_CancelPromise_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PromisesServer).CancelPromise(ctx, req.(*CancelPromiseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Promises_ServiceDesc is the grpc.ServiceDesc for Promises service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -277,8 +343,12 @@ var Promises_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Promises_CreatePromise_Handler,
 		},
 		{
-			MethodName: "CancelPromise",
-			Handler:    _Promises_CancelPromise_Handler,
+			MethodName: "CreatePromiseAndTask",
+			Handler:    _Promises_CreatePromiseAndTask_Handler,
+		},
+		{
+			MethodName: "CreatePromiseAndCallback",
+			Handler:    _Promises_CreatePromiseAndCallback_Handler,
 		},
 		{
 			MethodName: "ResolvePromise",
@@ -288,7 +358,11 @@ var Promises_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "RejectPromise",
 			Handler:    _Promises_RejectPromise_Handler,
 		},
+		{
+			MethodName: "CancelPromise",
+			Handler:    _Promises_CancelPromise_Handler,
+		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/app/subsystems/api/grpc/api/promise.proto",
+	Metadata: "internal/app/subsystems/api/grpc/pb/promise.proto",
 }

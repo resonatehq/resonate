@@ -3,24 +3,28 @@ package callback
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 type Callback struct {
-	Id            string          `json:"id"`
-	PromiseId     string          `json:"promiseId"`
-	RootPromiseId string          `json:"rootPromiseId"`
-	Timeout       int64           `json:"timeout"`
-	Recv          json.RawMessage `json:"recv"`
-	CreatedOn     int64           `json:"createdOn"`
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"recv,omitempty"`
+	Mesg      *message.Mesg   `json:"mesg,omitempty"`
+	Timeout   int64           `json:"timeout"`
+	CreatedOn int64           `json:"createdOn"`
 }
 
 func (c *Callback) String() string {
 	return fmt.Sprintf(
-		"Callback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d)",
+		"Callback(id=%s, promiseId=%s, recv=%s, mesg=%v, timeout=%d, createdOn=%d)",
 		c.Id,
 		c.PromiseId,
-		c.RootPromiseId,
+		c.Recv,
+		c.Mesg,
 		c.Timeout,
+		c.CreatedOn,
 	)
 }
 

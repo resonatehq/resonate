@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.23.3
-// source: internal/app/subsystems/api/grpc/api/callback.proto
+// source: internal/app/subsystems/api/grpc/pb/callback.proto
 
-package api
+package pb
 
 import (
 	context "context"
@@ -105,5 +105,5 @@ var Callbacks_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "internal/app/subsystems/api/grpc/api/callback.proto",
+	Metadata: "internal/app/subsystems/api/grpc/pb/callback.proto",
 }

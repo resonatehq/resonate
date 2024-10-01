@@ -8,7 +8,7 @@ import (
 type subsystem interface {
 	String() string
 	Kind() t_aio.Kind
-	Start() error
+	Start(chan<- error) error
 	Stop() error
 }
 

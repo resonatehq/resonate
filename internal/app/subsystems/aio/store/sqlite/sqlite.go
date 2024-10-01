@@ -48,9 +48,9 @@ const (
 	CREATE TABLE IF NOT EXISTS callbacks (
 		id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		promise_id TEXT,
-		timeout    INTEGER,
 		recv       BLOB,
 		mesg       BLOB,
+		timeout    INTEGER,
 		created_on INTEGER
 	);
 
@@ -93,10 +93,10 @@ const (
 		recv         BLOB,
 		mesg         BLOB,
 		timeout      INTEGER,
-		counter      INTEGER,
-		attempt      INTEGER,
-		frequency    INTEGER,
-		expiration   INTEGER,
+		counter      INTEGER DEFAULT 1,
+		attempt      INTEGER DEFAULT 0,
+		frequency    INTEGER DEFAULT 0,
+		expiration   INTEGER DEFAULT 0,
 		created_on   INTEGER,
 		completed_on INTEGER
 	);
@@ -157,7 +157,7 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, timeout, recv, mesg, created_on)
+		(promise_id, recv, mesg, timeout, created_on)
 	SELECT
 		?, ?, ?, ?, ?
 	WHERE EXISTS
@@ -275,15 +275,15 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, counter, attempt, frequency, expiration, created_on)
+		(recv, mesg, timeout, pid, state, frequency, expiration, created_on)
 	VALUES
-		(?, ?, ?, 0, 0, 0, 0, ?)`
+		(?, ?, ?, ?, ?, ?, ?, ?)`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, counter, attempt, frequency, expiration, created_on)
+		(recv, mesg, timeout, created_on)
 	SELECT
-		recv, mesg, timeout, 0, 0, 0, 0, ?
+		recv, mesg, timeout, ?
 	FROM
 		callbacks
 	WHERE
@@ -358,7 +358,7 @@ func (s *SqliteStore) Kind() t_aio.Kind {
 	return t_aio.Store
 }
 
-func (s *SqliteStore) Start() error {
+func (s *SqliteStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
@@ -962,7 +962,15 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 // Callbacks
 
 func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Timeout, cmd.Recv, cmd.Mesg, cmd.CreatedOn, cmd.PromiseId)
+	util.Assert(cmd.Recv != nil, "recv must not be nil")
+	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
+
+	mesg, err := json.Marshal(cmd.Mesg)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -1456,7 +1464,17 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 }
 
 func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.Recv, cmd.Mesg, cmd.Timeout, cmd.CreatedOn)
+	util.Assert(cmd.Recv != nil, "recv must not be nil")
+	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
+	util.Assert(cmd.State.In(task.Init|task.Claimed), "state must be init or claimed")
+	util.Assert(cmd.State != task.Claimed || cmd.ProcessId != nil, "pid must be set if state is claimed")
+
+	mesg, err := json.Marshal(cmd.Mesg)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Frequency, cmd.Expiration, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}
@@ -1466,10 +1484,21 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 		return nil, err
 	}
 
+	lastInsertId, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	var lastInsertIdStr string
+	if rowsAffected != 0 {
+		lastInsertIdStr = strconv.FormatInt(lastInsertId, 10)
+	}
+
 	return &t_aio.Result{
 		Kind: t_aio.CreateTask,
 		CreateTask: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
+			LastInsertId: lastInsertIdStr,
 		},
 	}, nil
 }

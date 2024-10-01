@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 )
 
@@ -16,15 +17,15 @@ type Promise struct {
 	Timeout                   int64             `json:"timeout"`
 	IdempotencyKeyForCreate   *idempotency.Key  `json:"idempotencyKeyForCreate,omitempty"`
 	IdempotencyKeyForComplete *idempotency.Key  `json:"idempotencyKeyForComplete,omitempty"`
+	Tags                      map[string]string `json:"tags,omitempty"`
 	CreatedOn                 *int64            `json:"createdOn,omitempty"`
 	CompletedOn               *int64            `json:"completedOn,omitempty"`
-	Tags                      map[string]string `json:"tags,omitempty"`
 	SortId                    int64             `json:"-"` // unexported
 }
 
 func (p *Promise) String() string {
 	return fmt.Sprintf(
-		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s, tags=%s)",
+		"Promise(id=%s, state=%s, param=%s, value=%s, timeout=%d, idempotencyKeyForCreate=%s, idempotencyKeyForUpdate=%s, tags=%s, createdOn=%d, completedOn=%d)",
 		p.Id,
 		p.State,
 		p.Param,
@@ -33,6 +34,8 @@ func (p *Promise) String() string {
 		p.IdempotencyKeyForCreate,
 		p.IdempotencyKeyForComplete,
 		p.Tags,
+		util.SafeDeref(p.CreatedOn),
+		util.SafeDeref(p.CompletedOn),
 	)
 }
 
@@ -119,9 +122,5 @@ type Value struct {
 }
 
 func (v Value) String() string {
-	return fmt.Sprintf(
-		"Value(headers=%s, data=%s)",
-		v.Headers,
-		string(v.Data),
-	)
+	return fmt.Sprintf("Value(headers=%s, data=%s)", v.Headers, v.Data)
 }

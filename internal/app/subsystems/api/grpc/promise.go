@@ -3,305 +3,386 @@ package grpc
 import (
 	"context"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"google.golang.org/grpc/codes"
-	grpcStatus "google.golang.org/grpc/status"
+	"google.golang.org/grpc/status"
 )
 
-func (s *server) ReadPromise(ctx context.Context, req *grpcApi.ReadPromiseRequest) (*grpcApi.ReadPromiseResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	res, err := s.service.ReadPromise(req.Id, header)
+func (s *server) ReadPromise(c context.Context, r *pb.ReadPromiseRequest) (*pb.ReadPromiseResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.ReadPromise,
+		ReadPromise: &t_api.ReadPromiseRequest{
+			Id: r.Id,
+		},
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.ReadPromiseResponse{
-		Promise: protoPromise(res.Promise),
+	util.Assert(res.ReadPromise != nil, "result must not be nil")
+	return &pb.ReadPromiseResponse{
+		Promise: protoPromise(res.ReadPromise.Promise),
 	}, nil
 }
 
-func (s *server) SearchPromises(ctx context.Context, req *grpcApi.SearchPromisesRequest) (*grpcApi.SearchPromisesResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	// TODO: for now, look at at protobuf validators
-	// ref: https://github.com/protocolbuffers/protobuf/issues/1606
-	// can't check if limit was set or not in proto3. see above issue
-	// so can't check for 0.
-	if req.Limit > 100 || req.Limit < 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "field limit must be greater than 0 and less than or equal to 100")
-	}
-
-	params := &service.SearchPromisesParams{
-		Id:     &req.Id,
-		State:  searchState(req.State),
-		Tags:   req.Tags,
-		Limit:  util.ToPointer(int(req.Limit)),
-		Cursor: &req.Cursor,
-	}
-
-	res, err := s.service.SearchPromises(header, params)
+func (s *server) SearchPromises(c context.Context, r *pb.SearchPromisesRequest) (*pb.SearchPromisesResponse, error) {
+	req, err := s.api.SearchPromises(r.Id, searchState(r.State), r.Tags, int(r.Limit), r.Cursor)
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	promises := make([]*grpcApi.Promise, len(res.Promises))
-	for i, promise := range res.Promises {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind:           t_api.SearchPromises,
+		SearchPromises: req,
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.SearchPromises != nil, "result must not be nil")
+
+	promises := make([]*pb.Promise, len(res.SearchPromises.Promises))
+	for i, promise := range res.SearchPromises.Promises {
 		promises[i] = protoPromise(promise)
 	}
 
-	cursor := ""
-	if res.Cursor != nil {
+	var cursor string
+	if res.SearchPromises.Cursor != nil {
 		var err error
-		cursor, err = res.Cursor.Encode()
+		cursor, err = res.SearchPromises.Cursor.Encode()
 		if err != nil {
-			return nil, grpcStatus.Error(codes.Internal, err.Error())
+			return nil, status.Error(codes.Internal, err.Error())
 		}
 	}
 
-	return &grpcApi.SearchPromisesResponse{
-		Cursor:   cursor,
+	return &pb.SearchPromisesResponse{
 		Promises: promises,
+		Cursor:   cursor,
 	}, nil
 }
 
-func (s *server) CreatePromise(ctx context.Context, req *grpcApi.CreatePromiseRequest) (*grpcApi.CreatePromiseResponse, error) {
+func (s *server) CreatePromise(c context.Context, r *pb.CreatePromiseRequest) (*pb.CreatePromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
-	if req.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
+	if r.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
 	}
 
 	var headers map[string]string
-	if req.Param != nil {
-		headers = req.Param.Headers
+	if r.Param != nil {
+		headers = r.Param.Headers
 	}
 
 	var data []byte
-	if req.Param != nil {
-		data = req.Param.Data
+	if r.Param != nil {
+		data = r.Param.Data
 	}
 
-	// TODO: for now, look at at protobuf validators
-	if req.Timeout < 0 || req.Timeout == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "timeout must be greater than 0")
-	}
-
-	header := &service.CreatePromiseHeader{
-		Header:         service.Header{RequestId: req.RequestId},
-		Strict:         req.Strict,
-		IdempotencyKey: idempotencyKey,
-	}
-
-	body := &promise.Promise{
-		Id: req.Id,
-		Param: promise.Value{
-			Headers: headers,
-			Data:    data,
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromise,
+		CreatePromise: &t_api.CreatePromiseRequest{
+			Id:             r.Id,
+			IdempotencyKey: idempotencyKey,
+			Strict:         r.Strict,
+			Param:          promise.Value{Headers: headers, Data: data},
+			Timeout:        r.Timeout,
+			Tags:           r.Tags,
 		},
-		Timeout: req.Timeout,
-	}
-
-	res, err := s.service.CreatePromise(header, body)
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.CreatePromiseResponse{
-		Noop:    res.Status == t_api.StatusOK,
-		Promise: protoPromise(res.Promise),
+	util.Assert(res.CreatePromise != nil, "result must not be nil")
+	return &pb.CreatePromiseResponse{
+		Noop:    res.CreatePromise.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CreatePromise.Promise),
 	}, nil
 }
 
-func (s *server) CancelPromise(ctx context.Context, req *grpcApi.CancelPromiseRequest) (*grpcApi.CancelPromiseResponse, error) {
+func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndTaskRequest) (*pb.CreatePromiseAndTaskResponse, error) {
+	if r.Promise == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field task is required.")
+	}
+
+	if r.Task == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field task is required.")
+	}
+
 	var idempotencyKey *idempotency.Key
-	if req.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
+	if r.Promise.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.Promise.IdempotencyKey))
 	}
 
 	var headers map[string]string
-	if req.Value != nil {
-		headers = req.Value.Headers
+	if r.Promise.Param != nil {
+		headers = r.Promise.Param.Headers
 	}
 
 	var data []byte
-	if req.Value != nil {
-		data = req.Value.Data
+	if r.Promise.Param != nil {
+		data = r.Promise.Param.Data
 	}
 
-	header := &service.CompletePromiseHeader{
-		Header:         service.Header{RequestId: req.RequestId},
-		Strict:         req.Strict,
-		IdempotencyKey: idempotencyKey,
+	recv, rErr := protoRecv(r.Task.Recv)
+	if rErr != nil {
+		return nil, rErr
 	}
 
-	body := &service.CompletePromiseBody{
-		Value: promise.Value{
-			Headers: headers,
-			Data:    data,
+	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             r.Promise.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         r.Promise.Strict,
+				Param:          promise.Value{Headers: headers, Data: data},
+				Timeout:        r.Promise.Timeout,
+				Tags:           r.Promise.Tags,
+			},
+			Task: &t_api.CreateTaskRequest{
+				PromiseId: r.Promise.Id,
+				ProcessId: r.Task.ProcessId,
+				Frequency: int(r.Task.Frequency),
+				Timeout:   r.Promise.Timeout,
+				Recv:      recv,
+			},
 		},
-	}
-	res, err := s.service.CompletePromise(req.Id, promise.Canceled, header, body)
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.CancelPromiseResponse{
-		Noop:    res.Status == t_api.StatusOK,
-		Promise: protoPromise(res.Promise),
+	util.Assert(res.CreatePromiseAndTask != nil, "result must not be nil")
+	return &pb.CreatePromiseAndTaskResponse{
+		Noop:    res.CreatePromiseAndTask.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CreatePromiseAndTask.Promise),
 	}, nil
 }
 
-func (s *server) ResolvePromise(ctx context.Context, req *grpcApi.ResolvePromiseRequest) (*grpcApi.ResolvePromiseResponse, error) {
+func (s *server) CreatePromiseAndCallback(c context.Context, r *pb.CreatePromiseAndCallbackRequest) (*pb.CreatePromiseAndCallbackResponse, error) {
+	if r.Promise == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field promise is required.")
+	}
+
+	if r.Callback == nil {
+		return nil, status.Error(codes.InvalidArgument, "The field callback is required.")
+	}
+
 	var idempotencyKey *idempotency.Key
-	if req.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
+	if r.Promise.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.Promise.IdempotencyKey))
 	}
 
 	var headers map[string]string
-	if req.Value != nil {
-		headers = req.Value.Headers
+	if r.Promise.Param != nil {
+		headers = r.Promise.Param.Headers
 	}
 
 	var data []byte
-	if req.Value != nil {
-		data = req.Value.Data
+	if r.Promise.Param != nil {
+		data = r.Promise.Param.Data
 	}
 
-	header := &service.CompletePromiseHeader{
-		Header:         service.Header{RequestId: req.RequestId},
-		Strict:         req.Strict,
-		IdempotencyKey: idempotencyKey,
+	recv, rErr := protoRecv(r.Callback.Recv)
+	if rErr != nil {
+		return nil, rErr
 	}
 
-	body := &service.CompletePromiseBody{
-		Value: promise.Value{
-			Headers: headers,
-			Data:    data,
+	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
+		Kind: t_api.CreatePromiseAndCallback,
+		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
+			Promise: &t_api.CreatePromiseRequest{
+				Id:             r.Promise.Id,
+				IdempotencyKey: idempotencyKey,
+				Strict:         r.Promise.Strict,
+				Param:          promise.Value{Headers: headers, Data: data},
+				Timeout:        r.Promise.Timeout,
+				Tags:           r.Promise.Tags,
+			},
+			Callback: &t_api.CreateCallbackRequest{
+				PromiseId:     r.Promise.Id,
+				RootPromiseId: r.Callback.RootPromiseId,
+				Timeout:       r.Callback.Timeout,
+				Recv:          recv,
+			},
 		},
-	}
-
-	res, err := s.service.CompletePromise(req.Id, promise.Resolved, header, body)
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.ResolvePromiseResponse{
-		Noop:    res.Status == t_api.StatusOK,
-		Promise: protoPromise(res.Promise),
+	util.Assert(res.CreatePromiseAndCallback != nil, "result must not be nil")
+	return &pb.CreatePromiseAndCallbackResponse{
+		Noop:    res.CreatePromiseAndCallback.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CreatePromiseAndCallback.Promise),
 	}, nil
 }
 
-func (s *server) RejectPromise(ctx context.Context, req *grpcApi.RejectPromiseRequest) (*grpcApi.RejectPromiseResponse, error) {
+func (s *server) ResolvePromise(c context.Context, r *pb.ResolvePromiseRequest) (*pb.ResolvePromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
-	if req.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(req.IdempotencyKey))
+	if r.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
 	}
 
 	var headers map[string]string
-	if req.Value != nil {
-		headers = req.Value.Headers
+	if r.Value != nil {
+		headers = r.Value.Headers
 	}
 
 	var data []byte
-	if req.Value != nil {
-		data = req.Value.Data
+	if r.Value != nil {
+		data = r.Value.Data
 	}
 
-	header := &service.CompletePromiseHeader{
-		Header:         service.Header{RequestId: req.RequestId},
-		Strict:         req.Strict,
-		IdempotencyKey: idempotencyKey,
-	}
-
-	body := &service.CompletePromiseBody{
-		Value: promise.Value{
-			Headers: headers,
-			Data:    data,
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CompletePromise,
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:             r.Id,
+			IdempotencyKey: idempotencyKey,
+			Strict:         r.Strict,
+			State:          promise.Resolved,
+			Value:          promise.Value{Headers: headers, Data: data},
 		},
-	}
-
-	res, err := s.service.CompletePromise(req.Id, promise.Rejected, header, body)
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.RejectPromiseResponse{
-		Noop:    res.Status == t_api.StatusOK,
-		Promise: protoPromise(res.Promise),
+	util.Assert(res.CompletePromise != nil, "result must not be nil")
+	return &pb.ResolvePromiseResponse{
+		Noop:    res.CompletePromise.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CompletePromise.Promise),
 	}, nil
 }
 
-func protoPromise(promise *promise.Promise) *grpcApi.Promise {
+func (s *server) RejectPromise(c context.Context, r *pb.RejectPromiseRequest) (*pb.RejectPromiseResponse, error) {
+	var idempotencyKey *idempotency.Key
+	if r.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
+	}
+
+	var headers map[string]string
+	if r.Value != nil {
+		headers = r.Value.Headers
+	}
+
+	var data []byte
+	if r.Value != nil {
+		data = r.Value.Data
+	}
+
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CompletePromise,
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:             r.Id,
+			IdempotencyKey: idempotencyKey,
+			Strict:         r.Strict,
+			State:          promise.Rejected,
+			Value:          promise.Value{Headers: headers, Data: data},
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.CompletePromise != nil, "result must not be nil")
+	return &pb.RejectPromiseResponse{
+		Noop:    res.CompletePromise.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CompletePromise.Promise),
+	}, nil
+}
+
+func (s *server) CancelPromise(c context.Context, r *pb.CancelPromiseRequest) (*pb.CancelPromiseResponse, error) {
+	var idempotencyKey *idempotency.Key
+	if r.IdempotencyKey != "" {
+		idempotencyKey = util.ToPointer(idempotency.Key(r.IdempotencyKey))
+	}
+
+	var headers map[string]string
+	if r.Value != nil {
+		headers = r.Value.Headers
+	}
+
+	var data []byte
+	if r.Value != nil {
+		data = r.Value.Data
+	}
+
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.CompletePromise,
+		CompletePromise: &t_api.CompletePromiseRequest{
+			Id:             r.Id,
+			IdempotencyKey: idempotencyKey,
+			Strict:         r.Strict,
+			State:          promise.Canceled,
+			Value:          promise.Value{Headers: headers, Data: data},
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.CompletePromise != nil, "result must not be nil")
+	return &pb.CancelPromiseResponse{
+		Noop:    res.CompletePromise.Status == t_api.StatusOK,
+		Promise: protoPromise(res.CompletePromise.Promise),
+	}, nil
+}
+
+// Helper functions
+
+func protoPromise(promise *promise.Promise) *pb.Promise {
 	if promise == nil {
 		return nil
 	}
 
-	var idempotencyKeyForCreate, idempotencyKeyForComplete string
-	if promise.IdempotencyKeyForCreate != nil {
-		idempotencyKeyForCreate = string(*promise.IdempotencyKeyForCreate)
-	}
-	if promise.IdempotencyKeyForComplete != nil {
-		idempotencyKeyForComplete = string(*promise.IdempotencyKeyForComplete)
-	}
-
-	return &grpcApi.Promise{
-		Id:    promise.Id,
-		State: protoState(promise.State),
-		Param: &grpcApi.Value{
-			Headers: promise.Param.Headers,
-			Data:    promise.Param.Data,
-		},
-		Value: &grpcApi.Value{
-			Headers: promise.Param.Headers,
-			Data:    promise.Param.Data,
-		},
+	return &pb.Promise{
+		Id:                        promise.Id,
+		State:                     protoState(promise.State),
+		Param:                     &pb.Value{Headers: promise.Param.Headers, Data: promise.Param.Data},
+		Value:                     &pb.Value{Headers: promise.Value.Headers, Data: promise.Value.Data},
 		Timeout:                   promise.Timeout,
-		IdempotencyKeyForCreate:   idempotencyKeyForCreate,
-		IdempotencyKeyForComplete: idempotencyKeyForComplete,
+		IdempotencyKeyForCreate:   string(util.SafeDeref(promise.IdempotencyKeyForCreate)),
+		IdempotencyKeyForComplete: string(util.SafeDeref(promise.IdempotencyKeyForComplete)),
 		CreatedOn:                 util.SafeDeref(promise.CreatedOn),
 		CompletedOn:               util.SafeDeref(promise.CompletedOn),
 		Tags:                      promise.Tags,
 	}
 }
 
-func protoState(state promise.State) grpcApi.State {
+func protoState(state promise.State) pb.State {
 	switch state {
 	case promise.Pending:
-		return grpcApi.State_PENDING
+		return pb.State_PENDING
 	case promise.Resolved:
-		return grpcApi.State_RESOLVED
+		return pb.State_RESOLVED
 	case promise.Rejected:
-		return grpcApi.State_REJECTED
+		return pb.State_REJECTED
 	case promise.Timedout:
-		return grpcApi.State_REJECTED_TIMEDOUT
+		return pb.State_REJECTED_TIMEDOUT
 	case promise.Canceled:
-		return grpcApi.State_REJECTED_CANCELED
+		return pb.State_REJECTED_CANCELED
 	default:
 		panic("invalid state")
 	}
 }
 
-func searchState(searchState grpcApi.SearchState) *string {
+func searchState(searchState pb.SearchState) string {
 	switch searchState {
-	case grpcApi.SearchState_SEARCH_ALL:
-		return nil
-	case grpcApi.SearchState_SEARCH_RESOLVED:
-		return util.ToPointer("resolved")
-	case grpcApi.SearchState_SEARCH_REJECTED:
-		return util.ToPointer("rejected")
-	case grpcApi.SearchState_SEARCH_PENDING:
-		return util.ToPointer("pending")
+	case pb.SearchState_SEARCH_ALL:
+		return ""
+	case pb.SearchState_SEARCH_PENDING:
+		return "pending"
+	case pb.SearchState_SEARCH_RESOLVED:
+		return "resolved"
+	case pb.SearchState_SEARCH_REJECTED:
+		return "rejected"
 	default:
-		panic("invalid state")
+		return "INVALID" // will be validated in the helper function
 	}
 }

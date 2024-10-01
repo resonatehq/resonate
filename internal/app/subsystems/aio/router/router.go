@@ -7,13 +7,13 @@ import (
 	"log/slog"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/receiver"
 )
@@ -47,7 +47,12 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Router, error)
 	workers := make([]*RouterWorker, config.Workers)
 	sources := make([]func(*promise.Promise) (any, bool), len(config.Sources))
 
+	var found bool
 	for i, source := range config.Sources {
+		if source.Name == "default" {
+			found = true
+		}
+
 		switch source.Type {
 		case "tag":
 			var config *TagSourceConfig
@@ -59,6 +64,11 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*Router, error)
 		default:
 			return nil, fmt.Errorf("unknown source type: %s", source.Type)
 		}
+	}
+
+	if !found {
+		// add default source if none found
+		sources = append(sources, TagSource(&TagSourceConfig{Key: "resonate:invoke"}))
 	}
 
 	for i := 0; i < config.Workers; i++ {
@@ -86,7 +96,7 @@ func (r *Router) Kind() t_aio.Kind {
 	return t_aio.Router
 }
 
-func (r *Router) Start() error {
+func (r *Router) Start(chan<- error) error {
 	for _, worker := range r.workers {
 		go worker.Start()
 	}
@@ -178,26 +188,12 @@ func (w *RouterWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 				break
 			}
 
-			mesg, err := json.Marshal(&message.Mesg{
-				Type: message.Invoke,
-				Root: sqe.Submission.Router.Promise.Id,
-				Leaf: sqe.Submission.Router.Promise.Id,
-			})
-			if err != nil {
-				slog.Error("failed to marshal mesg", "err", err)
-				break
-			}
-
 			cqe.Completion = &t_aio.Completion{
 				Kind: t_aio.Router,
 				Tags: sqe.Submission.Tags,
 				Router: &t_aio.RouterCompletion{
 					Matched: true,
-					Command: &t_aio.CreateTaskCommand{
-						Recv:    recv,
-						Mesg:    mesg,
-						Timeout: sqe.Submission.Router.Promise.Timeout,
-					},
+					Recv:    recv,
 				},
 			}
 			return cqe
@@ -253,7 +249,7 @@ func coerce(v any) (any, bool) {
 	case *receiver.Recv:
 		return v, true
 	case string:
-		if recv, ok := protocolToRecv(v); ok {
+		if recv, ok := schemeToRecv(v); ok {
 			return recv, true
 		}
 
@@ -265,25 +261,28 @@ func coerce(v any) (any, bool) {
 	}
 }
 
-func protocolToRecv(v string) (*receiver.Recv, bool) {
-	switch protocol(v) {
+func schemeToRecv(v string) (*receiver.Recv, bool) {
+	u, err := url.Parse(v)
+	if err != nil {
+		return nil, false
+	}
+
+	switch u.Scheme {
 	case "http", "https":
-		data, err := json.Marshal(map[string]interface{}{"url": v})
+		data, err := json.Marshal(map[string]interface{}{"url": u.String()})
 		if err != nil {
 			return nil, false
 		}
 
 		return &receiver.Recv{Type: "http", Data: data}, true
+	case "poll":
+		data, err := json.Marshal(map[string]interface{}{"group": u.Host, "id": strings.TrimPrefix(u.Path, "/")})
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "poll", Data: data}, true
 	default:
 		return nil, false
 	}
-}
-
-func protocol(value string) string {
-	url, err := url.Parse(value)
-	if err != nil {
-		return ""
-	}
-
-	return url.Scheme
 }

@@ -16,7 +16,7 @@ func (s *RouterSubmission) String() string {
 
 type RouterCompletion struct {
 	Matched bool
-	Command *CreateTaskCommand
+	Recv    []byte
 }
 
 func (c *RouterCompletion) String() string {

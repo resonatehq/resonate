@@ -20,7 +20,6 @@ type Generator struct {
 	headersSet         []map[string]string
 	dataSet            [][]byte
 	tagsSet            []map[string]string
-	searchSet          []string
 	callback           uint64
 	requests           map[t_api.Kind][]*t_api.Request
 	generators         []RequestGenerator
@@ -68,16 +67,10 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		}
 
 		if r.Intn(2) == 0 {
-			tags["resonate:invoke"] = "default" // create a task
+			tags["resonate:invoke"] = "dst" // create a task
 		}
 
 		tagsSet = append(tagsSet, tags, nil) // half of all tags are nil
-	}
-
-	searchSet := make([]string, config.Searches*2)
-	for i := 0; i < config.Searches*2; i = i + 2 {
-		searchSet[i+0] = fmt.Sprintf("*%d", i)
-		searchSet[i+1] = fmt.Sprintf("%d*", i)
 	}
 
 	return &Generator{
@@ -89,7 +82,6 @@ func NewGenerator(r *rand.Rand, config *Config) *Generator {
 		headersSet:         headersSet,
 		dataSet:            dataSet,
 		tagsSet:            tagsSet,
-		searchSet:          searchSet,
 		requests:           map[t_api.Kind][]*t_api.Request{},
 		generators:         []RequestGenerator{},
 	}
@@ -121,7 +113,7 @@ func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*t_api.Request {
 // PROMISES
 
 func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
+	id := g.promiseId(r)
 
 	return &t_api.Request{
 		Kind: t_api.ReadPromise,
@@ -137,7 +129,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 		return req
 	}
 
-	id := g.searchSet[r.Intn(len(g.searchSet))]
+	id := g.promiseSearch(r)
 	limit := RangeIntn(r, 1, 11)
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	states := []promise.State{}
@@ -170,50 +162,78 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 }
 
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
-
+	id := g.promiseId(r)
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
-	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
 	strict := r.Intn(2) == 0
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
+	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
 		CreatePromise: &t_api.CreatePromiseRequest{
-			Id: id,
-			Param: promise.Value{
-				Headers: headers,
-				Data:    data,
-			},
-			Timeout:        timeout,
+			Id:             id,
 			IdempotencyKey: idempotencyKey,
-			Tags:           tags,
 			Strict:         strict,
+			Param:          promise.Value{Headers: headers, Data: data},
+			Timeout:        timeout,
+			Tags:           tags,
+		},
+	}
+}
+
+func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.Request {
+	req := g.GenerateCreatePromise(r, t)
+
+	return &t_api.Request{
+		Kind: t_api.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Promise: req.CreatePromise,
+			Task: &t_api.CreateTaskRequest{
+				PromiseId: req.CreatePromise.Id,
+				ProcessId: req.CreatePromise.Id,
+				Frequency: RangeIntn(r, 1000, 5000),
+				Timeout:   req.CreatePromise.Timeout,
+				Recv:      []byte(`"dst"`),
+			},
+		},
+	}
+}
+
+func (g *Generator) GenerateCreatePromiseAndCallback(r *rand.Rand, t int64) *t_api.Request {
+	req := g.GenerateCreatePromise(r, t)
+
+	return &t_api.Request{
+		Kind: t_api.CreatePromiseAndCallback,
+		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
+			Promise: req.CreatePromise,
+			Callback: &t_api.CreateCallbackRequest{
+				PromiseId:     req.CreatePromise.Id,
+				RootPromiseId: g.promiseId(r),
+				Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
+				Recv:          []byte(`"dst"`),
+			},
 		},
 	}
 }
 
 func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
+	id := g.promiseId(r)
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
-	data := g.dataSet[r.Intn(len(g.dataSet))]
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
 	strict := r.Intn(2) == 0
 	state := promise.State(math.Exp2(float64(r.Intn(3) + 1)))
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	data := g.dataSet[r.Intn(len(g.dataSet))]
 
 	return &t_api.Request{
 		Kind: t_api.CompletePromise,
 		CompletePromise: &t_api.CompletePromiseRequest{
-			Id:    id,
-			State: state,
-			Value: promise.Value{
-				Headers: headers,
-				Data:    data,
-			},
+			Id:             id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
+			State:          state,
+			Value:          promise.Value{Headers: headers, Data: data},
 		},
 	}
 }
@@ -221,13 +241,10 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 // CALLBACKS
 
 func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request {
-	promiseId := g.idSet[r.Intn(len(g.idSet))]
-	rootPromiseId := g.idSet[r.Intn(len(g.idSet))]
+	promiseId := g.promiseId(r)
+	rootPromiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	g.callback++
-
-	// Note: recv is ignored in dst so we do not include a value in the
-	// create callback request
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
@@ -235,6 +252,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 			PromiseId:     promiseId,
 			RootPromiseId: rootPromiseId,
 			Timeout:       timeout,
+			Recv:          []byte(`"dst"`), // ignored in dst, use hardcoded value
 		},
 	}
 }
@@ -242,7 +260,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 // SCHEDULES
 
 func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
+	id := g.scheduleId(r)
 
 	return &t_api.Request{
 		Kind: t_api.ReadSchedule,
@@ -258,7 +276,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 		return req
 	}
 
-	id := g.searchSet[r.Intn(len(g.searchSet))]
+	id := g.scheduleSearch(r)
 	limit := RangeIntn(r, 1, 11)
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 
@@ -273,7 +291,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 }
 
 func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
+	id := g.scheduleId(r)
 	cron := fmt.Sprintf("%d * * * *", r.Intn(60))
 	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
@@ -300,7 +318,7 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 }
 
 func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request {
-	id := g.idSet[r.Intn(len(g.idSet))]
+	id := g.scheduleId(r)
 
 	return &t_api.Request{
 		Kind: t_api.DeleteSchedule,
@@ -374,6 +392,31 @@ func (g *Generator) GenerateHeartbeatTasks(r *rand.Rand, t int64) *t_api.Request
 }
 
 // Helpers
+
+func (g *Generator) promiseId(r *rand.Rand) string {
+	return "p" + g.idSet[r.Intn(len(g.idSet))]
+}
+
+func (g *Generator) scheduleId(r *rand.Rand) string {
+	return "s" + g.idSet[r.Intn(len(g.idSet))]
+}
+
+func (g *Generator) promiseSearch(r *rand.Rand) string {
+	return "p" + g.search(r)
+}
+
+func (g *Generator) scheduleSearch(r *rand.Rand) string {
+	return "s" + g.search(r)
+}
+
+func (g *Generator) search(r *rand.Rand) string {
+	switch r.Intn(2) {
+	case 0:
+		return fmt.Sprintf("*%d", r.Intn(10))
+	default:
+		return fmt.Sprintf("%d*", r.Intn(10))
+	}
+}
 
 func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
 	reqs := g.requests[kind]

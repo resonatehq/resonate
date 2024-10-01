@@ -61,6 +61,17 @@ func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
 }
 
+func (a *api) Addr() string {
+	// advertise only the http address, if available
+	for _, subsystem := range a.subsystems {
+		if subsystem.Kind() == "http" {
+			return subsystem.Addr()
+		}
+	}
+
+	return ""
+}
+
 // Lifecycle functions
 
 func (a *api) Start() error {

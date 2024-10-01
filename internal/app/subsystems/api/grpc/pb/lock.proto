@@ -2,20 +2,12 @@ syntax = "proto3";
 
 package lock;
 
-option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
 
 service Locks {
     rpc AcquireLock (AcquireLockRequest) returns (AcquireLockResponse) {}
-    rpc HeartbeatLocks (HeartbeatLocksRequest) returns (HeartbeatLocksResponse) {}
     rpc ReleaseLock (ReleaseLockRequest) returns (ReleaseLockResponse) {}
-}
-
-message Lock {
-    string resource_id = 1;
-    string execution_id = 2;
-    string process_id = 3;
-    int64 expiry_in_milliseconds = 4;
-    int64 expires_at = 5;
+    rpc HeartbeatLocks (HeartbeatLocksRequest) returns (HeartbeatLocksResponse) {}
 }
 
 message AcquireLockRequest {
@@ -27,7 +19,17 @@ message AcquireLockRequest {
 }
 
 message AcquireLockResponse {
-    Lock lock = 1;
+    bool acquired = 1;
+}
+
+message ReleaseLockRequest {
+    string resource_id = 1;
+    string execution_id = 2;
+    string request_id = 3;
+}
+
+message ReleaseLockResponse {
+    bool released = 1;
 }
 
 message HeartbeatLocksRequest {
@@ -38,11 +40,3 @@ message HeartbeatLocksRequest {
 message HeartbeatLocksResponse {
     int32 locksAffected = 1;
 }
-
-message ReleaseLockRequest {
-    string resource_id = 1;
-    string execution_id = 2;
-    string request_id = 3;
-}
-
-message ReleaseLockResponse {}

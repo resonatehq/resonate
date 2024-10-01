@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package task;
 
-import "internal/app/subsystems/api/grpc/api/promise.proto";
+import "internal/app/subsystems/api/grpc/pb/promise_t.proto";
 
-option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api";
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
 
 service Tasks {
     rpc ClaimTask (ClaimTaskRequest) returns (ClaimTaskResponse) {}
@@ -14,15 +14,26 @@ service Tasks {
 
 message ClaimTaskRequest {
     string id = 1;
-    string processId = 2;
-    int32 counter = 3;
+    int32 counter = 2;
+    string processId = 3;
     int32 frequency = 4;
     string requestId = 5;
 }
 
 message ClaimTaskResponse {
+    bool claimed = 1;
+    Mesg mesg = 2;
+}
+
+message Mesg {
     string type = 1;
-    map<string, promise.Promise> promises = 2;
+    map<string, MesgPromise> promises = 2;
+}
+
+message MesgPromise {
+    string id = 1;
+    string href = 2;
+    promise_t.Promise data = 3;
 }
 
 message CompleteTaskRequest {
@@ -31,7 +42,9 @@ message CompleteTaskRequest {
     string requestId = 3;
 }
 
-message CompleteTaskResponse {}
+message CompleteTaskResponse {
+    bool completed = 1;
+}
 
 message HeartbeatTasksRequest {
     string processId = 1;

@@ -56,7 +56,7 @@ func (e *Echo) Kind() t_aio.Kind {
 	return t_aio.Echo
 }
 
-func (e *Echo) Start() error {
+func (e *Echo) Start(chan<- error) error {
 	for _, worker := range e.workers {
 		go worker.Start()
 	}

@@ -3,105 +3,63 @@ package grpc
 import (
 	"context"
 
-	grpcApi "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/api"
-	"github.com/resonatehq/resonate/internal/app/subsystems/api/service"
-	"github.com/resonatehq/resonate/pkg/lock"
-	"google.golang.org/grpc/codes"
-	grpcStatus "google.golang.org/grpc/status"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
+	"google.golang.org/grpc/status"
 )
 
-func (s *server) AcquireLock(ctx context.Context, req *grpcApi.AcquireLockRequest) (*grpcApi.AcquireLockResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.ResourceId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.resource_id must be provided")
-	}
-	if req.ExecutionId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.execution_id must be provided")
-	}
-	if req.ProcessId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.process_id must be provided")
-	}
-	if req.ExpiryInMilliseconds == 0 {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "lock.expiry_in_milliseconds must be provided")
-	}
-
-	body := &service.AcquireLockBody{
-		ResourceId:           req.ResourceId,
-		ExecutionId:          req.ExecutionId,
-		ProcessId:            req.ProcessId,
-		ExpiryInMilliseconds: req.ExpiryInMilliseconds,
-	}
-
-	res, err := s.service.AcquireLock(header, body)
+func (s *server) AcquireLock(c context.Context, r *pb.AcquireLockRequest) (*pb.AcquireLockResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.AcquireLock,
+		AcquireLock: &t_api.AcquireLockRequest{
+			ResourceId:           r.ResourceId,
+			ExecutionId:          r.ExecutionId,
+			ProcessId:            r.ProcessId,
+			ExpiryInMilliseconds: r.ExpiryInMilliseconds,
+		},
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.AcquireLockResponse{
-		Lock: protoLock(res.Lock),
+	util.Assert(res.AcquireLock != nil, "result must not be nil")
+	return &pb.AcquireLockResponse{
+		Acquired: res.AcquireLock.Status == t_api.StatusCreated,
 	}, nil
 }
 
-func (s *server) ReleaseLock(ctx context.Context, req *grpcApi.ReleaseLockRequest) (*grpcApi.ReleaseLockResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.ResourceId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "resource_id must be provided")
-	}
-	if req.ExecutionId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "execution_id must be provided")
-	}
-
-	body := &service.ReleaseLockBody{
-		ResourceId:  req.ResourceId,
-		ExecutionId: req.ExecutionId,
-	}
-
-	_, err := s.service.ReleaseLock(header, body)
+func (s *server) ReleaseLock(c context.Context, r *pb.ReleaseLockRequest) (*pb.ReleaseLockResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.ReleaseLock,
+		ReleaseLock: &t_api.ReleaseLockRequest{
+			ResourceId:  r.ResourceId,
+			ExecutionId: r.ExecutionId,
+		},
+	})
 	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.ReleaseLockResponse{}, nil
-}
-
-func (s *server) HeartbeatLocks(ctx context.Context, req *grpcApi.HeartbeatLocksRequest) (*grpcApi.HeartbeatLocksResponse, error) {
-	header := &service.Header{
-		RequestId: req.RequestId,
-	}
-
-	if req.ProcessId == "" {
-		return nil, grpcStatus.Error(codes.InvalidArgument, "process_id must be provided")
-	}
-
-	body := &service.HeartbeatBody{
-		ProcessId: req.ProcessId,
-	}
-
-	res, err := s.service.Heartbeat(header, body)
-	if err != nil {
-		return nil, grpcStatus.Error(s.code(err.Code), err.Error())
-	}
-
-	return &grpcApi.HeartbeatLocksResponse{
-		LocksAffected: int32(res.LocksAffected),
+	util.Assert(res.ReleaseLock != nil, "result must not be nil")
+	return &pb.ReleaseLockResponse{
+		Released: res.ReleaseLock.Status == t_api.StatusCreated,
 	}, nil
 }
 
-func protoLock(lock *lock.Lock) *grpcApi.Lock {
-	if lock == nil {
-		return nil
+func (s *server) HeartbeatLocks(c context.Context, r *pb.HeartbeatLocksRequest) (*pb.HeartbeatLocksResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.HeartbeatLocks,
+		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+			ProcessId: r.ProcessId,
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	return &grpcApi.Lock{
-		ResourceId:           lock.ResourceId,
-		ExecutionId:          lock.ExecutionId,
-		ProcessId:            lock.ProcessId,
-		ExpiryInMilliseconds: lock.ExpiryInMilliseconds,
-	}
+	util.Assert(res.HeartbeatLocks != nil, "result must not be nil")
+	return &pb.HeartbeatLocksResponse{
+		LocksAffected: int32(res.HeartbeatLocks.LocksAffected),
+	}, nil
 }

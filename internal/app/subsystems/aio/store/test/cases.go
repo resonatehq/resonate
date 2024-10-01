@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -56,18 +57,18 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 				}
 			case t_aio.ReadSchedule:
 				for _, record := range result.ReadSchedule.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			case t_aio.ReadSchedules:
 				for _, record := range result.ReadSchedules.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			case t_aio.SearchSchedules:
 				for _, record := range result.SearchSchedules.Records {
-					record.Tags = normalizeJSON(record.Tags)
 					record.PromiseParamHeaders = normalizeJSON(record.PromiseParamHeaders)
+					record.Tags = normalizeJSON(record.Tags)
 				}
 			}
 		}
@@ -2050,6 +2051,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 		},
@@ -2076,6 +2079,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 		},
@@ -2111,6 +2116,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
@@ -2133,6 +2140,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "bar",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
 				},
 			},
 			{
@@ -2155,6 +2164,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "baz",
+					Recv:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "baz", Leaf: "baz"},
 				},
 			},
 			{
@@ -2177,6 +2188,8 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "qux",
+					Recv:      []byte("qux"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "qux", Leaf: "qux"},
 				},
 			},
 		},
@@ -2278,18 +2291,24 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo2"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "bar",
+					Recv:      []byte("bar1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
 				},
 			},
 			{
@@ -2728,8 +2747,9 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
 					Recv:      []byte("foo"),
-					Mesg:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
 					Timeout:   1,
+					State:     task.Init,
 					CreatedOn: 1,
 				},
 			},
@@ -2737,8 +2757,9 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
 					Recv:      []byte("bar"),
-					Mesg:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Invoke, Root: "bar", Leaf: "bar"},
 					Timeout:   2,
+					State:     task.Init,
 					CreatedOn: 2,
 				},
 			},
@@ -2755,12 +2776,14 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.AlterTasksResult{
 					RowsAffected: 1,
+					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.AlterTasksResult{
 					RowsAffected: 1,
+					LastInsertId: "2",
 				},
 			},
 			{
@@ -2770,17 +2793,19 @@ var TestCases = []*testCase{
 					Records: []*task.TaskRecord{
 						{
 							Id:        "1",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("foo"),
-							Mesg:      []byte("foo"),
+							Mesg:      []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
 							Timeout:   1,
 							CreatedOn: util.ToPointer[int64](1),
 						},
 						{
 							Id:        "2",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("bar"),
-							Mesg:      []byte("bar"),
+							Mesg:      []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
 							Timeout:   2,
 							CreatedOn: util.ToPointer[int64](2),
 						},
@@ -2805,7 +2830,7 @@ var TestCases = []*testCase{
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
-					Mesg:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
@@ -2813,7 +2838,7 @@ var TestCases = []*testCase{
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
 					Recv:      []byte("bar"),
-					Mesg:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
 				},
 			},
 			{
@@ -2821,7 +2846,7 @@ var TestCases = []*testCase{
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
 					Recv:      []byte("baz"),
-					Mesg:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "baz", Leaf: "baz"},
 				},
 			},
 			{
@@ -2879,23 +2904,26 @@ var TestCases = []*testCase{
 					Records: []*task.TaskRecord{
 						{
 							Id:        "1",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("foo"),
-							Mesg:      []byte("foo"),
+							Mesg:      []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "2",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("bar"),
-							Mesg:      []byte("bar"),
+							Mesg:      []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 						{
 							Id:        "3",
+							Counter:   1,
 							State:     task.Init,
 							Recv:      []byte("baz"),
-							Mesg:      []byte("baz"),
+							Mesg:      []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
 							CreatedOn: util.ToPointer[int64](0),
 						},
 					},
@@ -2919,7 +2947,7 @@ var TestCases = []*testCase{
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
-					Mesg:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
@@ -2934,28 +2962,13 @@ var TestCases = []*testCase{
 					Id:             "1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Enqueued,
-					Counter:        1,
+					Counter:        2,
 					Attempt:        1,
 					Frequency:      1,
 					Expiration:     1,
 					CompletedOn:    util.ToPointer[int64](1),
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
-				},
-			},
-			{
-				Kind: t_aio.UpdateTask,
-				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
-					ProcessId:      util.ToPointer("pid"),
-					State:          task.Claimed,
-					Counter:        2,
-					Attempt:        2,
-					Frequency:      2,
-					Expiration:     2,
-					CompletedOn:    util.ToPointer[int64](2),
-					CurrentStates:  []task.State{task.Enqueued},
-					CurrentCounter: 0, // mimatch
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -2965,12 +2978,12 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Claimed,
 					Counter:        3,
-					Attempt:        3,
-					Frequency:      3,
-					Expiration:     3,
-					CompletedOn:    util.ToPointer[int64](3),
+					Attempt:        2,
+					Frequency:      2,
+					Expiration:     2,
+					CompletedOn:    util.ToPointer[int64](2),
 					CurrentStates:  []task.State{task.Enqueued},
-					CurrentCounter: 1,
+					CurrentCounter: 1, // mismatch
 				},
 			},
 			{
@@ -2978,14 +2991,14 @@ var TestCases = []*testCase{
 				UpdateTask: &t_aio.UpdateTaskCommand{
 					Id:             "1",
 					ProcessId:      util.ToPointer("pid"),
-					State:          task.Completed,
+					State:          task.Claimed,
 					Counter:        4,
-					Attempt:        4,
-					Frequency:      4,
-					Expiration:     4,
-					CompletedOn:    util.ToPointer[int64](4),
-					CurrentStates:  []task.State{task.Enqueued}, // mismatch
-					CurrentCounter: 3,
+					Attempt:        3,
+					Frequency:      3,
+					Expiration:     3,
+					CompletedOn:    util.ToPointer[int64](3),
+					CurrentStates:  []task.State{task.Enqueued},
+					CurrentCounter: 2,
 				},
 			},
 			{
@@ -2995,12 +3008,27 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Completed,
 					Counter:        5,
+					Attempt:        4,
+					Frequency:      4,
+					Expiration:     4,
+					CompletedOn:    util.ToPointer[int64](4),
+					CurrentStates:  []task.State{task.Enqueued}, // mismatch
+					CurrentCounter: 4,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Completed,
+					Counter:        6,
 					Attempt:        5,
 					Frequency:      5,
 					Expiration:     5,
 					CompletedOn:    util.ToPointer[int64](5),
 					CurrentStates:  []task.State{task.Claimed},
-					CurrentCounter: 3,
+					CurrentCounter: 4,
 				},
 			},
 			{
@@ -3070,8 +3098,8 @@ var TestCases = []*testCase{
 							ProcessId:   util.ToPointer("pid"),
 							State:       task.Completed,
 							Recv:        []byte("foo"),
-							Mesg:        []byte("foo"),
-							Counter:     5,
+							Mesg:        []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							Counter:     6,
 							Attempt:     5,
 							Frequency:   5,
 							Expiration:  5,
@@ -3098,18 +3126,24 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo2"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
 					PromiseId: "foo",
+					Recv:      []byte("foo3"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
 				},
 			},
 			{
@@ -3125,7 +3159,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -3135,7 +3169,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{
@@ -3145,7 +3179,7 @@ var TestCases = []*testCase{
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Completed,
 					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: 0,
+					CurrentCounter: 1,
 				},
 			},
 			{

@@ -5,9 +5,9 @@ import (
 
 	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/lock"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/schedule"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type Response struct {
@@ -15,18 +15,20 @@ type Response struct {
 	Tags map[string]string
 
 	// Promises
-	CreatePromise   *CreatePromiseResponse
-	ReadPromise     *ReadPromiseResponse
-	SearchPromises  *SearchPromisesResponse
-	CompletePromise *CompletePromiseResponse
+	ReadPromise              *ReadPromiseResponse
+	SearchPromises           *SearchPromisesResponse
+	CreatePromise            *CreatePromiseResponse
+	CreatePromiseAndTask     *CreatePromiseAndTaskResponse
+	CreatePromiseAndCallback *CreatePromiseAndCallbackResponse
+	CompletePromise          *CompletePromiseResponse
 
 	// CALLBACKS
 	CreateCallback *CreateCallbackResponse
 
 	// SCHEDULES
-	CreateSchedule  *CreateScheduleResponse
-	SearchSchedules *SearchSchedulesResponse
 	ReadSchedule    *ReadScheduleResponse
+	SearchSchedules *SearchSchedulesResponse
+	CreateSchedule  *CreateScheduleResponse
 	DeleteSchedule  *DeleteScheduleResponse
 
 	// LOCKS
@@ -45,25 +47,61 @@ type Response struct {
 
 // Promises
 
-type CreatePromiseResponse struct {
-	Status  StatusCode       `json:"status"`
-	Promise *promise.Promise `json:"promise,omitempty"`
-}
-
 type ReadPromiseResponse struct {
 	Status  StatusCode       `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
 }
 
+func (r *ReadPromiseResponse) String() string {
+	return fmt.Sprintf("ReadPromise(status=%d, promise=%v)", r.Status, r.Promise)
+}
+
 type SearchPromisesResponse struct {
 	Status   StatusCode                     `json:"status"`
-	Cursor   *Cursor[SearchPromisesRequest] `json:"cursor,omitempty"`
 	Promises []*promise.Promise             `json:"promises,omitempty"`
+	Cursor   *Cursor[SearchPromisesRequest] `json:"cursor,omitempty"`
+}
+
+func (r *SearchPromisesResponse) String() string {
+	return fmt.Sprintf("SearchPromises(status=%d, promises=%v, cursor=%v)", r.Status, r.Promises, r.Cursor)
+}
+
+type CreatePromiseResponse struct {
+	Status  StatusCode       `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+func (r *CreatePromiseResponse) String() string {
+	return fmt.Sprintf("CreatePromise(status=%d, promise=%v)", r.Status, r.Promise)
+}
+
+type CreatePromiseAndTaskResponse struct {
+	Status  StatusCode       `json:"status"`
+	Promise *promise.Promise `json:"promise,omitempty"`
+	Task    *task.Task       `json:"task,omitempty"`
+}
+
+func (r *CreatePromiseAndTaskResponse) String() string {
+	return fmt.Sprintf("CreatePromiseAndTask(status=%d, promise=%v, task=%v)", r.Status, r.Promise, r.Task)
+}
+
+type CreatePromiseAndCallbackResponse struct {
+	Status   StatusCode         `json:"status"`
+	Promise  *promise.Promise   `json:"promise,omitempty"`
+	Callback *callback.Callback `json:"callback,omitempty"`
+}
+
+func (r *CreatePromiseAndCallbackResponse) String() string {
+	return fmt.Sprintf("CreatePromiseAndCallback(status=%d, promise=%v, callback=%v)", r.Status, r.Promise, r.Callback)
 }
 
 type CompletePromiseResponse struct {
 	Status  StatusCode       `json:"status"`
 	Promise *promise.Promise `json:"promise,omitempty"`
+}
+
+func (r *CompletePromiseResponse) String() string {
+	return fmt.Sprintf("CompletePromise(status=%d, promise=%v)", r.Status, r.Promise)
 }
 
 // Callbacks
@@ -74,26 +112,46 @@ type CreateCallbackResponse struct {
 	Callback *callback.Callback `json:"callback,omitempty"`
 }
 
+func (r *CreateCallbackResponse) String() string {
+	return fmt.Sprintf("CreateCallback(status=%d, promise=%v, callback=%v)", r.Status, r.Promise, r.Callback)
+}
+
 // Schedules
-
-type CreateScheduleResponse struct {
-	Status   StatusCode         `json:"status"`
-	Schedule *schedule.Schedule `json:"schedule,omitempty"`
-}
-
-type SearchSchedulesResponse struct {
-	Status    StatusCode                      `json:"status"`
-	Cursor    *Cursor[SearchSchedulesRequest] `json:"cursor,omitempty"`
-	Schedules []*schedule.Schedule            `json:"schedules,omitempty"`
-}
 
 type ReadScheduleResponse struct {
 	Status   StatusCode         `json:"status"`
 	Schedule *schedule.Schedule `json:"schedule,omitempty"`
 }
 
+func (r *ReadScheduleResponse) String() string {
+	return fmt.Sprintf("ReadSchedule(status=%d, schedule=%v)", r.Status, r.Schedule)
+}
+
+type SearchSchedulesResponse struct {
+	Status    StatusCode                      `json:"status"`
+	Schedules []*schedule.Schedule            `json:"schedules,omitempty"`
+	Cursor    *Cursor[SearchSchedulesRequest] `json:"cursor,omitempty"`
+}
+
+func (r *SearchSchedulesResponse) String() string {
+	return fmt.Sprintf("SearchSchedules(status=%d, schedules=%v, cursor=%v)", r.Status, r.Schedules, r.Cursor)
+}
+
+type CreateScheduleResponse struct {
+	Status   StatusCode         `json:"status"`
+	Schedule *schedule.Schedule `json:"schedule,omitempty"`
+}
+
+func (r *CreateScheduleResponse) String() string {
+	return fmt.Sprintf("CreateSchedule(status=%d, schedule=%v)", r.Status, r.Schedule)
+}
+
 type DeleteScheduleResponse struct {
 	Status StatusCode `json:"status"`
+}
+
+func (r *DeleteScheduleResponse) String() string {
+	return fmt.Sprintf("DeleteSchedule(status=%d)", r.Status)
 }
 
 // Locks
@@ -103,8 +161,16 @@ type AcquireLockResponse struct {
 	Lock   *lock.Lock `json:"lock,omitempty"`
 }
 
+func (r *AcquireLockResponse) String() string {
+	return fmt.Sprintf("AcquireLock(status=%d, lock=%v)", r.Status, r.Lock)
+}
+
 type ReleaseLockResponse struct {
 	Status StatusCode `json:"status"`
+}
+
+func (r *ReleaseLockResponse) String() string {
+	return fmt.Sprintf("ReleaseLock(status=%d)", r.Status)
 }
 
 type HeartbeatLocksResponse struct {
@@ -112,15 +178,32 @@ type HeartbeatLocksResponse struct {
 	LocksAffected int64      `json:"locksAffected"`
 }
 
+func (r *HeartbeatLocksResponse) String() string {
+	return fmt.Sprintf("HeartbeatLocks(status=%d, locksAffected=%d)", r.Status, r.LocksAffected)
+}
+
 // Tasks
 
 type ClaimTaskResponse struct {
-	Status StatusCode    `json:"status"`
-	Mesg   *message.Mesg `json:"mesg,omitempty"`
+	Status          StatusCode       `json:"status"`
+	Task            *task.Task       `json:"task,omitempty"`
+	RootPromise     *promise.Promise `json:"rootPromise,omitempty"`
+	LeafPromise     *promise.Promise `json:"leafPromise,omitempty"`
+	RootPromiseHref string           `json:"rootPromiseHref,omitempty"`
+	LeafPromiseHref string           `json:"leafPromiseHref,omitempty"`
+}
+
+func (r *ClaimTaskResponse) String() string {
+	return fmt.Sprintf("ClaimTask(status=%d, task=%v)", r.Status, r.Task)
 }
 
 type CompleteTaskResponse struct {
 	Status StatusCode `json:"status"`
+	Task   *task.Task `json:"task,omitempty"`
+}
+
+func (r *CompleteTaskResponse) String() string {
+	return fmt.Sprintf("CompleteTask(status=%d, task=%v)", r.Status, r.Task)
 }
 
 type HeartbeatTasksResponse struct {
@@ -128,10 +211,18 @@ type HeartbeatTasksResponse struct {
 	TasksAffected int64      `json:"tasksAffected"`
 }
 
+func (r *HeartbeatTasksResponse) String() string {
+	return fmt.Sprintf("HeartbeatTasks(status=%d, tasksAffected=%d)", r.Status, r.TasksAffected)
+}
+
 // Echo
 
 type EchoResponse struct {
 	Data string `json:"data"`
+}
+
+func (r *EchoResponse) String() string {
+	return fmt.Sprintf("Echo(data=%s)", r.Data)
 }
 
 func (r *Response) Status() StatusCode {
@@ -143,11 +234,17 @@ func (r *Response) Status() StatusCode {
 		return r.SearchPromises.Status
 	case CreatePromise:
 		return r.CreatePromise.Status
+	case CreatePromiseAndTask:
+		return r.CreatePromiseAndTask.Status
+	case CreatePromiseAndCallback:
+		return r.CreatePromiseAndCallback.Status
 	case CompletePromise:
 		return r.CompletePromise.Status
+
 	// CALLBACKS
 	case CreateCallback:
 		return r.CreateCallback.Status
+
 	// SCHEDULES
 	case ReadSchedule:
 		return r.ReadSchedule.Status
@@ -157,6 +254,7 @@ func (r *Response) Status() StatusCode {
 		return r.CreateSchedule.Status
 	case DeleteSchedule:
 		return r.DeleteSchedule.Status
+
 	// LOCKS
 	case AcquireLock:
 		return r.AcquireLock.Status
@@ -164,6 +262,7 @@ func (r *Response) Status() StatusCode {
 		return r.ReleaseLock.Status
 	case HeartbeatLocks:
 		return r.HeartbeatLocks.Status
+
 	// TASKS
 	case ClaimTask:
 		return r.ClaimTask.Status
@@ -171,9 +270,11 @@ func (r *Response) Status() StatusCode {
 		return r.CompleteTask.Status
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.Status
+
 	// ECHO
 	case Echo:
 		return 200
+
 	default:
 		panic(fmt.Sprintf("invalid response kind: %s", r.Kind))
 	}
@@ -183,110 +284,52 @@ func (r *Response) String() string {
 	switch r.Kind {
 	// PROMISES
 	case ReadPromise:
-		return fmt.Sprintf(
-			"ReadPromise(status=%d, promise=%s)",
-			r.ReadPromise.Status,
-			r.ReadPromise.Promise,
-		)
+		return r.ReadPromise.String()
 	case SearchPromises:
-		return fmt.Sprintf(
-			"SearchPromises(status=%d, cursor=%s, promises=%s)",
-			r.SearchPromises.Status,
-			r.SearchPromises.Cursor,
-			r.SearchPromises.Promises,
-		)
+		return r.SearchPromises.String()
 	case CreatePromise:
-		return fmt.Sprintf(
-			"CreatePromise(status=%d, promise=%s)",
-			r.CreatePromise.Status,
-			r.CreatePromise.Promise,
-		)
+		return r.CreatePromise.String()
+	case CreatePromiseAndTask:
+		return r.CreatePromiseAndTask.String()
+	case CreatePromiseAndCallback:
+		return r.CreatePromiseAndCallback.String()
 	case CompletePromise:
-		return fmt.Sprintf(
-			"CompletePromise(status=%d, promise=%s)",
-			r.CompletePromise.Status,
-			r.CompletePromise.Promise,
-		)
+		return r.CompletePromise.String()
 
 	// CALLBACKS
 	case CreateCallback:
-		return fmt.Sprintf(
-			"CreateCallback(status=%d, promise=%s, callback=%s)",
-			r.CreateCallback.Status,
-			r.CreateCallback.Promise,
-			r.CreateCallback.Callback,
-		)
+		return r.CreateCallback.String()
 
 	// SCHEDULES
 	case ReadSchedule:
-		return fmt.Sprintf(
-			"ReadSchedule(status=%d, schedule=%s)",
-			r.ReadSchedule.Status,
-			r.ReadSchedule.Schedule,
-		)
+		return r.ReadSchedule.String()
 	case SearchSchedules:
-		return fmt.Sprintf(
-			"SearchSchedules(status=%d, cursor=%s, schedules=%s)",
-			r.SearchSchedules.Status,
-			r.SearchSchedules.Cursor,
-			r.SearchSchedules.Schedules,
-		)
+		return r.SearchSchedules.String()
 	case CreateSchedule:
-		return fmt.Sprintf(
-			"CreateSchedule(status=%d, schedule=%s)",
-			r.CreateSchedule.Status,
-			r.CreateSchedule.Schedule,
-		)
+		return r.CreateSchedule.String()
 	case DeleteSchedule:
-		return fmt.Sprintf(
-			"DeleteSchedule(status=%d)",
-			r.DeleteSchedule.Status,
-		)
+		return r.DeleteSchedule.String()
 
 	// LOCKS
 	case AcquireLock:
-		return fmt.Sprintf(
-			"AcquireLock(status=%d, lock=%s)",
-			r.AcquireLock.Status,
-			r.AcquireLock.Lock,
-		)
+		return r.AcquireLock.String()
 	case ReleaseLock:
-		return fmt.Sprintf(
-			"ReleaseLock(status=%d)",
-			r.ReleaseLock.Status,
-		)
+		return r.ReleaseLock.String()
 	case HeartbeatLocks:
-		return fmt.Sprintf(
-			"HeartbeatLocks(status=%d, locksAffected=%d)",
-			r.HeartbeatLocks.Status,
-			r.HeartbeatLocks.LocksAffected,
-		)
+		return r.HeartbeatLocks.String()
 
 	// TASKS
 	case ClaimTask:
-		return fmt.Sprintf(
-			"ClaimTask(status=%d, mesg=%s)",
-			r.ClaimTask.Status,
-			r.ClaimTask.Mesg,
-		)
+		return r.ClaimTask.String()
 	case CompleteTask:
-		return fmt.Sprintf(
-			"CompleteTask(status=%d)",
-			r.CompleteTask.Status,
-		)
+		return r.CompleteTask.String()
 	case HeartbeatTasks:
-		return fmt.Sprintf(
-			"HeartbeatTasks(status=%d, tasksAffected=%d)",
-			r.HeartbeatTasks.Status,
-			r.HeartbeatTasks.TasksAffected,
-		)
+		return r.HeartbeatTasks.String()
 
 	// ECHO
 	case Echo:
-		return fmt.Sprintf(
-			"Echo(data=%s)",
-			r.Echo.Data,
-		)
+		return r.Echo.String()
+
 	default:
 		return "Response"
 	}

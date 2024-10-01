@@ -37,7 +37,6 @@ type Config struct {
 	Headers            int
 	Data               int
 	Tags               int
-	Searches           int
 	FaultInjection     bool
 	Backchannel        chan interface{}
 }
@@ -87,6 +86,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
 	d.Add(t_api.SearchPromises, d.generator.GenerateSearchPromises, d.validator.ValidateSearchPromises)
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
+	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
+	d.Add(t_api.CreatePromiseAndCallback, d.generator.GenerateCreatePromiseAndCallback, d.validator.ValidateCreatePromiseAndCallback)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
 	// callbacks
@@ -166,6 +167,48 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Output:   &Res{Op, resTime, res, err},
 					})
 
+					// Warning:
+					// A CreatePromiseAndTask request applies to two partitions, the
+					// promise partition and the task partition. Merging the
+					// partitions results in long checking time, so as a workaround
+					// we create an independent CreatePromise request. The mapping
+					// of requests to partitions is as follows:
+					// CreatePromise        -> p partition
+					// CreatePromiseAndTask -> t partition
+					//
+					// Note:
+					// A similar approach is not needed for CreatePromiseAndCallback
+					// because callbacks and promises are part of the same
+					// partition.
+					if req.Kind == t_api.CreatePromiseAndTask {
+						j++
+
+						req = &t_api.Request{
+							Kind:          t_api.CreatePromise,
+							Tags:          req.Tags,
+							CreatePromise: req.CreatePromiseAndTask.Promise,
+						}
+
+						if res != nil {
+							res = &t_api.Response{
+								Kind: t_api.CreatePromise,
+								Tags: res.Tags,
+								CreatePromise: &t_api.CreatePromiseResponse{
+									Status:  res.CreatePromiseAndTask.Status,
+									Promise: res.CreatePromiseAndTask.Promise,
+								},
+							}
+						}
+
+						ops = append(ops, porcupine.Operation{
+							ClientId: int(j % d.config.MaxReqsPerTick),
+							Call:     reqTime,
+							Return:   resTime,
+							Input:    &Req{Op, reqTime, req, nil},
+							Output:   &Res{Op, resTime, res, err},
+						})
+					}
+
 					j++
 				},
 			})
@@ -195,8 +238,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					Kind: t_api.ClaimTask,
 					ClaimTask: &t_api.ClaimTaskRequest{
 						Id:        obj.Id,
-						ProcessId: obj.Id,
 						Counter:   counter,
+						ProcessId: obj.Id,
 						Frequency: RangeIntn(r, 1000, 5000),
 					},
 				})
@@ -272,13 +315,13 @@ func (d *DST) Model() porcupine.Model {
 				switch req.kind {
 				case Op:
 					switch req.req.Kind {
-					case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
+					case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CreatePromiseAndCallback, t_api.CompletePromise, t_api.CreateCallback:
 						p = append(p, op)
 					case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
 						s = append(s, op)
 					case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
 						l = append(l, op)
-					case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks:
+					case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks, t_api.CreatePromiseAndTask:
 						t = append(t, op)
 					default:
 						panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
@@ -580,13 +623,12 @@ func (d *DST) Time(t int64) int64 {
 
 func (d *DST) String() string {
 	return fmt.Sprintf(
-		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, searches=%d, backchannel=%d)",
+		"DST(ids=%d, idempotencyKeys=%d, headers=%d, data=%d, tags=%d, backchannel=%d)",
 		d.config.Ids,
 		d.config.IdempotencyKeys,
 		d.config.Headers,
 		d.config.Data,
 		d.config.Tags,
-		d.config.Searches,
 		cap(d.config.Backchannel),
 	)
 }

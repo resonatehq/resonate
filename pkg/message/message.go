@@ -1,38 +1,17 @@
 package message
 
 import (
-	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/promise"
+	"fmt"
 )
 
 type Mesg struct {
-	Type     Type                        `json:"type"`
-	Root     string                      `json:"root,omitempty"`
-	Leaf     string                      `json:"leaf,omitempty"`
-	Promises map[string]*promise.Promise `json:"promises,omitempty"`
+	Type Type   `json:"type"`
+	Root string `json:"root"`
+	Leaf string `json:"leaf"`
 }
 
 func (m *Mesg) String() string {
-	return string(m.Type)
-}
-
-func (m *Mesg) SetPromises(root *promise.Promise, leaf *promise.Promise) {
-	util.Assert(root == nil || root.Id == m.Root, "root id must match")
-	util.Assert(leaf == nil || leaf.Id == m.Leaf, "leaf id must match")
-
-	// set promises
-	m.Promises = map[string]*promise.Promise{}
-
-	// hack, unset root and leaf
-	m.Root = ""
-	m.Leaf = ""
-
-	if root != nil {
-		m.Promises["root"] = root
-	}
-	if leaf != nil {
-		m.Promises["leaf"] = leaf
-	}
+	return fmt.Sprintf("Mesg(type=%s, root=%s, leaf=%s)", m.Type, m.Root, m.Leaf)
 }
 
 type Type string

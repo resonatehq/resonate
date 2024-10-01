@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -60,7 +61,10 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.Sender,
 					Tags: tags,
 					Sender: &t_aio.SenderSubmission{
-						Task: t,
+						Task:          t,
+						ClaimHref:     fmt.Sprintf("%s/tasks/claim/%s/%d", config.Url, t.Id, t.Counter),
+						CompleteHref:  fmt.Sprintf("%s/tasks/complete/%s/%d", config.Url, t.Id, t.Counter),
+						HeartbeatHref: fmt.Sprintf("%s/tasks/heartbeat/%s/%d", config.Url, t.Id, t.Counter),
 					},
 				})
 			} else {

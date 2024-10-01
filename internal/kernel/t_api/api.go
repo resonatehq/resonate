@@ -7,6 +7,8 @@ const (
 	ReadPromise Kind = iota
 	SearchPromises
 	CreatePromise
+	CreatePromiseAndTask
+	CreatePromiseAndCallback
 	CompletePromise
 
 	// CALLBACKS
@@ -41,6 +43,10 @@ func (k Kind) String() string {
 		return "SearchPromises"
 	case CreatePromise:
 		return "CreatePromise"
+	case CreatePromiseAndTask:
+		return "CreatePromiseAndTask"
+	case CreatePromiseAndCallback:
+		return "CreatePromiseAndCallback"
 	case CompletePromise:
 		return "CompletePromise"
 	// CALLBACKS

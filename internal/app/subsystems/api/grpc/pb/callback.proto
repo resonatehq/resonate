@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package callback;
+
+import "internal/app/subsystems/api/grpc/pb/callback_t.proto";
+import "internal/app/subsystems/api/grpc/pb/promise_t.proto";
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
+
+service Callbacks {
+    rpc CreateCallback (CreateCallbackRequest) returns (CreateCallbackResponse) {}
+}
+
+message CreateCallbackRequest {
+    string promiseId = 1;
+    string rootPromiseId = 2;
+    int64 timeout = 3;
+    callback_t.Recv recv = 4;
+    string requestId = 5;
+}
+
+message CreateCallbackResponse {
+    bool noop = 1;
+    callback_t.Callback callback = 2;
+    promise_t.Promise promise = 3;
+}

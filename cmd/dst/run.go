@@ -40,7 +40,6 @@ func RunDSTCmd() *cobra.Command {
 		headers         = util.NewRangeIntFlag(1, 25)
 		data            = util.NewRangeIntFlag(1, 25)
 		tags            = util.NewRangeIntFlag(1, 25)
-		searches        = util.NewRangeIntFlag(1, 10)
 		backchannelSize = util.NewRangeIntFlag(1, 1000)
 	)
 
@@ -80,10 +79,7 @@ func RunDSTCmd() *cobra.Command {
 
 			mux := netHttp.NewServeMux()
 			mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-			metricsServer := &netHttp.Server{
-				Addr:    ":9090",
-				Handler: mux,
-			}
+			metricsServer := &netHttp.Server{Addr: ":9090", Handler: mux}
 
 			go metricsServer.ListenAndServe() // nolint: errcheck
 
@@ -113,16 +109,20 @@ func RunDSTCmd() *cobra.Command {
 			aio := aio.NewDST(r, p, metrics)
 
 			// api subsystems
-			for _, subsystem := range config.API.Subsystems.Instantiate(api) {
+			apiSubsystems, err := config.APISubsystems(api)
+			if err != nil {
+				return err
+			}
+			for _, subsystem := range apiSubsystems {
 				api.AddSubsystem(subsystem)
 			}
 
 			// aio subsystems
-			subsystems, err := config.AIO.Subsystems.Instantiate(aio, metrics, r, backchannel)
+			aioSubsystems, err := config.AIOSubsystems(aio, metrics, r, backchannel)
 			if err != nil {
 				return err
 			}
-			for _, subsystem := range subsystems {
+			for _, subsystem := range aioSubsystems {
 				aio.AddSubsystem(subsystem)
 			}
 
@@ -141,6 +141,8 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+			system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
+			system.AddOnRequest(t_api.CreatePromiseAndCallback, coroutines.CreatePromiseAndCallback)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
@@ -176,7 +178,6 @@ func RunDSTCmd() *cobra.Command {
 				Headers:            headers.Resolve(r),
 				Data:               data.Resolve(r),
 				Tags:               tags.Resolve(r),
-				Searches:           searches.Resolve(r),
 				FaultInjection:     p != 0,
 				Backchannel:        backchannel,
 			})
@@ -213,7 +214,6 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(headers, "headers", "promise header set size")
 	cmd.Flags().Var(data, "data", "promise data set size")
 	cmd.Flags().Var(tags, "tags", "promise tags set size")
-	cmd.Flags().Var(searches, "searches", "search set size")
 	cmd.Flags().Var(backchannelSize, "backchannel-size", "backchannel size")
 
 	// bind config

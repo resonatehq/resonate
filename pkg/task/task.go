@@ -10,30 +10,34 @@ import (
 
 type Task struct {
 	Id          string          `json:"id"`
-	ProcessId   *string         `json:"processId"`
-	State       State           `json:"state"`
-	Recv        json.RawMessage `json:"recv"`
-	Mesg        *message.Mesg   `json:"mesg"`
-	Timeout     int64           `json:"timeout"`
 	Counter     int             `json:"counter"`
-	Attempt     int             `json:"attempt"`
-	Frequency   int             `json:"frequency"`
-	Expiration  int64           `json:"expiration"`
-	CreatedOn   *int64          `json:"createdOn"`
-	CompletedOn *int64          `json:"completedOn"`
+	Timeout     int64           `json:"timeout"`
+	ProcessId   *string         `json:"processId,omitempty"`
+	State       State           `json:"-"`
+	Recv        json.RawMessage `json:"-"`
+	Mesg        *message.Mesg   `json:"-"`
+	Attempt     int             `json:"-"`
+	Frequency   int             `json:"-"`
+	Expiration  int64           `json:"-"`
+	CreatedOn   *int64          `json:"createdOn,omitempty"`
+	CompletedOn *int64          `json:"completedOn,omitempty"`
 }
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%s, processId=%s, state=%s, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d)",
+		"Task(id=%s, processId=%s, state=%s, recv=%s, mesg=%v, timeout=%d, counter=%d, attempt=%d, frequency=%d, expiration=%d, createdOn=%d, completedOn=%d)",
 		t.Id,
 		util.SafeDeref(t.ProcessId),
 		t.State,
+		t.Recv,
+		t.Mesg,
 		t.Timeout,
 		t.Counter,
 		t.Attempt,
 		t.Frequency,
 		t.Expiration,
+		util.SafeDeref(t.CreatedOn),
+		util.SafeDeref(t.CompletedOn),
 	)
 }
 
