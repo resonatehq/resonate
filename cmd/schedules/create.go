@@ -42,11 +42,6 @@ func CreateScheduleCmd(c client.Client) *cobra.Command {
 			id := args[0]
 			pt := promiseTimeout.Milliseconds()
 
-			client, err := c.V1()
-			if err != nil {
-				return err
-			}
-
 			body := v1.CreateScheduleJSONRequestBody{
 				Id:             &id,
 				Cron:           &cron,
@@ -76,17 +71,17 @@ func CreateScheduleCmd(c client.Client) *cobra.Command {
 				body.PromiseTags = &promiseTags
 			}
 
-			resp, err := client.CreateScheduleWithResponse(context.TODO(), nil, body)
+			res, err := c.V1().CreateScheduleWithResponse(context.TODO(), nil, body)
 			if err != nil {
 				return err
 			}
 
-			if resp.StatusCode() == 201 {
+			if res.StatusCode() == 201 {
 				cmd.Printf("Created schedule: %s\n", id)
-			} else if resp.StatusCode() == 200 {
+			} else if res.StatusCode() == 200 {
 				cmd.Printf("Created schedule: %s (deduplicated)\n", id)
 			} else {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+				cmd.PrintErrln(res.Status(), string(res.Body))
 			}
 
 			return nil

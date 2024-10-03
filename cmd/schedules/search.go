@@ -36,11 +36,6 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			client, err := c.V1()
-			if err != nil {
-				return err
-			}
-
 			params := &v1.SearchSchedulesParams{
 				Id:    &id,
 				Limit: &limit,
@@ -54,18 +49,18 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			resp, err := client.SearchSchedulesWithResponse(context.Background(), params)
+			res, err := c.V1().SearchSchedulesWithResponse(context.Background(), params)
 			if err != nil {
 				return err
 			}
 
-			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
 				return nil
 			}
 
 			if output == "json" {
-				for _, s := range *resp.JSON200.Schedules {
+				for _, s := range *res.JSON200.Schedules {
 					schedule, err := json.Marshal(s)
 					if err != nil {
 						cmd.PrintErr(err)
@@ -77,7 +72,7 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 				return nil
 			}
 
-			prettyPrintSchedules(cmd, *resp.JSON200.Schedules...)
+			prettyPrintSchedules(cmd, *res.JSON200.Schedules...)
 			return nil
 		},
 	}

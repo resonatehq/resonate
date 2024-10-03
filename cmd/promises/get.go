@@ -29,12 +29,7 @@ func GetPromiseCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			client, err := c.V1()
-			if err != nil {
-				return err
-			}
-
-			res, err := client.ReadPromiseWithResponse(context.TODO(), id, nil)
+			res, err := c.V1().ReadPromiseWithResponse(context.TODO(), id, nil)
 			if err != nil {
 				return err
 			}

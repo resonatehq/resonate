@@ -39,11 +39,6 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			client, err := c.V1()
-			if err != nil {
-				return err
-			}
-
 			params := &v1.CreatePromiseParams{
 				Strict: &strict,
 			}
@@ -71,7 +66,7 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 				body.Tags = &tags
 			}
 
-			res, err := client.CreatePromiseWithResponse(context.TODO(), params, body)
+			res, err := c.V1().CreatePromiseWithResponse(context.TODO(), params, body)
 			if err != nil {
 				return err
 			}

@@ -51,11 +51,6 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 
 				id := args[0]
 
-				client, err := c.V1()
-				if err != nil {
-					return err
-				}
-
 				params := &v1.CompletePromiseParams{
 					Strict: &strict,
 				}
@@ -78,7 +73,7 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 					body.Value.Data = &encoded
 				}
 
-				res, err := client.CompletePromiseWithResponse(context.TODO(), id, params, body)
+				res, err := c.V1().CompletePromiseWithResponse(context.TODO(), id, params, body)
 				if err != nil {
 					return err
 				}

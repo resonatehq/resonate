@@ -24,18 +24,13 @@ func DeleteScheduleCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			client, err := c.V1()
+			res, err := c.V1().DeleteScheduleWithResponse(context.TODO(), id, nil)
 			if err != nil {
 				return err
 			}
 
-			resp, err := client.DeleteScheduleWithResponse(context.TODO(), id, nil)
-			if err != nil {
-				return err
-			}
-
-			if resp.StatusCode() != 204 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+			if res.StatusCode() != 204 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
 				return nil
 			}
 

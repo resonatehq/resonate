@@ -26,12 +26,12 @@ func NewCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			c.SetServer(server)
-
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
+
+			return c.Setup(server)
 		},
 	}
 

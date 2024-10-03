@@ -2,6 +2,15 @@ openapi: 3.0.0
 info:
   title: Poll Plugin
   version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+
+servers:
+  - url: https://api.resonatehq.io
+    description: Resonate server
+  - url: http://localhost:8002
+    description: Development server
 
 paths:
   /{group}/{id}:

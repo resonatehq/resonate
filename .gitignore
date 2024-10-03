@@ -35,3 +35,4 @@ resonate
 resonate.yml
 coverage.out
 dst*.html
+redoc-static.html

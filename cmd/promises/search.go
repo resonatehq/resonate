@@ -46,11 +46,6 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			client, err := c.V1()
-			if err != nil {
-				return err
-			}
-
 			params := &v1.SearchPromisesParams{
 				Id:    &id,
 				Limit: &limit,
@@ -69,7 +64,7 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			res, err := client.SearchPromisesWithResponse(context.TODO(), params)
+			res, err := c.V1().SearchPromisesWithResponse(context.TODO(), params)
 			if err != nil {
 				return err
 			}
