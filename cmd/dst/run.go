@@ -45,7 +45,7 @@ func RunDSTCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "run",
-		Short: "Run dst",
+		Short: "Run deterministic simulation test",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r := rand.New(rand.NewSource(seed))
 

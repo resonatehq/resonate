@@ -21,13 +21,17 @@
 go.work
 *.db*
 .DS_Store
-resonate*
-coverage.out
-.env
-dst*.html
 
 # ignore goland files
 .idea
 
 # Nix artifacts
 result*
+
+# Resonate specific
+.env
+resonate
+!resonate/
+resonate.yml
+coverage.out
+dst*.html

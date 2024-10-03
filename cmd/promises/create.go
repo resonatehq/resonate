@@ -3,10 +3,11 @@ package promises
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"time"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/promises"
+	"github.com/resonatehq/resonate/pkg/client/openapi"
 	"github.com/spf13/cobra"
 )
 
@@ -17,7 +18,7 @@ resonate promises create foo --timeout 1h
 # Create a promise with data and headers and tags
 resonate promises create foo --timeout 1h --data foo --header bar=bar --tag baz=baz`
 
-func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
+func CreatePromiseCmd(c client.Client) *cobra.Command {
 	var (
 		data           string
 		timeout        time.Duration
@@ -29,17 +30,16 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create a promise",
+		Short:   "Create promise",
 		Example: createPromiseExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify promise id")
-				return
+				return errors.New("must specify an id")
 			}
 
 			id := args[0]
 
-			params := &promises.CreatePromiseParams{
+			params := &openapi.CreatePromiseParams{
 				Strict: &strict,
 			}
 
@@ -47,14 +47,14 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 				params.IdempotencyKey = &idempotencyKey
 			}
 
-			body := promises.CreatePromiseJSONRequestBody{
+			body := openapi.CreatePromiseJSONRequestBody{
 				Id:      id,
 				Timeout: time.Now().Add(timeout).UnixMilli(),
-				Param:   &promises.PromiseValue{},
+				Param:   &openapi.Value{},
 			}
 
 			if cmd.Flag("header").Changed {
-				body.Param.Headers = headers
+				body.Param.Headers = &headers
 			}
 
 			if cmd.Flag("data").Changed {
@@ -66,10 +66,9 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 				body.Tags = &tags
 			}
 
-			resp, err := c.PromisesV1Alpha1().CreatePromiseWithResponse(context.TODO(), params, body)
+			resp, err := c.CreatePromiseWithResponse(context.TODO(), params, body)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
 			if resp.StatusCode() == 201 {
@@ -79,15 +78,17 @@ func CreatePromiseCmd(c client.ResonateClient) *cobra.Command {
 			} else {
 				cmd.PrintErrln(resp.Status(), string(resp.Body))
 			}
+
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&data, "data", "D", "", "Promise param data")
-	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 0, "Promise timeout")
-	cmd.Flags().StringToStringVarP(&headers, "header", "H", map[string]string{}, "Promise param header")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "Promise tag")
-	cmd.Flags().StringVarP(&idempotencyKey, "idempotency-key", "i", "", "Idempotency key")
-	cmd.Flags().BoolVarP(&strict, "strict", "s", true, "Strict mode")
+	cmd.Flags().DurationVarP(&timeout, "timeout", "t", 0, "promise timeout")
+	cmd.Flags().StringToStringVarP(&headers, "header", "H", map[string]string{}, "promise param header")
+	cmd.Flags().StringVarP(&data, "data", "D", "", "promise param data")
+	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "promise tags")
+	cmd.Flags().StringVarP(&idempotencyKey, "idempotency-key", "i", "", "idempotency key")
+	cmd.Flags().BoolVarP(&strict, "strict", "s", true, "strict mode")
 
 	_ = cmd.MarkFlagRequired("timeout")
 

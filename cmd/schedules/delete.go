@@ -2,7 +2,7 @@ package schedules
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
@@ -12,33 +12,30 @@ var deleteScheduleExample = `
 # Delete a schedule
 resonate schedules delete foo`
 
-func DeleteScheduleCmd(c client.ResonateClient) *cobra.Command {
-	var id string
-
+func DeleteScheduleCmd(c client.Client) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <id>",
-		Short:   "Delete a schedule",
+		Short:   "Delete schedule",
 		Example: deleteScheduleExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify schedule id")
-				return
+				return errors.New("must specify an id")
 			}
 
-			id = args[0]
+			id := args[0]
 
-			resp, err := c.SchedulesV1Alpha1().DeleteSchedulesIdWithResponse(context.TODO(), id, nil)
+			resp, err := c.DeleteScheduleWithResponse(context.TODO(), id, nil)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
 			if resp.StatusCode() != 204 {
 				cmd.PrintErrln(resp.Status(), string(resp.Body))
-				return
+				return nil
 			}
 
-			fmt.Println("Deleted schedule:", id)
+			cmd.Println("Deleted schedule:", id)
+			return nil
 		},
 	}
 

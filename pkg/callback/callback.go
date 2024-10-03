@@ -10,8 +10,8 @@ import (
 type Callback struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`
-	Recv      json.RawMessage `json:"recv,omitempty"`
-	Mesg      *message.Mesg   `json:"mesg,omitempty"`
+	Recv      json.RawMessage `json:"-"`
+	Mesg      *message.Mesg   `json:"-"`
 	Timeout   int64           `json:"timeout"`
 	CreatedOn int64           `json:"createdOn"`
 }

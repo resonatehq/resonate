@@ -3,9 +3,10 @@ package schedules
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/schedules"
+	"github.com/resonatehq/resonate/pkg/client/openapi"
 	"github.com/spf13/cobra"
 )
 
@@ -16,7 +17,7 @@ resonate schedules search "*"
 # Search for schedules that start with foo
 resonate schedules search "foo.*"`
 
-func SearchSchedulesCmd(c client.ResonateClient) *cobra.Command {
+func SearchSchedulesCmd(c client.Client) *cobra.Command {
 	var (
 		tags   map[string]string
 		limit  int
@@ -25,17 +26,18 @@ func SearchSchedulesCmd(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "search <id>",
-		Short:   "Search for schedules",
+		Use:     "search <q>",
+		Short:   "Search schedules",
 		Example: searchSchedulesExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify a search id")
-				return
+				return errors.New("must specify an id")
 			}
 
-			params := &schedules.SearchSchedulesParams{
-				Id:    &args[0],
+			id := args[0]
+
+			params := &openapi.SearchSchedulesParams{
+				Id:    &id,
 				Limit: &limit,
 			}
 
@@ -47,15 +49,14 @@ func SearchSchedulesCmd(c client.ResonateClient) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			resp, err := c.SchedulesV1Alpha1().SearchSchedulesWithResponse(context.Background(), params)
+			resp, err := c.SearchSchedulesWithResponse(context.Background(), params)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
 			if resp.StatusCode() != 200 {
 				cmd.PrintErrln(resp.Status(), string(resp.Body))
-				return
+				return nil
 			}
 
 			if output == "json" {
@@ -68,17 +69,18 @@ func SearchSchedulesCmd(c client.ResonateClient) *cobra.Command {
 
 					cmd.Println(string(schedule))
 				}
-				return
+				return nil
 			}
 
 			prettyPrintSchedules(cmd, *resp.JSON200.Schedules...)
+			return nil
 		},
 	}
 
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "Schedule tags")
-	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "Number of results per request (default: 100)")
-	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "Pagination cursor")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format, can be one of: json")
+	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "schedule tags")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "results per page")
+	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "pagination cursor")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format, can be one of: json")
 
 	return cmd
 }

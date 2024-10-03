@@ -30,7 +30,7 @@ func ServeCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the durable promise server",
+		Short: "Resonate server",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := config.Parse(); err != nil {
 				return err

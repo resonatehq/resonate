@@ -3,23 +3,23 @@ package schedules
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"time"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/schedules"
+	"github.com/resonatehq/resonate/pkg/client/openapi"
 	"github.com/spf13/cobra"
 )
 
 var createScheduleExample = `
 # Create a schedule that runs every minute
-resonate schedules create foo --cron "* * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h
+resonate schedules create foo --cron "* * * * *" --promise-timeout 1h --promise-id "foo.{{.timestamp}}"
 
 # Create a schedule that runs every 5 minutes and includes data and headers
-resonate schedules create foo --cron "*/5 * * * *" --promise-id "foo.{{.timestamp}}" --promise-timeout 1h --promise-data foo --promise-header bar=bar`
+resonate schedules create foo --cron "*/5 * * * *" --promise-timeout 1h --promise-id "foo.{{.timestamp}}" --promise-data foo --promise-header bar=bar`
 
-func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
+func CreateScheduleCmd(c client.Client) *cobra.Command {
 	var (
-		id             string
 		description    string
 		cron           string
 		tags           map[string]string
@@ -32,22 +32,22 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create a schedule",
+		Short:   "Create schedule",
 		Example: createScheduleExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify schedule id")
-				return
+				return errors.New("must specify an id")
 			}
 
-			id = args[0]
+			id := args[0]
+			pt := promiseTimeout.Milliseconds()
 
-			body := schedules.PostSchedulesJSONRequestBody{
-				Id:             id,
-				Cron:           cron,
-				PromiseId:      promiseId,
-				PromiseParam:   &schedules.PromiseValue{},
-				PromiseTimeout: promiseTimeout.Milliseconds(),
+			body := openapi.CreateScheduleJSONRequestBody{
+				Id:             &id,
+				Cron:           &cron,
+				PromiseId:      &promiseId,
+				PromiseParam:   &openapi.Value{},
+				PromiseTimeout: &pt,
 			}
 
 			if cmd.Flag("description").Changed {
@@ -59,7 +59,7 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 			}
 
 			if cmd.Flag("promise-header").Changed {
-				body.PromiseParam.Headers = promiseHeaders
+				body.PromiseParam.Headers = &promiseHeaders
 			}
 
 			if cmd.Flag("promise-data").Changed {
@@ -71,10 +71,9 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 				body.PromiseTags = &promiseTags
 			}
 
-			resp, err := c.SchedulesV1Alpha1().PostSchedulesWithResponse(context.TODO(), nil, body)
+			resp, err := c.CreateScheduleWithResponse(context.TODO(), nil, body)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
 			if resp.StatusCode() == 201 {
@@ -84,21 +83,23 @@ func CreateScheduleCmd(c client.ResonateClient) *cobra.Command {
 			} else {
 				cmd.PrintErrln(resp.Status(), string(resp.Body))
 			}
+
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&description, "description", "d", "", "Schedule description")
-	cmd.Flags().StringVarP(&cron, "cron", "c", "", "Schedule cron expression")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "Schedule tags")
-	cmd.Flags().StringVar(&promiseId, "promise-id", "", "Templated schedule id, can include {{.timestamp}}")
-	cmd.Flags().DurationVar(&promiseTimeout, "promise-timeout", 0, "Promise timeout")
-	cmd.Flags().StringVar(&promiseData, "promise-data", "", "Promise param data")
-	cmd.Flags().StringToStringVar(&promiseHeaders, "promise-header", map[string]string{}, "Promise param header")
-	cmd.Flags().StringToStringVar(&promiseTags, "promise-tag", map[string]string{}, "Promise tags")
+	cmd.Flags().StringVarP(&description, "description", "d", "", "schedule description")
+	cmd.Flags().StringVarP(&cron, "cron", "c", "", "schedule cron expression")
+	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "schedule tags")
+	cmd.Flags().StringVar(&promiseId, "promise-id", "", "templated schedule id, can include {{.timestamp}}")
+	cmd.Flags().DurationVar(&promiseTimeout, "promise-timeout", 0, "promise timeout")
+	cmd.Flags().StringToStringVar(&promiseHeaders, "promise-header", map[string]string{}, "promise param header")
+	cmd.Flags().StringVar(&promiseData, "promise-data", "", "promise param data")
+	cmd.Flags().StringToStringVar(&promiseTags, "promise-tag", map[string]string{}, "promise tags")
 
 	_ = cmd.MarkFlagRequired("cron")
-	_ = cmd.MarkFlagRequired("id")
-	_ = cmd.MarkFlagRequired("timeout")
+	_ = cmd.MarkFlagRequired("promise-id")
+	_ = cmd.MarkFlagRequired("promise-timeout")
 
 	return cmd
 }

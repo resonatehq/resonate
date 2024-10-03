@@ -31,14 +31,10 @@ func PrettyHeaders(headers map[string]string, seperator string) []string {
 	return result
 }
 
-func PrettyData(data *string) string {
-	if data == nil {
-		return ""
-	}
-
-	decoded, err := base64.StdEncoding.DecodeString(*data)
+func PrettyData(data string) string {
+	decoded, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
-		return *data
+		return data
 	}
 
 	return string(decoded)
