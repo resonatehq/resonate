@@ -7,12 +7,14 @@ import (
 
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/promises"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
-func NewCmd(c client.ResonateClient) *cobra.Command {
+func NewCmd() *cobra.Command {
 	var (
+		c        = client.New()
+		server   string
 		username string
 		password string
 	)
@@ -24,11 +26,12 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
-		PersistentPreRun: func(cmd *cobra.Command, args []string) {
-			// Set basic auth if provided
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
+
+			return c.Setup(server)
 		},
 	}
 
@@ -39,13 +42,14 @@ func NewCmd(c client.ResonateClient) *cobra.Command {
 	cmd.AddCommand(CompletePromiseCmds(c)...)
 
 	// Flags
-	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "resonate username")
-	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "resonate password")
+	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")
+	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "basic auth username")
+	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
 
 	return cmd
 }
 
-func prettyPrintPromises(cmd *cobra.Command, promises ...promises.Promise) {
+func prettyPrintPromises(cmd *cobra.Command, promises ...v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	formatted := func(row ...any) {
 		fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", row...)
@@ -70,7 +74,7 @@ func prettyPrintPromises(cmd *cobra.Command, promises ...promises.Promise) {
 	w.Flush()
 }
 
-func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
+func prettyPrintPromise(cmd *cobra.Command, promise *v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
 	fmt.Fprintf(w, "Id:\t%v\n", promise.Id)
@@ -84,23 +88,23 @@ func prettyPrintPromise(cmd *cobra.Command, promise *promises.Promise) {
 
 	fmt.Fprintf(w, "Param:\n")
 	fmt.Fprintf(w, "\tHeaders:\n")
-	for _, tag := range util.PrettyHeaders(promise.Param.Headers, ":\t") {
+	for _, tag := range util.PrettyHeaders(util.SafeDeref(promise.Param.Headers), ":\t") {
 		fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
 	fmt.Fprintf(w, "\tData:\n")
 	if promise.Param.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(promise.Param.Data))
+		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Param.Data)))
 	}
 	fmt.Fprintf(w, "\n")
 
 	fmt.Fprintf(w, "Value:\n")
 	fmt.Fprintf(w, "\tHeaders:\n")
-	for _, tag := range util.PrettyHeaders(promise.Value.Headers, ":\t") {
+	for _, tag := range util.PrettyHeaders(util.SafeDeref(promise.Value.Headers), ":\t") {
 		fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
 	fmt.Fprintf(w, "\tData:\n")
 	if promise.Value.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(promise.Value.Data))
+		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Value.Data)))
 	}
 	fmt.Fprintf(w, "\n")
 

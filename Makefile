@@ -11,14 +11,13 @@ gen-proto:
 
 .PHONY: deps
 deps:
-	go install github.com/deepmap/oapi-codegen/v2/cmd/oapi-codegen@latest
+	go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
+	go install go.uber.org/mock/mockgen@latest
 
 .PHONY: gen-openapi
 gen-openapi:
-	oapi-codegen -generate types,client -package promises ./api/promises-openapi.yml > pkg/client/promises/openapi.go
-	oapi-codegen -generate types,client -package schedules ./api/schedules-openapi.yml > pkg/client/schedules/openapi.go
+	oapi-codegen -generate types,client -package v1 -o pkg/client/v1/v1.go ./api/openapi.yml
 
 .PHONY: gen-mock
-gen-mock:
-	mockgen -source=pkg/client/promises/openapi.go -destination=pkg/client/promises/mock_client.go -package promises
-	mockgen -source=pkg/client/schedules/openapi.go -destination=pkg/client/schedules/mock_client.go -package schedules
+gen-mock: gen-openapi
+	mockgen -package v1 -source=pkg/client/v1/v1.go -destination=pkg/client/v1/v1_mock.go

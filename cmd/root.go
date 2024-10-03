@@ -10,13 +10,12 @@ import (
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
-	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
 
 var (
-	server, cfgFile string
+	cfgFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -28,16 +27,13 @@ var rootCmd = &cobra.Command{
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	c := client.NewOrDie(&server)
-
 	// Flags
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "Config file (default \"resonate.yml\")")
-	rootCmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "Resonate server url")
+	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "config file (default \"resonate.yml\")")
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands
-	rootCmd.AddCommand(promises.NewCmd(c))
-	rootCmd.AddCommand(schedules.NewCmd(c))
+	rootCmd.AddCommand(promises.NewCmd())
+	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(quickstart.NewCmd())

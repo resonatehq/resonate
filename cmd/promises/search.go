@@ -3,9 +3,10 @@ package promises
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/promises"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -25,7 +26,7 @@ resonate promises search "*" --state resolved
 # Search for all rejected promises
 resonate promises search "*" --state rejected`
 
-func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
+func SearchPromisesCmd(c client.Client) *cobra.Command {
 	var (
 		state  string
 		tags   map[string]string
@@ -35,22 +36,23 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "search <id>",
-		Short:   "Search for promises",
+		Use:     "search <q>",
+		Short:   "Search promises",
 		Example: searchPromiseExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify a search id")
-				return
+				return errors.New("must specify search query")
 			}
 
-			params := &promises.SearchPromisesParams{
-				Id:    &args[0],
+			id := args[0]
+
+			params := &v1.SearchPromisesParams{
+				Id:    &id,
 				Limit: &limit,
 			}
 
 			if cmd.Flag("state").Changed {
-				s := promises.SearchPromisesParamsState(state)
+				s := v1.SearchPromisesParamsState(state)
 				params.State = &s
 			}
 
@@ -62,19 +64,18 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			resp, err := c.PromisesV1Alpha1().SearchPromisesWithResponse(context.Background(), params)
+			res, err := c.V1().SearchPromisesWithResponse(context.TODO(), params)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
-			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
-				return
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
+				return nil
 			}
 
 			if output == "json" {
-				for _, p := range *resp.JSON200.Promises {
+				for _, p := range *res.JSON200.Promises {
 					promise, err := json.Marshal(p)
 					if err != nil {
 						cmd.PrintErr(err)
@@ -83,18 +84,19 @@ func SearchPromisesCmd(c client.ResonateClient) *cobra.Command {
 
 					cmd.Println(string(promise))
 				}
-				return
+				return nil
 			}
 
-			prettyPrintPromises(cmd, *resp.JSON200.Promises...)
+			prettyPrintPromises(cmd, *res.JSON200.Promises...)
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&state, "state", "s", "", "Promise state")
-	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "Promise tags")
-	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "Number of results per request (default: 100)")
-	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "Pagination cursor")
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format, can be one of: json")
+	cmd.Flags().StringVarP(&state, "state", "s", "", "promise state, can be one of: pending, resolved, rejected")
+	cmd.Flags().StringToStringVarP(&tags, "tag", "T", map[string]string{}, "promise tags")
+	cmd.Flags().IntVarP(&limit, "limit", "l", 100, "results per page")
+	cmd.Flags().StringVarP(&cursor, "cursor", "c", "", "pagination cursor")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format, can be one of: json")
 
 	return cmd
 }

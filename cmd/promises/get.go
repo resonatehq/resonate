@@ -3,6 +3,7 @@ package promises
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
@@ -12,50 +13,48 @@ var getPromiseExample = `
 # Get a promise
 resonate promises foo`
 
-func GetPromiseCmd(c client.ResonateClient) *cobra.Command {
+func GetPromiseCmd(c client.Client) *cobra.Command {
 	var (
 		output string
 	)
 
 	cmd := &cobra.Command{
 		Use:     "get <id>",
-		Short:   "Get a promise",
+		Short:   "Get promise",
 		Example: getPromiseExample,
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				cmd.PrintErrln("Must specify promise id")
-				return
+				return errors.New("must specify an id")
 			}
 
 			id := args[0]
 
-			resp, err := c.PromisesV1Alpha1().GetPromiseWithResponse(context.Background(), id, nil)
+			res, err := c.V1().ReadPromiseWithResponse(context.TODO(), id, nil)
 			if err != nil {
-				cmd.PrintErr(err)
-				return
+				return err
 			}
 
-			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
-				return
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
+				return nil
 			}
 
 			if output == "json" {
-				promise, err := json.MarshalIndent(resp.JSON200, "", "  ")
+				promise, err := json.MarshalIndent(res.JSON200, "", "  ")
 				if err != nil {
-					cmd.PrintErr(err)
-					return
+					return err
 				}
 
 				cmd.Println(string(promise))
-				return
+				return nil
 			}
 
-			prettyPrintPromise(cmd, resp.JSON200)
+			prettyPrintPromise(cmd, res.JSON200)
+			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&output, "output", "o", "", "Output format, can be one of: json")
+	cmd.Flags().StringVarP(&output, "output", "o", "", "output format, can be one of: json")
 
 	return cmd
 }

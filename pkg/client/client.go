@@ -5,100 +5,80 @@ import (
 	"encoding/base64"
 	"net/http"
 
-	"github.com/resonatehq/resonate/pkg/client/promises"
-	"github.com/resonatehq/resonate/pkg/client/schedules"
+	"github.com/resonatehq/resonate/internal/util"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 )
 
-type ResonateClient interface {
-	PromisesV1Alpha1() promises.ClientWithResponsesInterface
-	SchedulesV1Alpha1() schedules.ClientWithResponsesInterface
-	SetBasicAuth(username, password string)
+type Client interface {
+	V1() v1.ClientWithResponsesInterface
+	Setup(string) error
+	SetBasicAuth(string, string)
 }
 
-type ClientSet struct {
-	Server *string
+// Client
 
-	auth *auth
-
-	promisesV1alpha1  promises.ClientWithResponsesInterface
-	schedulesV1alpha1 schedules.ClientWithResponsesInterface
-}
-
-type auth struct {
+type client struct {
+	v1       v1.ClientWithResponsesInterface
 	username string
 	password string
 }
 
-func NewOrDie(server *string) ResonateClient {
-	return &ClientSet{
-		Server: server,
-	}
+func New() Client {
+	return &client{}
 }
 
-func (c *ClientSet) SetBasicAuth(username, password string) {
-	c.auth = &auth{username, password}
-}
+func (c *client) Setup(server string) error {
+	var opts []v1.ClientOption
 
-func (c *ClientSet) SetPromisesV1Alpha1(client promises.ClientWithResponsesInterface) {
-	c.promisesV1alpha1 = client
-}
-
-func (c *ClientSet) SetSchedulesV1Alpha1(client schedules.ClientWithResponsesInterface) {
-	c.schedulesV1alpha1 = client
-}
-
-func (c *ClientSet) PromisesV1Alpha1() promises.ClientWithResponsesInterface {
-	if c.promisesV1alpha1 != nil {
-		return c.promisesV1alpha1
-	}
-
-	opts := []promises.ClientOption{}
-
-	// set basic auth if provided
-	if c.auth != nil {
-		opts = append(opts, func(client *promises.Client) error {
-			client.RequestEditors = append(client.RequestEditors, c.basicAuthRequestEditor())
-			return nil
-		})
+	if c.username != "" && c.password != "" {
+		opts = append(opts, basicAuth(c.username, c.password))
 	}
 
 	var err error
-	c.promisesV1alpha1, err = promises.NewClientWithResponses(*c.Server, opts...)
-	if err != nil {
-		panic(err)
-	}
+	c.v1, err = v1.NewClientWithResponses(server, opts...)
 
-	return c.promisesV1alpha1
+	return err
 }
 
-func (c *ClientSet) SchedulesV1Alpha1() schedules.ClientWithResponsesInterface {
-	if c.schedulesV1alpha1 != nil {
-		return c.schedulesV1alpha1
-	}
+func (c *client) V1() v1.ClientWithResponsesInterface {
+	util.Assert(c.v1 != nil, "v1 must not be nil")
+	return c.v1
+}
 
-	opts := []schedules.ClientOption{}
+func (c *client) SetBasicAuth(username, password string) {
+	c.username = username
+	c.password = password
+}
 
-	// set basic auth if provided
-	if c.auth != nil {
-		opts = append(opts, func(client *schedules.Client) error {
-			client.RequestEditors = append(client.RequestEditors, c.basicAuthRequestEditor())
+// Mock Client
+
+type mockClient struct {
+	v1 *v1.MockClientWithResponsesInterface
+}
+
+func MockClient(v1 *v1.MockClientWithResponsesInterface) Client {
+	return &mockClient{v1}
+}
+
+func (c *mockClient) Setup(string) error {
+	return nil
+}
+
+func (c *mockClient) V1() v1.ClientWithResponsesInterface {
+	return c.v1
+}
+
+func (c *mockClient) SetBasicAuth(string, string) {}
+
+// Helper functions
+
+func basicAuth(username, password string) v1.ClientOption {
+	return func(c *v1.Client) error {
+		c.RequestEditors = append(c.RequestEditors, func(ctx context.Context, req *http.Request) error {
+			authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+			req.Header.Set("Authorization", authHeader)
 			return nil
 		})
-	}
-
-	var err error
-	c.schedulesV1alpha1, err = schedules.NewClientWithResponses(*c.Server, opts...)
-	if err != nil {
-		panic(err)
-	}
-	return c.schedulesV1alpha1
-}
-
-func (c *ClientSet) basicAuthRequestEditor() func(ctx context.Context, req *http.Request) error {
-	return func(ctx context.Context, req *http.Request) error {
-		authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(c.auth.username+":"+c.auth.password))
-		req.Header.Set("Authorization", authHeader)
-
 		return nil
 	}
 }
