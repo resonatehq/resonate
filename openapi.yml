@@ -1,0 +1,1232 @@
+openapi: 3.0.0 # gen-openapi does not support 3.1, see: https://github.com/oapi-codegen/oapi-codegen/issues/373
+info:
+  title: Resonate API
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+
+servers:
+  - url: https://api.resonatehq.io
+    description: Resonate server
+  - url: http://localhost:8001
+    description: Development server
+
+paths:
+  # Promises
+  /promises:
+    get:
+      tags:
+        - Promises
+      summary: Search promises
+      operationId: searchPromises
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - name: id
+          in: query
+          description: |
+            Search promises for matching ids, can include wildcards.
+
+            For example:
+            - "foo/*" matches all ids starting with "foo/"
+            - "*/bar" matches all ids ending with "bar/"
+            - "foo/*/bar" matches all ids starting with "foo/" and ending with "/bar"
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Search promises for matching states
+          schema:
+            type: string
+            enum:
+              - pending
+              - resolved
+              - rejected
+        - name: tags
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+        - name: limit
+          in: query
+          description: Number of results per page
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: Cursor for pagination
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promises:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Promise"
+                  cursor:
+                    type: string
+
+    post:
+      tags:
+        - Promises
+      summary: Create promise
+      operationId: createPromise
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - in: header
+          name: idempotency-key
+          description: Deduplicates requests
+          schema:
+            type: string
+        - in: header
+          name: strict
+          description: If true, deduplicates only when promise state matches the request
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - timeout
+              properties:
+                id:
+                  type: string
+                timeout:
+                  type: integer
+                  format: int64
+                param:
+                  $ref: "#/components/schemas/Value"
+                tags:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        200:
+          description: Operation deduplicated, promise fetched successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Promise already exists
+
+  /promises/task:
+    post:
+      tags:
+        - Promises
+      summary: Create promise and task
+      operationId: createPromiseAndTask
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - in: header
+          name: idempotency-key
+          description: Deduplicates requests
+          schema:
+            type: string
+        - in: header
+          name: strict
+          description: If true, deduplicates only when promise state matches the request
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - promise
+                - task
+              properties:
+                promise:
+                  type: object
+                  required:
+                    - id
+                    - timeout
+                  properties:
+                    id:
+                      type: string
+                    timeout:
+                      type: integer
+                      format: int64
+                    param:
+                      $ref: "#/components/schemas/Value"
+                    tags:
+                      type: object
+                      additionalProperties:
+                        type: string
+                task:
+                  type: object
+                  required:
+                    - processId
+                    - ttl
+                    - recv
+                  properties:
+                    processId:
+                      type: string
+                    ttl:
+                      type: integer
+                    recv:
+                      type: object
+      responses:
+        200:
+          description: Operation deduplicated, promise fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+                  task:
+                    $ref: "#/components/schemas/Task"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Promise already exists
+
+  /promises/callback:
+    post:
+      tags:
+        - Promises
+      summary: Create promise and callback
+      operationId: createPromiseAndCallback
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - in: header
+          name: idempotency-key
+          description: Deduplicates requests
+          schema:
+            type: string
+        - in: header
+          name: strict
+          description: If true, deduplicates only when promise state matches the request
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - promise
+                - callback
+              properties:
+                promise:
+                  type: object
+                  required:
+                    - id
+                    - timeout
+                  properties:
+                    id:
+                      type: string
+                    timeout:
+                      type: integer
+                      format: int64
+                    param:
+                      $ref: "#/components/schemas/Value"
+                    tags:
+                      type: object
+                      additionalProperties:
+                        type: string
+                callback:
+                  type: object
+                  required:
+                    - rootPromiseId
+                    - timeout
+                    - recv
+                  properties:
+                    rootPromiseId:
+                      type: string
+                    timeout:
+                      type: integer
+                      format: int64
+                    recv:
+                      $ref: "#/components/schemas/Recv"
+      responses:
+        200:
+          description: Operation deduplicated, promise fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+                  callback:
+                    $ref: "#/components/schemas/Callback"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Promise already exists
+
+  /promises/{id}:
+    get:
+      tags:
+        - Promises
+      summary: Read promise
+      operationId: readPromise
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: The promise id
+          schema:
+            type: string
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        404:
+          description: Promise not found
+
+    patch:
+      tags:
+        - Promises
+      summary: Complete promise
+      operationId: completePromise
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: The promise id
+          schema:
+            type: string
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - in: header
+          name: idempotency-key
+          description: Deduplicates requests
+          schema:
+            type: string
+        - in: header
+          name: strict
+          description: If true, deduplicates only when promise state matches the request
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - state
+              properties:
+                state:
+                  type: string
+                  enum:
+                    - RESOLVED
+                    - REJECTED
+                    - REJECTED_CANCELED
+                value:
+                  $ref: "#/components/schemas/Value"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Promise"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        404:
+          description: Promise not found
+
+  # Callbacks
+  /callbacks:
+    post:
+      tags:
+        - Callbacks
+      summary: Create callback
+      operationId: createCallback
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - promiseId
+                - rootPromiseId
+                - timeout
+                - recv
+              properties:
+                promiseId:
+                  type: string
+                rootPromiseId:
+                  type: string
+                timeout:
+                  type: integer
+                  format: int64
+                recv:
+                  $ref: "#/components/schemas/Recv"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callback:
+                    $ref: "#/components/schemas/Callback"
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        404:
+          description: Promise not found
+
+  # Schedules
+  /schedules:
+    get:
+      tags:
+        - Schedules
+      summary: Search schedules
+      operationId: searchSchedules
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - name: id
+          in: query
+          description: |
+            Search schedules for matching ids, can include wildcards.
+
+            For example:
+            - "foo/*" matches all ids starting with "foo/"
+            - "*/bar" matches all ids ending with "bar/"
+            - "foo/*/bar" matches all ids starting with "foo/" and ending with "/bar"
+          schema:
+            type: string
+        - name: tags
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            additionalProperties:
+              type: string
+        - name: limit
+          in: query
+          description: Number of results
+          schema:
+            type: integer
+        - name: cursor
+          in: query
+          description: Cursor for pagination
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schedules:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Schedule"
+                  cursor:
+                    type: string
+        400:
+          description: Invalid request
+
+    post:
+      tags:
+        - Schedules
+      summary: Create schedule
+      operationId: createSchedule
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+        - in: header
+          name: idempotency-key
+          description: Deduplicates requests
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: string
+                description:
+                  type: string
+                cron:
+                  type: string
+                tags:
+                  type: object
+                  additionalProperties:
+                    type: string
+                promiseId:
+                  type: string
+                promiseTimeout:
+                  type: integer
+                  format: int64
+                promiseParam:
+                  $ref: "#/components/schemas/Value"
+                promiseTags:
+                  type: object
+                  additionalProperties:
+                    type: string
+                idempotencyKey:
+                  type: string
+        required: true
+      responses:
+        200:
+          description: Operation deduplicated, schedule fetched successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - id
+                  - cron
+                  - promiseId
+                  - promiseTimeout
+                properties:
+                  id:
+                    type: string
+                  description:
+                    type: string
+                  cron:
+                    type: string
+                  tags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  promiseId:
+                    type: string
+                  promiseTimeout:
+                    type: integer
+                    format: int64
+                  promiseParam:
+                    $ref: "#/components/schemas/Value"
+                  promiseTags:
+                    type: object
+                    additionalProperties:
+                      type: string
+                  idempotencyKey:
+                    type: string
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        400:
+          description: Invalid request
+        403:
+          description: Forbidden request
+        409:
+          description: Schedule already exists
+
+  /schedules/{id}:
+    get:
+      tags:
+        - Schedules
+      summary: Read schedule
+      operationId: readSchedule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: The schedule id
+          schema:
+            type: string
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        404:
+          description: Schedule not found
+
+    delete:
+      tags:
+        - Schedules
+      summary: Delete a schedule
+      operationId: deleteSchedule
+      parameters:
+        - in: path
+          name: id
+          required: true
+          description: The schedule id
+          schema:
+            type: string
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        204:
+          description: Schedule deleted
+        404:
+          description: Schedule not found
+
+  # Locks
+  /locks/acquire:
+    post:
+      tags:
+        - Locks
+      summary: Acquire lock
+      operationId: acquireLock
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resourceId
+                - executionId
+                - processId
+                - ttl
+              properties:
+                resourceId:
+                  type: string
+                executionId:
+                  type: string
+                processId:
+                  type: string
+                ttl:
+                  type: integer
+        required: true
+      responses:
+        201:
+          description: Lock acquired
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lock"
+        403:
+          description: Lock already acquired
+
+  /locks/release:
+    post:
+      tags:
+        - Locks
+      summary: Release lock
+      operationId: releaseLock
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resourceId
+                - executionId
+              properties:
+                resourceId:
+                  type: string
+                executionId:
+                  type: string
+        required: true
+      responses:
+        204:
+          description: Lock released
+        404:
+          description: Lock not found
+
+  /locks/heartbeat:
+    post:
+      tags:
+        - Locks
+      summary: Heartbeat locks
+      operationId: heartbeatLocks
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - processId
+              properties:
+                processId:
+                  type: string
+        required: true
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locksAffected:
+                    type: integer
+                    format: int64
+
+  # Tasks
+  /tasks/claim:
+    post:
+      tags:
+        - Tasks
+      summary: Claim task
+      operationId: claimTask
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - counter
+                - processId
+                - ttl
+              properties:
+                id:
+                  type: string
+                  description: The task id
+                counter:
+                  type: integer
+                  description: The task counter
+                processId:
+                  type: string
+                  description: Unique process id that identifies the claimer
+                ttl:
+                  type: integer
+                  format: int64
+                  description: Time to live in milliseconds
+      responses:
+        201:
+          description: Task claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mesg"
+        403:
+          description: Task already claimed, completed, or invalid counter
+        404:
+          description: Task not found
+
+  /tasks/claim/{id}/{counter}:
+    get:
+      tags:
+        - Tasks
+      summary: Claim task
+      operationId: claimTaskGet
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The task id
+        - in: path
+          name: counter
+          required: true
+          schema:
+            type: integer
+          description: The task counter
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        201:
+          description: Task claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mesg"
+        403:
+          description: Task already claimed, completed, or invalid counter
+        404:
+          description: Task not found
+
+  /tasks/complete:
+    post:
+      tags:
+        - Tasks
+      summary: Complete task
+      operationId: completeTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - counter
+              properties:
+                id:
+                  type: string
+                  description: The task id
+                counter:
+                  type: integer
+                  description: The task counter
+      responses:
+        201:
+          description: Task completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        403:
+          description: Task not claimed, already completed, or invalid counter
+        404:
+          description: Task not found
+
+  /tasks/complete/{id}/{counter}:
+    get:
+      tags:
+        - Tasks
+      summary: Complete task
+      operationId: completeTaskGet
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The task id
+        - in: path
+          name: counter
+          required: true
+          schema:
+            type: integer
+          description: The task counter
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        201:
+          description: Task completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Task"
+        403:
+          description: Task not claimed, already completed, or invalid counter
+        404:
+          description: Task not found
+
+  /tasks/heartbeat:
+    post:
+      tags:
+        - Tasks
+      summary: Heartbeat tasks
+      operationId: heartbeatTasks
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - processId
+              properties:
+                processId:
+                  type: string
+        required: true
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasksAffected:
+                    type: integer
+                    format: int64
+
+  /tasks/heartbeat/{id}/{counter}:
+    get:
+      tags:
+        - Tasks
+      summary: Heartbeat task
+      operationId: heartbeatTaskGet
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The task id
+        - in: path
+          name: counter
+          required: true
+          schema:
+            type: integer
+          description: The task counter
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasksAffected:
+                    type: integer
+                    format: int64
+components:
+  schemas:
+    # Promises
+    Promise:
+      type: object
+      required:
+        - id
+        - state
+        - timeout
+        - param
+        - value
+        - tags
+      properties:
+        id:
+          type: string
+        state:
+          type: string
+          enum:
+            - PENDING
+            - RESOLVED
+            - REJECTED
+            - REJECTED_CANCELED
+            - REJECTED_TIMEDOUT
+        timeout:
+          type: integer
+          format: int64
+        param:
+          $ref: "#/components/schemas/Value"
+        value:
+          $ref: "#/components/schemas/Value"
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        idempotencyKeyForCreate:
+          type: string
+          readOnly: true
+        idempotencyKeyForComplete:
+          type: string
+          readOnly: true
+        createdOn:
+          type: integer
+          format: int64
+        completedOn:
+          type: integer
+          format: int64
+
+    Value:
+      type: object
+      properties:
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        data:
+          type: string
+
+    # Callbacks
+    Callback:
+      type: object
+      required:
+        - id
+        - promiseId
+        - timeout
+      properties:
+        id:
+          type: string
+        promiseId:
+          type: string
+        timeout:
+          type: integer
+          format: int64
+        createdOn:
+          type: integer
+          format: int64
+
+    # Schedules
+    Schedule:
+      type: object
+      required:
+        - id
+        - description
+        - cron
+        - tags
+        - promiseId
+        - promiseTimeout
+        - promiseParam
+        - promiseTags
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        cron:
+          type: string
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        promiseId:
+          type: string
+        promiseTimeout:
+          type: integer
+          format: int64
+        promiseParam:
+          $ref: "#/components/schemas/Value"
+        promiseTags:
+          type: object
+          additionalProperties:
+            type: string
+        idempotencyKey:
+          type: string
+        lastRunTime:
+          type: integer
+          format: int64
+        nextRunTime:
+          type: integer
+          format: int64
+        createdOn:
+          type: integer
+          format: int64
+
+    # Locks
+    Lock:
+      type: object
+      required:
+        - resourceId
+        - executionId
+        - processId
+        - ttl
+      properties:
+        resourceId:
+          type: string
+        executionId:
+          type: string
+        processId:
+          type: string
+        ttl:
+          type: integer
+        expiresAt:
+          type: integer
+          format: int64
+
+    # Tasks
+    Task:
+      type: object
+      required:
+        - id
+        - counter
+        - timeout
+      properties:
+        id:
+          type: string
+        counter:
+          type: integer
+        timeout:
+          type: integer
+          format: int64
+        processId:
+          type: string
+        createdOn:
+          type: integer
+          format: int64
+        completedOn:
+          type: integer
+          format: int64
+
+    Recv:
+      oneOf:
+        - type: object
+          required:
+            - type
+            - data
+          properties:
+            type:
+              type: string
+            data:
+              type: object
+              additionalProperties: true
+        - type: string
+
+    Mesg:
+      type: object
+      required:
+        - type
+        - promises
+      properties:
+        type:
+          type: string
+          enum:
+            - invoke
+            - resume
+        promises:
+          type: object
+          properties:
+            root:
+              type: object
+              required:
+                - id
+                - href
+                - data
+              properties:
+                id:
+                  type: string
+                href:
+                  type: string
+                data:
+                  $ref: "#/components/schemas/Promise"
+            leaf:
+              type: object
+              required:
+                - id
+                - href
+                - data
+              properties:
+                id:
+                  type: string
+                href:
+                  type: string
+                data:
+                  $ref: "#/components/schemas/Promise"

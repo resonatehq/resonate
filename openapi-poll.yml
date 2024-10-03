@@ -1,0 +1,53 @@
+openapi: 3.0.0
+info:
+  title: Poll Plugin
+  version: 1.0.0
+  license:
+    name: Apache 2.0
+    url: https://opensource.org/license/apache-2-0
+
+servers:
+  - url: https://api.resonatehq.io
+    description: Resonate server
+  - url: http://localhost:8002
+    description: Development server
+
+paths:
+  /{group}/{id}:
+    get:
+      tags:
+        - Poll
+      summary: Poll tasks
+      operationId: pollTasks
+      parameters:
+        - in: path
+          name: group
+          required: true
+          description: The connection group name
+          schema:
+            type: string
+        - in: path
+          name: id
+          required: true
+          description: The connection id
+          schema:
+            type: string
+      responses:
+        200:
+          description: OK
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                example: |
+                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/1","complete":"http://localhost:8001/tasks/complete/1/1","heartbeat":"http://localhost:8001/tasks/heartbeat/1/1"},"task":{"id":"1","counter":1}}
+                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/2","complete":"http://localhost:8001/tasks/complete/1/2","heartbeat":"http://localhost:8001/tasks/heartbeat/1/2"},"task":{"id":"1","counter":2}}
+                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/3","complete":"http://localhost:8001/tasks/complete/1/3","heartbeat":"http://localhost:8001/tasks/heartbeat/1/3"},"task":{"id":"1","counter":3}}
+        400:
+          description: Invalid request
+        405:
+          description: Method not allowed
+        429:
+          description: Too many requests
+        500:
+          description: Streaming not supported
