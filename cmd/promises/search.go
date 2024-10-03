@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -46,13 +46,18 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			params := &openapi.SearchPromisesParams{
+			client, err := c.V1()
+			if err != nil {
+				return err
+			}
+
+			params := &v1.SearchPromisesParams{
 				Id:    &id,
 				Limit: &limit,
 			}
 
 			if cmd.Flag("state").Changed {
-				s := openapi.SearchPromisesParamsState(state)
+				s := v1.SearchPromisesParamsState(state)
 				params.State = &s
 			}
 
@@ -64,18 +69,18 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			resp, err := c.SearchPromisesWithResponse(context.TODO(), params)
+			res, err := client.SearchPromisesWithResponse(context.TODO(), params)
 			if err != nil {
 				return err
 			}
 
-			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
 				return nil
 			}
 
 			if output == "json" {
-				for _, p := range *resp.JSON200.Promises {
+				for _, p := range *res.JSON200.Promises {
 					promise, err := json.Marshal(p)
 					if err != nil {
 						cmd.PrintErr(err)
@@ -87,7 +92,7 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 				return nil
 			}
 
-			prettyPrintPromises(cmd, *resp.JSON200.Promises...)
+			prettyPrintPromises(cmd, *res.JSON200.Promises...)
 			return nil
 		},
 	}

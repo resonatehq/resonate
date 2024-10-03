@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	"github.com/resonatehq/resonate/pkg/client"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
 )
@@ -15,20 +16,20 @@ func TestCreatePromiseCmd(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	res := &openapi.CreatePromiseResponse{HTTPResponse: &http.Response{StatusCode: 201}}
+	res := &v1.CreatePromiseResponse{HTTPResponse: &http.Response{StatusCode: 201}}
 
 	// Set test cases
 	tcs := []struct {
 		name       string
 		args       []string
-		expect     func(*openapi.MockClientWithResponsesInterface)
+		expect     func(*v1.MockClientWithResponsesInterface)
 		wantStdout string
 		wantStderr string
 	}{
 		{
 			name: "CreatePromise",
 			args: []string{"foo", "--timeout", "1s"},
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CreatePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -40,7 +41,7 @@ func TestCreatePromiseCmd(t *testing.T) {
 		{
 			name: "CreatePromiseWithData",
 			args: []string{"bar", "--timeout", "1m", "--data", `{"foo": "bar"}`},
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CreatePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -52,7 +53,7 @@ func TestCreatePromiseCmd(t *testing.T) {
 		{
 			name: "CreatePromiseWithDataAndHeaders",
 			args: []string{"baz", "--timeout", "1h", "--data", `{"foo": "bar"}`, "--header", "foo=bar"},
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CreatePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any()).
@@ -64,7 +65,7 @@ func TestCreatePromiseCmd(t *testing.T) {
 		{
 			name:       "MissingFirstArgument",
 			args:       []string{"--timeout", "24h"},
-			expect:     func(*openapi.MockClientWithResponsesInterface) {},
+			expect:     func(*v1.MockClientWithResponsesInterface) {},
 			wantStderr: "Error: must specify an id\n",
 		},
 	}
@@ -76,11 +77,11 @@ func TestCreatePromiseCmd(t *testing.T) {
 			stderr := &bytes.Buffer{}
 
 			// Create mock client
-			mock := openapi.NewMockClientWithResponsesInterface(ctrl)
+			mock := v1.NewMockClientWithResponsesInterface(ctrl)
 			tc.expect(mock)
 
 			// Create commands in test
-			cmd := CreatePromiseCmd(mock)
+			cmd := CreatePromiseCmd(client.MockClient(mock))
 
 			// Set streams for command
 			cmd.SetOut(stdout)

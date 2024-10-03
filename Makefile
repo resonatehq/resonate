@@ -16,8 +16,8 @@ deps:
 
 .PHONY: gen-openapi
 gen-openapi:
-	oapi-codegen -generate types,client -package openapi -o pkg/client/openapi/openapi.go ./api/openapi.yml
+	oapi-codegen -generate types,client -package v1 -o pkg/client/v1/v1.go ./api/openapi.yml
 
 .PHONY: gen-mock
 gen-mock: gen-openapi
-	mockgen -package openapi -source=pkg/client/openapi/openapi.go -destination=pkg/client/openapi/mock.go
+	mockgen -package v1 -source=pkg/client/v1/v1.go -destination=pkg/client/v1/v1_mock.go

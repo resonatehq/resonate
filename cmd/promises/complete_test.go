@@ -5,7 +5,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	"github.com/resonatehq/resonate/pkg/client"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/mock/gomock"
@@ -16,19 +17,19 @@ func TestCompletePromiseCmd(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	res := &openapi.CompletePromiseResponse{HTTPResponse: &http.Response{StatusCode: 201}}
+	res := &v1.CompletePromiseResponse{HTTPResponse: &http.Response{StatusCode: 201}}
 
 	// Set test cases
 	tcs := []struct {
 		name       string
 		args       []string
-		expect     func(*openapi.MockClientWithResponsesInterface)
+		expect     func(*v1.MockClientWithResponsesInterface)
 		wantStdout string
 		wantStderr string
 	}{
 		{
 			name: "ResolvePromise",
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CompletePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -41,7 +42,7 @@ func TestCompletePromiseCmd(t *testing.T) {
 		{
 			name: "reject a promise",
 			args: []string{"reject", "bar", "--data", `{"foo": "bar"}`},
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CompletePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -53,7 +54,7 @@ func TestCompletePromiseCmd(t *testing.T) {
 		{
 			name: "cancel a promise",
 			args: []string{"cancel", "baz"},
-			expect: func(mock *openapi.MockClientWithResponsesInterface) {
+			expect: func(mock *v1.MockClientWithResponsesInterface) {
 				mock.
 					EXPECT().
 					CompletePromiseWithResponse(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -65,7 +66,7 @@ func TestCompletePromiseCmd(t *testing.T) {
 		{
 			name:       "MissingFirstArgument",
 			args:       []string{"resolve"},
-			expect:     func(mock *openapi.MockClientWithResponsesInterface) {},
+			expect:     func(mock *v1.MockClientWithResponsesInterface) {},
 			wantStderr: "Error: must specify an id\n",
 		},
 	}
@@ -77,11 +78,11 @@ func TestCompletePromiseCmd(t *testing.T) {
 			stderr := &bytes.Buffer{}
 
 			// Create mock client
-			mock := openapi.NewMockClientWithResponsesInterface(ctrl)
+			mock := v1.NewMockClientWithResponsesInterface(ctrl)
 			tc.expect(mock)
 
 			// Create commands in test
-			cmds := CompletePromiseCmds(mock)
+			cmds := CompletePromiseCmds(client.MockClient(mock))
 
 			// Find the appropriate command based on the first argument
 			var cmd *cobra.Command

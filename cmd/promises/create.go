@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -39,7 +39,12 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			params := &openapi.CreatePromiseParams{
+			client, err := c.V1()
+			if err != nil {
+				return err
+			}
+
+			params := &v1.CreatePromiseParams{
 				Strict: &strict,
 			}
 
@@ -47,10 +52,10 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 				params.IdempotencyKey = &idempotencyKey
 			}
 
-			body := openapi.CreatePromiseJSONRequestBody{
+			body := v1.CreatePromiseJSONRequestBody{
 				Id:      id,
 				Timeout: time.Now().Add(timeout).UnixMilli(),
-				Param:   &openapi.Value{},
+				Param:   &v1.Value{},
 			}
 
 			if cmd.Flag("header").Changed {
@@ -66,17 +71,17 @@ func CreatePromiseCmd(c client.Client) *cobra.Command {
 				body.Tags = &tags
 			}
 
-			resp, err := c.CreatePromiseWithResponse(context.TODO(), params, body)
+			res, err := client.CreatePromiseWithResponse(context.TODO(), params, body)
 			if err != nil {
 				return err
 			}
 
-			if resp.StatusCode() == 201 {
+			if res.StatusCode() == 201 {
 				cmd.Printf("Created promise: %s\n", id)
-			} else if resp.StatusCode() == 200 {
+			} else if res.StatusCode() == 200 {
 				cmd.Printf("Created promise: %s (deduplicated)\n", id)
 			} else {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+				cmd.PrintErrln(res.Status(), string(res.Body))
 			}
 
 			return nil

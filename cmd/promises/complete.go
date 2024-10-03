@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -30,11 +30,11 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 		Short string
 		Title string
 		PastT string
-		State openapi.CompletePromiseJSONBodyState
+		State v1.CompletePromiseJSONBodyState
 	}{
-		{"resolve", "Resolve", "Resolved", openapi.CompletePromiseJSONBodyStateRESOLVED},
-		{"reject", "Reject", "Rejected", openapi.CompletePromiseJSONBodyStateREJECTED},
-		{"cancel", "Cancel", "Canceled", openapi.CompletePromiseJSONBodyStateREJECTEDCANCELED},
+		{"resolve", "Resolve", "Resolved", v1.CompletePromiseJSONBodyStateRESOLVED},
+		{"reject", "Reject", "Rejected", v1.CompletePromiseJSONBodyStateREJECTED},
+		{"cancel", "Cancel", "Canceled", v1.CompletePromiseJSONBodyStateREJECTEDCANCELED},
 	}
 
 	cmds := make([]*cobra.Command, 3)
@@ -51,7 +51,12 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 
 				id := args[0]
 
-				params := &openapi.CompletePromiseParams{
+				client, err := c.V1()
+				if err != nil {
+					return err
+				}
+
+				params := &v1.CompletePromiseParams{
 					Strict: &strict,
 				}
 
@@ -59,9 +64,9 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 					params.IdempotencyKey = &idempotencyKey
 				}
 
-				body := openapi.CompletePromiseJSONRequestBody{
+				body := v1.CompletePromiseJSONRequestBody{
 					State: state.State,
-					Value: &openapi.Value{},
+					Value: &v1.Value{},
 				}
 
 				if cmd.Flag("header").Changed {
@@ -73,17 +78,17 @@ func CompletePromiseCmds(c client.Client) []*cobra.Command {
 					body.Value.Data = &encoded
 				}
 
-				resp, err := c.CompletePromiseWithResponse(context.TODO(), id, params, body)
+				res, err := client.CompletePromiseWithResponse(context.TODO(), id, params, body)
 				if err != nil {
 					return err
 				}
 
-				if resp.StatusCode() == 201 {
+				if res.StatusCode() == 201 {
 					cmd.Printf("%s promise: %s\n", state.PastT, id)
-				} else if resp.StatusCode() == 200 {
+				} else if res.StatusCode() == 200 {
 					cmd.Printf("%s promise: %s (deduplicated)\n", state.PastT, id)
 				} else {
-					cmd.PrintErrln(resp.Status(), string(resp.Body))
+					cmd.PrintErrln(res.Status(), string(res.Body))
 				}
 
 				return nil

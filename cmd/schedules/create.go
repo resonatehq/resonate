@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -42,11 +42,16 @@ func CreateScheduleCmd(c client.Client) *cobra.Command {
 			id := args[0]
 			pt := promiseTimeout.Milliseconds()
 
-			body := openapi.CreateScheduleJSONRequestBody{
+			client, err := c.V1()
+			if err != nil {
+				return err
+			}
+
+			body := v1.CreateScheduleJSONRequestBody{
 				Id:             &id,
 				Cron:           &cron,
 				PromiseId:      &promiseId,
-				PromiseParam:   &openapi.Value{},
+				PromiseParam:   &v1.Value{},
 				PromiseTimeout: &pt,
 			}
 
@@ -71,7 +76,7 @@ func CreateScheduleCmd(c client.Client) *cobra.Command {
 				body.PromiseTags = &promiseTags
 			}
 
-			resp, err := c.CreateScheduleWithResponse(context.TODO(), nil, body)
+			resp, err := client.CreateScheduleWithResponse(context.TODO(), nil, body)
 			if err != nil {
 				return err
 			}

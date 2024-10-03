@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	server, cfgFile string
+	cfgFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -29,7 +29,6 @@ func init() {
 
 	// Flags
 	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "config file (default \"resonate.yml\")")
-	rootCmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate server url")
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands

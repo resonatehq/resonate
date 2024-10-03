@@ -7,13 +7,14 @@ import (
 
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
 func NewCmd() *cobra.Command {
 	var (
 		c        = client.New()
+		server   string
 		username string
 		password string
 	)
@@ -25,16 +26,11 @@ func NewCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			server, err := cmd.Flags().GetString("server")
-			if err != nil {
-				return err
-			}
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			c.SetServer(server)
 
-			if username == "" && password == "" {
-				return c.WithDefault(server)
-			} else {
-				return c.WithBasicAuth(server, username, password)
+			if username != "" || password != "" {
+				c.SetBasicAuth(username, password)
 			}
 		},
 	}
@@ -46,13 +42,14 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(CompletePromiseCmds(c)...)
 
 	// Flags
+	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")
 	cmd.PersistentFlags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
 
 	return cmd
 }
 
-func prettyPrintPromises(cmd *cobra.Command, promises ...openapi.Promise) {
+func prettyPrintPromises(cmd *cobra.Command, promises ...v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	formatted := func(row ...any) {
 		fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", row...)
@@ -77,7 +74,7 @@ func prettyPrintPromises(cmd *cobra.Command, promises ...openapi.Promise) {
 	w.Flush()
 }
 
-func prettyPrintPromise(cmd *cobra.Command, promise *openapi.Promise) {
+func prettyPrintPromise(cmd *cobra.Command, promise *v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
 	fmt.Fprintf(w, "Id:\t%v\n", promise.Id)

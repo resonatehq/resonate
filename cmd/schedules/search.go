@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/resonatehq/resonate/pkg/client"
-	"github.com/resonatehq/resonate/pkg/client/openapi"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -36,7 +36,12 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			params := &openapi.SearchSchedulesParams{
+			client, err := c.V1()
+			if err != nil {
+				return err
+			}
+
+			params := &v1.SearchSchedulesParams{
 				Id:    &id,
 				Limit: &limit,
 			}
@@ -49,7 +54,7 @@ func SearchSchedulesCmd(c client.Client) *cobra.Command {
 				params.Cursor = &cursor
 			}
 
-			resp, err := c.SearchSchedulesWithResponse(context.Background(), params)
+			resp, err := client.SearchSchedulesWithResponse(context.Background(), params)
 			if err != nil {
 				return err
 			}

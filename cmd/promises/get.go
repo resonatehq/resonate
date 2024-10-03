@@ -29,18 +29,23 @@ func GetPromiseCmd(c client.Client) *cobra.Command {
 
 			id := args[0]
 
-			resp, err := c.ReadPromiseWithResponse(context.TODO(), id, nil)
+			client, err := c.V1()
 			if err != nil {
 				return err
 			}
 
-			if resp.StatusCode() != 200 {
-				cmd.PrintErrln(resp.Status(), string(resp.Body))
+			res, err := client.ReadPromiseWithResponse(context.TODO(), id, nil)
+			if err != nil {
+				return err
+			}
+
+			if res.StatusCode() != 200 {
+				cmd.PrintErrln(res.Status(), string(res.Body))
 				return nil
 			}
 
 			if output == "json" {
-				promise, err := json.MarshalIndent(resp.JSON200, "", "  ")
+				promise, err := json.MarshalIndent(res.JSON200, "", "  ")
 				if err != nil {
 					return err
 				}
@@ -49,7 +54,7 @@ func GetPromiseCmd(c client.Client) *cobra.Command {
 				return nil
 			}
 
-			prettyPrintPromise(cmd, resp.JSON200)
+			prettyPrintPromise(cmd, res.JSON200)
 			return nil
 		},
 	}
