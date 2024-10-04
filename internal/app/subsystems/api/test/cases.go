@@ -1700,13 +1700,51 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		Name: "SearchSchedulesInvalidLimit",
+		Name: "SearchSchedulesDefaultLimit",
+		Req: &t_api.Request{
+			Kind: t_api.SearchSchedules,
+			Tags: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "SearchSchedules"},
+			SearchSchedules: &t_api.SearchSchedulesRequest{
+				Id:    "*",
+				Tags:  map[string]string{},
+				Limit: 100,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.SearchSchedules,
+			SearchSchedules: &t_api.SearchSchedulesResponse{
+				Status:    t_api.StatusOK,
+				Schedules: []*schedule.Schedule{},
+				Cursor:    nil,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "GET",
+				Path:   "schedules?id=*",
+				Headers: map[string]string{
+					"Request-Id": "SearchSchedulesDefaultLimit",
+				},
+			},
+			Res: &httpTestCaseResponse{
+				Code: 200,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.SearchSchedulesRequest{
+				Id:        "*",
+				RequestId: "SearchSchedulesDefaultLimit",
+			},
+		},
+	},
+	{
+		Name: "SearchSchedulesInvalidLimitLower",
 		Req:  nil,
 		Res:  nil,
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "GET",
-				Path:   "schedules?id=*&limit=0",
+				Path:   "schedules?id=*&limit=-1",
 			},
 			Res: &httpTestCaseResponse{
 				Code: 400,
@@ -1715,13 +1753,13 @@ var TestCases = []*testCase{
 		Grpc: &grpcTestCase{
 			Req: &pb.SearchSchedulesRequest{
 				Id:    "*",
-				Limit: 0,
+				Limit: -1,
 			},
 			Code: codes.InvalidArgument,
 		},
 	},
 	{
-		Name: "SearchSchedulesInvalidLimit",
+		Name: "SearchSchedulesInvalidLimitUpper",
 		Req:  nil,
 		Res:  nil,
 		Http: &httpTestCase{
