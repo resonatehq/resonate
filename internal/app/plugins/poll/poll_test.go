@@ -43,6 +43,24 @@ func TestPollPlugin(t *testing.T) {
 		expected    []*Resp
 	}{
 		{
+			name: "SameGroup",
+			mc:   5,
+			connections: []*Conn{
+				{"foo", "a"},
+				{"foo", "b"},
+			},
+			messages: []*Mesg{
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+			},
+			expected: []*Resp{
+				{"foo", []string{"a", "b"}, "data: ok1"},
+				{"foo", []string{"a", "b"}, "data: ok2"},
+				{"foo", []string{"a", "b"}, "data: ok3"},
+			},
+		},
+		{
 			name: "SameGroupAndId",
 			mc:   5,
 			connections: []*Conn{
@@ -61,21 +79,39 @@ func TestPollPlugin(t *testing.T) {
 			},
 		},
 		{
-			name: "SameGroup",
+			name: "SameGroupNoId",
 			mc:   5,
 			connections: []*Conn{
 				{"foo", "a"},
 				{"foo", "b"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a", "b"}, "data: ok1"},
 				{"foo", []string{"a", "b"}, "data: ok2"},
 				{"foo", []string{"a", "b"}, "data: ok3"},
+			},
+		},
+		{
+			name: "SameGroupAndIdWithSlashes",
+			mc:   5,
+			connections: []*Conn{
+				{"foo", "a/b"},
+				{"foo", "c/d"},
+			},
+			messages: []*Mesg{
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a/b"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c/d"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"e/f"}`), Body: []byte("ok3")}},
+			},
+			expected: []*Resp{
+				{"foo", []string{"a/b"}, "data: ok1"},
+				{"foo", []string{"c/d"}, "data: ok2"},
+				{"foo", []string{"a/b", "c/d"}, "data: ok3"},
 			},
 		},
 		{
