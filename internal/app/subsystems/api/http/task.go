@@ -21,7 +21,7 @@ type claimTaskBody struct {
 	Id        string `json:"id" binding:"required"`
 	Counter   int    `json:"counter" binding:"required"`
 	ProcessId string `json:"processId" binding:"required"`
-	Ttl       int    `json:"ttl" binding:"required"`
+	Ttl       int    `json:"ttl"`
 }
 
 func (s *server) claimTask(c *gin.Context) {

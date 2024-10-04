@@ -17,7 +17,7 @@ type acquireLockBody struct {
 	ResourceId  string `json:"resourceId" binding:"required"`
 	ExecutionId string `json:"executionId" binding:"required"`
 	ProcessId   string `json:"processId" binding:"required"`
-	Ttl         int64  `json:"ttl" binding:"required"`
+	Ttl         int64  `json:"ttl"`
 }
 
 func (s *server) acquireLock(c *gin.Context) {

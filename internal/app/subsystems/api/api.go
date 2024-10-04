@@ -161,6 +161,11 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 		tags = map[string]string{}
 	}
 
+	// set default limit
+	if limit == 0 {
+		limit = 100
+	}
+
 	// validate limit
 	if limit < 1 || limit > 100 {
 		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))
