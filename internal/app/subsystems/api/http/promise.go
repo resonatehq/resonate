@@ -114,7 +114,7 @@ type createPromiseHeader struct {
 type createPromiseBody struct {
 	Id      string            `json:"id" binding:"required"`
 	Param   promise.Value     `json:"param"`
-	Timeout int64             `json:"timeout" binding:"required"`
+	Timeout int64             `json:"timeout"`
 	Tags    map[string]string `json:"tags,omitempty"`
 }
 
@@ -162,7 +162,7 @@ type createPromiseAndTaskBody struct {
 
 type createPromiseTaskBody struct {
 	ProcessId string          `json:"processId" binding:"required"`
-	Ttl       int             `json:"ttl" binding:"required"`
+	Ttl       int             `json:"ttl"`
 	Recv      json.RawMessage `json:"recv" binding:"required"`
 }
 
@@ -222,7 +222,7 @@ type createPromiseAndCallbackBody struct {
 
 type createPromiseCallbackBody struct {
 	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
-	Timeout       int64           `json:"timeout" binding:"required"`
+	Timeout       int64           `json:"timeout"`
 	Recv          json.RawMessage `json:"recv" binding:"required"`
 }
 

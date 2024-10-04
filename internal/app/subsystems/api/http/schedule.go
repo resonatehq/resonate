@@ -110,7 +110,7 @@ type createScheduleBody struct {
 	Cron           string            `json:"cron" binding:"required"`
 	Tags           map[string]string `json:"tags,omitempty"`
 	PromiseId      string            `json:"promiseId" binding:"required"`
-	PromiseTimeout int64             `json:"promiseTimeout" binding:"required"`
+	PromiseTimeout int64             `json:"promiseTimeout"`
 	PromiseParam   promise.Value     `json:"promiseParam,omitempty"`
 	PromiseTags    map[string]string `json:"promiseTags,omitempty"`
 }

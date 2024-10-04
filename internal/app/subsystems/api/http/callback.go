@@ -18,7 +18,7 @@ type createCallbackHeader struct {
 type createCallbackBody struct {
 	PromiseId     string          `json:"promiseId" binding:"required"`
 	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
-	Timeout       int64           `json:"timeout" binding:"required"`
+	Timeout       int64           `json:"timeout"`
 	Recv          json.RawMessage `json:"recv" binding:"required"`
 }
 
