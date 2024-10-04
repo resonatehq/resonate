@@ -213,12 +213,16 @@ func TestPollPlugin(t *testing.T) {
 
 			// establish connections
 			for _, conn := range tc.connections {
-				disconnected.Add(1)
-
 				res, err := http.Get(fmt.Sprintf("http://%s/%s/%s", poll.Addr(), conn.group, conn.id))
 				if err != nil {
 					t.Fatal(err)
 				}
+
+				if res.StatusCode != http.StatusOK {
+					continue
+				}
+
+				disconnected.Add(1)
 
 				reader := bufio.NewReader(res.Body)
 				defer res.Body.Close()
@@ -248,6 +252,24 @@ func TestPollPlugin(t *testing.T) {
 				}()
 			}
 
+			// send messages
+			for _, mesg := range tc.messages {
+				ch := make(chan any)
+
+				mesg.mesg.Done = func(ok bool, err error) {
+					defer close(ch)
+
+					assert.Equal(t, mesg.ok, ok)
+					if ok {
+						assert.Nil(t, err)
+					} else {
+						assert.NotNil(t, err)
+					}
+				}
+				assert.True(t, poll.Enqueue(mesg.mesg))
+				<-ch
+			}
+
 			// count and assert active connections
 			ac := 0
 			for _, c := range poll.worker.connections.conns {
@@ -263,19 +285,6 @@ func TestPollPlugin(t *testing.T) {
 
 			// assert ac is equal to min of uc/mc
 			assert.Equal(t, min(uc, config.MaxConnections), ac)
-
-			// send messages
-			for _, mesg := range tc.messages {
-				mesg.mesg.Done = func(ok bool, err error) {
-					assert.Equal(t, mesg.ok, ok)
-					if ok {
-						assert.Nil(t, err)
-					} else {
-						assert.NotNil(t, err)
-					}
-				}
-				assert.True(t, poll.Enqueue(mesg.mesg))
-			}
 
 			// close the poll server
 			if err := poll.Stop(); err != nil {
