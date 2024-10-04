@@ -47,7 +47,7 @@ type searchSchedulesHeader struct {
 type searchSchedulesParams struct {
 	Id     *string           `form:"id" json:"id,omitempty" binding:"omitempty,min=1"`
 	Tags   map[string]string `form:"tags" json:"tags,omitempty"`
-	Limit  *int              `form:"limit" json:"limit,omitempty" binding:"omitempty,gt=0,lte=100"`
+	Limit  *int              `form:"limit" json:"limit,omitempty" binding:"omitempty,gte=0,lte=100"`
 	Cursor *string           `form:"cursor" json:"cursor,omitempty"`
 }
 

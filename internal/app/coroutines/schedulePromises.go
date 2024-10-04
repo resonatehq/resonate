@@ -108,7 +108,7 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 			}
 
 			if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
-				slog.Warn("promise '%s' for schedule '%s' already exists", commands[i].Id, result.Records[i].Id)
+				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 			}
 		}
 
