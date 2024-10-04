@@ -37,7 +37,7 @@ type Poll struct {
 
 type Data struct {
 	Group string `json:"group"`
-	Id    string `json:"id"`
+	Id    string `json:"id,omitempty"`
 }
 
 type connection struct {
@@ -58,9 +58,12 @@ func (cs *connections) get(group string, id string) (*connection, bool) {
 		return nil, false
 	}
 
-	for _, conn := range cs.conns[group] {
-		if conn.id == id {
-			return conn, true
+	if id != "" {
+		// if id is provided, prefer connection with the same id
+		for _, conn := range cs.conns[group] {
+			if conn.id == id {
+				return conn, true
+			}
 		}
 	}
 
@@ -349,7 +352,7 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// extract group and id
 	parts := strings.Split(r.URL.Path, "/")
-	if len(parts) != 3 {
+	if len(parts) < 3 {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -363,7 +366,7 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	conn := &connection{
 		group: parts[1],
-		id:    parts[2],
+		id:    strings.Join(parts[2:], "/"),
 		ch:    make(chan []byte, h.config.BufferSize),
 	}
 

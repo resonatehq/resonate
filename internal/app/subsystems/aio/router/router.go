@@ -269,14 +269,19 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 	switch u.Scheme {
 	case "http", "https":
-		data, err := json.Marshal(map[string]interface{}{"url": u.String()})
+		data, err := json.Marshal(map[string]string{"url": u.String()})
 		if err != nil {
 			return nil, false
 		}
 
 		return &receiver.Recv{Type: "http", Data: data}, true
 	case "poll":
-		data, err := json.Marshal(map[string]interface{}{"group": u.Host, "id": strings.TrimPrefix(u.Path, "/")})
+		rawData := map[string]string{"group": u.Host}
+		if id := strings.TrimPrefix(u.Path, "/"); id != "" {
+			rawData["id"] = id
+		}
+
+		data, err := json.Marshal(rawData)
 		if err != nil {
 			return nil, false
 		}
