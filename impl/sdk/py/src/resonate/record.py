@@ -23,6 +23,15 @@ class Value:
 
 @final
 @dataclass(frozen=True)
+class CallbackRecord:
+    callback_id: str
+    promise_id: str
+    timeout: int
+    created_on: int
+
+
+@final
+@dataclass(frozen=True)
 class DurablePromiseRecord:
     state: State
     promise_id: str

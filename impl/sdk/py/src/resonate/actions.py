@@ -1,25 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, final
+from typing import TYPE_CHECKING, Any, TypeVar, final
 
 from typing_extensions import ParamSpec, Self
 
+from resonate.commands import Command
 from resonate.options import Options
-
-if TYPE_CHECKING:
-    from collections.abc import Hashable
-
-    from resonate.dataclasses import FnOrCoroutine
-    from resonate.retry_policy import RetryPolicy
-    from resonate.typing import Tags
-from typing import TYPE_CHECKING, Any, TypeVar
-
 from resonate.retry_policy import never
 
 if TYPE_CHECKING:
+    from resonate.dataclasses import FnOrCoroutine
     from resonate.promise import Promise
+    from resonate.retry_policy import RetryPolicy
     from resonate.typing import ExecutionUnit
+
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -28,12 +23,13 @@ T = TypeVar("T")
 @final
 @dataclass
 class RFI:
-    promise_id: str | None
-    func: str
-    args: tuple[Hashable, ...]
-    tags: Tags
+    exec_unit: ExecutionUnit
+    promise_id: str | None = None
 
     def with_options(self, promise_id: str) -> Self:
+        assert not isinstance(
+            self.exec_unit, Command
+        ), "Options must be set on the command."
         assert self.promise_id is None, "promise ID has already been set"
         self.promise_id = promise_id
         return self
@@ -42,18 +38,19 @@ class RFI:
 @final
 @dataclass
 class RFC:
-    promise_id: str | None
-    func: str
-    args: tuple[Hashable, ...]
-    tags: Tags
+    exec_unit: ExecutionUnit
+    promise_id: str | None = None
 
     def with_options(self, promise_id: str) -> Self:
+        assert not isinstance(
+            self.exec_unit, Command
+        ), "Options must be set on the command."
         assert self.promise_id is None, "promise ID has already been set"
         self.promise_id = promise_id
         return self
 
     def to_invocation(self) -> RFI:
-        return RFI(self.promise_id, self.func, self.args, self.tags)
+        return RFI(self.exec_unit, self.promise_id)
 
 
 @final
@@ -114,12 +111,6 @@ class LFI:
             durable=durable, promise_id=promise_id, retry_policy=retry_policy
         )
         return self
-
-
-@final
-@dataclass(frozen=True)
-class Sleep:
-    seconds: int
 
 
 @final

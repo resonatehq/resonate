@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Generic, TypeVar
 from typing_extensions import ParamSpec
 
 from resonate.actions import LFI
+from resonate.commands import CreateDurablePromiseReq
 from resonate.result import Ok
 from resonate.retry_policy import Never
 
@@ -88,17 +89,15 @@ class FnOrCoroutine:
         self.args = args
         self.kwargs = kwargs
 
-    def json_data(self) -> dict[str, Any]:
-        return {
-            "func": self.exec_unit.__name__,
-            "args": self.args,
-            "kwargs": self.kwargs,
-        }
-
-
-class Command:
-    def __call__(self, ctx: Context) -> None:
-        # This is not meant to be call. We are making the type system happy.
-        _ = ctx
-        msg = "You should never be here!"
-        raise AssertionError(msg)
+    def to_req(
+        self, promise_id: str | None, func_name: str, tags: dict[str, str]
+    ) -> CreateDurablePromiseReq:
+        return CreateDurablePromiseReq(
+            promise_id=promise_id,
+            data={
+                "func": func_name,
+                "args": self.args,
+                "kwargs": self.kwargs,
+            },
+            tags=tags,
+        )

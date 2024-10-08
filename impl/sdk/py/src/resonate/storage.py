@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, final
 
 import requests
 
+from resonate import time
 from resonate.encoders import Base64Encoder, IEncoder
 from resonate.errors import ResonateError
 from resonate.logging import logger
-from resonate.record import DurablePromiseRecord, Param, Value
+from resonate.record import CallbackRecord, DurablePromiseRecord, Param, Value
 from resonate.time import now
 
 if TYPE_CHECKING:
@@ -16,6 +17,11 @@ if TYPE_CHECKING:
 
 
 class IPromiseStore(ABC):
+    @abstractmethod
+    def create_callback(
+        self, *, promise_id: str, root_promise_id: str, timeout: int, recv: str
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]: ...
+
     @abstractmethod
     def create(  # noqa: PLR0913
         self,
@@ -95,34 +101,77 @@ def _timeout(promise_record: DurablePromiseRecord) -> DurablePromiseRecord:
 
 class IStorage(ABC):
     @abstractmethod
-    def rmw(
+    def rmw_durable_promise(
         self,
         promise_id: str,
         fn: Callable[[DurablePromiseRecord | None], DurablePromiseRecord],
     ) -> DurablePromiseRecord: ...
 
+    @abstractmethod
+    def w_callback(
+        self,
+        promise_id: str,
+        root_promise_id: str,
+        timeout: int,
+        recv: str,
+    ) -> tuple[DurablePromiseRecord, CallbackRecord]: ...
+
 
 class MemoryStorage(IStorage):
     def __init__(self) -> None:
-        self._items: dict[str, DurablePromiseRecord] = {}
+        self._durable_promises: dict[str, DurablePromiseRecord] = {}
+        self._callbacks: dict[str, CallbackRecord] = {}
 
-    def rmw(
+    def rmw_durable_promise(
         self,
         promise_id: str,
         fn: Callable[[DurablePromiseRecord | None], DurablePromiseRecord],
     ) -> DurablePromiseRecord:
-        promise_record = self._items.get(promise_id)
+        promise_record = self._durable_promises.get(promise_id)
         if promise_record is not None:
             promise_record = _timeout(promise_record)
         item = fn(promise_record)
-        self._items[promise_id] = item
+        self._durable_promises[promise_id] = item
         return item
+
+    def w_callback(
+        self, promise_id: str, root_promise_id: str, timeout: int, recv: str
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        _ = recv
+        _ = root_promise_id
+        durable_promise = self._durable_promises.get(promise_id)
+        if durable_promise is None:
+            raise ResonateError(msg="Promise not found", code="STORE_FORBIDDEN")
+
+        if durable_promise.is_completed():
+            return durable_promise, None
+
+        num_callback = str(len(self._callbacks) + 1)
+        record = CallbackRecord(
+            num_callback,
+            promise_id=promise_id,
+            timeout=timeout,
+            created_on=time.now(),
+        )
+
+        self._callbacks[num_callback] = record
+        return durable_promise, record
 
 
 @final
 class LocalPromiseStore(IPromiseStore):
     def __init__(self, storage: IStorage | None = None) -> None:
         self._storage = storage or MemoryStorage()
+
+    def create_callback(
+        self, *, promise_id: str, root_promise_id: str, timeout: int, recv: str
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        return self._storage.w_callback(
+            promise_id=promise_id,
+            root_promise_id=root_promise_id,
+            timeout=timeout,
+            recv=recv,
+        )
 
     def create(  # noqa: PLR0913
         self,
@@ -165,7 +214,7 @@ class LocalPromiseStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw(promise_id=promise_id, fn=_create)
+        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_create)
 
     def reject(
         self,
@@ -206,7 +255,7 @@ class LocalPromiseStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw(promise_id=promise_id, fn=_reject)
+        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_reject)
 
     def cancel(
         self,
@@ -247,7 +296,7 @@ class LocalPromiseStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw(promise_id=promise_id, fn=_cancel)
+        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_cancel)
 
     def resolve(
         self,
@@ -288,7 +337,7 @@ class LocalPromiseStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw(promise_id=promise_id, fn=_resolve)
+        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_resolve)
 
     def get(self, *, promise_id: str) -> DurablePromiseRecord:
         def _get(
@@ -299,7 +348,7 @@ class LocalPromiseStore(IPromiseStore):
 
             return promise_record
 
-        return self._storage.rmw(promise_id=promise_id, fn=_get)
+        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_get)
 
     def search(
         self,
@@ -335,6 +384,31 @@ class RemotePromiseStore(IPromiseStore):
 
         return request_headers
 
+    def create_callback(
+        self, *, promise_id: str, root_promise_id: str, timeout: int, recv: str
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        response = requests.post(
+            url=f"{self.url}/callbacks",
+            json={
+                "promiseId": promise_id,
+                "rootPromiseId": root_promise_id,
+                "timeout": timeout,
+                "recv": recv,
+            },
+            timeout=self._request_timeout,
+        )
+
+        _ensure_success(response)
+        data = response.json()
+
+        callback_data = data["callback"]
+        durable_promise = _decode_durable_promise(
+            data["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, _decode_callback(response=callback_data)
+
     def create(  # noqa: PLR0913
         self,
         *,
@@ -365,7 +439,7 @@ class RemotePromiseStore(IPromiseStore):
 
         _ensure_success(response)
 
-        return decode(response=response.json(), encoder=self._encoder)
+        return _decode_durable_promise(response=response.json(), encoder=self._encoder)
 
     def cancel(
         self,
@@ -387,7 +461,7 @@ class RemotePromiseStore(IPromiseStore):
             timeout=self._request_timeout,
         )
         _ensure_success(response)
-        return decode(response=response.json(), encoder=self._encoder)
+        return _decode_durable_promise(response=response.json(), encoder=self._encoder)
 
     def resolve(
         self,
@@ -410,7 +484,7 @@ class RemotePromiseStore(IPromiseStore):
             timeout=self._request_timeout,
         )
         _ensure_success(response)
-        return decode(response=response.json(), encoder=self._encoder)
+        return _decode_durable_promise(response=response.json(), encoder=self._encoder)
 
     def reject(
         self,
@@ -433,14 +507,14 @@ class RemotePromiseStore(IPromiseStore):
             timeout=self._request_timeout,
         )
         _ensure_success(response)
-        return decode(response=response.json(), encoder=self._encoder)
+        return _decode_durable_promise(response=response.json(), encoder=self._encoder)
 
     def get(self, *, promise_id: str) -> DurablePromiseRecord:
         response = requests.get(
             f"{self.url}/promises/{promise_id}", timeout=self._request_timeout
         )
         _ensure_success(response)
-        return decode(response=response.json(), encoder=self._encoder)
+        return _decode_durable_promise(response=response.json(), encoder=self._encoder)
 
     def search(
         self, *, promise_id: str, state: State, tags: Tags, limit: int | None = None
@@ -466,7 +540,16 @@ def _encode(value: str, encoder: IEncoder[str, str]) -> str:
         raise ResonateError(msg, "STORE_ENCODER", e) from e
 
 
-def decode(
+def _decode_callback(response: dict[str, Any]) -> CallbackRecord:
+    return CallbackRecord(
+        response["id"],
+        response["promiseId"],
+        timeout=response["timeout"],
+        created_on=response["createdOn"],
+    )
+
+
+def _decode_durable_promise(
     response: dict[str, Any], encoder: IEncoder[str, str]
 ) -> DurablePromiseRecord:
     if response["param"]:

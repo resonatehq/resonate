@@ -12,8 +12,8 @@ import pytest
 from typing_extensions import TypeVar
 
 import resonate
+from resonate.commands import Command
 from resonate.contants import ENV_VARIABLE_PIN_SEED
-from resonate.context import Command
 from resonate.dst.scheduler import DSTScheduler
 from resonate.events import (
     ExecutionAwaited,

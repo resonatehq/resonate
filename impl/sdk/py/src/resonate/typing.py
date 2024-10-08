@@ -14,11 +14,11 @@ from resonate.actions import (
     AllSettled,
     DeferredInvocation,
     Race,
-    Sleep,
 )
 from resonate.batching import CmdBuffer
+from resonate.commands import Command
 from resonate.context import Context
-from resonate.dataclasses import Command, CoroAndPromise, FnOrCoroutine, Runnable
+from resonate.dataclasses import CoroAndPromise, FnOrCoroutine, Runnable
 from resonate.promise import Promise
 
 T = TypeVar("T")
@@ -29,7 +29,7 @@ ExecutionUnit: TypeAlias = Union[Command, FnOrCoroutine]
 
 Combinator: TypeAlias = Union[All, AllSettled, Race]
 
-PromiseActions: TypeAlias = Union[Combinator, LFI, Sleep, RFI]
+PromiseActions: TypeAlias = Union[Combinator, LFI, RFI]
 
 Yieldable: TypeAlias = Union[LFC, Promise[Any], PromiseActions, DeferredInvocation, RFC]
 
