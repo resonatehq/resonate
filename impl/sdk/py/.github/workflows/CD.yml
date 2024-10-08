@@ -11,6 +11,10 @@ env:
 jobs:
   run:
     name: Deploy library
+    
+    permissions:
+      id-token: write
+      
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -28,7 +32,3 @@ jobs:
     
       - name: Push build artifacts to PyPI
         uses: pypa/gh-action-pypi-publish@v1.8.14
-        with:
-          skip-existing: true
-          user: __token__
-          password: ${{ secrets.PYPI_TOKEN }}
