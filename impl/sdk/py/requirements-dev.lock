@@ -11,67 +11,30 @@
 
 -e file:.
 certifi==2024.8.30
-    # via requests
 charset-normalizer==3.3.2
-    # via requests
 deprecated==1.2.14
-    # via opentelemetry-api
-    # via opentelemetry-exporter-otlp-proto-http
-    # via opentelemetry-semantic-conventions
 exceptiongroup==1.2.2
-    # via pytest
 googleapis-common-protos==1.65.0
-    # via opentelemetry-exporter-otlp-proto-http
-idna==3.8
-    # via requests
+idna==3.10
 importlib-metadata==8.4.0
-    # via opentelemetry-api
 iniconfig==2.0.0
-    # via pytest
 mypy==1.11.2
 mypy-extensions==1.0.0
-    # via mypy
 opentelemetry-api==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
-    # via opentelemetry-sdk
-    # via opentelemetry-semantic-conventions
-    # via resonate-sdk
 opentelemetry-exporter-otlp-proto-common==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
 opentelemetry-exporter-otlp-proto-http==1.27.0
-    # via resonate-sdk
 opentelemetry-proto==1.27.0
-    # via opentelemetry-exporter-otlp-proto-common
-    # via opentelemetry-exporter-otlp-proto-http
 opentelemetry-sdk==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
-    # via resonate-sdk
 opentelemetry-semantic-conventions==0.48b0
-    # via opentelemetry-sdk
 packaging==24.1
-    # via pytest
 pluggy==1.5.0
-    # via pytest
-protobuf==4.25.4
-    # via googleapis-common-protos
-    # via opentelemetry-proto
-pytest==8.3.2
+protobuf==4.25.5
+pytest==8.3.3
 requests==2.32.3
-    # via opentelemetry-exporter-otlp-proto-http
-    # via resonate-sdk
-ruff==0.6.4
-tomli==2.0.1
-    # via mypy
-    # via pytest
-types-requests==2.32.0.20240907
+ruff==0.6.9
+tomli==2.0.2
+types-requests==2.32.0.20240914
 typing-extensions==4.12.2
-    # via mypy
-    # via opentelemetry-sdk
-    # via resonate-sdk
-urllib3==2.2.2
-    # via requests
-    # via types-requests
+urllib3==2.2.3
 wrapt==1.16.0
-    # via deprecated
-zipp==3.20.1
-    # via importlib-metadata
+zipp==3.20.2

@@ -11,48 +11,20 @@
 
 -e file:.
 certifi==2024.8.30
-    # via requests
 charset-normalizer==3.3.2
-    # via requests
 deprecated==1.2.14
-    # via opentelemetry-api
-    # via opentelemetry-exporter-otlp-proto-http
-    # via opentelemetry-semantic-conventions
 googleapis-common-protos==1.65.0
-    # via opentelemetry-exporter-otlp-proto-http
-idna==3.8
-    # via requests
+idna==3.10
 importlib-metadata==8.4.0
-    # via opentelemetry-api
 opentelemetry-api==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
-    # via opentelemetry-sdk
-    # via opentelemetry-semantic-conventions
-    # via resonate-sdk
 opentelemetry-exporter-otlp-proto-common==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
 opentelemetry-exporter-otlp-proto-http==1.27.0
-    # via resonate-sdk
 opentelemetry-proto==1.27.0
-    # via opentelemetry-exporter-otlp-proto-common
-    # via opentelemetry-exporter-otlp-proto-http
 opentelemetry-sdk==1.27.0
-    # via opentelemetry-exporter-otlp-proto-http
-    # via resonate-sdk
 opentelemetry-semantic-conventions==0.48b0
-    # via opentelemetry-sdk
-protobuf==4.25.4
-    # via googleapis-common-protos
-    # via opentelemetry-proto
+protobuf==4.25.5
 requests==2.32.3
-    # via opentelemetry-exporter-otlp-proto-http
-    # via resonate-sdk
 typing-extensions==4.12.2
-    # via opentelemetry-sdk
-    # via resonate-sdk
-urllib3==2.2.2
-    # via requests
+urllib3==2.2.3
 wrapt==1.16.0
-    # via deprecated
-zipp==3.20.1
-    # via importlib-metadata
+zipp==3.20.2
