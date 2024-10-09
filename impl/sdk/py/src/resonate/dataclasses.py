@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.context import Context
+    from resonate.itertools import FinalValue
     from resonate.promise import Promise
     from resonate.result import Result
     from resonate.typing import (
@@ -69,6 +70,18 @@ class CoroAndPromise(Generic[T]):
     ) -> None:
         self.route_info = route_info
         self.coro = coro
+        self.final_value: FinalValue[T] | None = None
+        self._blocked_on: int = 0
+
+    def increase_blocked_on(self) -> None:
+        self._blocked_on += 1
+
+    def decrease_blocked_on(self) -> None:
+        self._blocked_on -= 1
+        assert self._blocked_on >= 0, "Blocked on must always be positive"
+
+    def is_blocked(self) -> bool:
+        return self._blocked_on != 0
 
 
 @dataclass(frozen=True)

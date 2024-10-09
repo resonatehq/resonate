@@ -162,10 +162,6 @@ class Scheduler:
         self._runnable_coros: RunnableCoroutines = []
         self._awaitables: Awaitables = {}
 
-        self._promises_to_be_resolved: list[
-            tuple[Promise[Any], Result[Any, Exception], list[Promise[Any]]]
-        ] = []
-
         self._processor = _Processor(
             processor_threads,
             self._submission_queue,
@@ -544,18 +540,6 @@ class Scheduler:
                         delay=cqe.sqe.route_info.next_retry_delay(),
                     )
 
-            for p_to_b_resolved in self._promises_to_be_resolved:
-                prom, final_value, children_promises = p_to_b_resolved
-                if all_promises_are_done(children_promises):
-                    firt_error = get_first_error_if_any(children_promises)
-                    if firt_error is None:
-                        self._resolve_promise(prom, final_value)
-                    else:
-                        self._resolve_promise(prom, firt_error)
-
-                    self._unblock_coros_waiting_on_promise(prom)
-                    self._promises_to_be_resolved.remove(p_to_b_resolved)
-
             combinators = self._combinators_queue.dequeue_all()
             for combinator, p in combinators:
                 assert not p.done(), (
@@ -581,6 +565,7 @@ class Scheduler:
             not p.done()
         ), "If the promise is resolved already it makes no sense to block coroutine"
         self._awaitables.setdefault(p, []).append(coro_and_promise)
+        coro_and_promise.increase_blocked_on()
         self._tracing_adapter.process_event(
             ExecutionAwaited(
                 promise_id=coro_and_promise.route_info.promise.promise_id,
@@ -606,11 +591,34 @@ class Scheduler:
             return
 
         for coro_and_promise in self._awaitables.pop(p):
-            self._add_coro_to_runnables(
-                coro_and_promise=coro_and_promise,
-                value_to_yield_back=p.safe_result(),
-                was_awaited=True,
-            )
+            coro_and_promise.decrease_blocked_on()
+            if coro_and_promise.is_blocked():
+                continue
+            if coro_and_promise.final_value is None:
+                self._add_coro_to_runnables(
+                    coro_and_promise=coro_and_promise,
+                    value_to_yield_back=p.safe_result(),
+                    was_awaited=True,
+                )
+            else:
+                assert all_promises_are_done(
+                    coro_and_promise.route_info.promise.children_promises
+                ), "All children promises must be resolved."
+                first_error = get_first_error_if_any(
+                    coro_and_promise.route_info.promise.children_promises
+                )
+                if first_error is None:
+                    self._resolve_promise(
+                        coro_and_promise.route_info.promise,
+                        coro_and_promise.final_value.v,
+                    )
+                else:
+                    self._resolve_promise(
+                        coro_and_promise.route_info.promise, first_error
+                    )
+                self._unblock_coros_waiting_on_promise(
+                    coro_and_promise.route_info.promise
+                )
 
     def _resolve_promise(
         self, promise: Promise[T], value: Result[T, Exception]
@@ -679,22 +687,23 @@ class Scheduler:
                         runnable.coro_and_promise.route_info.promise
                     )
                 else:
+                    runnable.coro_and_promise.final_value = yieldable_or_final_value
+                    callback_registered: bool = False
                     for (
                         child_promise
                     ) in runnable.coro_and_promise.route_info.promise.children_promises:
-                        if isinstance(child_promise.action, RFI):
-                            self._register_callback_or_resolve_ephemeral_promise(
-                                child_promise
+                        if not child_promise.done():
+                            self._add_coro_to_awaitables(
+                                child_promise, runnable.coro_and_promise
                             )
+                            if isinstance(child_promise.action, RFI):
+                                if not callback_registered:
+                                    self._register_callback_or_resolve_ephemeral_promise(
+                                        child_promise
+                                    )
+                                callback_registered = True
 
-                    self._promises_to_be_resolved.append(
-                        (
-                            runnable.coro_and_promise.route_info.promise,
-                            final_value,
-                            runnable.coro_and_promise.route_info.promise.children_promises,
-                        )
-                    )
-                del runnable
+                        self._signal()
             else:
                 self._delay_queue.put_nowait(
                     runnable.coro_and_promise.route_info.next_retry_attempt(),
