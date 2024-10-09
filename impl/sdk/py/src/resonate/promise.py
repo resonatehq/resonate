@@ -34,13 +34,14 @@ class Promise(Generic[T]):
         self._num_children = 0
 
         self.parent_promise = parent_promise
-        self.root_promise_id: str = (
-            self.promise_id
-            if self.parent_promise is None
-            else self.parent_promise.root_promise_id
+        self.root_promise: Promise[Any] = (
+            self if self.parent_promise is None else self.parent_promise.root_promise
         )
 
         self.children_promises: list[Promise[Any]] = []
+
+        # Only used for the root promise.
+        self.leaf_promises: set[Promise[Any]] = set()
 
         self.action = action
         if isinstance(action, (LFI, All, AllSettled, Race)):
@@ -104,6 +105,14 @@ class Promise(Generic[T]):
             parent_promise=self,
         )
         self.children_promises.append(child)
+
+        if self.parent_promise is None:
+            # The root is creating a child it is a leaf until it creates another promise
+            self.leaf_promises.add(child)
+        else:
+            # The promise creating a child might no longer be a leaf promise itself
+            self.root_promise.leaf_promises.discard(self)
+            self.root_promise.leaf_promises.add(child)
 
         return child
 

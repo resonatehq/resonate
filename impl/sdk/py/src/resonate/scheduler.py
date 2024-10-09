@@ -217,7 +217,7 @@ class Scheduler:
         durable_promise, created_callback = (
             self._durable_promise_storage.create_callback(
                 promise_id=promise.promise_id,
-                root_promise_id=promise.root_promise_id,
+                root_promise_id=promise.root_promise.promise_id,
                 timeout=sys.maxsize,
                 recv=recv,
             )
