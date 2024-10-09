@@ -7,6 +7,7 @@
 <div align="center">
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Static Badge](https://img.shields.io/badge/join%20our%20waitlist-8A2BE2?color=green)](https://forms.gle/bVRdiHD4RoBgNXCV9)
 
 </div>
 
