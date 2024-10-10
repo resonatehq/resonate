@@ -565,7 +565,7 @@ class Scheduler:
             not p.done()
         ), "If the promise is resolved already it makes no sense to block coroutine"
         self._awaitables.setdefault(p, []).append(coro_and_promise)
-        coro_and_promise.increase_blocked_on()
+        coro_and_promise.route_info.promise.increase_blocked_on()
         self._tracing_adapter.process_event(
             ExecutionAwaited(
                 promise_id=coro_and_promise.route_info.promise.promise_id,
@@ -591,8 +591,8 @@ class Scheduler:
             return
 
         for coro_and_promise in self._awaitables.pop(p):
-            coro_and_promise.decrease_blocked_on()
-            if coro_and_promise.is_blocked():
+            coro_and_promise.route_info.promise.decrease_blocked_on()
+            if coro_and_promise.route_info.promise.is_blocked():
                 continue
             if coro_and_promise.final_value is None:
                 self._add_coro_to_runnables(
