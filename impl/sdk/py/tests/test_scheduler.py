@@ -510,3 +510,129 @@ def test_rfc_raw(store: IPromiseStore) -> None:
     assert child_promise_record.promise_id == "abc"
     assert child_promise_record.state == "PENDING"
     assert child_promise_record.tags == {"demo": "test"}
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_blocked_on_remote_deep(store: IPromiseStore) -> None:
+    def _local_fn(_ctx: Context) -> int:
+        return 42
+
+    def _lfi1(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_lfi2)
+
+    def _lfi2(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_lfi3)
+
+    def _lfi3(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_lfi4)
+
+    def _lfi4(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_lfi5)
+
+    def _lfi5(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_lfi6)
+
+    def _lfi6(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_rfc)
+
+    def _rfc(ctx: Context) -> Generator[Yieldable, Any, None]:
+        yield ctx.lfi(_local_fn)
+        yield ctx.rfi(
+            CreateDurablePromiseReq(
+                promise_id="abc2",
+                data={
+                    "func": "func",
+                    "args": (1, 2),
+                },
+                tags={"demo": "test"},
+            )
+        )
+
+    def top_level(ctx: Context) -> Generator[Yieldable, Any, Any]:
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_lfi1)
+
+        return 42
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(top_level)
+    p = s.run("test-top-level-blocked_on", top_level)
+
+    p.safe_result(0.1)
+    assert p.is_blocked_on_remote()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_blocked_on_remote_shallow(store: IPromiseStore) -> None:
+    def _local_fn(_ctx: Context) -> int:
+        return 42
+
+    def top_level(ctx: Context) -> Generator[Yieldable, Any, Any]:
+        yield ctx.lfi(_local_fn)
+        yield ctx.rfi(
+            CreateDurablePromiseReq(
+                promise_id="abc2",
+                data={
+                    "func": "func",
+                    "args": (1, 2),
+                },
+                tags={"demo": "test"},
+            )
+        )
+        return 42
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(top_level)
+    p = s.run("test-top-level-blocked_on", top_level)
+
+    p.safe_result(0.1)
+    assert p.is_blocked_on_remote()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_blocked_on_just_remote(store: IPromiseStore) -> None:
+    def top_level(ctx: Context) -> Generator[Yieldable, Any, Any]:
+        yield ctx.rfi(
+            CreateDurablePromiseReq(
+                promise_id="abc2",
+                data={
+                    "func": "func",
+                    "args": (1, 2),
+                },
+                tags={"demo": "test"},
+            )
+        )
+        return 42
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(top_level)
+    p = s.run("test-top-level-blocked_on", top_level)
+
+    p.safe_result(0.1)
+    assert p.is_blocked_on_remote()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_not_blocked_on_remote(store: IPromiseStore) -> None:
+    def _local_fn(_ctx: Context) -> int:
+        return 42
+
+    def top_level(ctx: Context) -> Generator[Yieldable, Any, Any]:
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+        yield ctx.lfi(_local_fn)
+
+        return 42
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(top_level)
+    p = s.run("test-top-level-blocked_on", top_level)
+
+    p.safe_result(0.1)
+    assert not p.is_blocked_on_remote()
