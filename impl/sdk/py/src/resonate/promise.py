@@ -64,9 +64,14 @@ class Promise(Generic[T]):
         return self._blocked_on != 0
 
     def is_blocked_on_remote(self) -> bool:
-        return any(
-            not p.done() and isinstance(p.action, RFI) for p in self.leaf_promises
-        )
+        blocked_on_remote = False
+        for p in self.leaf_promises:
+            if not p.done() and isinstance(p.action, LFI):
+                return False
+            if not p.done() and isinstance(p.action, RFI):
+                blocked_on_remote = True
+
+        return blocked_on_remote
 
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)

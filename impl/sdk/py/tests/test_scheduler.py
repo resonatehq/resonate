@@ -560,7 +560,7 @@ def test_blocked_on_remote_deep(store: IPromiseStore) -> None:
 
     s = scheduler.Scheduler(durable_promise_storage=store)
     s.register(top_level)
-    p = s.run("test-top-level-blocked_on", top_level)
+    p = s.run("test_blocked_on_remote_deep", top_level)
 
     p.safe_result(0.1)
     assert p.is_blocked_on_remote()
@@ -587,7 +587,7 @@ def test_blocked_on_remote_shallow(store: IPromiseStore) -> None:
 
     s = scheduler.Scheduler(durable_promise_storage=store)
     s.register(top_level)
-    p = s.run("test-top-level-blocked_on", top_level)
+    p = s.run("test_blocked_on_remote_shallow", top_level)
 
     p.safe_result(0.1)
     assert p.is_blocked_on_remote()
@@ -610,7 +610,7 @@ def test_blocked_on_just_remote(store: IPromiseStore) -> None:
 
     s = scheduler.Scheduler(durable_promise_storage=store)
     s.register(top_level)
-    p = s.run("test-top-level-blocked_on", top_level)
+    p = s.run("test_blocked_on_just_remote", top_level)
 
     p.safe_result(0.1)
     assert p.is_blocked_on_remote()
@@ -632,7 +632,35 @@ def test_not_blocked_on_remote(store: IPromiseStore) -> None:
 
     s = scheduler.Scheduler(durable_promise_storage=store)
     s.register(top_level)
-    p = s.run("test-top-level-blocked_on", top_level)
+    p = s.run("test_not_blocked_on_remote", top_level)
 
     p.safe_result(0.1)
+    assert not p.is_blocked_on_remote()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_not_blocked_on_remote_long_lfi(store: IPromiseStore) -> None:
+    def _local_fn(_ctx: Context) -> int:
+        time.sleep(1)
+        return 24
+
+    def top_level(ctx: Context) -> Generator[Yieldable, Any, Any]:
+        yield ctx.lfi(_local_fn)
+        yield ctx.rfi(
+            CreateDurablePromiseReq(
+                promise_id="abc2",
+                data={
+                    "func": "func",
+                    "args": (1, 2),
+                },
+                tags={"demo": "test"},
+            )
+        )
+        return 42
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(top_level)
+    p = s.run("test_not_blocked_on_remote_long_lfi", top_level)
+
+    p.safe_result(0.2)
     assert not p.is_blocked_on_remote()
