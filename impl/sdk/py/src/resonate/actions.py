@@ -66,6 +66,10 @@ class LFC:
         promise_id: str | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> Self:
+        if retry_policy is not None:
+            assert not isinstance(
+                self.exec_unit, Command
+            ), "Retry policies on batching are set when registering command handlers."
         self.opts = Options(
             durable=durable, promise_id=promise_id, retry_policy=retry_policy
         )
@@ -107,6 +111,10 @@ class LFI:
         promise_id: str | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> Self:
+        if retry_policy is not None:
+            assert not isinstance(
+                self.exec_unit, Command
+            ), "Retry policies on batching are set when registering command handlers."
         self.opts = Options(
             durable=durable, promise_id=promise_id, retry_policy=retry_policy
         )

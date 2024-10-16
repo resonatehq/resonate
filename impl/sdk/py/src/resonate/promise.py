@@ -51,18 +51,6 @@ class Promise(Generic[T]):
         else:
             assert_never(action)
 
-        self._blocked_on: int = 0
-
-    def increase_blocked_on(self) -> None:
-        self._blocked_on += 1
-
-    def decrease_blocked_on(self) -> None:
-        self._blocked_on -= 1
-        assert self._blocked_on >= 0, "Blocked on must always be positive"
-
-    def is_blocked(self) -> bool:
-        return self._blocked_on != 0
-
     def is_blocked_on_remote(self) -> bool:
         blocked_on_remote = False
         for p in self.leaf_promises:

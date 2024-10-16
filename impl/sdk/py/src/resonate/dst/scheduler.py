@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
-from inspect import isgenerator, isgeneratorfunction
+from collections import deque
+from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Callable, Literal, Union, final
 
 from typing_extensions import ParamSpec, TypeAlias, TypeVar, assert_never
@@ -25,8 +26,8 @@ from resonate.context import (
     Context,
 )
 from resonate.dataclasses import (
-    CoroAndPromise,
     FnOrCoroutine,
+    ResonateCoro,
     RouteInfo,
     Runnable,
 )
@@ -77,7 +78,7 @@ Step: TypeAlias = Literal["functions", "coroutines"]
 Mode: TypeAlias = Literal["concurrent", "sequential"]
 
 
-RunnableFunctions: TypeAlias = list[
+RunnableFunctions: TypeAlias = deque[
     tuple[Union[FnWrapper[Any], AsyncFnWrapper[Any]], Promise[Any]]
 ]
 
@@ -114,9 +115,9 @@ class DSTScheduler:
         durable_promise_storage: IPromiseStore,
     ) -> None:
         self._stg_queue: list[tuple[LFI, str]] = []
-        self._runnable_coros: RunnableCoroutines = []
+        self._runnable_coros: RunnableCoroutines = deque()
         self._awatiables: Awaitables = {}
-        self._runnable_functions: RunnableFunctions = []
+        self._runnable_functions: RunnableFunctions = deque()
 
         self.random = random
         self.seed = self.random.seed
@@ -241,14 +242,12 @@ class DSTScheduler:
 
     def _add_coro_to_runnables(
         self,
-        coro_and_promise: CoroAndPromise[Any],
+        coro: ResonateCoro[Any],
         value_to_yield_back: Result[Any, Exception] | None,
         *,
         was_awaited: bool,
     ) -> None:
-        self._runnable_coros.append(
-            (Runnable(coro_and_promise, value_to_yield_back), was_awaited)
-        )
+        self._runnable_coros.append((Runnable(coro, value_to_yield_back), was_awaited))
 
     def _add_function_to_runnables(
         self,
@@ -274,7 +273,7 @@ class DSTScheduler:
                 info.ctx, *info.fn_or_coroutine.args, **info.fn_or_coroutine.kwargs
             )
             self._add_coro_to_runnables(
-                CoroAndPromise(info, coro),
+                ResonateCoro(info, coro),
                 None,
                 was_awaited=False,
             )
@@ -402,8 +401,10 @@ class DSTScheduler:
             self._route_fn_or_coroutine(RouteInfo(root_ctx, p, top_lvl.exec_unit, 0))
         return p
 
-    def _get_random_element(self, array: list[T]) -> T:
-        return array.pop(self.random.randint(0, len(array) - 1))
+    def _get_random_element(self, array: deque[T]) -> T:
+        element = self.random.choice(array)
+        array.remove(element)
+        return element
 
     def _reset(self) -> None:
         self._runnable_coros.clear()
@@ -576,7 +577,7 @@ class DSTScheduler:
         self, invocation: LFI, runnable: Runnable[Any]
     ) -> Promise[Any]:
         p = self._create_promise(
-            parent_promise=runnable.coro_and_promise.route_info.promise,
+            parent_promise=runnable.coro.route_info.promise,
             promise_id=invocation.opts.promise_id,
             action=invocation,
         )
@@ -590,7 +591,7 @@ class DSTScheduler:
             else:
                 self._route_fn_or_coroutine(
                     RouteInfo(
-                        runnable.coro_and_promise.route_info.ctx,
+                        runnable.coro.route_info.ctx,
                         p,
                         invocation.exec_unit,
                         0,
@@ -600,53 +601,45 @@ class DSTScheduler:
             assert_never(invocation.exec_unit)
         return p
 
-    def _add_coro_to_awaitables(
-        self, p: Promise[Any], coro_and_promise: CoroAndPromise[Any]
-    ) -> None:
+    def _add_coro_to_awaitables(self, p: Promise[Any], coro: ResonateCoro[Any]) -> None:
         assert (
             not p.done()
         ), "If the promise is resolved already it makes no sense to block coroutine"
-        self._awatiables.setdefault(p, []).append(coro_and_promise)
+        self._awatiables.setdefault(p, []).append(coro)
         self._events.append(
             ExecutionAwaited(
-                promise_id=coro_and_promise.route_info.promise.promise_id,
+                promise_id=coro.route_info.promise.promise_id,
                 tick=self.tick,
-                parent_promise_id=coro_and_promise.route_info.promise.parent_promise_id(),
+                parent_promise_id=coro.route_info.promise.parent_promise_id(),
             )
         )
 
     def _advance_runnable_span(
         self, runnable: Runnable[Any], *, was_awaited: bool
     ) -> None:
-        assert isgenerator(
-            runnable.coro_and_promise.coro
-        ), "Only coroutines can be advanced"
-
         yieldable_or_final_value = iterate_coro(runnable)
 
         if was_awaited:
             self._events.append(
                 ExecutionResumed(
-                    promise_id=runnable.coro_and_promise.route_info.promise.promise_id,
+                    promise_id=runnable.coro.route_info.promise.promise_id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro_and_promise.route_info.promise.parent_promise_id(),
+                    parent_promise_id=runnable.coro.route_info.promise.parent_promise_id(),
                 )
             )
 
         if isinstance(yieldable_or_final_value, FinalValue):
             self._events.append(
                 ExecutionTerminated(
-                    promise_id=runnable.coro_and_promise.route_info.promise.promise_id,
+                    promise_id=runnable.coro.route_info.promise.promise_id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro_and_promise.route_info.promise.parent_promise_id(),
+                    parent_promise_id=runnable.coro.route_info.promise.parent_promise_id(),
                 )
             )
             self._resolve_promise(
-                runnable.coro_and_promise.route_info.promise, yieldable_or_final_value.v
+                runnable.coro.route_info.promise, yieldable_or_final_value.v
             )
-            self._unblock_coros_waiting_on_promise(
-                p=runnable.coro_and_promise.route_info.promise
-            )
+            self._unblock_coros_waiting_on_promise(p=runnable.coro.route_info.promise)
         elif isinstance(yieldable_or_final_value, LFC):
             p = self._process_local_invocation(
                 yieldable_or_final_value.to_invocation(), runnable
@@ -656,29 +649,27 @@ class DSTScheduler:
             ), "Since it's a call it should be a promise without dependants"
             if p.done():
                 self._add_coro_to_runnables(
-                    runnable.coro_and_promise,
+                    runnable.coro,
                     p.safe_result(),
                     was_awaited=False,
                 )
             else:
-                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
+                self._add_coro_to_awaitables(p, runnable.coro)
 
         elif isinstance(yieldable_or_final_value, LFI):
             p = self._process_local_invocation(
                 invocation=yieldable_or_final_value, runnable=runnable
             )
-            self._add_coro_to_runnables(
-                runnable.coro_and_promise, Ok(p), was_awaited=False
-            )
+            self._add_coro_to_runnables(runnable.coro, Ok(p), was_awaited=False)
         elif isinstance(yieldable_or_final_value, Promise):
             p = yieldable_or_final_value
             if p.done():
                 self._unblock_coros_waiting_on_promise(p)
                 self._add_coro_to_runnables(
-                    runnable.coro_and_promise, p.safe_result(), was_awaited=False
+                    runnable.coro, p.safe_result(), was_awaited=False
                 )
             else:
-                self._add_coro_to_awaitables(p, runnable.coro_and_promise)
+                self._add_coro_to_awaitables(p, runnable.coro)
 
         elif isinstance(
             yieldable_or_final_value,
@@ -693,10 +684,8 @@ class DSTScheduler:
         assert p.done(), "Promise must be done to unblock waiting coroutines"
         if self._awatiables.get(p) is None:
             return
-        for coro_and_promise in self._awatiables.pop(p):
-            self._add_coro_to_runnables(
-                coro_and_promise, p.safe_result(), was_awaited=True
-            )
+        for coro in self._awatiables.pop(p):
+            self._add_coro_to_runnables(coro, p.safe_result(), was_awaited=True)
 
     def _next_step(self) -> Step:
         next_step: Step

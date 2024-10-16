@@ -31,10 +31,6 @@ class Exponential(Retriable):
         return attempt <= self.max_retries
 
 
-def exponential(base_delay: float, factor: float, max_retries: int) -> Exponential:
-    return Exponential(base_delay=base_delay, factor=factor, max_retries=max_retries)
-
-
 @final
 @dataclass(frozen=True)
 class Linear(Retriable):
@@ -48,10 +44,6 @@ class Linear(Retriable):
 
     def should_retry(self, attempt: int) -> bool:
         return attempt <= self.max_retries
-
-
-def linear(delay: float, max_retries: int) -> Linear:
-    return Linear(delay=delay, max_retries=max_retries)
 
 
 @final
@@ -70,21 +62,33 @@ class Constant(Retriable):
         return attempt <= self.max_retries
 
 
-def constant(delay: float, max_retries: int) -> Constant:
-    return Constant(delay=delay, max_retries=max_retries)
-
-
 @final
 @dataclass(frozen=True)
 class Never:
     """A retry policy where there's no retry."""
 
 
+RetryPolicy: TypeAlias = Union[Exponential, Linear, Constant, Never]
+
+
+def linear(delay: float, max_retries: int) -> Linear:
+    return Linear(delay=delay, max_retries=max_retries)
+
+
+def exponential(base_delay: float, factor: float, max_retries: int) -> Exponential:
+    return Exponential(base_delay=base_delay, factor=factor, max_retries=max_retries)
+
+
+def constant(delay: float, max_retries: int) -> Constant:
+    return Constant(delay=delay, max_retries=max_retries)
+
+
 def never() -> Never:
     return Never()
 
 
-RetryPolicy: TypeAlias = Union[Exponential, Linear, Constant, Never]
+def default_policy() -> RetryPolicy:
+    return exponential(base_delay=1, factor=2, max_retries=5)
 
 
 def calculate_total_possible_delay(policy: Exponential | Linear | Constant) -> float:

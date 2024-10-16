@@ -25,15 +25,13 @@ def iterate_coro(runnable: Runnable[T]) -> Yieldable | FinalValue[T]:
     try:
         if runnable.next_value is None:
             # `None` means to initialize the coroutine
-            yieldable = next(runnable.coro_and_promise.coro)
+            yieldable = runnable.coro.next()
         elif isinstance(runnable.next_value, Ok):
             # `Ok[T]` means send a value
-            yieldable = runnable.coro_and_promise.coro.send(
-                runnable.next_value.unwrap()
-            )
+            yieldable = runnable.coro.send(runnable.next_value.unwrap())
         elif isinstance(runnable.next_value, Err):
             # `Err[Exception]` means throw and Exception
-            yieldable = runnable.coro_and_promise.coro.throw(runnable.next_value.err())
+            yieldable = runnable.coro.throw(runnable.next_value.err())
         else:
             assert_never(runnable.next_value)
     except StopIteration as e:

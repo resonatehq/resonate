@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from resonate import scheduler
-from resonate.commands import CreateDurablePromiseReq
+from resonate.commands import Command, CreateDurablePromiseReq
+from resonate.result import Ok
 from resonate.retry_policy import (
     Linear,
     constant,
@@ -60,18 +61,6 @@ def _promise_storages() -> list[IPromiseStore]:
     if os.getenv("RESONATE_STORE_URL") is not None:
         stores.append(RemotePromiseStore(url=os.environ["RESONATE_STORE_URL"]))
     return stores
-
-
-@pytest.mark.skip
-@pytest.mark.parametrize("store", _promise_storages())
-def test_coro_return_promise(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(
-        processor_threads=1,
-        durable_promise_storage=store,
-    )
-    s.register(bar, "bar-function", retry_policy=never())
-    p: Promise[Promise[str]] = s.run("bar", bar, name="A", sleep_time=0.01)
-    assert p.result(timeout=2) == "A"
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -140,7 +129,7 @@ def test_retry(store: IPromiseStore) -> None:
         policy = Linear(
             delay=policy_info["delay"], max_retries=policy_info["max_retries"]
         )
-        yield ctx.lfc(_failing, error=NotImplementedError).with_options(
+        yield ctx.lfc(_failing, error=RuntimeError).with_options(
             durable=False, retry_policy=policy
         )
 
@@ -150,7 +139,7 @@ def test_retry(store: IPromiseStore) -> None:
     s.register(coro, "coro-func", retry_policy=never())
 
     p: Promise[None] = s.run("retry-coro", coro, dataclasses.asdict(policy))
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError):
         assert p.result()
     assert tries == 3  # noqa: PLR2004
 
@@ -196,7 +185,7 @@ def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
     def coro_that_triggers_structure_concurrency_and_fails(
         ctx: Context,
     ) -> Generator[Yieldable, Any, int]:
-        yield ctx.lfi(_failing, error=NotImplementedError).with_options(
+        yield ctx.lfi(_failing, error=RuntimeError).with_options(
             retry_policy=constant(delay=0.03, max_retries=2), durable=False
         )
         return 1
@@ -212,7 +201,7 @@ def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
         "structure-concurrency-with-failure",
         coro_that_triggers_structure_concurrency_and_fails,
     )
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError):
         p.result()
 
     assert tries == 3  # noqa: PLR2004
@@ -229,7 +218,7 @@ def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> N
         yield ctx.lfi(_failing, error=TypeError).with_options(
             retry_policy=never(), durable=False
         )
-        yield ctx.lfi(_failing, error=NotImplementedError).with_options(
+        yield ctx.lfi(_failing, error=RuntimeError).with_options(
             durable=False, retry_policy=never()
         )
         return 1
@@ -664,3 +653,249 @@ def test_not_blocked_on_remote_long_lfi(store: IPromiseStore) -> None:
 
     p.safe_result(0.2)
     assert not p.is_blocked_on_remote()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_dedup(store: IPromiseStore) -> None:
+    def factorial(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
+        if n <= 1:
+            return 1
+
+        p: Promise[int] = yield ctx.lfi(factorial, n - 1).with_options(
+            promise_id=f"factorial-{n-1}", retry_policy=never()
+        )
+        return n * (yield p)
+
+    s = scheduler.Scheduler(durable_promise_storage=store)
+    s.register(factorial, retry_policy=never())
+    n = 5
+    p1: Promise[int] = s.run(f"factorial-{n}", factorial, n)
+    p2: Promise[int] = s.run(f"factorial-{n}", factorial, n)
+    assert p1 == p2
+    assert p2.result() == 120  # noqa: PLR2004
+    assert p1.done()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class GreetCommand(Command):
+        name: str
+
+    def command_handler(ctx: Context, cmds: list[GreetCommand]) -> list[str]:  # noqa: ARG001
+        return [cmd.name for cmd in cmds]
+
+    def greet(ctx: Context, name: str) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(GreetCommand(name=name))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+    s.register_command_handler(GreetCommand, command_handler, maxlen=10)
+    s.register(greet)
+
+    characters = [
+        "Gon Freecss",
+        "Killua Zoldyck",
+        "Kurapika",
+        "Leorio Paradinight",
+        "Hisoka Morow",
+        "Chrollo Lucilfer",
+        "Meruem",
+        "Isaac Netero",
+        "Biscuit Krueger",
+        "Feitan Portor",
+        "Shalnark",
+        "Shizuku Murasaki",
+        "Nobunaga Hazama",
+        "Pakunoda",
+        "Phinks Magcub",
+        "Uvogin",
+        "Machi Komacine",
+        "Kite",
+        "Knuckle Bine",
+        "Morel Mackernasey",
+    ]
+    promises: list[Promise[str]] = []
+    for name in characters:
+        p: Promise[str] = s.run(f"test-batching-greet-{name}", greet, name)
+        promises.append(p)
+
+    for p, name in zip(promises, characters):
+        assert p.result() == name
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching_with_failing_func(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ACommand(Command):
+        n: int
+
+    def command_handler(ctx: Context, cmds: list[ACommand]) -> list[str]:  # noqa: ARG001
+        raise RuntimeError
+
+    def do_something(ctx: Context, n: int) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(ACommand(n))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+
+    s.register_command_handler(
+        ACommand,
+        command_handler,
+        maxlen=10,
+        retry_policy=never(),
+    )
+    s.register(do_something, retry_policy=never())
+
+    promises: list[Promise[str]] = []
+    for n in range(10):
+        p: Promise[str] = s.run(f"do-something-{n}", do_something, n)
+        promises.append(p)
+
+    for p in promises:
+        with pytest.raises(RuntimeError):
+            p.result()
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching_with_no_result(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ACommand(Command):
+        n: int
+
+    def command_handler(ctx: Context, cmds: list[ACommand]) -> None:  # noqa: ARG001
+        _ = cmds
+
+    def do_something(ctx: Context, n: int) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(ACommand(n))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+    s.register_command_handler(ACommand, command_handler, maxlen=10)
+    s.register(do_something, retry_policy=never())
+
+    promises: list[Promise[str]] = []
+    for n in range(10):
+        p: Promise[str] = s.run(f"do-something-with-no-result-{n}", do_something, n)
+        promises.append(p)
+
+        for p in promises:
+            assert p.result() is None
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching_with_single_result(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ACommand(Command):
+        n: int
+
+    def command_handler(ctx: Context, cmds: list[ACommand]) -> str:  # noqa: ARG001
+        _ = cmds
+        return "Ok"
+
+    def do_something(ctx: Context, n: int) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(ACommand(n))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+    s.register_command_handler(ACommand, command_handler, maxlen=10)
+    s.register(do_something, retry_policy=never())
+
+    promises: list[Promise[str]] = []
+    for n in range(10):
+        p: Promise[str] = s.run(f"do-something-with-single-result-{n}", do_something, n)
+        promises.append(p)
+
+        for p in promises:
+            assert p.result() == "Ok"
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching_with_failing_func_and_retries(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ACommand(Command):
+        n: int
+
+    retries: int = -1
+
+    def command_handler(ctx: Context, cmds: list[ACommand]) -> list[str]:  # noqa: ARG001
+        nonlocal retries
+        retries += 1
+        raise RuntimeError
+
+    def do_something(ctx: Context, n: int) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(ACommand(n))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+
+    max_retries = 10
+    s.register_command_handler(
+        ACommand,
+        command_handler,
+        maxlen=10,
+        retry_policy=constant(delay=0, max_retries=max_retries),
+    )
+    s.register(do_something, retry_policy=never())
+
+    n = 1
+    p: Promise[str] = s.run(f"test-batch-retries{n}", do_something, n)
+
+    with pytest.raises(RuntimeError):
+        p.result()
+
+    assert retries == max_retries
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_batching_with_element_level_exception(store: IPromiseStore) -> None:
+    @dataclasses.dataclass(frozen=True)
+    class ACommand(Command):
+        n: int
+
+    should_fail: bool = False
+
+    def command_handler(ctx: Context, cmds: list[ACommand]) -> list[str | Exception]:  # noqa: ARG001
+        nonlocal should_fail
+        results: list[str | Exception] = []
+        for _ in range(len(cmds)):
+            if should_fail:
+                results.append(RuntimeError("something bad happened"))
+            else:
+                results.append("something good happened")
+            should_fail = not should_fail
+        return results
+
+    def do_something(ctx: Context, n: int) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.lfi(ACommand(n))
+        v: str = yield p
+        return v
+
+    s = scheduler.Scheduler(store)
+
+    s.register_command_handler(
+        ACommand,
+        command_handler,
+        retry_policy=never(),
+    )
+    s.register(do_something, retry_policy=never())
+
+    promises: list[Promise[str]] = []
+    for i in range(10):
+        promises.append(s.run(f"test-batch-element-level-failure{i}", do_something, i))  # noqa: PERF401
+
+    successes = 0
+    failures = 0
+    for p in promises:
+        result = p.safe_result()
+        if isinstance(result, Ok):
+            successes += 1
+        else:
+            failures += 1
+
+    assert successes == failures
