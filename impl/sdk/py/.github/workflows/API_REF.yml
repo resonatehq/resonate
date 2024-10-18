@@ -1,0 +1,41 @@
+name: API_REF
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python 3.12.6
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.12.6
+
+      - name: Install requirements for documentation generation
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install docutils pydoctor
+
+      - name: Generate API documentation with pydoctor
+        run: |
+
+          # Run pydoctor build
+          pydoctor --config=docs/pydoctor.ini src/resonate
+
+      - name: Push API documentation to Github Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/build
+          publish_branch: gh-pages
+          force_orphan: true # Ensure this creates a fresh gh-pages branch if needed
+          commit_message: "Generate API documentation"
