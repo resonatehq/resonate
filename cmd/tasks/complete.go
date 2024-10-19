@@ -1,63 +1,75 @@
 package tasks
 
 import (
-	"github.com/resonatehq/gocoro"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"context"
+	"errors"
+
+	"github.com/resonatehq/resonate/pkg/client"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
-var completeTaskExample = `
-# Complete a task
+// Example command usage for completing a task
+var completeTasksExample = `
+# Complete a task 
 resonate tasks complete --id foo --counter 1`
 
-// CompleteTask sets up the CLI command to complete a task.
-func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) *cobra.Command {
+// CompleteTaskCmd returns a cobra command for completing a task.
+func CompleteTaskCmd(c client.Client) *cobra.Command {
 	var (
-		id      string
-		counter int
+		id      string // Task ID to complete
+		counter int    // Counter for the task completion
 	)
 
-	// Define the cobra command for `complete`
+	// Define the cobra command
 	cmd := &cobra.Command{
-		Use:     "complete <id>",
-		Short:   "Mark a task as complete",
-		Example: completeTaskExample,
-		Run: func(cmd *cobra.Command, args []string) {
-			// Build the request for completing a task
-			req := &t_api.Request{
-				CompleteTask: &t_api.CompleteTaskRequest{
-					Id:      id,
-					Counter: counter,
-				},
+		Use:     "complete",
+		Short:   "Complete a task",
+		Example: completeTasksExample,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate required flags
+			if id == "" {
+				return errors.New("id is required")
+			}
+			if counter <= 0 {
+				return errors.New("counter is required")
 			}
 
-			// Invoke the coroutine to complete the task
-			resp, err := coroutines.CompleteTask(c, req)
+			// Create the body for the complete task request
+			body := v1.CompleteTaskJSONRequestBody{
+				Id:      id,
+				Counter: counter,
+			}
 
-			// Handle errors during task completion
+			// Call the client method to complete the task
+			res, err := c.V1().CompleteTaskWithResponse(context.TODO(), body)
+
 			if err != nil {
-				cmd.PrintErrf("Error completing task: %v\n", err)
-				return
+				return err // Return any errors from the request
 			}
 
-			// Output the response, including the task completion status
-			cmd.Printf("Task completion status: %s\n", resp.CompleteTask.Status)
-			if resp.CompleteTask.Status == t_api.StatusCreated {
-				cmd.Printf("Task '%s' marked as completed\n", id)
+			// Handle the response based on the status code
+			if res.StatusCode() == 204 {
+				cmd.Printf("Task completed: %s\n", id)
+			} else if res.StatusCode() == 403 {
+				return errors.New("task cannot be completed, invalid counter or state")
+			} else if res.StatusCode() == 404 {
+				return errors.New("task not found")
+			} else {
+				cmd.PrintErrln(res.Status(), string(res.Body))
 			}
+
+			return nil // Return nil if no error occurred
 		},
 	}
 
-	// Define flags for user input
-	cmd.Flags().StringVar(&id, "id", "", "Task ID")
-	cmd.Flags().IntVar(&counter, "counter", 1, "Counter")
+	// Define command flags
+	cmd.Flags().StringVarP(&id, "id", "i", "", "The task ID")
+	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
 
-	// Mark required flags
-	cmd.MarkFlagRequired("id")
-	cmd.MarkFlagRequired("counter")
+	// Mark flags as required
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("counter")
 
-	// Return the command to be added to the CLI app
-	return cmd
+	return cmd // Return the constructed command
 }

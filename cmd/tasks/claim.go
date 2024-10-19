@@ -1,72 +1,94 @@
 package tasks
 
 import (
+	"context"
+	"errors"
 	"time"
 
-	"github.com/resonatehq/gocoro"
-	"github.com/resonatehq/resonate/internal/app/coroutines"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/pkg/client"
+	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
-var claimTaskExample = `
-# Claim a task
+// Example command usage for claiming a task
+var claimTasksExample = `
+# Claim a task 
 resonate tasks claim --id foo --counter 1 --process-id bar --ttl 1m`
 
-// ClaimTask sets up the CLI command for claiming a task using provided task information.
-// It takes a gocoro.Coroutine as an argument which allows asynchronous task handling.
-func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) *cobra.Command {
-
+// ClaimTaskCmd returns a cobra command for claiming a task.
+func ClaimTaskCmd(c client.Client) *cobra.Command {
 	var (
-		// Command-line flags for user input
-		id        string
-		counter   int
-		processID string
-		ttl       time.Duration
+		id        string        // Task ID to claim
+		counter   int           // Counter for the task claim
+		processId string        // Unique process ID identifying the claimer
+		ttl       time.Duration // Time to live for the task claim
+		requestId string        // Unique tracking ID for the request
 	)
 
-	// Define the cobra command for `claim`
+	// Define the cobra command
 	cmd := &cobra.Command{
-		Use:     "claim <id> <counter> <processID> <ttl>",
-		Short:   "Claim Task",
-		Example: claimTaskExample,
-		Run: func(cmd *cobra.Command, args []string) {
-			// Build the request for claiming a task with the user's input
-			req := &t_api.Request{
-				ClaimTask: &t_api.ClaimTaskRequest{
-					Id:        id,
-					Counter:   counter,
-					ProcessId: processID,
-					Ttl:       int(ttl.Seconds()),
-				},
+		Use:     "claim",
+		Short:   "Claim a task",
+		Example: claimTasksExample,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Validate required flags
+			if id == "" {
+				return errors.New("id is required")
+			}
+			if counter <= 0 {
+				return errors.New("counter is required")
+			}
+			if processId == "" {
+				return errors.New("process-id is required")
 			}
 
-			// Build the request for claiming a task
-			resp, err := coroutines.ClaimTask(c, req)
+			// Create parameters for the claim task request
+			params := &v1.ClaimTaskParams{
+				RequestId: &requestId, // Optional tracking ID
+			}
 
-			// Handle errors during task claiming
+			// Create the body for the claim task request
+			body := v1.ClaimTaskJSONRequestBody{
+				Id:        id,
+				Counter:   counter,
+				ProcessId: processId,
+				Ttl:       int64(ttl.Milliseconds()), // Convert duration to milliseconds
+			}
+
+			// Call the client method to claim the task
+			res, err := c.V1().ClaimTaskWithResponse(context.TODO(), params, body)
+
 			if err != nil {
-				cmd.PrintErrf("Error claiming task: %v\n", err)
-				return
+				return err // Return any errors from the request
 			}
 
-			// If successful, display the claimed task information
-			cmd.Printf("Claimed Task: %+v\n", resp.ClaimTask)
+			// Handle the response based on the status code
+			if res.StatusCode() == 201 {
+				cmd.Printf("Task claimed: %s\n", id)
+			} else if res.StatusCode() == 403 {
+				return errors.New("task already claimed, completed, or invalid counter")
+			} else if res.StatusCode() == 404 {
+				return errors.New("task not found")
+			} else {
+				cmd.PrintErrln(res.Status(), string(res.Body))
+			}
+
+			return nil // Return nil if no error occurred
 		},
 	}
 
-	// Define flags that allow users to pass values from the command line
-	cmd.Flags().StringVar(&id, "id", "", "Task ID")
-	cmd.Flags().IntVar(&counter, "counter", 1, "Task counter")
-	cmd.Flags().StringVar(&processID, "process-id", "", "Process ID")
-	cmd.Flags().DurationVar(&ttl, "ttl", 1*time.Minute, "Time to live (e.g: 1m, 30s)")
+	// Define command flags
+	cmd.Flags().StringVarP(&id, "id", "i", "", "The task ID")
+	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
+	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "Unique process ID that identifies the claimer")
+	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "Time to live in milliseconds")
+	cmd.Flags().StringVarP(&requestId, "request-id", "r", "", "Unique tracking ID")
 
-	// Mark certain flags as required so the user must provide them
-	cmd.MarkFlagRequired("id")
-	cmd.MarkFlagRequired("counter")
-	cmd.MarkFlagRequired("process-id")
-	cmd.MarkFlagRequired("ttl")
+	// Mark flags as required
+	_ = cmd.MarkFlagRequired("id")
+	_ = cmd.MarkFlagRequired("counter")
+	_ = cmd.MarkFlagRequired("process-id")
+	_ = cmd.MarkFlagRequired("ttl")
 
-	return cmd
+	return cmd // Return the constructed command
 }
