@@ -12,25 +12,27 @@ import (
 // Example command usage for completing a task
 var completeTasksExample = `
 # Complete a task 
-resonate tasks complete --id foo --counter 1`
+resonate tasks complete foo --counter 1`
 
 // CompleteTaskCmd returns a cobra command for completing a task.
 func CompleteTaskCmd(c client.Client) *cobra.Command {
 	var (
-		id      string // Task ID to complete
-		counter int    // Counter for the task completion
+		counter int // Counter for the task completion
 	)
 
 	// Define the cobra command
 	cmd := &cobra.Command{
-		Use:     "complete",
+		Use:     "complete <id>",
 		Short:   "Complete a task",
 		Example: completeTasksExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate required flags
-			if id == "" {
-				return errors.New("id is required")
+			if len(args) != 1 {
+				return errors.New("must specify an id")
 			}
+
+			id := args[0]
+
 			if counter <= 0 {
 				return errors.New("counter is required")
 			}
@@ -49,14 +51,11 @@ func CompleteTaskCmd(c client.Client) *cobra.Command {
 			}
 
 			// Handle the response based on the status code
-			if res.StatusCode() == 204 {
+			if res.StatusCode() == 201 {
 				cmd.Printf("Task completed: %s\n", id)
-			} else if res.StatusCode() == 403 {
-				return errors.New("task cannot be completed, invalid counter or state")
-			} else if res.StatusCode() == 404 {
-				return errors.New("task not found")
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))
+				return nil
 			}
 
 			return nil // Return nil if no error occurred
@@ -64,7 +63,6 @@ func CompleteTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().StringVarP(&id, "id", "i", "", "The task ID")
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
 
 	// Mark flags as required

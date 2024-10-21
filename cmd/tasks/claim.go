@@ -13,12 +13,11 @@ import (
 // Example command usage for claiming a task
 var claimTasksExample = `
 # Claim a task 
-resonate tasks claim --id foo --counter 1 --process-id bar --ttl 1m`
+resonate tasks claim foo --counter 1 --process-id bar --ttl 1m`
 
 // ClaimTaskCmd returns a cobra command for claiming a task.
 func ClaimTaskCmd(c client.Client) *cobra.Command {
 	var (
-		id        string        // Task ID to claim
 		counter   int           // Counter for the task claim
 		processId string        // Unique process ID identifying the claimer
 		ttl       time.Duration // Time to live for the task claim
@@ -27,14 +26,17 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 
 	// Define the cobra command
 	cmd := &cobra.Command{
-		Use:     "claim",
+		Use:     "claim <id>",
 		Short:   "Claim a task",
 		Example: claimTasksExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate required flags
-			if id == "" {
-				return errors.New("id is required")
+			if len(args) != 1 {
+				return errors.New("must specify an id")
 			}
+
+			id := args[0]
+
 			if counter <= 0 {
 				return errors.New("counter is required")
 			}
@@ -52,7 +54,7 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 				Id:        id,
 				Counter:   counter,
 				ProcessId: processId,
-				Ttl:       int64(ttl.Milliseconds()), // Convert duration to milliseconds
+				Ttl:       ttl.Milliseconds(), // Convert duration to milliseconds
 			}
 
 			// Call the client method to claim the task
@@ -65,12 +67,9 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 			// Handle the response based on the status code
 			if res.StatusCode() == 201 {
 				cmd.Printf("Task claimed: %s\n", id)
-			} else if res.StatusCode() == 403 {
-				return errors.New("task already claimed, completed, or invalid counter")
-			} else if res.StatusCode() == 404 {
-				return errors.New("task not found")
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))
+				return nil
 			}
 
 			return nil // Return nil if no error occurred
@@ -78,7 +77,6 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().StringVarP(&id, "id", "i", "", "The task ID")
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
 	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "Unique process ID that identifies the claimer")
 	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "Time to live in milliseconds")
