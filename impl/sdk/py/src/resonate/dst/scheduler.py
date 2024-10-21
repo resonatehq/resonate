@@ -123,6 +123,10 @@ class DSTScheduler:
         self.seed = self.random.seed
 
         self.deps = Dependencies()
+        self._ctx = Context(
+            seed=self.seed,
+            deps=self.deps,
+        )
 
         self.current_failures: int = 0
         self._max_failures = max_failures
@@ -385,10 +389,6 @@ class DSTScheduler:
         self, top_lvl: LFI, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
-        root_ctx = Context(
-            seed=self.seed,
-            deps=self.deps,
-        )
         p = self._create_promise(
             parent_promise=None,
             promise_id=promise_id,
@@ -398,7 +398,7 @@ class DSTScheduler:
         if p.done():
             self._unblock_coros_waiting_on_promise(p)
         else:
-            self._route_fn_or_coroutine(RouteInfo(root_ctx, p, top_lvl.exec_unit, 0))
+            self._route_fn_or_coroutine(RouteInfo(self._ctx, p, 0))
         return p
 
     def _get_random_element(self, array: deque[T]) -> T:
@@ -593,7 +593,6 @@ class DSTScheduler:
                     RouteInfo(
                         runnable.coro.route_info.ctx,
                         p,
-                        invocation.exec_unit,
                         0,
                     )
                 )

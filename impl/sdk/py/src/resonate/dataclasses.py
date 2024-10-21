@@ -32,13 +32,13 @@ class RouteInfo:
         self,
         ctx: Context,
         promise: Promise[Any],
-        fn_or_coroutine: FnOrCoroutine,
         retry_attempt: int,
     ) -> None:
         assert isinstance(promise.action, LFI)
+        assert isinstance(promise.action.exec_unit, FnOrCoroutine)
         self.ctx = ctx
         self.promise = promise
-        self.fn_or_coroutine = fn_or_coroutine
+        self.fn_or_coroutine = promise.action.exec_unit
         self.retry_attempt = retry_attempt
         self.retry_policy = promise.action.opts.retry_policy
 
@@ -55,6 +55,10 @@ class ResonateCoro(Generic[T]):
         self._coro_active = True
         self._final_value: Result[T, Exception] | None = None
         self._first_error_used = False
+        self._next_child_to_yield = 0
+
+    def _pending_children(self) -> list[Promise[Any]]:
+        return self.route_info.promise.children_promises[self._next_child_to_yield :]
 
     def next(self) -> Yieldable:
         assert self._coro_active
@@ -69,7 +73,8 @@ class ResonateCoro(Generic[T]):
                 self._final_value = Ok(e.value)
                 self._coro_active = False
 
-        for child in self.route_info.promise.children_promises:
+        for child in self._pending_children():
+            self._next_child_to_yield += 1
             if child.done():
                 continue
             return child
@@ -94,7 +99,8 @@ class ResonateCoro(Generic[T]):
             self._final_value = Err(error)
             self._first_error_used = True
 
-        for child in self.route_info.promise.children_promises:
+        for child in self._pending_children():
+            self._next_child_to_yield += 1
             if child.done():
                 continue
             return child
