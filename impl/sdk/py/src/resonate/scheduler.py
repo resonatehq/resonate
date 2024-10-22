@@ -60,6 +60,7 @@ from resonate.promise import (
 from resonate.queue import DelayQueue, Queue
 from resonate.result import Err, Ok
 from resonate.retry_policy import Never, RetryPolicy, default_policy
+from resonate.storage import RemoteServer
 from resonate.time import now
 from resonate.tracing.stdout import StdOutAdapter
 from resonate.typing import (
@@ -346,6 +347,9 @@ class Scheduler:
         self, promise: Promise[Any], recv: str = "default"
     ) -> None:
         assert isinstance(promise.action, RFI), "We only register callbacks for rfi"
+        assert isinstance(
+            self._durable_promise_storage, RemoteServer
+        ), "Registering callback only makes sense if using remote server."
         durable_promise, created_callback = (
             self._durable_promise_storage.create_callback(
                 promise_id=promise.promise_id,

@@ -8,7 +8,7 @@ from typing_extensions import ParamSpec, assert_never
 from resonate import random
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.dst.scheduler import DSTScheduler, Mode
-from resonate.storage import IPromiseStore, LocalPromiseStore
+from resonate.storage import IPromiseStore, LocalStore
 
 if TYPE_CHECKING:
     from resonate.dependency_injection import Dependencies
@@ -42,7 +42,7 @@ def dst(  # noqa: PLR0913
             assert_eventually=assert_eventually,
             durable_promise_storage=durable_promise_storage
             if durable_promise_storage
-            else LocalPromiseStore(),
+            else LocalStore(),
         )
 
     schedulers: list[DSTScheduler] = []
