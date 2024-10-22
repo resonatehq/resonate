@@ -21,7 +21,6 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 		counter   int           // Counter for the task claim
 		processId string        // Unique process ID identifying the claimer
 		ttl       time.Duration // Time to live for the task claim
-		requestId string        // Unique tracking ID for the request
 	)
 
 	// Define the cobra command
@@ -45,9 +44,7 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 			}
 
 			// Create parameters for the claim task request
-			params := &v1.ClaimTaskParams{
-				RequestId: &requestId, // Optional tracking ID
-			}
+			params := &v1.ClaimTaskParams{}
 
 			// Create the body for the claim task request
 			body := v1.ClaimTaskJSONRequestBody{
@@ -80,7 +77,6 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
 	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "Unique process ID that identifies the claimer")
 	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "Time to live in milliseconds")
-	cmd.Flags().StringVarP(&requestId, "request-id", "r", "", "Unique tracking ID")
 
 	// Mark flags as required
 	_ = cmd.MarkFlagRequired("id")
