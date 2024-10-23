@@ -170,8 +170,8 @@ schema = 3
     version = "v1.9.0"
     hash = "sha256-D8OtLaViqPShz1w8ijhIHmjw9xVaRu0qD2hXKj63r4Q="
   [mod."go.uber.org/mock"]
-    version = "v0.4.0"
-    hash = "sha256-mJN2cPmAMTZQzOnTpJ8zi9QH2m3OAKI4IpnQW9QYS8s="
+    version = "v0.5.0"
+    hash = "sha256-OLgbIRFUgt2taXypu5zSfnUZeeevNaU/myCdXBOBVaA="
   [mod."go.uber.org/multierr"]
     version = "v1.9.0"
     hash = "sha256-tlDRooh/V4HDhZohsUrxot/Y6uVInVBtRWCZbj/tPds="
