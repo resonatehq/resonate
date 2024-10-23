@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
+	"github.com/resonatehq/resonate/cmd/tasks"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -37,6 +38,7 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(quickstart.NewCmd())
+	rootCmd.AddCommand(tasks.NewCmd())
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)
