@@ -35,6 +35,7 @@ func CreateCallbackCmd(c client.Client) *cobra.Command {
 		Example: createCallbacksExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			// What should requestID be?
 			paramsByte, err := json.Marshal(struct {
 				RequestId string `json:"request-id"`
 			}{RequestId: ""})
