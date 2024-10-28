@@ -41,7 +41,11 @@ class Promise(Generic[T]):
         self.children_promises: list[Promise[Any]] = []
 
         # Only used for the root promise.
-        self.leaf_promises: set[Promise[Any]] = set()
+        self.leaf_promises: set[Promise[Any]] | None
+        if self.parent_promise is None:
+            self.leaf_promises = set()
+        else:
+            self.leaf_promises = None
 
         self.action = action
         if isinstance(action, (LFI, All, AllSettled, Race)):
@@ -52,6 +56,9 @@ class Promise(Generic[T]):
             assert_never(action)
 
     def is_blocked_on_remote(self) -> bool:
+        assert (
+            self.leaf_promises is not None
+        ), "This method is only meant to be called on root promises."
         blocked_on_remote = False
         for p in self.leaf_promises:
             if not p.done() and isinstance(p.action, LFI):
@@ -118,9 +125,11 @@ class Promise(Generic[T]):
 
         if self.parent_promise is None:
             # The root is creating a child it is a leaf until it creates another promise
+            assert self.leaf_promises is not None
             self.leaf_promises.add(child)
         else:
             # The promise creating a child might no longer be a leaf promise itself
+            assert self.root_promise.leaf_promises is not None
             self.root_promise.leaf_promises.discard(self)
             self.root_promise.leaf_promises.add(child)
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, final
 from typing_extensions import ParamSpec, Self
 
 from resonate.commands import Command
-from resonate.options import Options
+from resonate.options import LOptions, ROptions
 from resonate.retry_policy import never
 
 if TYPE_CHECKING:
@@ -24,14 +24,15 @@ T = TypeVar("T")
 @dataclass
 class RFI:
     exec_unit: ExecutionUnit
-    promise_id: str | None = None
+    opts: ROptions = field(default=ROptions())
 
-    def with_options(self, promise_id: str) -> Self:
+    def with_options(
+        self, promise_id: str | None = None, target: str | None = None
+    ) -> Self:
         assert not isinstance(
             self.exec_unit, Command
         ), "Options must be set on the command."
-        assert self.promise_id is None, "promise ID has already been set"
-        self.promise_id = promise_id
+        self.opts = ROptions(promise_id=promise_id, target=target)
         return self
 
 
@@ -39,25 +40,26 @@ class RFI:
 @dataclass
 class RFC:
     exec_unit: ExecutionUnit
-    promise_id: str | None = None
+    opts: ROptions = field(default=ROptions())
 
-    def with_options(self, promise_id: str) -> Self:
+    def with_options(
+        self, promise_id: str | None = None, target: str | None = None
+    ) -> Self:
         assert not isinstance(
             self.exec_unit, Command
         ), "Options must be set on the command."
-        assert self.promise_id is None, "promise ID has already been set"
-        self.promise_id = promise_id
+        self.opts = ROptions(promise_id=promise_id, target=target)
         return self
 
     def to_invocation(self) -> RFI:
-        return RFI(self.exec_unit, self.promise_id)
+        return RFI(self.exec_unit, self.opts)
 
 
 @final
 @dataclass
 class LFC:
     exec_unit: ExecutionUnit
-    opts: Options = field(default=Options())
+    opts: LOptions = field(default=LOptions())
 
     def with_options(
         self,
@@ -70,7 +72,7 @@ class LFC:
             assert not isinstance(
                 self.exec_unit, Command
             ), "Retry policies on batching are set when registering command handlers."
-        self.opts = Options(
+        self.opts = LOptions(
             durable=durable, promise_id=promise_id, retry_policy=retry_policy
         )
         return self
@@ -89,10 +91,10 @@ class DeferredInvocation:
 
     promise_id: str
     coro: FnOrCoroutine
-    opts: Options = field(default=Options())
+    opts: LOptions = field(default=LOptions())
 
     def with_options(self, *, retry_policy: RetryPolicy | None = None) -> Self:
-        self.opts = Options(
+        self.opts = LOptions(
             durable=True, promise_id=self.promise_id, retry_policy=retry_policy
         )
         return self
@@ -102,7 +104,7 @@ class DeferredInvocation:
 @dataclass
 class LFI:
     exec_unit: ExecutionUnit
-    opts: Options = field(default=Options())
+    opts: LOptions = field(default=LOptions())
 
     def with_options(
         self,
@@ -115,7 +117,7 @@ class LFI:
             assert not isinstance(
                 self.exec_unit, Command
             ), "Retry policies on batching are set when registering command handlers."
-        self.opts = Options(
+        self.opts = LOptions(
             durable=durable, promise_id=promise_id, retry_policy=retry_policy
         )
         return self
@@ -130,7 +132,7 @@ class All:
     """
 
     def __init__(self, promises: list[Promise[Any]]) -> None:
-        self.opts = Options(retry_policy=never())
+        self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
     def with_options(
@@ -149,7 +151,7 @@ class All:
 
         Returns: Self: The combinator instance with updated options.
         """
-        self.opts = Options(
+        self.opts = LOptions(
             durable=durable,
             promise_id=promise_id,
             retry_policy=retry_policy if retry_policy is not None else never(),
@@ -167,7 +169,7 @@ class AllSettled:
     """
 
     def __init__(self, promises: list[Promise[Any]]) -> None:
-        self.opts = Options(retry_policy=never())
+        self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
     def with_options(
@@ -186,7 +188,7 @@ class AllSettled:
 
         Returns: Self: The combinator instance with updated options.
         """
-        self.opts = Options(
+        self.opts = LOptions(
             durable=durable,
             promise_id=promise_id,
             retry_policy=retry_policy if retry_policy is not None else never(),
@@ -206,7 +208,7 @@ class Race:
         assert (
             len(promises) > 0
         ), "Race combinator requires a non empty list of promises"
-        self.opts = Options(retry_policy=never())
+        self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
     def with_options(
@@ -225,7 +227,7 @@ class Race:
 
         Returns: Self: The combinator instance with updated options.
         """
-        self.opts = Options(
+        self.opts = LOptions(
             durable=durable,
             promise_id=promise_id,
             retry_policy=retry_policy if retry_policy is not None else never(),

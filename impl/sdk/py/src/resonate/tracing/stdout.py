@@ -12,4 +12,4 @@ if TYPE_CHECKING:
 @final
 class StdOutAdapter(IAdapter):
     def process_event(self, event: SchedulerEvents) -> None:
-        logger.debug(event)
+        logger.info(event)

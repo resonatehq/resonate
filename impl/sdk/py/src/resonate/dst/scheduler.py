@@ -20,6 +20,7 @@ from resonate.actions import (
     Race,
 )
 from resonate.batching import CmdBuffer
+from resonate.collections import EphemeralMemo
 from resonate.commands import Command
 from resonate.contants import CWD
 from resonate.context import (
@@ -54,16 +55,15 @@ if TYPE_CHECKING:
     from resonate.events import (
         SchedulerEvents,
     )
-    from resonate.options import Options
+    from resonate.options import LOptions
     from resonate.record import DurablePromiseRecord
-    from resonate.storage import IPromiseStore
+    from resonate.storage.traits import IPromiseStore
     from resonate.typing import (
         Awaitables,
         CommandHandlerQueues,
         CommandHandlers,
         DurableCoro,
         DurableFn,
-        EphemeralPromiseMemo,
         MockFn,
         PromiseActions,
         RunnableCoroutines,
@@ -152,7 +152,7 @@ class DSTScheduler:
 
         self._durable_promise_storage = durable_promise_storage
         self._json_encoder = JsonEncoder()
-        self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
+        self._emphemeral_promise_memo = EphemeralMemo[str, Promise[Any]]()
 
     def register_command(
         self,
@@ -228,14 +228,14 @@ class DSTScheduler:
     def add(
         self,
         promise_id: str,
-        opts: Options,
+        opts: LOptions,
         coro: DurableCoro[P, Any] | DurableFn[P, Any],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> None:
-        assert (
-            promise_id not in self._emphemeral_promise_memo
+        assert not self._emphemeral_promise_memo.has(
+            promise_id
         ), "There's already a promise with the same id"
 
         top_lvl = LFI(
@@ -311,6 +311,7 @@ class DSTScheduler:
     ) -> Promise[Any]:
         if parent_promise is not None:
             p = parent_promise.child_promise(promise_id=promise_id, action=action)
+            as_root = False
         else:
             assert (
                 promise_id is not None
@@ -318,10 +319,9 @@ class DSTScheduler:
             p = Promise[Any](
                 promise_id=promise_id, action=action, parent_promise=parent_promise
             )
-        assert (
-            p.promise_id not in self._emphemeral_promise_memo
-        ), "There should not be a new promise with same promise id."
-        self._emphemeral_promise_memo[p.promise_id] = p
+            as_root = True
+
+        self._emphemeral_promise_memo.add(p.promise_id, p, as_root=as_root)
         if isinstance(action, LFI):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -460,8 +460,8 @@ class DSTScheduler:
             promise.set_result(v)
         else:
             promise.set_result(value)
-        assert (
-            promise.promise_id in self._emphemeral_promise_memo
+        assert self._emphemeral_promise_memo.has(
+            promise.promise_id
         ), "Resolved promise should be in the memo"
 
         self._events.append(

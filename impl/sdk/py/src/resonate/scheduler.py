@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import uuid
 from abc import ABC, abstractmethod
 from collections import deque
@@ -30,7 +31,7 @@ from resonate.actions import (
     Race,
 )
 from resonate.batching import CommandBuffer
-from resonate.collections import DoubleDict
+from resonate.collections import DoubleDict, EphemeralMemo
 from resonate.commands import Command, CreateDurablePromiseReq
 from resonate.context import Context
 from resonate.dataclasses import (
@@ -51,16 +52,19 @@ from resonate.events import (
 )
 from resonate.functools import AsyncFnWrapper, FnWrapper, wrap_fn
 from resonate.itertools import FinalValue, iterate_coro
-from resonate.options import Options
+from resonate.logging import logger
+from resonate.options import LOptions
 from resonate.promise import (
     Promise,
     all_promises_are_done,
     any_promise_is_done,
 )
 from resonate.queue import DelayQueue, Queue
+from resonate.record import Invoke, Resume, TaskRecord
 from resonate.result import Err, Ok
 from resonate.retry_policy import Never, RetryPolicy, default_policy
-from resonate.storage import RemoteServer
+from resonate.shells.long_poller import LongPoller
+from resonate.storage.traits import ICallbackStore, IPromiseStore, ITaskStore
 from resonate.time import now
 from resonate.tracing.stdout import StdOutAdapter
 from resonate.typing import (
@@ -73,14 +77,12 @@ if TYPE_CHECKING:
 
     from resonate.record import DurablePromiseRecord
     from resonate.result import Result
-    from resonate.storage import IPromiseStore
     from resonate.tracing import IAdapter
     from resonate.typing import (
         Awaitables,
         CmdHandlerResult,
         DurableCoro,
         DurableFn,
-        EphemeralPromiseMemo,
         PromiseActions,
         RunnableCoroutines,
     )
@@ -240,17 +242,21 @@ class Scheduler:
         self,
         durable_promise_storage: IPromiseStore,
         *,
+        logic_group: str = "default",
         tracing_adapter: IAdapter | None = None,
         processor_threads: int | None = None,
+        with_long_polling: bool | None = None,
     ) -> None:
-        self._sdk_id = uuid.uuid4().hex
+        self.logic_group: str = logic_group
+        self.pid = uuid.uuid4().hex
         self._registered_function = DoubleDict[str, Any]()
-        self._attached_options_to_top_lvl: dict[str, Options] = {}
+        self._attached_options_to_top_lvl: dict[str, LOptions] = {}
 
         self._stg_queue = Queue[Promise[Any]]()
         self._completion_queue = Queue[_CQE]()
         self._submission_queue = Queue[_SQE]()
         self._combinators_queue = Queue[tuple[Combinator, Promise[Any]]]()
+        self._task_record_queue = Queue[TaskRecord]()
 
         self._worker_continue = Event()
 
@@ -270,20 +276,41 @@ class Scheduler:
 
         self._runnable_coros: RunnableCoroutines = deque()
         self._awaitables: Awaitables = {}
+        self._tasks_to_complete: dict[str, TaskRecord] = {}
 
         self._processor = _Processor(
             processor_threads,
             self._submission_queue,
             self,
         )
+
         self._durable_promise_storage = durable_promise_storage
-        self._emphemeral_promise_memo: EphemeralPromiseMemo = {}
+
+        self._heartbeating_thread: Thread | None = None
+        if isinstance(self._durable_promise_storage, ITaskStore):
+            self._heartbeating_thread = Thread(target=self._heartbeat, daemon=True)
+            self._heartbeating_thread.start()
+            if with_long_polling is None or with_long_polling:
+                self._long_poller = LongPoller(self)
+
+        self._emphemeral_promise_memo = EphemeralMemo[str, Promise[Any]]()
 
         self._cmd_handlers = dict[type[Command], tuple[CmdHandler[Any], RetryPolicy]]()
         self._cmd_buffers = dict[type[Command], CommandBuffer[Command]]()
 
         self._worker_thread = Thread(target=self._run, daemon=True)
         self._worker_thread.start()
+
+    def _heartbeat(self) -> None:
+        while True:
+            assert isinstance(self._durable_promise_storage, ITaskStore)
+            affected = self._durable_promise_storage.heartbeat_tasks(pid=self.pid)
+            logger.debug("Heatbeat affected %s tasks", affected)
+            time.sleep(2)
+
+    def enqueue_task_record(self, task_record: TaskRecord) -> None:
+        self._task_record_queue.put_nowait(task_record)
+        self._signal()
 
     def register_command_handler(
         self,
@@ -307,7 +334,7 @@ class Scheduler:
         self._cmd_buffers[cmd] = CommandBuffer(maxlen=maxlen)
 
     def enqueue_cqe(self, cqe: _CQE) -> None:
-        self._completion_queue.put(cqe)
+        self._completion_queue.put_nowait(cqe)
         self._signal()
 
     def _enqueue_combinator(
@@ -344,12 +371,14 @@ class Scheduler:
         assert_never(value)
 
     def _register_callback_or_resolve_ephemeral_promise(
-        self, promise: Promise[Any], recv: str = "default"
+        self, promise: Promise[Any]
     ) -> None:
         assert isinstance(promise.action, RFI), "We only register callbacks for rfi"
         assert isinstance(
-            self._durable_promise_storage, RemoteServer
-        ), "Registering callback only makes sense if using remote server."
+            self._durable_promise_storage, ICallbackStore
+        ), "Used storage does not support callbacks."
+
+        recv = {"type": "poll", "data": {"group": self.logic_group, "id": self.pid}}
         durable_promise, created_callback = (
             self._durable_promise_storage.create_callback(
                 promise_id=promise.promise_id,
@@ -359,6 +388,11 @@ class Scheduler:
             )
         )
         if created_callback is not None:
+            logger.info(
+                "Callback pointing to %s has been registered for when %s is completed",
+                recv,
+                promise.promise_id,
+            )
             return
 
         assert (
@@ -366,8 +400,8 @@ class Scheduler:
         ), "Callback won't be created only if durable promise has been completed."
         v = self._get_value_from_durable_promise(durable_promise_record=durable_promise)
         promise.set_result(v)
-        assert (
-            promise.promise_id in self._emphemeral_promise_memo
+        assert self._emphemeral_promise_memo.has(
+            promise.promise_id
         ), "Ephemeral process must have been registered in the memo."
 
         self._tracing_adapter.process_event(
@@ -426,6 +460,7 @@ class Scheduler:
     ) -> Promise[Any]:
         if parent_promise is not None:
             p = parent_promise.child_promise(promise_id=promise_id, action=action)
+            as_root = False
         else:
             assert (
                 promise_id is not None
@@ -433,11 +468,9 @@ class Scheduler:
             p = Promise[Any](
                 promise_id=promise_id, action=action, parent_promise=parent_promise
             )
-        assert (
-            p.promise_id not in self._emphemeral_promise_memo
-        ), "There should not be a new promise with same promise id."
+            as_root = True
 
-        self._emphemeral_promise_memo[p.promise_id] = p
+        self._emphemeral_promise_memo.add(p.promise_id, p, as_root=as_root)
 
         if not p.durable:
             self._tracing_adapter.process_event(
@@ -499,6 +532,9 @@ class Scheduler:
             else:
                 assert_never(promise.action.exec_unit)
         elif isinstance(promise.action, RFI):
+            assert isinstance(
+                self._durable_promise_storage, (ITaskStore, ICallbackStore)
+            ), "Used storage does not support rfi."
             if isinstance(promise.action.exec_unit, Command):
                 assert isinstance(
                     promise.action.exec_unit, CreateDurablePromiseReq
@@ -514,8 +550,12 @@ class Scheduler:
                 attached_options = self._attached_options_to_top_lvl[func_name]
 
                 final_tags = attached_options.tags
-                if "resonate:invoke" not in attached_options.tags:
-                    final_tags["resonate:invoke"] = f"poll://default/{self._sdk_id}"
+                target_url: str
+                if promise.action.opts.target is not None:
+                    target_url = f"poll://{promise.action.opts.target}"
+                else:
+                    target_url = f"poll://{self.logic_group}"
+                final_tags["resonate:invoke"] = target_url
 
                 req = promise.action.exec_unit.to_req(
                     promise.promise_id,
@@ -547,7 +587,7 @@ class Scheduler:
             name not in self._attached_options_to_top_lvl
         ), "There's already a coroutine registered with this name."
         self._registered_function.add(name, func)
-        self._attached_options_to_top_lvl[name] = Options(
+        self._attached_options_to_top_lvl[name] = LOptions(
             durable=True,
             promise_id=None,
             retry_policy=retry_policy,
@@ -570,9 +610,8 @@ class Scheduler:
 
         assert attached_options.durable, "All top level invocation must be durable."
 
-        p: Promise[Any]
-        if promise_id in self._emphemeral_promise_memo:
-            p = self._emphemeral_promise_memo[promise_id]
+        p = self._emphemeral_promise_memo.get(promise_id)
+        if p is not None:
             return p
 
         p = self._create_promise(
@@ -679,7 +718,7 @@ class Scheduler:
         else:
             assert_never(cqe)
 
-    def _run(self) -> None:  # noqa: C901, PLR0912
+    def _run(self) -> None:  # noqa: C901, PLR0912, PLR0915
         while self._worker_continue.wait():
             self._worker_continue.clear()
 
@@ -708,6 +747,56 @@ class Scheduler:
                             0,
                         )
                     )
+
+            task_records = self._task_record_queue.dequeue_all()
+            for record in task_records:
+                assert isinstance(
+                    self._durable_promise_storage, ITaskStore
+                ), "We should only be receiving tasks messages if using an storage with tasks support"  # noqa: E501
+                msg = self._durable_promise_storage.claim_task(
+                    task_id=record.task_id,
+                    counter=record.counter,
+                    pid=self.pid,
+                    ttl=5 * 1_000,
+                )
+
+                logger.info(
+                    "Message arrived %s on woker %s/%s", msg, self.logic_group, self.pid
+                )
+                assert (
+                    msg.root_promise_store.promise_id not in self._tasks_to_complete
+                ), "Only one task at a time for a given promise."
+                self._tasks_to_complete[msg.root_promise_store.promise_id] = record
+                if isinstance(msg, Invoke):
+                    self._handle_invoke(durable_promise_record=msg.root_promise_store)
+                elif isinstance(msg, Resume):
+                    leaf_promise = self._emphemeral_promise_memo.get(
+                        msg.leaf_promise_store.promise_id
+                    )
+                    if leaf_promise is None:
+                        self._handle_invoke(
+                            durable_promise_record=msg.root_promise_store
+                        )
+                    else:
+                        v = self._get_value_from_durable_promise(msg.leaf_promise_store)
+                        leaf_promise.set_result(v)
+                        self._tracing_adapter.process_event(
+                            PromiseCompleted(
+                                promise_id=leaf_promise.promise_id,
+                                tick=now(),
+                                value=v,
+                                parent_promise_id=leaf_promise.parent_promise_id(),
+                            )
+                        )
+                        assert (
+                            msg.root_promise_store.promise_id in self._tasks_to_complete
+                        ), "Root promise must be monitored by a task."
+                        self._complete_task_monitoring_promise(
+                            msg.root_promise_store.promise_id
+                        )
+                        self._unblock_coros_waiting_on_promise(leaf_promise)
+                else:
+                    assert_never(msg)
 
             cqes = self._completion_queue.dequeue_all()
             for cqe in cqes:
@@ -749,6 +838,59 @@ class Scheduler:
 
             assert not self._runnable_coros, "Runnables should have been all exhausted"
 
+    def _handle_invoke(self, durable_promise_record: DurablePromiseRecord) -> None:
+        invoke_info = durable_promise_record.invoke_info()
+        func_name = invoke_info["func_name"]
+        func_pointer = self._registered_function.get(func_name)
+        assert (
+            func_pointer is not None
+        ), f"Function {func_name} must be registered to invoke"
+
+        attached_options = self._attached_options_to_top_lvl[func_name]
+
+        p = self._emphemeral_promise_memo.get(durable_promise_record.promise_id)
+        if p is None:
+            p = Promise[Any](
+                promise_id=durable_promise_record.promise_id,
+                parent_promise=None,
+                action=LFI(
+                    FnOrCoroutine(
+                        func_pointer, *invoke_info["args"], **invoke_info["kwargs"]
+                    ),
+                    opts=attached_options,
+                ),
+            )
+            self._emphemeral_promise_memo.add(p.promise_id, p, as_root=True)
+
+        else:
+            assert p.parent_promise is not None
+            assert isinstance(p.action, RFI)
+            self._change_promise_to_lfi(p, attached_options)
+
+        self._stg_queue.put_nowait(p)
+        self._signal()
+
+    def _change_promise_to_lfi(self, promise: Promise[Any], opts: LOptions) -> None:
+        assert isinstance(promise.action, RFI), "Can only promote RFI to LFI"
+        assert not isinstance(
+            promise.action.exec_unit, Command
+        ), "Can not change action if it is a command"
+
+        promise.action = LFI(promise.action.exec_unit, opts=opts)
+
+    def _complete_task_monitoring_promise(self, promise_id: str) -> None:
+        record = self._tasks_to_complete.pop(promise_id)
+        assert isinstance(self._durable_promise_storage, ITaskStore)
+        self._durable_promise_storage.complete_task(
+            task_id=record.task_id, counter=record.counter
+        )
+        logger.info(
+            "Task related to promise %s has been completed from worker %s/%s",
+            promise_id,
+            self.logic_group,
+            self.pid,
+        )
+
     def _add_coro_to_awaitables(self, p: Promise[Any], coro: ResonateCoro[Any]) -> None:
         assert (
             not p.done()
@@ -768,6 +910,11 @@ class Scheduler:
                 parent_promise_id=coro.route_info.promise.parent_promise_id(),
             )
         )
+        if (
+            isinstance(self._durable_promise_storage, ITaskStore)
+            and coro.route_info.promise.promise_id in self._tasks_to_complete
+        ):
+            self._complete_task_monitoring_promise(coro.route_info.promise.promise_id)
 
     def _add_coro_to_runnables(
         self,
@@ -807,8 +954,9 @@ class Scheduler:
             promise.set_result(v)
         else:
             promise.set_result(value)
-        assert (
-            promise.promise_id in self._emphemeral_promise_memo
+
+        assert self._emphemeral_promise_memo.has(
+            promise.promise_id
         ), "Ephemeral process must have been registered in the memo."
 
         self._tracing_adapter.process_event(
@@ -819,6 +967,11 @@ class Scheduler:
                 parent_promise_id=promise.parent_promise_id(),
             )
         )
+        if (
+            isinstance(self._durable_promise_storage, ITaskStore)
+            and promise.promise_id in self._tasks_to_complete
+        ):
+            self._complete_task_monitoring_promise(promise.promise_id)
         self._emphemeral_promise_memo.pop(promise.promise_id)
 
     def _send_pending_commands_to_processor(self, cmd_type: type[Command]) -> None:
@@ -977,9 +1130,19 @@ class Scheduler:
     def _process_remote_invocation(
         self, invocation: RFI, runnable: Runnable[Any]
     ) -> Promise[Any]:
+        assert isinstance(
+            self._durable_promise_storage, (ITaskStore, ICallbackStore)
+        ), "Used storage does not support rfi."
+        promise_id: str | None
+        if not isinstance(invocation.exec_unit, Command):
+            promise_id = invocation.opts.promise_id
+        else:
+            assert isinstance(invocation.exec_unit, CreateDurablePromiseReq)
+            promise_id = invocation.exec_unit.promise_id
+
         return self._create_promise(
             parent_promise=runnable.coro.route_info.promise,
-            promise_id=invocation.promise_id,
+            promise_id=promise_id,
             action=invocation,
         )
 

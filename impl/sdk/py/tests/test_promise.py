@@ -46,6 +46,7 @@ def test_leaf_promises() -> None:
     leaf_promise2_3_2 = child_promise2_3.child_promise(promise_id=None, action=action)
     leaf_promise2_3_3 = child_promise2_3.child_promise(promise_id=None, action=action)
 
+    assert root_promise.leaf_promises is not None
     difference = root_promise.leaf_promises.symmetric_difference(
         {
             leaf_promise1_1,

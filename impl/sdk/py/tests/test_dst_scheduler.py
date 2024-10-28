@@ -23,11 +23,10 @@ from resonate.events import (
     PromiseCompleted,
     PromiseCreated,
 )
-from resonate.options import Options
+from resonate.options import LOptions
 from resonate.result import Ok
 from resonate.retry_policy import never
 from resonate.storage import (
-    IPromiseStore,
     LocalStore,
     MemoryStorage,
     RemoteServer,
@@ -42,6 +41,7 @@ if TYPE_CHECKING:
     from resonate.dependency_injection import Dependencies
     from resonate.dst.scheduler import DSTScheduler
     from resonate.promise import Promise
+    from resonate.storage.traits import IPromiseStore
     from resonate.typing import Yieldable
 
 T = TypeVar("T")
@@ -129,7 +129,7 @@ def test_raise_inmediately(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
     s.add(
         "raise-inmediately-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         raise_inmediately,
     )
     p = s.run()[0]
@@ -143,7 +143,7 @@ def test_failing_call(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
     s.add(
         "failing-call-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         coro_that_fails_call,
     )
     promises = s.run()
@@ -153,7 +153,7 @@ def test_failing_call(store: IPromiseStore) -> None:
     s = dst(seeds=[1])[0]
     s.add(
         "failing-invoke-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         coro_that_fails_invoke,
     )
     promises = s.run()
@@ -169,31 +169,31 @@ def test_batching_using_call(store: IPromiseStore) -> None:
 
     s.add(
         "batching-using-call-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Ging",
     )
     s.add(
         "batching-using-call-2",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Razor",
     )
     s.add(
         "batching-using-call-3",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching_but_with_call,
         name="Eta",
     )
     s.add(
         "batching-using-call-4",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Elena",
     )
     s.add(
         "batching-using-call-5",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Dwun",
     )
@@ -216,31 +216,31 @@ def test_batching(store: IPromiseStore) -> None:
     s.register_command(cmd=GreetCommand, handler=batch_greeting, max_batch=2)
     s.add(
         "batching-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Ging",
     )
     s.add(
         "batching-2",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Razor",
     )
     s.add(
         "batching-3",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Eta",
     )
     s.add(
         "batching-4",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Elena",
     )
     s.add(
         "batching-5",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         greet_with_batching,
         name="Dwun",
     )
@@ -271,8 +271,8 @@ def test_pin_seed(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_mock_function(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("mock-1", Options(durable=True, retry_policy=never()), only_call, n=3)
-    s.add("mock-2", Options(durable=True, retry_policy=never()), only_invocation, n=3)
+    s.add("mock-1", LOptions(durable=True, retry_policy=never()), only_call, n=3)
+    s.add("mock-2", LOptions(durable=True, retry_policy=never()), only_invocation, n=3)
     promises = s.run()
     assert all(p.result() == 3 for p in promises)  # noqa: PLR2004
     s = dst(seeds=[1], mocks={number: mocked_number})[0]
@@ -288,19 +288,19 @@ def test_dst_scheduler(store: IPromiseStore) -> None:
         s = dst(seeds=[seed], durable_promise_storage=store)[0]
 
         s.add(
-            "only-call-1", Options(durable=True, retry_policy=never()), only_call, n=1
+            "only-call-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
         )
         s.add(
-            "only-call-2", Options(durable=True, retry_policy=never()), only_call, n=2
+            "only-call-2", LOptions(durable=True, retry_policy=never()), only_call, n=2
         )
         s.add(
-            "only-call-3", Options(durable=True, retry_policy=never()), only_call, n=3
+            "only-call-3", LOptions(durable=True, retry_policy=never()), only_call, n=3
         )
         s.add(
-            "only-call-4", Options(durable=True, retry_policy=never()), only_call, n=4
+            "only-call-4", LOptions(durable=True, retry_policy=never()), only_call, n=4
         )
         s.add(
-            "only-call-5", Options(durable=True, retry_policy=never()), only_call, n=5
+            "only-call-5", LOptions(durable=True, retry_policy=never()), only_call, n=5
         )
 
         promises = s.run()
@@ -321,31 +321,31 @@ def test_dst_determinitic(store: IPromiseStore) -> None:
     s = dst(seeds=[seed], durable_promise_storage=store)[0]
     s.add(
         "dst-deterministic-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=1,
     )
     s.add(
         "dst-deterministic-2",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=2,
     )
     s.add(
         "dst-deterministic-3",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=3,
     )
     s.add(
         "dst-deterministic-4",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=4,
     )
     s.add(
         "dst-deterministic-5",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=5,
     )
@@ -356,31 +356,31 @@ def test_dst_determinitic(store: IPromiseStore) -> None:
     same_seed_s = dst(seeds=[seed])[0]
     same_seed_s.add(
         "dst-deterministic-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=1,
     )
     same_seed_s.add(
         "dst-deterministic-2",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=2,
     )
     same_seed_s.add(
         "dst-deterministic-3",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=3,
     )
     same_seed_s.add(
         "dst-deterministic-4",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=4,
     )
     same_seed_s.add(
         "dst-deterministic-5",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=5,
     )
@@ -391,31 +391,31 @@ def test_dst_determinitic(store: IPromiseStore) -> None:
     different_seed_s = dst(seeds=[seed + 10])[0]
     different_seed_s.add(
         "dst-deterministic-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=1,
     )
     different_seed_s.add(
         "dst-deterministic-2",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=2,
     )
     different_seed_s.add(
         "dst-deterministic-3",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=3,
     )
     different_seed_s.add(
         "dst-deterministic-4",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=4,
     )
     different_seed_s.add(
         "dst-deterministic-5",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=5,
     )
@@ -430,7 +430,7 @@ def test_failing_asserting(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
     s.add(
         "failing-asserting-1",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         failing_asserting,
     )
     p = s.run()
@@ -442,19 +442,19 @@ def test_failing_asserting(store: IPromiseStore) -> None:
 @pytest.mark.parametrize("scheduler", resonate.testing.dst([range(10)]))
 def test_dst_framework(scheduler: DSTScheduler) -> None:
     scheduler.add(
-        "dst-framework-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        "dst-framework-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
     )
     scheduler.add(
-        "dst-framework-2", Options(durable=True, retry_policy=never()), only_call, n=2
+        "dst-framework-2", LOptions(durable=True, retry_policy=never()), only_call, n=2
     )
     scheduler.add(
-        "dst-framework-3", Options(durable=True, retry_policy=never()), only_call, n=3
+        "dst-framework-3", LOptions(durable=True, retry_policy=never()), only_call, n=3
     )
     scheduler.add(
-        "dst-framework-4", Options(durable=True, retry_policy=never()), only_call, n=4
+        "dst-framework-4", LOptions(durable=True, retry_policy=never()), only_call, n=4
     )
     scheduler.add(
-        "dst-framework-5", Options(durable=True, retry_policy=never()), only_call, n=5
+        "dst-framework-5", LOptions(durable=True, retry_policy=never()), only_call, n=5
     )
     promises = scheduler.run()
     assert sum(p.result() for p in promises) == 15  # noqa: PLR2004
@@ -470,7 +470,7 @@ def test_failure(store: IPromiseStore) -> None:
         durable_promise_storage=store,
     )[0]
     scheduler.add(
-        "failure-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        "failure-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
     )
     p = scheduler.run()
     assert p[0].done()
@@ -480,7 +480,7 @@ def test_failure(store: IPromiseStore) -> None:
 
     scheduler = dst(seeds=[1], max_failures=2, failure_chance=0)[0]
     scheduler.add(
-        "failure-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        "failure-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
     )
     p = scheduler.run()
     assert p[0].done()
@@ -495,7 +495,7 @@ def test_sequential_retry(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]
     seq_scheduler.add(
         "execution-seq-with-retry",
-        Options(durable=True, retry_policy=never()),
+        LOptions(durable=True, retry_policy=never()),
         only_call,
         n=1,
     )
@@ -580,38 +580,38 @@ def test_sequential_retry(store: IPromiseStore) -> None:
 def test_sequential(store: IPromiseStore) -> None:
     seq_scheduler = dst(seeds=[1], mode="sequential", durable_promise_storage=store)[0]
     seq_scheduler.add(
-        "execution-seq-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        "execution-seq-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
     )
     seq_scheduler.add(
-        "execution-seq-2", Options(durable=True, retry_policy=never()), only_call, n=2
+        "execution-seq-2", LOptions(durable=True, retry_policy=never()), only_call, n=2
     )
     seq_scheduler.add(
-        "execution-seq-3", Options(durable=True, retry_policy=never()), only_call, n=3
+        "execution-seq-3", LOptions(durable=True, retry_policy=never()), only_call, n=3
     )
     seq_scheduler.add(
-        "execution-seq-4", Options(durable=True, retry_policy=never()), only_call, n=4
+        "execution-seq-4", LOptions(durable=True, retry_policy=never()), only_call, n=4
     )
     seq_scheduler.add(
-        "execution-seq-5", Options(durable=True, retry_policy=never()), only_call, n=5
+        "execution-seq-5", LOptions(durable=True, retry_policy=never()), only_call, n=5
     )
     promises = seq_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
 
     con_scheduler = dst(seeds=[1], max_failures=2, durable_promise_storage=store)[0]
     con_scheduler.add(
-        "execution-con-1", Options(durable=True, retry_policy=never()), only_call, n=1
+        "execution-con-1", LOptions(durable=True, retry_policy=never()), only_call, n=1
     )
     con_scheduler.add(
-        "execution-con-2", Options(durable=True, retry_policy=never()), only_call, n=2
+        "execution-con-2", LOptions(durable=True, retry_policy=never()), only_call, n=2
     )
     con_scheduler.add(
-        "execution-con-3", Options(durable=True, retry_policy=never()), only_call, n=3
+        "execution-con-3", LOptions(durable=True, retry_policy=never()), only_call, n=3
     )
     con_scheduler.add(
-        "execution-con-4", Options(durable=True, retry_policy=never()), only_call, n=4
+        "execution-con-4", LOptions(durable=True, retry_policy=never()), only_call, n=4
     )
     con_scheduler.add(
-        "execution-con-5", Options(durable=True, retry_policy=never()), only_call, n=5
+        "execution-con-5", LOptions(durable=True, retry_policy=never()), only_call, n=5
     )
     promises = con_scheduler.run()
     assert [p.result() for p in promises] == [1, 2, 3, 4, 5]
@@ -628,19 +628,34 @@ def test_dump_events(store: IPromiseStore) -> None:
         formatted_file_path = Path(log_file_path.as_posix() % (s.seed))
         assert not formatted_file_path.exists()
         s.add(
-            "dump-events-1", Options(durable=True, retry_policy=never()), only_call, n=1
+            "dump-events-1",
+            LOptions(durable=True, retry_policy=never()),
+            only_call,
+            n=1,
         )
         s.add(
-            "dump-events-2", Options(durable=True, retry_policy=never()), only_call, n=2
+            "dump-events-2",
+            LOptions(durable=True, retry_policy=never()),
+            only_call,
+            n=2,
         )
         s.add(
-            "dump-events-3", Options(durable=True, retry_policy=never()), only_call, n=3
+            "dump-events-3",
+            LOptions(durable=True, retry_policy=never()),
+            only_call,
+            n=3,
         )
         s.add(
-            "dump-events-4", Options(durable=True, retry_policy=never()), only_call, n=4
+            "dump-events-4",
+            LOptions(durable=True, retry_policy=never()),
+            only_call,
+            n=4,
         )
         s.add(
-            "dump-events-5", Options(durable=True, retry_policy=never()), only_call, n=5
+            "dump-events-5",
+            LOptions(durable=True, retry_policy=never()),
+            only_call,
+            n=5,
         )
         s.run()
 
@@ -657,11 +672,11 @@ def _probe_function(deps: Dependencies, tick: int) -> int:  # noqa: ARG001
 @pytest.mark.parametrize("store", _promise_storages())
 def test_probe(store: IPromiseStore) -> None:
     s = dst(seeds=[1], probe=_probe_function, durable_promise_storage=store)[0]
-    s.add("probe-1", Options(durable=True, retry_policy=never()), only_call, n=1)
-    s.add("probe-2", Options(durable=True, retry_policy=never()), only_call, n=2)
-    s.add("probe-3", Options(durable=True, retry_policy=never()), only_call, n=3)
-    s.add("probe-4", Options(durable=True, retry_policy=never()), only_call, n=4)
-    s.add("probe-5", Options(durable=True, retry_policy=never()), only_call, n=5)
+    s.add("probe-1", LOptions(durable=True, retry_policy=never()), only_call, n=1)
+    s.add("probe-2", LOptions(durable=True, retry_policy=never()), only_call, n=2)
+    s.add("probe-3", LOptions(durable=True, retry_policy=never()), only_call, n=3)
+    s.add("probe-4", LOptions(durable=True, retry_policy=never()), only_call, n=4)
+    s.add("probe-5", LOptions(durable=True, retry_policy=never()), only_call, n=5)
     s.run()
     assert len(s.probe_results) > 0
     assert s.probe_results[-1] <= now()
@@ -689,7 +704,7 @@ def foo(ctx: Context) -> Generator[Yieldable, Any, list[str]]:
 @pytest.mark.parametrize("store", _promise_storages())
 def test_events_logic(store: IPromiseStore) -> None:
     s = dst(seeds=[1], durable_promise_storage=store)[0]
-    s.add("foo-events-1", Options(durable=True, retry_policy=never()), foo)
+    s.add("foo-events-1", LOptions(durable=True, retry_policy=never()), foo)
     s.run()
     assert s.get_events() == [
         PromiseCreated(promise_id="foo-events-1", parent_promise_id=None, tick=0),

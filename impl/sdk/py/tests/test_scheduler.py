@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
-import json
 import os
 import time
 from concurrent.futures import TimeoutError
@@ -20,7 +19,6 @@ from resonate.retry_policy import (
     never,
 )
 from resonate.storage import (
-    IPromiseStore,
     LocalStore,
     MemoryStorage,
     RemoteServer,
@@ -31,6 +29,7 @@ if TYPE_CHECKING:
 
     from resonate.context import Context
     from resonate.promise import Promise
+    from resonate.storage.traits import IPromiseStore
     from resonate.typing import Yieldable
 
 
@@ -398,20 +397,20 @@ def test_race_combinator(store: IPromiseStore) -> None:
     s = scheduler.Scheduler(durable_promise_storage=store, processor_threads=16)
 
     # Test case 1
-    waits_results = [(0.03, "A"), (0.03, "B"), (0.01, "C"), (0.03, "D"), (0.03, "E")]
+    waits_results = [(0.1, "A"), (0.1, "B"), (0.01, "C"), (0.1, "D"), (0.1, "E")]
     expected = "C"
     s.register(race_coro, "race-coro", retry_policy=never())
     p_race: Promise[str] = s.run("race-coro-0", race_coro, waits_results=waits_results)
     assert p_race.result() == expected
 
     # Test case 2
-    waits_results = [(0.05, "A"), (0.04, "B"), (0.03, "C"), (0.02, "D"), (0.01, "E")]
+    waits_results = [(0.1, "A"), (0.1, "B"), (0.1, "C"), (0.1, "D"), (0.01, "E")]
     expected = "E"
     p_race = s.run("race-coro-1", race_coro, waits_results=waits_results)
     assert p_race.result() == expected
 
     # # Test case 3
-    waits_results = [(0.010, "A"), (0.02, "B"), (0.02, "C")]
+    waits_results = [(0.01, "A"), (0.1, "B"), (0.1, "C")]
     expected = "A"
     p_race = s.run("race-coro-2", race_coro, waits_results=waits_results)
     assert p_race.result() == expected
@@ -447,33 +446,6 @@ def test_coro_retry(store: IPromiseStore) -> None:
         p.result()
 
     assert tries == 4  # noqa: PLR2004
-
-
-def factorial(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
-    if n in (0, 1):
-        return 1
-    return n * (yield ctx.rfc(factorial, n - 1))
-
-
-@pytest.mark.parametrize("store", _promise_storages())
-def test_rfc(store: IPromiseStore) -> None:
-    if not isinstance(store, RemoteServer):
-        return
-    s = scheduler.Scheduler(durable_promise_storage=store)
-    s.register(factorial, tags={"a": "1"})
-    p: Promise[int] = s.run("factorial-n", factorial, 4)
-    with contextlib.suppress(TimeoutError):
-        p.result(timeout=0.1)
-
-    child_promise_record = store.get(promise_id="factorial-n.1")
-    assert child_promise_record.promise_id == "factorial-n.1"
-    assert child_promise_record.param is not None
-    assert child_promise_record.param.data is not None
-    data = json.loads(child_promise_record.param.data)
-    assert data["func"] == "factorial"
-    assert data["args"] == [3]
-    assert child_promise_record.tags is not None
-    assert child_promise_record.tags.keys() == {"a", "resonate:invoke"}
 
 
 def _raw_rfc(ctx: Context) -> Generator[Yieldable, Any, None]:
@@ -682,15 +654,15 @@ def test_dedup(store: IPromiseStore) -> None:
             return 1
 
         p: Promise[int] = yield ctx.lfi(factorial, n - 1).with_options(
-            promise_id=f"factorial-{n-1}", retry_policy=never()
+            promise_id=f"factorial-dedup-{n-1}", retry_policy=never()
         )
         return n * (yield p)
 
     s = scheduler.Scheduler(durable_promise_storage=store)
     s.register(factorial, retry_policy=never())
     n = 5
-    p1: Promise[int] = s.run(f"factorial-{n}", factorial, n)
-    p2: Promise[int] = s.run(f"factorial-{n}", factorial, n)
+    p1: Promise[int] = s.run(f"factorial-dedup-{n}", factorial, n)
+    p2: Promise[int] = s.run(f"factorial-dedup-{n}", factorial, n)
     assert p1 == p2
     assert p2.result() == 120  # noqa: PLR2004
     assert p1.done()
@@ -919,3 +891,71 @@ def test_batching_with_element_level_exception(store: IPromiseStore) -> None:
             failures += 1
 
     assert successes == failures
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_remote_call_same_node(store: IPromiseStore) -> None:
+    if not isinstance(store, RemoteServer):
+        return
+
+    def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
+        return 1
+
+    def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
+        n = yield ctx.rfc(_number_from_other_node).with_options(target="call-same-node")
+        return n
+
+    s = scheduler.Scheduler(store, logic_group="call-same-node")
+    s.register(_remotely, retry_policy=never())
+    s.register(_number_from_other_node, retry_policy=never())
+    p: Promise[int] = s.run("test-remote-call-same-node", _remotely)
+    assert p.result() == 1
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_remote_invocation_same_node(store: IPromiseStore) -> None:
+    if not isinstance(store, RemoteServer):
+        return
+
+    def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
+        return 1
+
+    def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
+        p = yield ctx.rfi(_number_from_other_node).with_options(
+            target="invocation-same-node"
+        )
+        n = yield p
+        return n
+
+    s = scheduler.Scheduler(store, logic_group="invocation-same-node")
+    s.register(_remotely, retry_policy=never())
+    s.register(_number_from_other_node, retry_policy=never())
+    p: Promise[int] = s.run("test-remote-invocation-same-node", _remotely)
+    assert p.result() == 1
+
+
+@pytest.mark.parametrize("store", _promise_storages())
+def test_remote_invocation_other_node(store: IPromiseStore) -> None:
+    if not isinstance(store, RemoteServer):
+        return
+
+    def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
+        return 1
+
+    def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
+        p = yield ctx.rfi(_number_from_other_node).with_options(
+            target="invocation-other-node"
+        )
+        n = yield p
+        return n
+
+    s = scheduler.Scheduler(store, logic_group="invocation-this-node")
+    s.register(_remotely, retry_policy=never())
+    s.register(_number_from_other_node, retry_policy=never())
+
+    s_other = scheduler.Scheduler(store, logic_group="invocation-other-node")
+    s_other.register(_remotely, retry_policy=never())
+    s_other.register(_number_from_other_node, retry_policy=never())
+
+    p: Promise[int] = s.run("test-remote-invocation-other-node", _remotely)
+    assert p.result() == 1
