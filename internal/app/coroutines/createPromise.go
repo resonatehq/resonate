@@ -148,7 +148,7 @@ func createPromiseAndTaskOrCallback(
 				Recv:      cmd.Recv,
 				Mesg:      cmd.Mesg,
 				Timeout:   cmd.Timeout,
-				Counter:   0,
+				Counter:   1,
 				Attempt:   0,
 				Ttl:       cmd.Ttl,
 				ExpiresAt: cmd.ExpiresAt,
