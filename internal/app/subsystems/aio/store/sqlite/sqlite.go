@@ -46,12 +46,13 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
 
 	CREATE TABLE IF NOT EXISTS callbacks (
-		id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		promise_id TEXT,
-		recv       BLOB,
-		mesg       BLOB,
-		timeout    INTEGER,
-		created_on INTEGER
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		promise_id      TEXT,
+		root_promise_id TEXT,
+		recv            BLOB,
+		mesg            BLOB,
+		timeout         INTEGER,
+		created_on      INTEGER
 	);
 
 	CREATE TABLE IF NOT EXISTS schedules (
@@ -87,18 +88,19 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id           INTEGER PRIMARY KEY AUTOINCREMENT,
-		process_id   TEXT,
-		state        INTEGER DEFAULT 1,
-		recv         BLOB,
-		mesg         BLOB,
-		timeout      INTEGER,
-		counter      INTEGER DEFAULT 1,
-		attempt      INTEGER DEFAULT 0,
-		ttl          INTEGER DEFAULT 0,
-		expires_at   INTEGER DEFAULT 0,
-		created_on   INTEGER,
-		completed_on INTEGER
+		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		process_id      TEXT,
+		state           INTEGER DEFAULT 1,
+		root_promise_id TEXT,
+		recv            BLOB,
+		mesg            BLOB,
+		timeout         INTEGER,
+		counter         INTEGER DEFAULT 1,
+		attempt         INTEGER DEFAULT 0,
+		ttl             INTEGER DEFAULT 0,
+		expires_at      INTEGER DEFAULT 0,
+		created_on      INTEGER,
+		completed_on    INTEGER
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
@@ -160,9 +162,9 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, recv, mesg, timeout, created_on)
+		(promise_id, root_promise_id, recv, mesg, timeout, created_on)
 	SELECT
-		?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?
 	WHERE EXISTS
 		(SELECT 1 FROM promises WHERE id = ? AND state = 1)`
 
@@ -258,7 +260,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
+		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -266,7 +268,7 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
+		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -278,15 +280,15 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, ttl, expires_at, created_on)
+		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?)`
+		(?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, created_on)
+		(recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, ?
+		recv, mesg, timeout, root_promise_id, ?
 	FROM
 		callbacks
 	WHERE
@@ -973,7 +975,7 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn, cmd.PromiseId)
+	res, err := stmt.Exec(cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
 		return nil, err
 	}
@@ -1386,6 +1388,7 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
+		&record.RootPromiseId,
 		&record.Recv,
 		&record.Mesg,
 		&record.Timeout,
@@ -1440,6 +1443,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
+			&record.RootPromiseId,
 			&record.Recv,
 			&record.Mesg,
 			&record.Timeout,
@@ -1477,7 +1481,7 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 	if err != nil {
 		return nil, err
 	}

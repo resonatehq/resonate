@@ -1,6 +1,7 @@
 package test
 
 import (
+	"runtime/debug"
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -35,6 +36,7 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 
 		results, err := store.Execute([]*t_aio.Transaction{{Commands: c.commands}})
 		if err != nil {
+			t.Log(string(debug.Stack()))
 			t.Fatal(err)
 		}
 
@@ -2792,22 +2794,24 @@ var TestCases = []*testCase{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
 						{
-							Id:        "1",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("foo"),
-							Mesg:      []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
-							Timeout:   1,
-							CreatedOn: util.ToPointer[int64](1),
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
+							Timeout:       1,
+							CreatedOn:     util.ToPointer[int64](1),
 						},
 						{
-							Id:        "2",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("bar"),
-							Mesg:      []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
-							Timeout:   2,
-							CreatedOn: util.ToPointer[int64](2),
+							Id:            "2",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "bar",
+							Recv:          []byte("bar"),
+							Mesg:          []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
+							Timeout:       2,
+							CreatedOn:     util.ToPointer[int64](2),
 						},
 					},
 				},
@@ -2903,28 +2907,31 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*task.TaskRecord{
 						{
-							Id:        "1",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("foo"),
-							Mesg:      []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:        "2",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("bar"),
-							Mesg:      []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "2",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "bar",
+							Recv:          []byte("bar"),
+							Mesg:          []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:        "3",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("baz"),
-							Mesg:      []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "3",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "baz",
+							Recv:          []byte("baz"),
+							Mesg:          []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 					},
 				},
@@ -3094,17 +3101,18 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:          "1",
-							ProcessId:   util.ToPointer("pid"),
-							State:       task.Completed,
-							Recv:        []byte("foo"),
-							Mesg:        []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
-							Counter:     6,
-							Attempt:     5,
-							Ttl:         5,
-							ExpiresAt:   5,
-							CreatedOn:   util.ToPointer[int64](0),
-							CompletedOn: util.ToPointer[int64](5),
+							Id:            "1",
+							ProcessId:     util.ToPointer("pid"),
+							State:         task.Completed,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							Counter:       6,
+							Attempt:       5,
+							Ttl:           5,
+							ExpiresAt:     5,
+							CreatedOn:     util.ToPointer[int64](0),
+							CompletedOn:   util.ToPointer[int64](5),
 						},
 					},
 				},
