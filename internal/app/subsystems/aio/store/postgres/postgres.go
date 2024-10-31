@@ -47,12 +47,13 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
 
 	CREATE TABLE IF NOT EXISTS callbacks (
-		id         SERIAL PRIMARY KEY,
-		promise_id TEXT,
-		recv       BYTEA,
-		mesg       BYTEA,
-		timeout    INTEGER,
-		created_on BIGINT
+		id              SERIAL PRIMARY KEY,
+		promise_id      TEXT,
+		root_promise_id TEXT,
+		recv            BYTEA,
+		mesg            BYTEA,
+		timeout         INTEGER,
+		created_on      BIGINT
 	);
 
 	CREATE TABLE IF NOT EXISTS schedules (
@@ -90,18 +91,19 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id           SERIAL PRIMARY KEY,
-		process_id   TEXT,
-		state        INTEGER DEFAULT 1,
-		recv         BYTEA,
-		mesg         BYTEA,
-		timeout      BIGINT,
-		counter      INTEGER DEFAULT 1,
-		attempt      INTEGER DEFAULT 0,
-		ttl          INTEGER DEFAULT 0,
-		expires_at   BIGINT DEFAULT 0,
-		created_on   BIGINT,
-		completed_on BIGINT
+		id              SERIAL PRIMARY KEY,
+		process_id      TEXT,
+		state           INTEGER DEFAULT 1,
+		root_promise_id TEXT,
+		recv            BYTEA,
+		mesg            BYTEA,
+		timeout         BIGINT,
+		counter         INTEGER DEFAULT 1,
+		attempt         INTEGER DEFAULT 0,
+		ttl             INTEGER DEFAULT 0,
+		expires_at      BIGINT DEFAULT 0,
+		created_on      BIGINT,
+		completed_on    BIGINT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
@@ -270,7 +272,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
+		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -278,7 +280,7 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
+		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -290,16 +292,17 @@ const (
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, ttl, expires_at, created_on)
+		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8)
+		($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	RETURNING id`
 
+	// TODO: get the root promise Id from the callback some how
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, created_on)
+		(recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, $1
+		recv, mesg, timeout, root_promise_id, $1
 	FROM
 		callbacks
 	WHERE
@@ -1000,7 +1003,7 @@ func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallba
 
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
+	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
@@ -1445,6 +1448,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
+			&record.RootPromiseId,
 			&record.Recv,
 			&record.Mesg,
 			&record.Timeout,
@@ -1484,7 +1488,7 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
