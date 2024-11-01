@@ -280,15 +280,31 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
-	FROM
-		tasks
+		id,
+		process_id,
+		state,
+		root_promise_id,
+		recv,
+		mesg,
+		timeout,
+		counter,
+		attempt,
+		ttl,
+		expires_at,
+		created_on,
+		completed_on
+	FROM tasks t1
 	WHERE
 		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
-	ORDER BY
-		id
-	LIMIT
-		$3`
+	AND NOT EXISTS (
+		SELECT 1
+		FROM tasks t2
+		WHERE t2.root_promise_id = t1.root_promise_id
+		AND t2.state in (2, 4) -- 2 -> Enequeue, 4 -> Claimed
+	)
+	GROUP BY id
+	ORDER BY id
+	LIMIT $3`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
