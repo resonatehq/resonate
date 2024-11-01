@@ -20,7 +20,7 @@ from resonate.actions import (
     Race,
 )
 from resonate.batching import CmdBuffer
-from resonate.collections import EphemeralMemo
+from resonate.collections import Awaiting, EphemeralMemo
 from resonate.commands import Command
 from resonate.contants import CWD
 from resonate.context import (
@@ -59,14 +59,14 @@ if TYPE_CHECKING:
     from resonate.record import DurablePromiseRecord
     from resonate.storage.traits import IPromiseStore
     from resonate.typing import (
-        Awaitables,
+        AwaitingFor,
         CommandHandlerQueues,
         CommandHandlers,
         DurableCoro,
         DurableFn,
         MockFn,
         PromiseActions,
-        RunnableCoroutines,
+        Runnables,
     )
 
 
@@ -115,8 +115,8 @@ class DSTScheduler:
         durable_promise_storage: IPromiseStore,
     ) -> None:
         self._stg_queue: list[tuple[LFI, str]] = []
-        self._runnable_coros: RunnableCoroutines = deque()
-        self._awatiables: Awaitables = {}
+        self._runnable_coros: Runnables = deque()
+        self._awaiting = Awaiting()
         self._runnable_functions: RunnableFunctions = deque()
 
         self.random = random
@@ -190,19 +190,19 @@ class DSTScheduler:
                 if results is None:
                     for p in promises:
                         self._resolve_promise(p, Ok(None))
-                        self._unblock_coros_waiting_on_promise(p)
+                        self._unblock_coros_waiting_on_promise(p, "local")
                 else:
                     assert (
                         len(results) == n_cmds
                     ), "Numbers of commands and number of results must be the same"
                     for i in range(n_cmds):
                         self._resolve_promise(promises[i], Ok(results[i]))
-                        self._unblock_coros_waiting_on_promise(promises[i])
+                        self._unblock_coros_waiting_on_promise(promises[i], "local")
 
             except Exception as e:  # noqa: BLE001
                 for p in promises:
                     self._resolve_promise(p, Err(e))
-                    self._unblock_coros_waiting_on_promise(p)
+                    self._unblock_coros_waiting_on_promise(p, "local")
         cmd_buffer.clear()
 
     def get_events(self) -> list[SchedulerEvents]:
@@ -306,12 +306,11 @@ class DSTScheduler:
     def _create_promise(
         self,
         parent_promise: Promise[Any] | None,
-        promise_id: str | None,
+        promise_id: str,
         action: PromiseActions,
     ) -> Promise[Any]:
         if parent_promise is not None:
             p = parent_promise.child_promise(promise_id=promise_id, action=action)
-            as_root = False
         else:
             assert (
                 promise_id is not None
@@ -319,9 +318,8 @@ class DSTScheduler:
             p = Promise[Any](
                 promise_id=promise_id, action=action, parent_promise=parent_promise
             )
-            as_root = True
 
-        self._emphemeral_promise_memo.add(p.promise_id, p, as_root=as_root)
+        self._emphemeral_promise_memo.add(p.promise_id, p)
         if isinstance(action, LFI):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -389,6 +387,11 @@ class DSTScheduler:
         self, top_lvl: LFI, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
+        if promise_id is not None:
+            p = self._emphemeral_promise_memo.get(promise_id)
+            if p is not None:
+                return p
+
         p = self._create_promise(
             parent_promise=None,
             promise_id=promise_id,
@@ -396,7 +399,7 @@ class DSTScheduler:
         )
         assert p.durable, "Top level invocations must be durable"
         if p.done():
-            self._unblock_coros_waiting_on_promise(p)
+            self._unblock_coros_waiting_on_promise(p, "local")
         else:
             self._route_fn_or_coroutine(RouteInfo(self._ctx, p, 0))
         return p
@@ -409,7 +412,7 @@ class DSTScheduler:
     def _reset(self) -> None:
         self._runnable_coros.clear()
         self._runnable_functions.clear()
-        self._awatiables.clear()
+        self._awaiting.clear()
         self._emphemeral_promise_memo.clear()
         self.probe_results.clear()
         for queue in self._handler_queues.values():
@@ -526,7 +529,7 @@ class DSTScheduler:
                 )
 
                 self._resolve_promise(promise, v)
-                self._unblock_coros_waiting_on_promise(promise)
+                self._unblock_coros_waiting_on_promise(promise, "local")
 
             elif next_step == "coroutines":
                 runnable, was_awaited = self._get_random_element(
@@ -576,9 +579,19 @@ class DSTScheduler:
     def _process_local_invocation(
         self, invocation: LFI, runnable: Runnable[Any]
     ) -> Promise[Any]:
+        promise_id = (
+            invocation.opts.promise_id
+            if invocation.opts.promise_id is not None
+            else runnable.coro.route_info.promise.child_name()
+        )
+
+        p = self._emphemeral_promise_memo.get(promise_id)
+        if p is not None:
+            return p
+
         p = self._create_promise(
             parent_promise=runnable.coro.route_info.promise,
-            promise_id=invocation.opts.promise_id,
+            promise_id=promise_id,
             action=invocation,
         )
         if isinstance(invocation.exec_unit, Command):
@@ -587,7 +600,7 @@ class DSTScheduler:
             )
         elif isinstance(invocation.exec_unit, FnOrCoroutine):
             if p.done():
-                self._unblock_coros_waiting_on_promise(p)
+                self._unblock_coros_waiting_on_promise(p, "local")
             else:
                 self._route_fn_or_coroutine(
                     RouteInfo(
@@ -600,11 +613,13 @@ class DSTScheduler:
             assert_never(invocation.exec_unit)
         return p
 
-    def _add_coro_to_awaitables(self, p: Promise[Any], coro: ResonateCoro[Any]) -> None:
+    def _add_coro_to_awaitables(
+        self, p: Promise[Any], coro: ResonateCoro[Any], awaiting_for: AwaitingFor
+    ) -> None:
         assert (
             not p.done()
         ), "If the promise is resolved already it makes no sense to block coroutine"
-        self._awatiables.setdefault(p, []).append(coro)
+        self._awaiting.append(p, coro, awaiting_for)
         self._events.append(
             ExecutionAwaited(
                 promise_id=coro.route_info.promise.promise_id,
@@ -638,13 +653,15 @@ class DSTScheduler:
             self._resolve_promise(
                 runnable.coro.route_info.promise, yieldable_or_final_value.v
             )
-            self._unblock_coros_waiting_on_promise(p=runnable.coro.route_info.promise)
+            self._unblock_coros_waiting_on_promise(
+                runnable.coro.route_info.promise, "local"
+            )
         elif isinstance(yieldable_or_final_value, LFC):
             p = self._process_local_invocation(
                 yieldable_or_final_value.to_invocation(), runnable
             )
-            assert (
-                p not in self._awatiables
+            assert not self._awaiting.waiting_for(
+                p
             ), "Since it's a call it should be a promise without dependants"
             if p.done():
                 self._add_coro_to_runnables(
@@ -653,7 +670,7 @@ class DSTScheduler:
                     was_awaited=False,
                 )
             else:
-                self._add_coro_to_awaitables(p, runnable.coro)
+                self._add_coro_to_awaitables(p, runnable.coro, "local")
 
         elif isinstance(yieldable_or_final_value, LFI):
             p = self._process_local_invocation(
@@ -662,13 +679,20 @@ class DSTScheduler:
             self._add_coro_to_runnables(runnable.coro, Ok(p), was_awaited=False)
         elif isinstance(yieldable_or_final_value, Promise):
             p = yieldable_or_final_value
+            awaiting_for: AwaitingFor = (
+                "remote" if isinstance(p.action, RFI) else "local"
+            )
+            assert awaiting_for == "local"
+
             if p.done():
-                self._unblock_coros_waiting_on_promise(p)
+                self._unblock_coros_waiting_on_promise(p, awaiting_for)
                 self._add_coro_to_runnables(
-                    runnable.coro, p.safe_result(), was_awaited=False
+                    runnable.coro,
+                    p.safe_result(),
+                    was_awaited=False,
                 )
             else:
-                self._add_coro_to_awaitables(p, runnable.coro)
+                self._add_coro_to_awaitables(p, runnable.coro, awaiting_for)
 
         elif isinstance(
             yieldable_or_final_value,
@@ -679,12 +703,18 @@ class DSTScheduler:
         else:
             assert_never(yieldable_or_final_value)
 
-    def _unblock_coros_waiting_on_promise(self, p: Promise[Any]) -> None:
+    def _unblock_coros_waiting_on_promise(
+        self, p: Promise[Any], awaiting_for: AwaitingFor
+    ) -> None:
         assert p.done(), "Promise must be done to unblock waiting coroutines"
-        if self._awatiables.get(p) is None:
+        if self._awaiting.get(p, awaiting_for) is None:
             return
-        for coro in self._awatiables.pop(p):
-            self._add_coro_to_runnables(coro, p.safe_result(), was_awaited=True)
+        for coro in self._awaiting.pop(p, awaiting_for):
+            self._add_coro_to_runnables(
+                coro,
+                p.safe_result(),
+                was_awaited=True,
+            )
 
     def _next_step(self) -> Step:
         next_step: Step

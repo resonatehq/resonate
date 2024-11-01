@@ -8,7 +8,8 @@ from typing_extensions import ParamSpec, TypeVar, assert_never
 from resonate.result import Err, Ok, Result
 
 if TYPE_CHECKING:
-    from resonate.typing import Runnable, Yieldable
+    from resonate.dataclasses import Runnable
+    from resonate.typing import Yieldable
 
 T = TypeVar("T")
 P = ParamSpec("P")

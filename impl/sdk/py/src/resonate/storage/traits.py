@@ -7,15 +7,18 @@ if TYPE_CHECKING:
     from resonate.record import (
         CallbackRecord,
         DurablePromiseRecord,
+        Invoke,
+        Resume,
+        TaskRecord,
     )
-    from resonate.typing import Data, Headers, IdempotencyKey, PollMessage, State, Tags
+    from resonate.typing import Data, Headers, IdempotencyKey, State, Tags
 
 
 class ITaskStore(ABC):
     @abstractmethod
     def claim_task(
         self, *, task_id: str, counter: int, pid: str, ttl: int
-    ) -> PollMessage: ...
+    ) -> Invoke | Resume: ...
 
     @abstractmethod
     def complete_task(self, *, task_id: str, counter: int) -> None: ...
@@ -23,8 +26,6 @@ class ITaskStore(ABC):
     @abstractmethod
     def heartbeat_tasks(self, *, pid: str) -> int: ...
 
-
-class ICallbackStore(ABC):
     @abstractmethod
     def create_callback(
         self,
@@ -34,6 +35,22 @@ class ICallbackStore(ABC):
         timeout: int,
         recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, CallbackRecord | None]: ...
+
+    @abstractmethod
+    def create_with_task(  # noqa: PLR0913
+        self,
+        *,
+        promise_id: str,
+        ikey: IdempotencyKey,
+        strict: bool,
+        headers: Headers,
+        data: Data,
+        timeout: int,
+        tags: Tags,
+        pid: str,
+        ttl: int,
+        recv: str | dict[str, Any],
+    ) -> tuple[DurablePromiseRecord, TaskRecord | None]: ...
 
 
 class IPromiseStore(ABC):

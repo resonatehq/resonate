@@ -26,11 +26,11 @@ from resonate.events import (
 from resonate.options import LOptions
 from resonate.result import Ok
 from resonate.retry_policy import never
-from resonate.storage import (
+from resonate.storage.local_store import (
     LocalStore,
     MemoryStorage,
-    RemoteServer,
 )
+from resonate.storage.resonate_server import RemoteServer
 from resonate.testing import dst
 from resonate.time import now
 

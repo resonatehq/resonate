@@ -30,22 +30,12 @@ class Promise(Generic[T]):
     ) -> None:
         self.promise_id = promise_id
         self.f = Future[T]()
-
-        self._num_children = 0
-
+        self._next_child_num = 1
         self.parent_promise = parent_promise
-        self.root_promise: Promise[Any] = (
-            self if self.parent_promise is None else self.parent_promise.root_promise
-        )
-
         self.children_promises: list[Promise[Any]] = []
-
-        # Only used for the root promise.
-        self.leaf_promises: set[Promise[Any]] | None
-        if self.parent_promise is None:
-            self.leaf_promises = set()
-        else:
-            self.leaf_promises = None
+        self.leaf_promises = set[Promise[Any]]()
+        self._is_partition_root = self.parent_promise is None
+        self._marked_as_partition_root = False
 
         self.action = action
         if isinstance(action, (LFI, All, AllSettled, Race)):
@@ -55,18 +45,24 @@ class Promise(Generic[T]):
         else:
             assert_never(action)
 
-    def is_blocked_on_remote(self) -> bool:
-        assert (
-            self.leaf_promises is not None
-        ), "This method is only meant to be called on root promises."
-        blocked_on_remote = False
-        for p in self.leaf_promises:
-            if not p.done() and isinstance(p.action, LFI):
-                return False
-            if not p.done() and isinstance(p.action, RFI):
-                blocked_on_remote = True
+    def is_partition_root(self) -> bool:
+        return self._is_partition_root or self._marked_as_partition_root
 
-        return blocked_on_remote
+    def is_marked_as_partition_root(self) -> bool:
+        return self._marked_as_partition_root
+
+    def unmark_as_partition_root(self) -> None:
+        assert (
+            self._marked_as_partition_root
+        ), "Promise is already marked as partition root"
+        self._marked_as_partition_root = not self._marked_as_partition_root
+
+    def mark_as_partition_root(self) -> None:
+        assert not self._is_partition_root, "Promise is already a partition root"
+        assert (
+            not self._marked_as_partition_root
+        ), "Promise is already marked as partition root"
+        self._marked_as_partition_root = not self._marked_as_partition_root
 
     def result(self, timeout: float | None = None) -> T:
         return self.f.result(timeout=timeout)
@@ -108,31 +104,43 @@ class Promise(Generic[T]):
             self.parent_promise.promise_id if self.parent_promise is not None else None
         )
 
+    def root(self) -> Promise[Any]:
+        maybe_root = self
+        while True:
+            if maybe_root.parent_promise is None:
+                return maybe_root
+            maybe_root = maybe_root.parent_promise
+
+    def partition_root(self) -> Promise[Any]:
+        maybe_root = self
+        while True:
+            if maybe_root.is_partition_root():
+                return maybe_root
+            assert maybe_root.parent_promise is not None
+            maybe_root = maybe_root.parent_promise
+
+    def child_name(self) -> str:
+        return f"{self.promise_id}.{self._next_child_num}"
+
     def child_promise(
         self,
-        promise_id: str | None,
+        promise_id: str,
         action: PromiseActions,
     ) -> Promise[Any]:
-        self._num_children += 1
-        if promise_id is None:
-            promise_id = f"{self.promise_id}.{self._num_children}"
         child = Promise[Any](
             promise_id=promise_id,
             action=action,
             parent_promise=self,
         )
+
         self.children_promises.append(child)
+        self.leaf_promises.add(child)
+        root_promise = self.root()
+        if root_promise is not None:
+            root_promise.leaf_promises.discard(self)
+            root_promise.leaf_promises.add(child)
 
-        if self.parent_promise is None:
-            # The root is creating a child it is a leaf until it creates another promise
-            assert self.leaf_promises is not None
-            self.leaf_promises.add(child)
-        else:
-            # The promise creating a child might no longer be a leaf promise itself
-            assert self.root_promise.leaf_promises is not None
-            self.root_promise.leaf_promises.discard(self)
-            self.root_promise.leaf_promises.add(child)
-
+        self._next_child_num += 1
         return child
 
 
