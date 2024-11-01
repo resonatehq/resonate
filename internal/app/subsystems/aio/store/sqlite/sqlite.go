@@ -290,7 +290,7 @@ const (
 		WHERE t2.root_promise_id = t1.root_promise_id
 		AND t2.state in (2, 4) -- 2 -> Enequeue, 4 -> Claimed
 	)
-	GROUP BY id
+	GROUP BY root_promise_id
 	ORDER BY id
 	LIMIT ?`
 
