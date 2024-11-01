@@ -2939,6 +2939,267 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "ReadTasks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "pbar",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "baz"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "baz"},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "pbar",
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					States: []task.State{task.Init},
+					Limit:  10,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Enqueued,
+					Counter:        2,
+					Attempt:        1,
+					Ttl:            1,
+					ExpiresAt:      1,
+					CompletedOn:    util.ToPointer[int64](1),
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					States: []task.State{task.Init},
+					Limit:  10,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "5",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Enqueued,
+					Counter:        2,
+					Attempt:        1,
+					Ttl:            1,
+					ExpiresAt:      1,
+					CompletedOn:    util.ToPointer[int64](1),
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
+					States: []task.State{task.Init},
+					Limit:  10,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "4",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "5",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "6",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 2,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+						{
+							Id:            "4",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "pbar",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"pbar","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "4",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "pbar",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"pbar","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 0,
+				},
+			},
+		},
+	},
+	{
 		name: "UpdateTask",
 		commands: []*t_aio.Command{
 			{
