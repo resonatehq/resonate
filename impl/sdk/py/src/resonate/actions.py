@@ -63,10 +63,10 @@ class LFC:
 
     def with_options(
         self,
-        *,
-        durable: bool = True,
         promise_id: str | None = None,
         retry_policy: RetryPolicy | None = None,
+        *,
+        durable: bool = True,
     ) -> Self:
         if retry_policy is not None:
             assert not isinstance(
@@ -108,10 +108,10 @@ class LFI:
 
     def with_options(
         self,
-        *,
-        durable: bool = True,
         promise_id: str | None = None,
         retry_policy: RetryPolicy | None = None,
+        *,
+        durable: bool = True,
     ) -> Self:
         if retry_policy is not None:
             assert not isinstance(
