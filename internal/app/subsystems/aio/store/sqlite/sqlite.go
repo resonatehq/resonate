@@ -291,7 +291,7 @@ const (
 		AND t2.state in (2, 4) -- 2 -> Enequeue, 4 -> Claimed
 	)
 	GROUP BY root_promise_id
-	ORDER BY id
+	ORDER BY root_promise_id, id
 	LIMIT ?`
 
 	TASK_INSERT_STATEMENT = `
