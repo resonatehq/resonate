@@ -303,12 +303,16 @@ class DSTScheduler:
             )
         )
 
-    def _create_promise(
+    def _create_promise_or_dedup(
         self,
         parent_promise: Promise[Any] | None,
         promise_id: str,
         action: PromiseActions,
-    ) -> Promise[Any]:
+    ) -> tuple[Promise[Any], bool]:
+        p = self._emphemeral_promise_memo.get(promise_id)
+        if p is not None:
+            return p, True
+
         if parent_promise is not None:
             p = parent_promise.child_promise(promise_id=promise_id, action=action)
         else:
@@ -340,7 +344,7 @@ class DSTScheduler:
                     parent_promise_id=p.parent_promise_id(),
                 )
             )
-            return p
+            return p, False
 
         durable_promise_record = self._create_durable_promise_record(
             promise_id=p.promise_id, data=data
@@ -353,14 +357,14 @@ class DSTScheduler:
             )
         )
         if durable_promise_record.is_pending():
-            return p
+            return p, False
 
         assert (
             durable_promise_record.value.data is not None
         ), "If the promise is not pending, there must be data."
         v = self._get_value_from_durable_promise(durable_promise_record)
         self._resolve_promise(p, v)
-        return p
+        return p, False
 
     def _get_value_from_durable_promise(
         self, durable_promise_record: DurablePromiseRecord
@@ -387,16 +391,15 @@ class DSTScheduler:
         self, top_lvl: LFI, promise_id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
-        if promise_id is not None:
-            p = self._emphemeral_promise_memo.get(promise_id)
-            if p is not None:
-                return p
 
-        p = self._create_promise(
+        p, deduped = self._create_promise_or_dedup(
             parent_promise=None,
             promise_id=promise_id,
             action=top_lvl,
         )
+        if deduped:
+            return p
+
         assert p.durable, "Top level invocations must be durable"
         if p.done():
             self._unblock_coros_waiting_on_promise(p, "local")
@@ -589,11 +592,14 @@ class DSTScheduler:
         if p is not None:
             return p
 
-        p = self._create_promise(
+        p, deduped = self._create_promise_or_dedup(
             parent_promise=runnable.coro.route_info.promise,
             promise_id=promise_id,
             action=invocation,
         )
+        if deduped:
+            return p
+
         if isinstance(invocation.exec_unit, Command):
             self._handler_queues[type(invocation.exec_unit)].append(
                 (p, invocation.exec_unit)

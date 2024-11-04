@@ -26,3 +26,22 @@ class CreateDurablePromiseReq(Command):
         self.data = data
         self.headers = headers
         self.tags = tags
+
+
+def manual_completion(promise_id: str | None) -> CreateDurablePromiseReq:
+    return CreateDurablePromiseReq(promise_id=promise_id)
+
+
+def remote_function(
+    func_name: str,
+    args: list[Any],
+    *,
+    target: str,
+    promise_id: str | None = None,
+) -> CreateDurablePromiseReq:
+    return CreateDurablePromiseReq(
+        promise_id=promise_id,
+        data={"func": func_name, "args": args, "kwargs": {}},
+        headers=None,
+        tags={"resonate:invoke": f"poll://{target}"},
+    )

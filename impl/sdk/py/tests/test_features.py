@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from resonate.commands import CreateDurablePromiseReq
+from resonate.commands import manual_completion, remote_function
 from resonate.promise import Promise
 from resonate.retry_policy import never
 from resonate.scheduler import Scheduler
@@ -28,14 +28,10 @@ if TYPE_CHECKING:
 def test_human_in_the_loop() -> None:
     def human_in_the_loop(ctx: Context) -> Generator[Yieldable, Any, str]:
         name: str = yield ctx.rfc(
-            CreateDurablePromiseReq(
-                promise_id="test-human-in-loop-question-to-answer-1"
-            )
+            manual_completion("test-human-in-loop-question-to-answer-1")
         )
         age: int = yield ctx.rfc(
-            CreateDurablePromiseReq(
-                promise_id="test-human-in-loop-question-to-answer-2"
-            )
+            manual_completion(promise_id="test-human-in-loop-question-to-answer-2")
         )
         return f"Hi {name} with age {age}"
 
@@ -129,19 +125,17 @@ def test_factorial_multi_node() -> None:
 def test_trigger_on_other_node() -> None:
     def workflow(ctx: Context) -> Generator[Yieldable, Any, str]:
         v1: int = yield ctx.rfc(
-            CreateDurablePromiseReq(
-                promise_id=None,
-                data={"func": "foo", "args": [1], "kwargs": {}},
-                headers=None,
-                tags={"resonate:invoke": "poll://test-trigger-on-other-node-other"},
-            )
+            remote_function(
+                func_name="foo",
+                args=[1],
+                target="test-trigger-on-other-node-other",
+            ),
         )
-        v2: str = yield ctx.rfc(
-            CreateDurablePromiseReq(
-                promise_id=None,
-                data={"func": "bar", "args": ["Killua"], "kwargs": {}},
-                headers=None,
-                tags={"resonate:invoke": "poll://test-trigger-on-other-node-other"},
+        v2: int = yield ctx.rfc(
+            remote_function(
+                func_name="bar",
+                args=["Killua"],
+                target="test-trigger-on-other-node-other",
             )
         )
         return f"{v2} is {v1}"
@@ -208,13 +202,14 @@ def test_serverless_mechanics() -> None:
 
     def workflow(ctx: Context) -> Generator[Yieldable, Any, int]:
         v: int = yield ctx.rfc(
-            CreateDurablePromiseReq(
+            remote_function(
                 promise_id=None,
-                data={"func": "factorial", "args": [5], "kwargs": {}},
-                headers=None,
-                tags={"resonate:invoke": "poll://test-serverless-mechanics-lambda"},
+                func_name="factorial",
+                args=[5],
+                target="test-serverless-mechanics-lambda",
             )
         )
+
         return v
 
     store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
