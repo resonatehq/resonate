@@ -174,9 +174,9 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, recv, mesg, timeout, created_on)
+		(promise_id, root_promise_id, recv, mesg, timeout, created_on)
 	SELECT
-		$1, $2, $3, $4, $5
+		$1, $2, $3, $4, $5, $6
 	WHERE EXISTS
 		(SELECT 1 FROM promises WHERE id = $1 AND state = 1)
 	RETURNING id`
@@ -313,7 +313,6 @@ const (
 		($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	RETURNING id`
 
-	// TODO: get the root promise Id from the callback some how
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
 		(recv, mesg, timeout, root_promise_id, created_on)
