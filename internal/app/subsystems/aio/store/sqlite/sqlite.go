@@ -281,6 +281,27 @@ const (
 	    expires_at,
 	    created_on,
 	    completed_on
+	FROM tasks
+	WHERE
+		state & ? != 0 AND (expires_at <= ? OR timeout <= ?)
+	ORDER BY root_promise_id, id
+	LIMIT ?`
+
+	TASK_SELECT_ENQUABLE_STATEMENT = `
+	SELECT
+		id,
+	    process_id,
+		state,
+	    root_promise_id,
+	    recv,
+	    mesg,
+	    timeout,
+	    counter,
+	    attempt,
+	    ttl,
+	    expires_at,
+	    created_on,
+	    completed_on
 	FROM tasks t1
 	WHERE
 		state & ? != 0 AND (expires_at <= ? OR timeout <= ?)
@@ -288,7 +309,7 @@ const (
 		SELECT 1
 		FROM tasks t2
 		WHERE t2.root_promise_id = t1.root_promise_id
-		AND t2.state in (2, 4) -- 2 -> Enequeue, 4 -> Claimed
+		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
 	GROUP BY root_promise_id
 	ORDER BY root_promise_id, id
@@ -683,8 +704,11 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadTask != nil, "command must not be nil")
 				results[i][j], err = w.readTask(tx, command.ReadTask)
 			case t_aio.ReadTasks:
-				util.Assert(command.ReadTasks != nil, "command must not be nil")
+				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
+			case t_aio.ReadEnqueableTasks:
+				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
+				results[i][j], err = w.readEnquableTasks(tx, command.ReadEnquableTasks)
 			case t_aio.CreateTask:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
@@ -1478,7 +1502,57 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.ReadTasks,
+		Kind: t_aio.ReadEnqueableTasks,
+		ReadTasks: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
+func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueableTasksCommand) (*t_aio.Result, error) {
+	util.Assert(len(cmd.States) > 0, "must provide at least one state")
+
+	var states task.State
+	for _, state := range cmd.States {
+		states |= state
+	}
+
+	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, states, cmd.Time, cmd.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*task.TaskRecord
+
+	for rows.Next() {
+		record := &task.TaskRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.ProcessId,
+			&record.State,
+			&record.RootPromiseId,
+			&record.Recv,
+			&record.Mesg,
+			&record.Timeout,
+			&record.Counter,
+			&record.Attempt,
+			&record.Ttl,
+			&record.ExpiresAt,
+			&record.CreatedOn,
+			&record.CompletedOn,
+		); err != nil {
+			return nil, err
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadEnqueableTasks,
 		ReadTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,

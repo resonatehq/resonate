@@ -23,8 +23,8 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
-							Kind: t_aio.ReadTasks,
-							ReadTasks: &t_aio.ReadTasksCommand{
+							Kind: t_aio.ReadEnqueableTasks,
+							ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
 								States: []task.State{task.Init},
 								Time:   c.Time(),
 								Limit:  config.TaskBatchSize,
