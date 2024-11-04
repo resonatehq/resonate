@@ -279,7 +279,7 @@ const (
 		id = $1`
 
 	TASK_SELECT_ALL_STATEMENT = `
-	SELECT DISTINCT ON (root_promise_id),
+	SELECT DISTINCT ON (root_promise_id)
 		id,
 		process_id,
 		state,
@@ -1408,6 +1408,7 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
+		&record.RootPromiseId,
 		&record.Recv,
 		&record.Mesg,
 		&record.Timeout,
