@@ -279,11 +279,11 @@ const (
 		id = $1`
 
 	TASK_SELECT_ALL_STATEMENT = `
-	SELECT
+	SELECT DISTINCT ON (root_promise_id),
 		id,
 		process_id,
 		state,
-		DISTINCT ON (root_promise_id),
+		root_promise_id,
 		recv,
 		mesg,
 		timeout,
@@ -300,9 +300,9 @@ const (
 		SELECT 1
 		FROM tasks t2
 		WHERE t2.root_promise_id = t1.root_promise_id
-		AND t2.state in (2, 4) -- 2 -> Enequeue, 4 -> Claimed
+		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
-	ORDER BY id
+	ORDER BY root_promise_id, id
 	LIMIT $3`
 
 	TASK_INSERT_STATEMENT = `
