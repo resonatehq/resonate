@@ -114,3 +114,33 @@ def test_case_3_create_durable_promise_with_callback() -> None:
     assert durable_promise.promise_id == callback_record.promise_id
     assert durable_promise.is_pending()
     assert durable_promise.timeout == callback_record.timeout
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_case_4_create_with_callback_dedup() -> None:
+    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    store.create(
+        promise_id="5.0",
+        ikey="5.0",
+        strict=False,
+        headers=None,
+        data=None,
+        timeout=sys.maxsize,
+        tags=None,
+    )
+    store.resolve(promise_id="5.0", ikey="5.0", strict=False, headers=None, data="1")
+    promise_record, callback_record = store.create_with_callback(
+        promise_id="5.0",
+        root_promise_id="5.0",
+        timeout=sys.maxsize,
+        recv="default",
+        ikey="5.0",
+        strict=False,
+        headers=None,
+        data=None,
+        tags=None,
+    )
+    assert promise_record.is_completed()
+    assert callback_record is None
