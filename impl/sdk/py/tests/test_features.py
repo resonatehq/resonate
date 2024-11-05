@@ -333,3 +333,25 @@ def test_fibonnaci_mechanics_no_awaiting() -> None:
     )
 
     assert p.result() == 13  # noqa: PLR2004
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_trigger_on_other_process() -> None:
+    node_group = "test-trigger-on-other-process"
+
+    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+
+    def factorial(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
+        if n == 0:
+            return 1
+        return n * (yield ctx.rfc(factorial, n - 1))
+
+    this_scheduler = Scheduler(store, logic_group=node_group)
+    other_scheduler = Scheduler(store, logic_group=f"{node_group}-other")
+    other_scheduler.register(factorial)
+    p: Promise[int] = this_scheduler.trigger(
+        f"{node_group}-factorial", "factorial", [5], target=f"{node_group}-other"
+    )
+    assert p.result() == 120  # noqa: PLR2004

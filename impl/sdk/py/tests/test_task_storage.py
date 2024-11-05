@@ -91,3 +91,26 @@ def test_case_3_create_durable_promise_with_task() -> None:
     assert task_record.counter == 1
     store.heartbeat_tasks(pid=pid)
     store.complete_task(task_id=task_record.task_id, counter=task_record.counter)
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_case_3_create_durable_promise_with_callback() -> None:
+    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    pid = uuid.uuid4().hex
+    durable_promise, callback_record = store.create_with_callback(
+        promise_id="4.0",
+        ikey=None,
+        strict=False,
+        timeout=sys.maxsize,
+        headers=None,
+        data=None,
+        tags=None,
+        root_promise_id="4.0",
+        recv={"type": "poll", "data": {"group": "default", "id": pid}},
+    )
+    assert callback_record is not None
+    assert durable_promise.promise_id == callback_record.promise_id
+    assert durable_promise.is_pending()
+    assert durable_promise.timeout == callback_record.timeout

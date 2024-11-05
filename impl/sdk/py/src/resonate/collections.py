@@ -42,7 +42,10 @@ class Awaiting:
         assert_never(awaiting_for)
 
     def append(
-        self, key: Promise[Any], value: ResonateCoro[Any], awaiting_for: AwaitingFor
+        self,
+        key: Promise[Any],
+        value: ResonateCoro[Any] | None,
+        awaiting_for: AwaitingFor,
     ) -> None:
         awaiting: dict[Promise[Any], list[ResonateCoro[Any]]]
         if awaiting_for == "local":
@@ -51,7 +54,11 @@ class Awaiting:
             awaiting = self._remote
         else:
             assert_never(awaiting_for)
-        awaiting.setdefault(key, []).append(value)
+        if value is not None:
+            awaiting.setdefault(key, []).append(value)
+        else:
+            assert key not in awaiting
+            awaiting[key] = []
 
     def get(
         self, key: Promise[Any], awaiting_for: AwaitingFor

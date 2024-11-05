@@ -113,6 +113,52 @@ class RemoteServer(IPromiseStore, ITaskStore):
 
         return Resume.decode(data=promises, encoder=self._encoder)
 
+    def create_with_callback(  # noqa: PLR0913
+        self,
+        *,
+        promise_id: str,
+        ikey: str | None,
+        strict: bool,
+        timeout: int,
+        headers: dict[str, str] | None,
+        data: str | None,
+        tags: dict[str, str] | None,
+        root_promise_id: str,
+        recv: str | dict[str, Any],
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+
+        response = requests.post(
+            url=f"{self.url}/promises/callback",
+            headers=request_headers,
+            json={
+                "promise": {
+                    "id": promise_id,
+                    "timeout": timeout,
+                    "param": {"headers": headers, "data": self._encode_data(data)},
+                    "tags": tags,
+                },
+                "callback": {
+                    "rootPromiseId": root_promise_id,
+                    "timeout": timeout,
+                    "recv": recv,
+                },
+            },
+            timeout=self._request_timeout,
+        )
+        _ensure_success(response)
+        data_json = response.json()
+
+        callback_data = data_json["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data_json["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
+        )
+
     def complete_task(self, *, task_id: str, counter: int) -> None:
         response = requests.post(
             url=f"{self.url}/tasks/complete",

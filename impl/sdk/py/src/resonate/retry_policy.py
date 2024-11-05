@@ -88,7 +88,7 @@ def never() -> Never:
 
 
 def default_policy() -> RetryPolicy:
-    return exponential(base_delay=1, factor=2, max_retries=5)
+    return never()
 
 
 def calculate_total_possible_delay(policy: Exponential | Linear | Constant) -> float:
