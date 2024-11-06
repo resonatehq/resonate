@@ -1,7 +1,6 @@
 package test
 
 import (
-	"runtime/debug"
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
@@ -36,7 +35,6 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 
 		results, err := store.Execute([]*t_aio.Transaction{{Commands: c.commands}})
 		if err != nil {
-			t.Log(string(debug.Stack()))
 			t.Fatal(err)
 		}
 
@@ -2766,8 +2764,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
-				ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
 					States: []task.State{task.Init},
 					Limit:  10,
 				},
@@ -2789,7 +2787,7 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
+				Kind: t_aio.ReadTasks,
 				ReadTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
@@ -2860,8 +2858,8 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
-				ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
+				Kind: t_aio.ReadTasks,
+				ReadTasks: &t_aio.ReadTasksCommand{
 					States: []task.State{task.Init},
 					Limit:  10,
 				},
@@ -2902,7 +2900,7 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
+				Kind: t_aio.ReadTasks,
 				ReadTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 3,
 					Records: []*task.TaskRecord{
@@ -2939,7 +2937,7 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "ReadTasks",
+		name: "ReadEnquableTasks",
 		commands: []*t_aio.Command{
 			{
 				Kind: t_aio.CreatePromise,
@@ -3138,7 +3136,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueableTasks,
-				ReadTasks: &t_aio.QueryTasksResult{
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
 						{
@@ -3170,7 +3168,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueableTasks,
-				ReadTasks: &t_aio.QueryTasksResult{
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
@@ -3193,7 +3191,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueableTasks,
-				ReadTasks: &t_aio.QueryTasksResult{
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 0,
 				},
 			},

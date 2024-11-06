@@ -704,7 +704,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				util.Assert(command.ReadTask != nil, "command must not be nil")
 				results[i][j], err = w.readTask(tx, command.ReadTask)
 			case t_aio.ReadTasks:
-				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
+				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
 			case t_aio.ReadEnqueableTasks:
 				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
@@ -1442,7 +1442,7 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
 		} else {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 	}
 
@@ -1470,7 +1470,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 
 	rows, err := tx.Query(TASK_SELECT_ALL_STATEMENT, states, cmd.Time, cmd.Time, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 	defer rows.Close()
 
@@ -1494,7 +1494,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 
 		records = append(records, record)
@@ -1502,7 +1502,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.ReadEnqueableTasks,
+		Kind: t_aio.ReadTasks,
 		ReadTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
@@ -1518,9 +1518,9 @@ func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueab
 		states |= state
 	}
 
-	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, states, cmd.Time, cmd.Limit)
+	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, states, cmd.Time, cmd.Time, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 	defer rows.Close()
 
@@ -1544,7 +1544,7 @@ func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueab
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 
 		records = append(records, record)
@@ -1553,7 +1553,7 @@ func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueab
 
 	return &t_aio.Result{
 		Kind: t_aio.ReadEnqueableTasks,
-		ReadTasks: &t_aio.QueryTasksResult{
+		ReadEnquableTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
@@ -1568,22 +1568,22 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 
 	mesg, err := json.Marshal(cmd.Mesg)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	lastInsertId, err := res.LastInsertId()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	var lastInsertIdStr string
@@ -1603,12 +1603,12 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 func (w *SqliteStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1640,12 +1640,12 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 		cmd.CurrentCounter,
 	)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1659,12 +1659,12 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 func (w *SqliteStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
