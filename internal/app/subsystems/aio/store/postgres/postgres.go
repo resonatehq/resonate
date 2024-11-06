@@ -740,7 +740,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadTask != nil, "command must not be nil")
 				results[i][j], err = w.readTask(tx, command.ReadTask)
 			case t_aio.ReadTasks:
-				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
+				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
 			case t_aio.ReadEnqueableTasks:
 				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
@@ -1446,7 +1446,7 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
 		} else {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 	}
 
@@ -1474,7 +1474,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 
 	rows, err := tx.Query(TASK_SELECT_ALL_STATEMENT, states, cmd.Time, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 	defer rows.Close()
 
@@ -1498,7 +1498,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 
 		records = append(records, record)
@@ -1506,7 +1506,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.ReadEnqueableTasks,
+		Kind: t_aio.ReadTasks,
 		ReadTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
@@ -1524,7 +1524,7 @@ func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnque
 
 	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, states, cmd.Time, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 	defer rows.Close()
 
@@ -1548,7 +1548,7 @@ func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnque
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 
 		records = append(records, record)
@@ -1557,7 +1557,7 @@ func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnque
 
 	return &t_aio.Result{
 		Kind: t_aio.ReadEnqueableTasks,
-		ReadTasks: &t_aio.QueryTasksResult{
+		ReadEnquableTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
@@ -1572,7 +1572,7 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 
 	mesg, err := json.Marshal(cmd.Mesg)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	var lastInsertId string
@@ -1583,7 +1583,7 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 		if err == sql.ErrNoRows {
 			rowsAffected = 0
 		} else {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 	}
 
@@ -1599,12 +1599,12 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 func (w *PostgresStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1636,12 +1636,12 @@ func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 		cmd.CurrentCounter,
 	)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1655,12 +1655,12 @@ func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 func (w *PostgresStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
