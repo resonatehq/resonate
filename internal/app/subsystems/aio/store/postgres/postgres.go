@@ -316,7 +316,7 @@ const (
 		completed_on
 	FROM tasks t1
 	WHERE
-		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
+		state = 1 AND (expires_at <= $2 OR timeout <= $2)
 	AND NOT EXISTS (
 		SELECT 1
 		FROM tasks t2
@@ -742,7 +742,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			case t_aio.ReadTasks:
 				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
-			case t_aio.ReadEnqueableTasks:
+			case t_aio.ReadEnqueueableTasks:
 				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
 				results[i][j], err = w.readEnquableTasks(tx, command.ReadEnquableTasks)
 			case t_aio.CreateTask:
@@ -1514,15 +1514,8 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 	}, nil
 }
 
-func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueableTasksCommand) (*t_aio.Result, error) {
-	util.Assert(len(cmd.States) > 0, "must provide at least one state")
-
-	var states task.State
-	for _, state := range cmd.States {
-		states |= state
-	}
-
-	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, states, cmd.Time, cmd.Limit)
+func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, cmd.Time, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
@@ -1556,7 +1549,7 @@ func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnque
 	}
 
 	return &t_aio.Result{
-		Kind: t_aio.ReadEnqueableTasks,
+		Kind: t_aio.ReadEnqueueableTasks,
 		ReadEnquableTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
