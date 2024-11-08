@@ -3016,10 +3016,9 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
-				ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
-					States: []task.State{task.Init},
-					Limit:  10,
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
 				},
 			},
 			{
@@ -3038,10 +3037,9 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
-				ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
-					States: []task.State{task.Init},
-					Limit:  10,
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
 				},
 			},
 			{
@@ -3060,10 +3058,9 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
-				ReadEnquableTasks: &t_aio.ReadEnqueableTasksCommand{
-					States: []task.State{task.Init},
-					Limit:  10,
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
 				},
 			},
 		},
@@ -3135,7 +3132,7 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
+				Kind: t_aio.ReadEnqueueableTasks,
 				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
@@ -3167,7 +3164,7 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
+				Kind: t_aio.ReadEnqueueableTasks,
 				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
@@ -3190,7 +3187,7 @@ var TestCases = []*testCase{
 				},
 			},
 			{
-				Kind: t_aio.ReadEnqueableTasks,
+				Kind: t_aio.ReadEnqueueableTasks,
 				ReadEnquableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 0,
 				},

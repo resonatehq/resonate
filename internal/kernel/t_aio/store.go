@@ -35,7 +35,7 @@ const (
 
 	// TASKS
 	ReadTask
-	ReadEnqueableTasks
+	ReadEnqueueableTasks
 	ReadTasks
 	CreateTask
 	CreateTasks
@@ -84,8 +84,8 @@ func (k StoreKind) String() string {
 	// TASKS
 	case ReadTask:
 		return "ReadTask"
-	case ReadEnqueableTasks:
-		return "ReadEnqueableTasks"
+	case ReadEnqueueableTasks:
+		return "ReadEnqueueableTasks"
 	case ReadTasks:
 		return "ReadTasks"
 	case CreateTask:
@@ -158,7 +158,7 @@ type Command struct {
 	// TASKS
 	ReadTask          *ReadTaskCommand
 	ReadTasks         *ReadTasksCommand
-	ReadEnquableTasks *ReadEnqueableTasksCommand
+	ReadEnquableTasks *ReadEnqueueableTasksCommand
 	CreateTask        *CreateTaskCommand
 	CreateTasks       *CreateTasksCommand
 	UpdateTask        *UpdateTaskCommand
@@ -354,10 +354,9 @@ type ReadTasksCommand struct {
 	Limit  int
 }
 
-type ReadEnqueableTasksCommand struct {
-	States []task.State
-	Time   int64
-	Limit  int
+type ReadEnqueueableTasksCommand struct {
+	Time  int64
+	Limit int
 }
 
 type CreateTaskCommand struct {
