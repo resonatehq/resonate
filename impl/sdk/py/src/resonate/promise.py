@@ -24,11 +24,11 @@ T = TypeVar("T")
 class Promise(Generic[T]):
     def __init__(
         self,
-        promise_id: str,
+        id: str,
         action: PromiseActions,
         parent_promise: Promise[Any] | None,
     ) -> None:
-        self.promise_id = promise_id
+        self.id = id
         self.f = Future[T]()
         self._next_child_num = 1
         self.parent_promise = parent_promise
@@ -99,10 +99,8 @@ class Promise(Generic[T]):
     def failure(self) -> bool:
         return not self.success()
 
-    def parent_promise_id(self) -> str | None:
-        return (
-            self.parent_promise.promise_id if self.parent_promise is not None else None
-        )
+    def parent_id(self) -> str | None:
+        return self.parent_promise.id if self.parent_promise is not None else None
 
     def root(self) -> Promise[Any]:
         maybe_root = self
@@ -120,15 +118,15 @@ class Promise(Generic[T]):
             maybe_root = maybe_root.parent_promise
 
     def child_name(self) -> str:
-        return f"{self.promise_id}.{self._next_child_num}"
+        return f"{self.id}.{self._next_child_num}"
 
     def child_promise(
         self,
-        promise_id: str,
+        id: str,
         action: PromiseActions,
     ) -> Promise[Any]:
         child = Promise[Any](
-            promise_id=promise_id,
+            id=id,
             action=action,
             parent_promise=self,
         )

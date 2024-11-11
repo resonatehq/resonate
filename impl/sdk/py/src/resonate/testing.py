@@ -8,11 +8,11 @@ from typing_extensions import ParamSpec, assert_never
 from resonate import random
 from resonate.contants import ENV_VARIABLE_PIN_SEED
 from resonate.dst.scheduler import DSTScheduler, Mode
-from resonate.storage.local_store import LocalStore
+from resonate.stores.local import LocalStore
 
 if TYPE_CHECKING:
-    from resonate.dependency_injection import Dependencies
-    from resonate.storage.traits import IPromiseStore
+    from resonate.dependencies import Dependencies
+    from resonate.stores.remote import RemoteStore
     from resonate.typing import DurableCoro, DurableFn, MockFn
 
 P = ParamSpec("P")
@@ -28,7 +28,7 @@ def dst(  # noqa: PLR0913
     probe: Callable[[Dependencies, int], Any] | None = None,
     assert_always: Callable[[Dependencies, int, int], Any] | None = None,
     assert_eventually: Callable[[Dependencies, int], Any] | None = None,
-    durable_promise_storage: IPromiseStore | None = None,
+    store: LocalStore | RemoteStore | None = None,
 ) -> list[DSTScheduler]:
     def _new_dst_scheduler(seed: int) -> DSTScheduler:
         return DSTScheduler(
@@ -41,9 +41,7 @@ def dst(  # noqa: PLR0913
             probe=probe,
             assert_always=assert_always,
             assert_eventually=assert_eventually,
-            durable_promise_storage=durable_promise_storage
-            if durable_promise_storage
-            else LocalStore(),
+            store=store if store else LocalStore(),
         )
 
     schedulers: list[DSTScheduler] = []

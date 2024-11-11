@@ -52,6 +52,8 @@ unsafe-fixes = true
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
+    "A001",
+    "A002",
     "D",
     "ANN101",
     "COM812",

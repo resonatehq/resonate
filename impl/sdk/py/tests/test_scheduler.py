@@ -16,18 +16,17 @@ from resonate.retry_policy import (
     constant,
     never,
 )
-from resonate.storage.local_store import (
+from resonate.stores.local import (
     LocalStore,
     MemoryStorage,
 )
-from resonate.storage.resonate_server import RemoteServer
+from resonate.stores.remote import RemoteStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.context import Context
     from resonate.promise import Promise
-    from resonate.storage.traits import IPromiseStore
     from resonate.typing import Yieldable
 
 
@@ -37,7 +36,7 @@ def foo(ctx: Context, name: str, sleep_time: float) -> str:  # noqa: ARG001
 
 
 def baz(ctx: Context, name: str, sleep_time: float) -> Generator[Yieldable, Any, str]:
-    p = yield ctx.lfi(foo, name=name, sleep_time=sleep_time).with_options(
+    p = yield ctx.lfi(foo, name=name, sleep_time=sleep_time).options(
         retry_policy=never()
     )
     return (yield p)
@@ -46,24 +45,24 @@ def baz(ctx: Context, name: str, sleep_time: float) -> Generator[Yieldable, Any,
 def bar(
     ctx: Context, name: str, sleep_time: float
 ) -> Generator[Yieldable, Any, Promise[str]]:
-    p: Promise[str] = yield ctx.lfi(foo, name=name, sleep_time=sleep_time).with_options(
+    p: Promise[str] = yield ctx.lfi(foo, name=name, sleep_time=sleep_time).options(
         retry_policy=never()
     )
     return p
 
 
 @cache
-def _promise_storages() -> list[IPromiseStore]:
-    stores: list[IPromiseStore] = [LocalStore(MemoryStorage())]
+def _promise_storages() -> list[LocalStore | RemoteStore]:
+    stores: list[LocalStore | RemoteStore] = [LocalStore(MemoryStorage())]
     if os.getenv("RESONATE_STORE_URL") is not None:
-        stores.append(RemoteServer(url=os.environ["RESONATE_STORE_URL"]))
+        stores.append(RemoteStore(url=os.environ["RESONATE_STORE_URL"]))
     return stores
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_scheduler(store: IPromiseStore) -> None:
+def test_scheduler(store: LocalStore | RemoteStore) -> None:
     s = scheduler.Scheduler(
-        durable_promise_storage=store,
+        store=store,
     )
 
     s.register(baz, "baz-function", retry_policy=never())
@@ -81,10 +80,10 @@ def test_scheduler(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_multithreading_capabilities(store: IPromiseStore) -> None:
+def test_multithreading_capabilities(store: LocalStore | RemoteStore) -> None:
     s = scheduler.Scheduler(
-        processor_threads=3,
-        durable_promise_storage=store,
+        workers=3,
+        store=store,
     )
     s.register(baz, "baz")
 
@@ -119,7 +118,7 @@ def test_multithreading_capabilities(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_retry(store: IPromiseStore) -> None:
+def test_retry(store: LocalStore | RemoteStore) -> None:
     tries = 0
 
     def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
@@ -133,11 +132,11 @@ def test_retry(store: IPromiseStore) -> None:
         policy = Linear(
             delay=policy_info["delay"], max_retries=policy_info["max_retries"]
         )
-        yield ctx.lfc(_failing, error=RuntimeError).with_options(
+        yield ctx.lfc(_failing, error=RuntimeError).options(
             durable=False, retry_policy=policy
         )
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
     policy = Linear(delay=0, max_retries=2)
 
     s.register(coro, "coro-func", retry_policy=never())
@@ -151,21 +150,21 @@ def test_retry(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_async_fibonacci(store: IPromiseStore) -> None:
+def test_async_fibonacci(store: LocalStore | RemoteStore) -> None:
     def fibonacci(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
         if n <= 1:
             return n
-        p1: Promise[Any] = yield ctx.lfi(fibonacci, n - 1).with_options(
-            promise_id=f"async-fibonacci-{n-1}"
+        p1: Promise[Any] = yield ctx.lfi(fibonacci, n - 1).options(
+            id=f"async-fibonacci-{n-1}"
         )
-        p2: Promise[Any] = yield ctx.lfi(fibonacci, n - 2).with_options(
-            promise_id=f"async-fibonacci-{n-2}"
+        p2: Promise[Any] = yield ctx.lfi(fibonacci, n - 2).options(
+            id=f"async-fibonacci-{n-2}"
         )
         v2 = yield p2
         v1 = yield p1
         return v1 + v2
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
     s.register(fibonacci, "async-fibonacci")
     n = 40
     p: Promise[int] = s.run(f"async-fibonacci-{n}", fibonacci, n)
@@ -174,8 +173,8 @@ def test_async_fibonacci(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_structure_concurrency(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store)
+def test_structure_concurrency(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store)
 
     child_p: Promise[str] | None = None
 
@@ -205,7 +204,7 @@ def test_structure_concurrency(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
+def test_structure_concurrency_with_failure(store: LocalStore | RemoteStore) -> None:
     tries = 0
 
     def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
@@ -216,12 +215,12 @@ def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
     def coro_that_triggers_structure_concurrency_and_fails(
         ctx: Context,
     ) -> Generator[Yieldable, Any, int]:
-        yield ctx.lfi(_failing, error=RuntimeError).with_options(
+        yield ctx.lfi(_failing, error=RuntimeError).options(
             retry_policy=constant(delay=0.03, max_retries=2), durable=False
         )
         return 1
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
 
     s.register(
         coro_that_triggers_structure_concurrency_and_fails,
@@ -241,22 +240,24 @@ def test_structure_concurrency_with_failure(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> None:
+def test_structure_concurrency_with_multiple_failures(
+    store: LocalStore | RemoteStore,
+) -> None:
     def _failing(ctx: Context, error: type[Exception]) -> None:  # noqa: ARG001, RUF100
         raise error
 
     def coro_that_trigger_structure_concurrency_and_multiple_errors(
         ctx: Context,
     ) -> Generator[Yieldable, Any, int]:
-        yield ctx.lfi(_failing, error=TypeError).with_options(
+        yield ctx.lfi(_failing, error=TypeError).options(
             retry_policy=never(), durable=False
         )
-        yield ctx.lfi(_failing, error=RuntimeError).with_options(
+        yield ctx.lfi(_failing, error=RuntimeError).options(
             durable=False, retry_policy=never()
         )
         return 1
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
 
     s.register(
         coro_that_trigger_structure_concurrency_and_multiple_errors,
@@ -274,8 +275,8 @@ def test_structure_concurrency_with_multiple_failures(store: IPromiseStore) -> N
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_deferred_invoke(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store)
+def test_deferred_invoke(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store)
 
     deferred_p: Promise[str] | None = None
 
@@ -348,7 +349,7 @@ def all_settled_coro(
 ) -> Generator[Yieldable, Any, list[str]]:
     ps = []
     for val in vals:
-        p = yield ctx.lfi(_fn_raise_or_ret, val=val).with_options(retry_policy=never())
+        p = yield ctx.lfi(_fn_raise_or_ret, val=val).options(retry_policy=never())
         ps.append(p)
 
     p_all_settled = yield ctx.all_settled(ps)
@@ -358,8 +359,8 @@ def all_settled_coro(
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_all_combinator(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store)
+def test_all_combinator(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store)
     # Test case 1
     waits_results = [(0.02, "A"), (0.03, "B"), (0.01, "C"), (0.02, "D"), (0.02, "E")]
     expected = ["A", "B", "C", "D", "E"]
@@ -405,8 +406,8 @@ def test_all_combinator(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_all_settled_combinator(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store)
+def test_all_settled_combinator(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store)
     # Test case 1
     vals = ["A", "B", "C", "D", "E"]
     expected = ["A", "B", "C", "D", "E"]
@@ -446,8 +447,8 @@ def test_all_settled_combinator(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_race_combinator(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store, processor_threads=16)
+def test_race_combinator(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store, workers=16)
 
     # Test case 1
     waits_results = [(0.1, "A"), (0.1, "B"), (0.01, "C"), (0.1, "D"), (0.1, "E")]
@@ -492,8 +493,8 @@ def test_race_combinator(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_coro_retry(store: IPromiseStore) -> None:
-    s = scheduler.Scheduler(durable_promise_storage=store)
+def test_coro_retry(store: LocalStore | RemoteStore) -> None:
+    s = scheduler.Scheduler(store=store)
 
     tries = 0
 
@@ -516,7 +517,7 @@ def test_coro_retry(store: IPromiseStore) -> None:
 def _raw_rfc(ctx: Context) -> Generator[Yieldable, Any, None]:
     yield ctx.rfc(
         CreateDurablePromiseReq(
-            promise_id="abc",
+            id="abc",
             data={
                 "func": "func",
                 "args": (1, 2),
@@ -530,32 +531,32 @@ def _raw_rfc(ctx: Context) -> Generator[Yieldable, Any, None]:
     os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
 )
 def test_rfc_raw() -> None:
-    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
     s.register(_raw_rfc)
     p: Promise[None] = s.run("test-raw-rfc", _raw_rfc)
     s.wait_until_blocked()
     assert not p.done()
 
-    child_promise_record = store.get(promise_id="abc")
-    assert child_promise_record.promise_id == "abc"
+    child_promise_record = store.promises.get(id="abc")
+    assert child_promise_record.id == "abc"
     assert child_promise_record.state == "PENDING"
     assert child_promise_record.tags == {"demo": "test"}
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_dedup(store: IPromiseStore) -> None:
+def test_dedup(store: LocalStore | RemoteStore) -> None:
     def factorial(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
         if n <= 1:
             return 1
 
-        p: Promise[int] = yield ctx.lfi(factorial, n - 1).with_options(
-            promise_id=f"factorial-dedup-{n-1}", retry_policy=never()
+        p: Promise[int] = yield ctx.lfi(factorial, n - 1).options(
+            id=f"factorial-dedup-{n-1}", retry_policy=never()
         )
         return n * (yield p)
 
-    s = scheduler.Scheduler(durable_promise_storage=store)
+    s = scheduler.Scheduler(store=store)
     s.register(factorial, retry_policy=never())
     n = 5
     p1: Promise[int] = s.run(f"factorial-dedup-{n}", factorial, n)
@@ -567,7 +568,7 @@ def test_dedup(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching(store: IPromiseStore) -> None:
+def test_batching(store: LocalStore | RemoteStore) -> None:
     @dataclasses.dataclass(frozen=True)
     class GreetCommand(Command):
         name: str
@@ -619,7 +620,7 @@ def test_batching(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching_with_failing_func(store: IPromiseStore) -> None:
+def test_batching_with_failing_func(store: LocalStore | RemoteStore) -> None:
     @dataclasses.dataclass(frozen=True)
     class ACommand(Command):
         n: int
@@ -655,7 +656,7 @@ def test_batching_with_failing_func(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching_with_no_result(store: IPromiseStore) -> None:
+def test_batching_with_no_result(store: LocalStore | RemoteStore) -> None:
     @dataclasses.dataclass(frozen=True)
     class ACommand(Command):
         n: int
@@ -684,7 +685,7 @@ def test_batching_with_no_result(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching_with_single_result(store: IPromiseStore) -> None:
+def test_batching_with_single_result(store: LocalStore | RemoteStore) -> None:
     @dataclasses.dataclass(frozen=True)
     class ACommand(Command):
         n: int
@@ -715,7 +716,9 @@ def test_batching_with_single_result(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching_with_failing_func_and_retries(store: IPromiseStore) -> None:
+def test_batching_with_failing_func_and_retries(
+    store: LocalStore | RemoteStore,
+) -> None:
     @dataclasses.dataclass(frozen=True)
     class ACommand(Command):
         n: int
@@ -755,7 +758,7 @@ def test_batching_with_failing_func_and_retries(store: IPromiseStore) -> None:
 
 
 @pytest.mark.parametrize("store", _promise_storages())
-def test_batching_with_element_level_exception(store: IPromiseStore) -> None:
+def test_batching_with_element_level_exception(store: LocalStore | RemoteStore) -> None:
     @dataclasses.dataclass(frozen=True)
     class ACommand(Command):
         n: int
@@ -810,16 +813,16 @@ def test_batching_with_element_level_exception(store: IPromiseStore) -> None:
     os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
 )
 def test_remote_call_same_node() -> None:
-    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
 
     def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
         return 1
 
     def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
-        n = yield ctx.rfc(_number_from_other_node).with_options(target="call-same-node")
+        n = yield ctx.rfc(_number_from_other_node).options(target="call-same-node")
         return n
 
-    s = scheduler.Scheduler(store, logic_group="call-same-node")
+    s = scheduler.Scheduler(store, group="call-same-node")
     s.register(_remotely, retry_policy=never())
     s.register(_number_from_other_node, retry_policy=never())
     p: Promise[int] = s.run("test-remote-call-same-node", _remotely)
@@ -832,19 +835,19 @@ def test_remote_call_same_node() -> None:
     os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
 )
 def test_remote_invocation_same_node() -> None:
-    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
 
     def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
         return 1
 
     def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
-        p = yield ctx.rfi(_number_from_other_node).with_options(
+        p = yield ctx.rfi(_number_from_other_node).options(
             target="invocation-same-node"
         )
         n = yield p
         return n
 
-    s = scheduler.Scheduler(store, logic_group="invocation-same-node")
+    s = scheduler.Scheduler(store, group="invocation-same-node")
     s.register(_remotely, retry_policy=never())
     s.register(_number_from_other_node, retry_policy=never())
     p: Promise[int] = s.run("test-remote-invocation-same-node", _remotely)
@@ -857,23 +860,23 @@ def test_remote_invocation_same_node() -> None:
     os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
 )
 def test_remote_invocation_other_node() -> None:
-    store = RemoteServer(url=os.environ["RESONATE_STORE_URL"])
+    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
 
     def _number_from_other_node(ctx: Context) -> int:  # noqa: ARG001
         return 1
 
     def _remotely(ctx: Context) -> Generator[Yieldable, Any, int]:
-        p = yield ctx.rfi(_number_from_other_node).with_options(
+        p = yield ctx.rfi(_number_from_other_node).options(
             target="invocation-other-node"
         )
         n = yield p
         return n
 
-    s = scheduler.Scheduler(store, logic_group="invocation-this-node")
+    s = scheduler.Scheduler(store, group="invocation-this-node")
     s.register(_remotely, retry_policy=never())
     s.register(_number_from_other_node, retry_policy=never())
 
-    s_other = scheduler.Scheduler(store, logic_group="invocation-other-node")
+    s_other = scheduler.Scheduler(store, group="invocation-other-node")
     s_other.register(_remotely, retry_policy=never())
     s_other.register(_number_from_other_node, retry_policy=never())
 

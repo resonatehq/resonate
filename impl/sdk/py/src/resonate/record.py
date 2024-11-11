@@ -44,7 +44,7 @@ class Value:
 @dataclass(frozen=True)
 class CallbackRecord(Decodable):
     callback_id: str
-    promise_id: str
+    id: str
     timeout: int
     created_on: int
 
@@ -53,7 +53,7 @@ class CallbackRecord(Decodable):
         _ = encoder
         return cls(
             callback_id=data["id"],
-            promise_id=data["promiseId"],
+            id=data["promiseId"],
             timeout=data["timeout"],
             created_on=data["createdOn"],
         )
@@ -63,7 +63,7 @@ class CallbackRecord(Decodable):
 @dataclass(frozen=True)
 class DurablePromiseRecord(Decodable):
     state: State
-    promise_id: str
+    id: str
     timeout: int
     param: Param
     value: Value
@@ -119,7 +119,7 @@ class DurablePromiseRecord(Decodable):
             value = Value(data=None, headers=None)
 
         return cls(
-            promise_id=data["id"],
+            id=data["id"],
             state=data["state"],
             param=param,
             value=value,

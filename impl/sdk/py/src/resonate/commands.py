@@ -17,19 +17,19 @@ class Command:
 class CreateDurablePromiseReq(Command):
     def __init__(
         self,
-        promise_id: str | None,
+        id: str | None,
         data: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         tags: dict[str, str] | None = None,
     ) -> None:
-        self.promise_id = promise_id
+        self.id = id
         self.data = data
         self.headers = headers
         self.tags = tags
 
 
-def manual_completion(promise_id: str | None) -> CreateDurablePromiseReq:
-    return CreateDurablePromiseReq(promise_id=promise_id)
+def manual_completion(id: str | None) -> CreateDurablePromiseReq:
+    return CreateDurablePromiseReq(id=id)
 
 
 def remote_function(
@@ -37,10 +37,10 @@ def remote_function(
     args: list[Any],
     *,
     target: str,
-    promise_id: str | None = None,
+    id: str | None = None,
 ) -> CreateDurablePromiseReq:
     return CreateDurablePromiseReq(
-        promise_id=promise_id,
+        id=id,
         data={"func": func_name, "args": args, "kwargs": {}},
         headers=None,
         tags={"resonate:invoke": f"poll://{target}"},

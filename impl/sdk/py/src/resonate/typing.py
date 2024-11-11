@@ -40,7 +40,6 @@ DurableAsyncFn: TypeAlias = Callable[Concatenate[Context, P], Coroutine[Any, Any
 DurableFn: TypeAlias = Union[DurableSyncFn[P, T], DurableAsyncFn[P, T]]
 MockFn: TypeAlias = Callable[[], T]
 
-Invokable: TypeAlias = Union[DurableCoro[P, Any], DurableFn[P, Any], Command]
 
 AwaitingFor: TypeAlias = Literal["local", "remote"]
 Runnables: TypeAlias = deque[tuple[Runnable[Any], bool]]

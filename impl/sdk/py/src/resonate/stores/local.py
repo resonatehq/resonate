@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, Literal, final
+from typing import TYPE_CHECKING, Callable, final
 
 from resonate.errors import ResonateError
 from resonate.record import (
@@ -9,7 +9,7 @@ from resonate.record import (
     Param,
     Value,
 )
-from resonate.storage.traits import IPromiseStore
+from resonate.stores.traits import IPromiseStore
 from resonate.time import now
 
 if TYPE_CHECKING:
@@ -25,7 +25,7 @@ def _timeout(promise_record: DurablePromiseRecord) -> DurablePromiseRecord:
                 new_status = "RESOLVED"
         return DurablePromiseRecord(
             new_status,
-            promise_id=promise_record.promise_id,
+            id=promise_record.id,
             timeout=promise_record.timeout,
             param=promise_record.param,
             value=Value(headers=None, data=None),
@@ -40,9 +40,9 @@ def _timeout(promise_record: DurablePromiseRecord) -> DurablePromiseRecord:
 
 class IStorage(ABC):
     @abstractmethod
-    def rmw_durable_promise(
+    def rmw(
         self,
-        promise_id: str,
+        id: str,
         fn: Callable[[DurablePromiseRecord | None], DurablePromiseRecord],
     ) -> DurablePromiseRecord: ...
 
@@ -51,28 +51,28 @@ class MemoryStorage(IStorage):
     def __init__(self) -> None:
         self._durable_promises: dict[str, DurablePromiseRecord] = {}
 
-    def rmw_durable_promise(
+    def rmw(
         self,
-        promise_id: str,
+        id: str,
         fn: Callable[[DurablePromiseRecord | None], DurablePromiseRecord],
     ) -> DurablePromiseRecord:
-        promise_record = self._durable_promises.get(promise_id)
+        promise_record = self._durable_promises.get(id)
         if promise_record is not None:
             promise_record = _timeout(promise_record)
         item = fn(promise_record)
-        self._durable_promises[promise_id] = item
+        self._durable_promises[id] = item
         return item
 
 
 @final
-class LocalStore(IPromiseStore):
-    def __init__(self, storage: IStorage | None = None) -> None:
-        self._storage = storage or MemoryStorage()
+class LocalPromiseStore(IPromiseStore):
+    def __init__(self, storage: IStorage) -> None:
+        self._storage = storage
 
     def create(  # noqa: PLR0913
         self,
         *,
-        promise_id: str,
+        id: str,
         ikey: str | None,
         strict: bool,
         headers: dict[str, str] | None,
@@ -86,7 +86,7 @@ class LocalStore(IPromiseStore):
             if promise_record is None:
                 return DurablePromiseRecord(
                     state="PENDING",
-                    promise_id=promise_id,
+                    id=id,
                     timeout=timeout,
                     param=Param(headers=headers, data=data),
                     value=Value(headers=None, data=None),
@@ -110,12 +110,12 @@ class LocalStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_create)
+        return self._storage.rmw(id=id, fn=_create)
 
     def reject(
         self,
         *,
-        promise_id: str,
+        id: str,
         ikey: str | None,
         strict: bool,
         headers: dict[str, str] | None,
@@ -130,7 +130,7 @@ class LocalStore(IPromiseStore):
             if promise_record.is_pending():
                 return DurablePromiseRecord(
                     state="REJECTED",
-                    promise_id=promise_record.promise_id,
+                    id=promise_record.id,
                     timeout=promise_record.timeout,
                     param=promise_record.param,
                     value=Value(headers=headers, data=data),
@@ -151,12 +151,12 @@ class LocalStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_reject)
+        return self._storage.rmw(id=id, fn=_reject)
 
     def cancel(
         self,
         *,
-        promise_id: str,
+        id: str,
         ikey: str | None,
         strict: bool,
         headers: dict[str, str] | None,
@@ -171,7 +171,7 @@ class LocalStore(IPromiseStore):
             if promise_record.is_pending():
                 return DurablePromiseRecord(
                     state="REJECTED_CANCELED",
-                    promise_id=promise_record.promise_id,
+                    id=promise_record.id,
                     timeout=promise_record.timeout,
                     param=promise_record.param,
                     value=Value(headers=headers, data=data),
@@ -192,12 +192,12 @@ class LocalStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_cancel)
+        return self._storage.rmw(id=id, fn=_cancel)
 
     def resolve(
         self,
         *,
-        promise_id: str,
+        id: str,
         ikey: str | None,
         strict: bool,
         headers: dict[str, str] | None,
@@ -212,7 +212,7 @@ class LocalStore(IPromiseStore):
             if promise_record.is_pending():
                 return DurablePromiseRecord(
                     state="RESOLVED",
-                    promise_id=promise_record.promise_id,
+                    id=promise_record.id,
                     timeout=promise_record.timeout,
                     param=promise_record.param,
                     value=Value(headers=headers, data=data),
@@ -233,9 +233,9 @@ class LocalStore(IPromiseStore):
                 raise ResonateError(msg, "STORE_FORBIDDEN")
             return promise_record
 
-        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_resolve)
+        return self._storage.rmw(id=id, fn=_resolve)
 
-    def get(self, *, promise_id: str) -> DurablePromiseRecord:
+    def get(self, *, id: str) -> DurablePromiseRecord:
         def _get(
             promise_record: DurablePromiseRecord | None,
         ) -> DurablePromiseRecord:
@@ -244,16 +244,11 @@ class LocalStore(IPromiseStore):
 
             return promise_record
 
-        return self._storage.rmw_durable_promise(promise_id=promise_id, fn=_get)
+        return self._storage.rmw(id=id, fn=_get)
 
-    def search(
-        self,
-        *,
-        promise_id: str,
-        state: Literal[
-            "PENDING", "RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"
-        ],
-        tags: dict[str, str] | None,
-        limit: int | None = None,
-    ) -> list[DurablePromiseRecord]:
-        raise NotImplementedError
+
+@final
+class LocalStore:
+    def __init__(self, storage: IStorage | None = None) -> None:
+        self._storage = storage or MemoryStorage()
+        self.promises = LocalPromiseStore(storage=self._storage)

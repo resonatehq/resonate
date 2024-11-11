@@ -136,10 +136,10 @@ class FnOrCoroutine:
         self.kwargs = kwargs
 
     def to_req(
-        self, promise_id: str | None, func_name: str, tags: dict[str, str]
+        self, id: str | None, func_name: str, tags: dict[str, str]
     ) -> CreateDurablePromiseReq:
         return CreateDurablePromiseReq(
-            promise_id=promise_id,
+            id=id,
             data={
                 "func": func_name,
                 "args": self.args,

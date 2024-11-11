@@ -32,7 +32,7 @@ from resonate.dataclasses import (
     RouteInfo,
     Runnable,
 )
-from resonate.dependency_injection import Dependencies
+from resonate.dependencies import Dependencies
 from resonate.encoders import JsonEncoder
 from resonate.events import (
     ExecutionAwaited,
@@ -57,7 +57,8 @@ if TYPE_CHECKING:
     )
     from resonate.options import LOptions
     from resonate.record import DurablePromiseRecord
-    from resonate.storage.traits import IPromiseStore
+    from resonate.stores.local import LocalStore
+    from resonate.stores.remote import RemoteStore
     from resonate.typing import (
         AwaitingFor,
         CommandHandlerQueues,
@@ -112,7 +113,7 @@ class DSTScheduler:
             MockFn[Any],
         ]
         | None,
-        durable_promise_storage: IPromiseStore,
+        store: LocalStore | RemoteStore,
     ) -> None:
         self._stg_queue: list[tuple[LFI, str]] = []
         self._runnable_coros: Runnables = deque()
@@ -150,7 +151,7 @@ class DSTScheduler:
         self._handlers: CommandHandlers = {}
         self._handler_queues: CommandHandlerQueues = {}
 
-        self._durable_promise_storage = durable_promise_storage
+        self._store = store
         self._json_encoder = JsonEncoder()
         self._emphemeral_promise_memo = EphemeralMemo[str, Promise[Any]]()
 
@@ -227,7 +228,7 @@ class DSTScheduler:
 
     def add(
         self,
-        promise_id: str,
+        id: str,
         opts: LOptions,
         coro: DurableCoro[P, Any] | DurableFn[P, Any],
         /,
@@ -235,14 +236,14 @@ class DSTScheduler:
         **kwargs: P.kwargs,
     ) -> None:
         assert not self._emphemeral_promise_memo.has(
-            promise_id
+            id
         ), "There's already a promise with the same id"
 
         top_lvl = LFI(
             FnOrCoroutine(coro, *args, **kwargs),
             opts=opts,
         )
-        self._stg_queue.append((top_lvl, promise_id))
+        self._stg_queue.append((top_lvl, id))
 
     def _add_coro_to_runnables(
         self,
@@ -294,8 +295,8 @@ class DSTScheduler:
 
         self._events.append(
             ExecutionInvoked(
-                info.promise.promise_id,
-                info.promise.parent_promise_id(),
+                info.promise.id,
+                info.promise.parent_id(),
                 self.tick,
                 info.fn_or_coroutine.exec_unit.__name__,
                 info.fn_or_coroutine.args,
@@ -306,24 +307,22 @@ class DSTScheduler:
     def _create_promise_or_dedup(
         self,
         parent_promise: Promise[Any] | None,
-        promise_id: str,
+        id: str,
         action: PromiseActions,
     ) -> tuple[Promise[Any], bool]:
-        p = self._emphemeral_promise_memo.get(promise_id)
+        p = self._emphemeral_promise_memo.get(id)
         if p is not None:
             return p, True
 
         if parent_promise is not None:
-            p = parent_promise.child_promise(promise_id=promise_id, action=action)
+            p = parent_promise.child_promise(id=id, action=action)
         else:
             assert (
-                promise_id is not None
+                id is not None
             ), "If creating a root promise must provide a promise id."
-            p = Promise[Any](
-                promise_id=promise_id, action=action, parent_promise=parent_promise
-            )
+            p = Promise[Any](id=id, action=action, parent_promise=parent_promise)
 
-        self._emphemeral_promise_memo.add(p.promise_id, p)
+        self._emphemeral_promise_memo.add(p.id, p)
         if isinstance(action, LFI):
             if isinstance(action.exec_unit, Command):
                 raise NotImplementedError
@@ -339,21 +338,19 @@ class DSTScheduler:
         if not p.durable:
             self._events.append(
                 PromiseCreated(
-                    promise_id=p.promise_id,
+                    id=p.id,
                     tick=self.tick,
-                    parent_promise_id=p.parent_promise_id(),
+                    parent_id=p.parent_id(),
                 )
             )
             return p, False
 
-        durable_promise_record = self._create_durable_promise_record(
-            promise_id=p.promise_id, data=data
-        )
+        durable_promise_record = self._create_durable_promise_record(id=p.id, data=data)
         self._events.append(
             PromiseCreated(
-                promise_id=p.promise_id,
+                id=p.id,
                 tick=self.tick,
-                parent_promise_id=p.parent_promise_id(),
+                parent_id=p.parent_id(),
             )
         )
         if durable_promise_record.is_pending():
@@ -388,13 +385,13 @@ class DSTScheduler:
         return v
 
     def _move_next_top_lvl_invocation_to_runnables(
-        self, top_lvl: LFI, promise_id: str
+        self, top_lvl: LFI, id: str
     ) -> Promise[Any]:
         assert isinstance(top_lvl.exec_unit, FnOrCoroutine)
 
         p, deduped = self._create_promise_or_dedup(
             parent_promise=None,
-            promise_id=promise_id,
+            id=id,
             action=top_lvl,
         )
         if deduped:
@@ -456,7 +453,7 @@ class DSTScheduler:
     ) -> None:
         if promise.durable:
             completed_record = self._complete_durable_promise_record(
-                promise_id=promise.promise_id,
+                id=promise.id,
                 value=value,
             )
             assert (
@@ -467,18 +464,18 @@ class DSTScheduler:
         else:
             promise.set_result(value)
         assert self._emphemeral_promise_memo.has(
-            promise.promise_id
+            promise.id
         ), "Resolved promise should be in the memo"
 
         self._events.append(
             PromiseCompleted(
-                promise_id=promise.promise_id,
+                id=promise.id,
                 tick=self.tick,
                 value=value,
-                parent_promise_id=promise.parent_promise_id(),
+                parent_id=promise.parent_id(),
             )
         )
-        self._emphemeral_promise_memo.pop(promise.promise_id)
+        self._emphemeral_promise_memo.pop(promise.id)
 
     def _maybe_fail(self) -> None:
         if (
@@ -525,9 +522,9 @@ class DSTScheduler:
 
                 self._events.append(
                     ExecutionTerminated(
-                        promise_id=promise.promise_id,
+                        id=promise.id,
                         tick=self.tick,
-                        parent_promise_id=promise.parent_promise_id(),
+                        parent_id=promise.parent_id(),
                     )
                 )
 
@@ -546,20 +543,20 @@ class DSTScheduler:
             self._assert_eventually(self.deps, self.seed)
 
     def _complete_durable_promise_record(
-        self, promise_id: str, value: Result[Any, Exception]
+        self, id: str, value: Result[Any, Exception]
     ) -> DurablePromiseRecord:
         if isinstance(value, Ok):
-            return self._durable_promise_storage.resolve(
-                promise_id=promise_id,
-                ikey=utils.string_to_ikey(promise_id),
+            return self._store.promises.resolve(
+                id=id,
+                ikey=utils.string_to_ikey(id),
                 strict=False,
                 headers=None,
                 data=self._json_encoder.encode(value.unwrap()),
             )
         if isinstance(value, Err):
-            return self._durable_promise_storage.reject(
-                promise_id=promise_id,
-                ikey=utils.string_to_ikey(promise_id),
+            return self._store.promises.reject(
+                id=id,
+                ikey=utils.string_to_ikey(id),
                 strict=False,
                 headers=None,
                 data=self._json_encoder.encode(value.err()),
@@ -567,11 +564,11 @@ class DSTScheduler:
         assert_never(value)
 
     def _create_durable_promise_record(
-        self, promise_id: str, data: dict[str, Any] | None
+        self, id: str, data: dict[str, Any] | None
     ) -> DurablePromiseRecord:
-        return self._durable_promise_storage.create(
-            promise_id=promise_id,
-            ikey=utils.string_to_ikey(promise_id),
+        return self._store.promises.create(
+            id=id,
+            ikey=utils.string_to_ikey(id),
             strict=False,
             headers=None,
             data=self._json_encoder.encode(data) if data is not None else None,
@@ -582,19 +579,19 @@ class DSTScheduler:
     def _process_local_invocation(
         self, invocation: LFI, runnable: Runnable[Any]
     ) -> Promise[Any]:
-        promise_id = (
-            invocation.opts.promise_id
-            if invocation.opts.promise_id is not None
+        id = (
+            invocation.opts.id
+            if invocation.opts.id is not None
             else runnable.coro.route_info.promise.child_name()
         )
 
-        p = self._emphemeral_promise_memo.get(promise_id)
+        p = self._emphemeral_promise_memo.get(id)
         if p is not None:
             return p
 
         p, deduped = self._create_promise_or_dedup(
             parent_promise=runnable.coro.route_info.promise,
-            promise_id=promise_id,
+            id=id,
             action=invocation,
         )
         if deduped:
@@ -628,9 +625,9 @@ class DSTScheduler:
         self._awaiting.append(p, coro, awaiting_for)
         self._events.append(
             ExecutionAwaited(
-                promise_id=coro.route_info.promise.promise_id,
+                id=coro.route_info.promise.id,
                 tick=self.tick,
-                parent_promise_id=coro.route_info.promise.parent_promise_id(),
+                parent_id=coro.route_info.promise.parent_id(),
             )
         )
 
@@ -642,18 +639,18 @@ class DSTScheduler:
         if was_awaited:
             self._events.append(
                 ExecutionResumed(
-                    promise_id=runnable.coro.route_info.promise.promise_id,
+                    id=runnable.coro.route_info.promise.id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro.route_info.promise.parent_promise_id(),
+                    parent_id=runnable.coro.route_info.promise.parent_id(),
                 )
             )
 
         if isinstance(yieldable_or_final_value, FinalValue):
             self._events.append(
                 ExecutionTerminated(
-                    promise_id=runnable.coro.route_info.promise.promise_id,
+                    id=runnable.coro.route_info.promise.id,
                     tick=self.tick,
-                    parent_promise_id=runnable.coro.route_info.promise.parent_promise_id(),
+                    parent_id=runnable.coro.route_info.promise.parent_id(),
                 )
             )
             self._resolve_promise(
@@ -744,9 +741,9 @@ class DSTScheduler:
 
     def _run_sequentially(self) -> list[Promise[Any]]:
         promises: list[Promise[Any]] = []
-        for top_lvl, promise_id in self._stg_queue:
+        for top_lvl, id in self._stg_queue:
             promises.append(
-                self._move_next_top_lvl_invocation_to_runnables(top_lvl, promise_id)
+                self._move_next_top_lvl_invocation_to_runnables(top_lvl, id)
             )
             self._run()
 
@@ -754,9 +751,9 @@ class DSTScheduler:
 
     def _run_concurrently(self) -> list[Promise[Any]]:
         promises: list[Promise[Any]] = []
-        for top_lvl, promise_id in self._stg_queue:
+        for top_lvl, id in self._stg_queue:
             promises.append(
-                self._move_next_top_lvl_invocation_to_runnables(top_lvl, promise_id)
+                self._move_next_top_lvl_invocation_to_runnables(top_lvl, id)
             )
         self._run()
         return promises

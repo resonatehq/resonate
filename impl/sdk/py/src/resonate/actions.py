@@ -26,13 +26,11 @@ class RFI:
     exec_unit: ExecutionUnit
     opts: ROptions = field(default=ROptions())
 
-    def with_options(
-        self, promise_id: str | None = None, target: str | None = None
-    ) -> Self:
+    def options(self, id: str | None = None, target: str | None = None) -> Self:
         assert not isinstance(
             self.exec_unit, Command
         ), "Options must be set on the command."
-        self.opts = ROptions(promise_id=promise_id, target=target)
+        self.opts = ROptions(id=id, target=target)
         return self
 
 
@@ -42,13 +40,11 @@ class RFC:
     exec_unit: ExecutionUnit
     opts: ROptions = field(default=ROptions())
 
-    def with_options(
-        self, promise_id: str | None = None, target: str | None = None
-    ) -> Self:
+    def options(self, id: str | None = None, target: str | None = None) -> Self:
         assert not isinstance(
             self.exec_unit, Command
         ), "Options must be set on the command."
-        self.opts = ROptions(promise_id=promise_id, target=target)
+        self.opts = ROptions(id=id, target=target)
         return self
 
     def to_invocation(self) -> RFI:
@@ -61,9 +57,9 @@ class LFC:
     exec_unit: ExecutionUnit
     opts: LOptions = field(default=LOptions())
 
-    def with_options(
+    def options(
         self,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
         *,
         durable: bool = True,
@@ -72,9 +68,7 @@ class LFC:
             assert not isinstance(
                 self.exec_unit, Command
             ), "Retry policies on batching are set when registering command handlers."
-        self.opts = LOptions(
-            durable=durable, promise_id=promise_id, retry_policy=retry_policy
-        )
+        self.opts = LOptions(durable=durable, id=id, retry_policy=retry_policy)
         return self
 
     def to_invocation(self) -> LFI:
@@ -89,14 +83,12 @@ class DeferredInvocation:
     deferred invocation.
     """
 
-    promise_id: str
+    id: str
     coro: FnOrCoroutine
     opts: LOptions = field(default=LOptions())
 
-    def with_options(self, *, retry_policy: RetryPolicy | None = None) -> Self:
-        self.opts = LOptions(
-            durable=True, promise_id=self.promise_id, retry_policy=retry_policy
-        )
+    def options(self, *, retry_policy: RetryPolicy | None = None) -> Self:
+        self.opts = LOptions(durable=True, id=self.id, retry_policy=retry_policy)
         return self
 
 
@@ -106,9 +98,9 @@ class LFI:
     exec_unit: ExecutionUnit
     opts: LOptions = field(default=LOptions())
 
-    def with_options(
+    def options(
         self,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
         *,
         durable: bool = True,
@@ -117,9 +109,7 @@ class LFI:
             assert not isinstance(
                 self.exec_unit, Command
             ), "Retry policies on batching are set when registering command handlers."
-        self.opts = LOptions(
-            durable=durable, promise_id=promise_id, retry_policy=retry_policy
-        )
+        self.opts = LOptions(durable=durable, id=id, retry_policy=retry_policy)
         return self
 
 
@@ -135,25 +125,25 @@ class All:
         self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
-    def with_options(
+    def options(
         self,
         *,
         durable: bool = True,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> Self:
         """
         Set options for the combinator.
 
         Args: durable (bool): Whether the promise is durable. Defaults to True.
-        promise_id (str | None): An optional identifier for the promise.
+        id (str | None): An optional identifier for the promise.
         retry_policy (RetryPolicy | None): An optional retry policy for the promise.
 
         Returns: Self: The combinator instance with updated options.
         """
         self.opts = LOptions(
             durable=durable,
-            promise_id=promise_id,
+            id=id,
             retry_policy=retry_policy if retry_policy is not None else never(),
         )
         return self
@@ -172,25 +162,25 @@ class AllSettled:
         self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
-    def with_options(
+    def options(
         self,
         *,
         durable: bool = True,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> Self:
         """
         Set options for the combinator.
 
         Args: durable (bool): Whether the promise is durable. Defaults to True.
-        promise_id (str | None): An optional identifier for the promise.
+        id (str | None): An optional identifier for the promise.
         retry_policy (RetryPolicy | None): An optional retry policy for the promise.
 
         Returns: Self: The combinator instance with updated options.
         """
         self.opts = LOptions(
             durable=durable,
-            promise_id=promise_id,
+            id=id,
             retry_policy=retry_policy if retry_policy is not None else never(),
         )
         return self
@@ -211,25 +201,25 @@ class Race:
         self.opts = LOptions(retry_policy=never())
         self.promises = promises
 
-    def with_options(
+    def options(
         self,
         *,
         durable: bool = True,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
     ) -> Self:
         """
         Set options for the combinator.
 
         Args: durable (bool): Whether the promise is durable. Defaults to True.
-        promise_id (str | None): An optional identifier for the promise.
+        id (str | None): An optional identifier for the promise.
         retry_policy (RetryPolicy | None): An optional retry policy for the promise.
 
         Returns: Self: The combinator instance with updated options.
         """
         self.opts = LOptions(
             durable=durable,
-            promise_id=promise_id,
+            id=id,
             retry_policy=retry_policy if retry_policy is not None else never(),
         )
         return self

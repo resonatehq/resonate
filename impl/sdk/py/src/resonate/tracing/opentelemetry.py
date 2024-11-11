@@ -42,8 +42,8 @@ class OpenTelemetryAdapter(IAdapter):
             __package__,
         )
 
-    def _get_span(self, promise_id: str) -> Span:
-        return self._spans[promise_id][0]
+    def _get_span(self, id: str) -> Span:
+        return self._spans[id][0]
 
     def _json_serialize_or_default(self, obj: Any) -> str:  # noqa: ANN401
         try:
@@ -54,36 +54,34 @@ class OpenTelemetryAdapter(IAdapter):
     def process_event(self, event: SchedulerEvents) -> None:
         if isinstance(event, PromiseCreated):
             assert (
-                event.promise_id not in self._spans
+                event.id not in self._spans
             ), "There shouldn't be never another span with same name."
-            self._create_span(
-                event.promise_id, event.parent_promise_id, start_time=event.tick
-            )
+            self._create_span(event.id, event.parent_id, start_time=event.tick)
         elif isinstance(event, PromiseCompleted):
             assert (
-                event.promise_id in self._spans
+                event.id in self._spans
             ), "There should always be an span with that name."
-            self._close_span(event.promise_id, end_time=event.tick)
+            self._close_span(event.id, end_time=event.tick)
         elif isinstance(event, ExecutionInvoked):
-            span = self._get_span(event.promise_id)
+            span = self._get_span(event.id)
             span.add_event(
                 ExecutionInvoked.__name__,
             )
         elif isinstance(event, ExecutionTerminated):
-            span = self._get_span(event.promise_id)
+            span = self._get_span(event.id)
             span.add_event(
                 ExecutionTerminated.__name__,
                 timestamp=event.tick,
             )
         elif isinstance(event, ExecutionResumed):
-            span = self._get_span(event.promise_id)
+            span = self._get_span(event.id)
 
             span.add_event(
                 ExecutionResumed.__name__,
                 timestamp=event.tick,
             )
         elif isinstance(event, ExecutionAwaited):
-            span = self._get_span(event.promise_id)
+            span = self._get_span(event.id)
             span.add_event(
                 ExecutionAwaited.__name__,
                 timestamp=event.tick,
@@ -91,11 +89,9 @@ class OpenTelemetryAdapter(IAdapter):
         else:
             assert_never(event)
 
-    def _create_span(
-        self, promise_id: str, parent_promise_id: str | None, start_time: int
-    ) -> None:
+    def _create_span(self, id: str, parent_id: str | None, start_time: int) -> None:
         parent_span_and_token = (
-            self._spans[parent_promise_id] if parent_promise_id is not None else None
+            self._spans[parent_id] if parent_id is not None else None
         )
         parent_span: Span | None = None
         if parent_span_and_token is not None:
@@ -106,19 +102,19 @@ class OpenTelemetryAdapter(IAdapter):
         )
         token = context.attach(parent_ctx) if parent_ctx is not None else None
         new_span = self._tracer.start_span(
-            name=promise_id, context=parent_ctx, start_time=start_time
+            name=id, context=parent_ctx, start_time=start_time
         )
 
         assert (
-            promise_id not in self._spans
+            id not in self._spans
         ), "There should not be two spans with the same name at the same time."
-        self._spans[promise_id] = (new_span, token)
+        self._spans[id] = (new_span, token)
 
-    def _close_span(self, promise_id: str, end_time: int) -> None:
+    def _close_span(self, id: str, end_time: int) -> None:
         assert (
-            promise_id in self._spans
+            id in self._spans
         ), "There should be an span associated with the promise id."
-        span, token = self._spans.pop(promise_id)
+        span, token = self._spans.pop(id)
         if token:
             context.detach(token=token)
         span.end(end_time=end_time)

@@ -19,16 +19,16 @@ P = ParamSpec("P")
 @final
 @dataclass(frozen=True)
 class PromiseCreated:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
 
 
 @final
 @dataclass(frozen=True)
 class PromiseCompleted:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
     value: Result[Any, Exception]
 
@@ -39,8 +39,8 @@ class PromiseCompleted:
 @final
 @dataclass(frozen=True)
 class ExecutionInvoked:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
     fn_name: str
     args: tuple[Any, ...]
@@ -50,24 +50,24 @@ class ExecutionInvoked:
 @final
 @dataclass(frozen=True)
 class ExecutionTerminated:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
 
 
 @final
 @dataclass(frozen=True)
 class ExecutionResumed:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
 
 
 @final
 @dataclass(frozen=True)
 class ExecutionAwaited:
-    promise_id: str
-    parent_promise_id: str | None
+    id: str
+    parent_id: str | None
     tick: int
 
 

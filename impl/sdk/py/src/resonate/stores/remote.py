@@ -13,23 +13,68 @@ from resonate.record import (
     Resume,
     TaskRecord,
 )
-from resonate.storage.traits import IPromiseStore, ITaskStore
+from resonate.stores.traits import IPromiseStore
 
 if TYPE_CHECKING:
-    from resonate.typing import Data, Headers, IdempotencyKey, State, Tags
+    from resonate.typing import Data, Headers, IdempotencyKey
 
 
 @final
-class RemoteServer(IPromiseStore, ITaskStore):
+class RemoteCallbackStore:
     def __init__(
         self,
         url: str,
-        request_timeout: int = 10,
-        encoder: IEncoder[str, str] | None = None,
+        request_timeout: int,
+        encoder: IEncoder[str, str],
     ) -> None:
         self.url = url
         self._request_timeout = request_timeout
-        self._encoder = encoder or Base64Encoder()
+        self._encoder = encoder
+
+    def create(
+        self,
+        *,
+        id: str,
+        root_id: str,
+        timeout: int,
+        recv: str | dict[str, Any],
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        response = requests.post(
+            url=f"{self.url}/callbacks",
+            json={
+                "promiseId": id,
+                "rootPromiseId": root_id,
+                "timeout": timeout,
+                "recv": recv,
+            },
+            timeout=self._request_timeout,
+        )
+
+        _ensure_success(response)
+        data = response.json()
+
+        callback_data = data["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
+        )
+
+
+@final
+class RemotePromiseStore(IPromiseStore):
+    def __init__(
+        self,
+        url: str,
+        request_timeout: int,
+        encoder: IEncoder[str, str],
+    ) -> None:
+        self.url = url
+        self._request_timeout = request_timeout
+        self._encoder = encoder
 
     def _initialize_headers(
         self, *, strict: bool, ikey: IdempotencyKey
@@ -43,7 +88,7 @@ class RemoteServer(IPromiseStore, ITaskStore):
     def create_with_task(  # noqa: PLR0913
         self,
         *,
-        promise_id: str,
+        id: str,
         ikey: str | None,
         strict: bool,
         headers: dict[str, str] | None,
@@ -60,7 +105,7 @@ class RemoteServer(IPromiseStore, ITaskStore):
             headers=request_headers,
             json={
                 "promise": {
-                    "id": promise_id,
+                    "id": id,
                     "param": {
                         "headers": headers,
                         "data": self._encode_data(data),
@@ -87,7 +132,178 @@ class RemoteServer(IPromiseStore, ITaskStore):
             return durable_promise, None
         return durable_promise, TaskRecord.decode(task_data, encoder=self._encoder)
 
-    def claim_task(
+    def create_with_callback(  # noqa: PLR0913
+        self,
+        *,
+        id: str,
+        ikey: str | None,
+        strict: bool,
+        timeout: int,
+        headers: dict[str, str] | None,
+        data: str | None,
+        tags: dict[str, str] | None,
+        root_id: str,
+        recv: str | dict[str, Any],
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+
+        response = requests.post(
+            url=f"{self.url}/promises/callback",
+            headers=request_headers,
+            json={
+                "promise": {
+                    "id": id,
+                    "timeout": timeout,
+                    "param": {"headers": headers, "data": self._encode_data(data)},
+                    "tags": tags,
+                },
+                "callback": {
+                    "rootPromiseId": root_id,
+                    "timeout": timeout,
+                    "recv": recv,
+                },
+            },
+            timeout=self._request_timeout,
+        )
+        _ensure_success(response)
+        data_json = response.json()
+
+        callback_data = data_json["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data_json["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
+        )
+
+    def create(  # noqa: PLR0913
+        self,
+        *,
+        id: str,
+        ikey: str | None,
+        strict: bool,
+        headers: dict[str, str] | None,
+        data: str | None,
+        timeout: int,
+        tags: dict[str, str] | None,
+    ) -> DurablePromiseRecord:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+
+        response = requests.post(
+            url=f"{self.url}/promises",
+            headers=request_headers,
+            json={
+                "id": id,
+                "param": {
+                    "headers": headers,
+                    "data": self._encode_data(data),
+                },
+                "timeout": timeout,
+                "tags": tags,
+            },
+            timeout=self._request_timeout,
+        )
+
+        _ensure_success(response)
+
+        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
+
+    def cancel(
+        self,
+        *,
+        id: str,
+        ikey: IdempotencyKey,
+        strict: bool,
+        headers: Headers,
+        data: Data,
+    ) -> DurablePromiseRecord:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+        response = requests.patch(
+            url=f"{self.url}/promises/{id}",
+            headers=request_headers,
+            json={
+                "state": "REJECTED_CANCELED",
+                "value": {"headers": headers, "data": self._encode_data(data)},
+            },
+            timeout=self._request_timeout,
+        )
+        _ensure_success(response)
+        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
+
+    def resolve(
+        self,
+        *,
+        id: str,
+        ikey: IdempotencyKey,
+        strict: bool,
+        headers: Headers,
+        data: Data,
+    ) -> DurablePromiseRecord:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+
+        response = requests.patch(
+            f"{self.url}/promises/{id}",
+            headers=request_headers,
+            json={
+                "state": "RESOLVED",
+                "value": {"headers": headers, "data": self._encode_data(data)},
+            },
+            timeout=self._request_timeout,
+        )
+        _ensure_success(response)
+        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
+
+    def reject(
+        self,
+        *,
+        id: str,
+        ikey: IdempotencyKey,
+        strict: bool,
+        headers: Headers,
+        data: Data,
+    ) -> DurablePromiseRecord:
+        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
+
+        response = requests.patch(
+            f"{self.url}/promises/{id}",
+            headers=request_headers,
+            json={
+                "state": "REJECTED",
+                "value": {"headers": headers, "data": self._encode_data(data)},
+            },
+            timeout=self._request_timeout,
+        )
+        _ensure_success(response)
+        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
+
+    def get(self, *, id: str) -> DurablePromiseRecord:
+        response = requests.get(
+            f"{self.url}/promises/{id}", timeout=self._request_timeout
+        )
+        _ensure_success(response)
+        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
+
+    def _encode_data(self, data: str | None) -> str | None:
+        if data is None:
+            return None
+        return _encode(data, self._encoder)
+
+
+@final
+class RemoteTaskStore:
+    def __init__(
+        self,
+        url: str,
+        request_timeout: int,
+        encoder: IEncoder[str, str],
+    ) -> None:
+        self.url = url
+        self._request_timeout = request_timeout
+        self._encoder = encoder
+
+    def claim(
         self, *, task_id: str, counter: int, pid: str, ttl: int
     ) -> Invoke | Resume:
         response = requests.post(
@@ -113,53 +329,7 @@ class RemoteServer(IPromiseStore, ITaskStore):
 
         return Resume.decode(data=promises, encoder=self._encoder)
 
-    def create_with_callback(  # noqa: PLR0913
-        self,
-        *,
-        promise_id: str,
-        ikey: str | None,
-        strict: bool,
-        timeout: int,
-        headers: dict[str, str] | None,
-        data: str | None,
-        tags: dict[str, str] | None,
-        root_promise_id: str,
-        recv: str | dict[str, Any],
-    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-
-        response = requests.post(
-            url=f"{self.url}/promises/callback",
-            headers=request_headers,
-            json={
-                "promise": {
-                    "id": promise_id,
-                    "timeout": timeout,
-                    "param": {"headers": headers, "data": self._encode_data(data)},
-                    "tags": tags,
-                },
-                "callback": {
-                    "rootPromiseId": root_promise_id,
-                    "timeout": timeout,
-                    "recv": recv,
-                },
-            },
-            timeout=self._request_timeout,
-        )
-        _ensure_success(response)
-        data_json = response.json()
-
-        callback_data = data_json["callback"]
-        durable_promise = DurablePromiseRecord.decode(
-            data_json["promise"], encoder=self._encoder
-        )
-        if callback_data is None:
-            return durable_promise, None
-        return durable_promise, CallbackRecord.decode(
-            callback_data, encoder=self._encoder
-        )
-
-    def complete_task(self, *, task_id: str, counter: int) -> None:
+    def complete(self, *, task_id: str, counter: int) -> None:
         response = requests.post(
             url=f"{self.url}/tasks/complete",
             headers={},
@@ -171,7 +341,7 @@ class RemoteServer(IPromiseStore, ITaskStore):
         )
         _ensure_success(response)
 
-    def heartbeat_tasks(self, *, pid: str) -> int:
+    def heartbeat(self, *, pid: str) -> int:
         response = requests.post(
             url=f"{self.url}/tasks/heartbeat",
             headers={},
@@ -181,154 +351,27 @@ class RemoteServer(IPromiseStore, ITaskStore):
         _ensure_success(response)
         return response.json()["tasksAffected"]
 
-    def create_callback(
+
+@final
+class RemoteStore:
+    def __init__(
         self,
-        *,
-        promise_id: str,
-        root_promise_id: str,
-        timeout: int,
-        recv: str | dict[str, Any],
-    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
-        response = requests.post(
-            url=f"{self.url}/callbacks",
-            json={
-                "promiseId": promise_id,
-                "rootPromiseId": root_promise_id,
-                "timeout": timeout,
-                "recv": recv,
-            },
-            timeout=self._request_timeout,
+        url: str,
+        request_timeout: int = 10,
+        encoder: IEncoder[str, str] | None = None,
+    ) -> None:
+        self.url = url
+        self._request_timeout = request_timeout
+        self._encoder = encoder or Base64Encoder()
+        self.tasks = RemoteTaskStore(
+            url=self.url, request_timeout=self._request_timeout, encoder=self._encoder
         )
-
-        _ensure_success(response)
-        data = response.json()
-
-        callback_data = data["callback"]
-        durable_promise = DurablePromiseRecord.decode(
-            data["promise"], encoder=self._encoder
+        self.promises = RemotePromiseStore(
+            url=self.url, request_timeout=self._request_timeout, encoder=self._encoder
         )
-        if callback_data is None:
-            return durable_promise, None
-        return durable_promise, CallbackRecord.decode(
-            callback_data, encoder=self._encoder
+        self.callbacks = RemoteCallbackStore(
+            url=self.url, request_timeout=self._request_timeout, encoder=self._encoder
         )
-
-    def create(  # noqa: PLR0913
-        self,
-        *,
-        promise_id: str,
-        ikey: str | None,
-        strict: bool,
-        headers: dict[str, str] | None,
-        data: str | None,
-        timeout: int,
-        tags: dict[str, str] | None,
-    ) -> DurablePromiseRecord:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-
-        response = requests.post(
-            url=f"{self.url}/promises",
-            headers=request_headers,
-            json={
-                "id": promise_id,
-                "param": {
-                    "headers": headers,
-                    "data": self._encode_data(data),
-                },
-                "timeout": timeout,
-                "tags": tags,
-            },
-            timeout=self._request_timeout,
-        )
-
-        _ensure_success(response)
-
-        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
-
-    def cancel(
-        self,
-        *,
-        promise_id: str,
-        ikey: IdempotencyKey,
-        strict: bool,
-        headers: Headers,
-        data: Data,
-    ) -> DurablePromiseRecord:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-        response = requests.patch(
-            url=f"{self.url}/promises/{promise_id}",
-            headers=request_headers,
-            json={
-                "state": "REJECTED_CANCELED",
-                "value": {"headers": headers, "data": self._encode_data(data)},
-            },
-            timeout=self._request_timeout,
-        )
-        _ensure_success(response)
-        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
-
-    def resolve(
-        self,
-        *,
-        promise_id: str,
-        ikey: IdempotencyKey,
-        strict: bool,
-        headers: Headers,
-        data: Data,
-    ) -> DurablePromiseRecord:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-
-        response = requests.patch(
-            f"{self.url}/promises/{promise_id}",
-            headers=request_headers,
-            json={
-                "state": "RESOLVED",
-                "value": {"headers": headers, "data": self._encode_data(data)},
-            },
-            timeout=self._request_timeout,
-        )
-        _ensure_success(response)
-        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
-
-    def reject(
-        self,
-        *,
-        promise_id: str,
-        ikey: IdempotencyKey,
-        strict: bool,
-        headers: Headers,
-        data: Data,
-    ) -> DurablePromiseRecord:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-
-        response = requests.patch(
-            f"{self.url}/promises/{promise_id}",
-            headers=request_headers,
-            json={
-                "state": "REJECTED",
-                "value": {"headers": headers, "data": self._encode_data(data)},
-            },
-            timeout=self._request_timeout,
-        )
-        _ensure_success(response)
-        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
-
-    def get(self, *, promise_id: str) -> DurablePromiseRecord:
-        response = requests.get(
-            f"{self.url}/promises/{promise_id}", timeout=self._request_timeout
-        )
-        _ensure_success(response)
-        return DurablePromiseRecord.decode(data=response.json(), encoder=self._encoder)
-
-    def search(
-        self, *, promise_id: str, state: State, tags: Tags, limit: int | None = None
-    ) -> list[DurablePromiseRecord]:
-        raise NotImplementedError
-
-    def _encode_data(self, data: str | None) -> str | None:
-        if data is None:
-            return None
-        return _encode(data, self._encoder)
 
 
 def _ensure_success(resp: requests.Response) -> None:

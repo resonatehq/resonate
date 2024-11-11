@@ -7,10 +7,8 @@ from resonate.retry_policy import RetryPolicy, default_policy
 
 @final
 class ROptions:
-    def __init__(
-        self, promise_id: str | None = None, target: str | None = None
-    ) -> None:
-        self.promise_id = promise_id
+    def __init__(self, id: str | None = None, target: str | None = None) -> None:
+        self.id = id
         self.target = target
 
 
@@ -20,12 +18,12 @@ class LOptions:
         self,
         *,
         durable: bool = True,
-        promise_id: str | None = None,
+        id: str | None = None,
         retry_policy: RetryPolicy | None = None,
         tags: dict[str, str] | None = None,
     ) -> None:
         self.durable = durable
-        self.promise_id = promise_id
+        self.id = id
         self.retry_policy = (
             retry_policy if retry_policy is not None else default_policy()
         )

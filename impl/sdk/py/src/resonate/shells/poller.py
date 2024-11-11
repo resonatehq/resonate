@@ -27,9 +27,7 @@ class LongPoller:
 
     def _run(self) -> None:
         while True:
-            poll_url = (
-                f"{self._url}:8002/{self._scheduler.logic_group}/{self._scheduler.pid}"
-            )
+            poll_url = f"{self._url}:8002/{self._scheduler.group}/{self._scheduler.pid}"
             response = requests.get(  # noqa: S113
                 url=poll_url,
                 headers={"Accept": "text/event-stream"},

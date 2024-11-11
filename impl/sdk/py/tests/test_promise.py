@@ -13,33 +13,29 @@ if TYPE_CHECKING:
 def _foo(ctx: Context) -> None: ...
 def test_child_creation() -> None:
     action = LFI(exec_unit=FnOrCoroutine(_foo))
-    root_promise: Promise[Any] = Promise(
-        promise_id="a", action=action, parent_promise=None
-    )
+    root_promise: Promise[Any] = Promise(id="a", action=action, parent_promise=None)
     child_promise = root_promise.child_promise(
-        promise_id=root_promise.child_name(), action=action
+        id=root_promise.child_name(), action=action
     )
-    assert child_promise.promise_id == "a.1"
+    assert child_promise.id == "a.1"
     assert child_promise.parent_promise == root_promise
-    assert child_promise.root().promise_id == root_promise.promise_id
+    assert child_promise.root().id == root_promise.id
     child_child_promise = child_promise.child_promise(
         child_promise.child_name(), action
     )
-    assert child_child_promise.promise_id == "a.1.1"
+    assert child_child_promise.id == "a.1.1"
     assert child_child_promise.parent_promise == child_promise
-    assert child_child_promise.root().promise_id == root_promise.promise_id
+    assert child_child_promise.root().id == root_promise.id
 
 
 def test_leaf_promises() -> None:
     action = LFI(exec_unit=FnOrCoroutine(_foo))
-    root_promise: Promise[Any] = Promise(
-        promise_id="a", action=action, parent_promise=None
-    )
+    root_promise: Promise[Any] = Promise(id="a", action=action, parent_promise=None)
     child_promise1 = root_promise.child_promise(
-        promise_id=root_promise.child_name(), action=action
+        id=root_promise.child_name(), action=action
     )
     child_promise2 = root_promise.child_promise(
-        promise_id=root_promise.child_name(), action=action
+        id=root_promise.child_name(), action=action
     )
 
     assert (
@@ -52,13 +48,13 @@ def test_leaf_promises() -> None:
     )
 
     leaf_promise1_1 = child_promise1.child_promise(
-        promise_id=child_promise1.child_name(), action=action
+        id=child_promise1.child_name(), action=action
     )
     leaf_promise1_2 = child_promise1.child_promise(
-        promise_id=child_promise1.child_name(), action=action
+        id=child_promise1.child_name(), action=action
     )
     leaf_promise1_3 = child_promise1.child_promise(
-        promise_id=child_promise1.child_name(), action=action
+        id=child_promise1.child_name(), action=action
     )
     assert (
         len(
@@ -70,10 +66,10 @@ def test_leaf_promises() -> None:
     )
 
     leaf_promise2_1 = child_promise2.child_promise(
-        promise_id=child_promise2.child_name(), action=action
+        id=child_promise2.child_name(), action=action
     )
     leaf_promise2_2 = child_promise2.child_promise(
-        promise_id=child_promise2.child_name(), action=action
+        id=child_promise2.child_name(), action=action
     )
     assert (
         len(
@@ -91,7 +87,7 @@ def test_leaf_promises() -> None:
     )
 
     child_promise2_3 = child_promise2.child_promise(
-        promise_id=child_promise2.child_name(), action=action
+        id=child_promise2.child_name(), action=action
     )
     assert (
         len(
@@ -109,13 +105,13 @@ def test_leaf_promises() -> None:
         == 0
     )
     leaf_promise2_3_1 = child_promise2_3.child_promise(
-        promise_id=child_promise2_3.child_name(), action=action
+        id=child_promise2_3.child_name(), action=action
     )
     leaf_promise2_3_2 = child_promise2_3.child_promise(
-        promise_id=child_promise2_3.child_name(), action=action
+        id=child_promise2_3.child_name(), action=action
     )
     leaf_promise2_3_3 = child_promise2_3.child_promise(
-        promise_id=child_promise2_3.child_name(), action=action
+        id=child_promise2_3.child_name(), action=action
     )
 
     assert (
