@@ -1,6 +1,7 @@
 module github.com/resonatehq/resonate
 
-go 1.22.4
+go 1.22.7
+
 toolchain go1.22.9
 
 require (
