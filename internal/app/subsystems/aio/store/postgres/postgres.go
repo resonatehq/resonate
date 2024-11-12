@@ -47,12 +47,13 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
 
 	CREATE TABLE IF NOT EXISTS callbacks (
-		id         SERIAL PRIMARY KEY,
-		promise_id TEXT,
-		recv       BYTEA,
-		mesg       BYTEA,
-		timeout    INTEGER,
-		created_on BIGINT
+		id              SERIAL PRIMARY KEY,
+		promise_id      TEXT,
+		root_promise_id TEXT,
+		recv            BYTEA,
+		mesg            BYTEA,
+		timeout         INTEGER,
+		created_on      BIGINT
 	);
 
 	CREATE TABLE IF NOT EXISTS schedules (
@@ -90,18 +91,19 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id           SERIAL PRIMARY KEY,
-		process_id   TEXT,
-		state        INTEGER DEFAULT 1,
-		recv         BYTEA,
-		mesg         BYTEA,
-		timeout      BIGINT,
-		counter      INTEGER DEFAULT 1,
-		attempt      INTEGER DEFAULT 0,
-		ttl          INTEGER DEFAULT 0,
-		expires_at   BIGINT DEFAULT 0,
-		created_on   BIGINT,
-		completed_on BIGINT
+		id              SERIAL PRIMARY KEY,
+		process_id      TEXT,
+		state           INTEGER DEFAULT 1,
+		root_promise_id TEXT,
+		recv            BYTEA,
+		mesg            BYTEA,
+		timeout         BIGINT,
+		counter         INTEGER DEFAULT 1,
+		attempt         INTEGER DEFAULT 0,
+		ttl             INTEGER DEFAULT 0,
+		expires_at      BIGINT DEFAULT 0,
+		created_on      BIGINT,
+		completed_on    BIGINT
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
@@ -172,9 +174,9 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, recv, mesg, timeout, created_on)
+		(promise_id, root_promise_id, recv, mesg, timeout, created_on)
 	SELECT
-		$1, $2, $3, $4, $5
+		$1, $2, $3, $4, $5, $6
 	WHERE EXISTS
 		(SELECT 1 FROM promises WHERE id = $1 AND state = 1)
 	RETURNING id`
@@ -270,7 +272,7 @@ const (
 
 	TASK_SELECT_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
+		id, process_id, state, root_promise_id, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
 	FROM
 		tasks
 	WHERE
@@ -278,28 +280,64 @@ const (
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
-		id, process_id, state, recv, mesg, timeout, counter, attempt, ttl, expires_at, created_on, completed_on
-	FROM
-		tasks
+		id,
+		process_id,
+		state,
+		root_promise_id,
+		recv,
+		mesg,
+		timeout,
+		counter,
+		attempt,
+		ttl,
+		expires_at,
+		created_on,
+		completed_on
+	FROM tasks
 	WHERE
 		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
-	ORDER BY
-		id
-	LIMIT
-		$3`
+	ORDER BY root_promise_id, id
+	LIMIT $3`
+
+	TASK_SELECT_ENQUABLE_STATEMENT = `
+	SELECT DISTINCT ON (root_promise_id)
+		id,
+		process_id,
+		state,
+		root_promise_id,
+		recv,
+		mesg,
+		timeout,
+		counter,
+		attempt,
+		ttl,
+		expires_at,
+		created_on,
+		completed_on
+	FROM tasks t1
+	WHERE
+		state = 1 AND (expires_at <= $1 OR timeout <= $1)
+	AND NOT EXISTS (
+		SELECT 1
+		FROM tasks t2
+		WHERE t2.root_promise_id = t1.root_promise_id
+		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
+	)
+	ORDER BY root_promise_id, id
+	LIMIT $2`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, ttl, expires_at, created_on)
+		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8)
+		($1, $2, $3, $4, $5, $6, $7, $8, $9)
 	RETURNING id`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, created_on)
+		(recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, $1
+		recv, mesg, timeout, root_promise_id, $1
 	FROM
 		callbacks
 	WHERE
@@ -704,6 +742,9 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			case t_aio.ReadTasks:
 				util.Assert(command.ReadTasks != nil, "command must not be nil")
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
+			case t_aio.ReadEnqueueableTasks:
+				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
+				results[i][j], err = w.readEnquableTasks(tx, command.ReadEnquableTasks)
 			case t_aio.CreateTask:
 				util.Assert(command.CreateTask != nil, "command must not be nil")
 				results[i][j], err = w.createTask(tx, command.CreateTask)
@@ -1000,7 +1041,7 @@ func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallba
 
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
+	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
@@ -1391,6 +1432,7 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		&record.Id,
 		&record.ProcessId,
 		&record.State,
+		&record.RootPromiseId,
 		&record.Recv,
 		&record.Mesg,
 		&record.Timeout,
@@ -1404,7 +1446,7 @@ func (w *PostgresStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (
 		if err == sql.ErrNoRows {
 			rowsReturned = 0
 		} else {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 	}
 
@@ -1432,7 +1474,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 
 	rows, err := tx.Query(TASK_SELECT_ALL_STATEMENT, states, cmd.Time, cmd.Limit)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 	defer rows.Close()
 
@@ -1445,6 +1487,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.Id,
 			&record.ProcessId,
 			&record.State,
+			&record.RootPromiseId,
 			&record.Recv,
 			&record.Mesg,
 			&record.Timeout,
@@ -1455,7 +1498,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 			&record.CreatedOn,
 			&record.CompletedOn,
 		); err != nil {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 
 		records = append(records, record)
@@ -1471,6 +1514,49 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 	}, nil
 }
 
+func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, cmd.Time, cmd.Limit)
+	if err != nil {
+		return nil, store.StoreErr(err)
+	}
+	defer rows.Close()
+
+	rowsReturned := int64(0)
+	var records []*task.TaskRecord
+
+	for rows.Next() {
+		record := &task.TaskRecord{}
+		if err := rows.Scan(
+			&record.Id,
+			&record.ProcessId,
+			&record.State,
+			&record.RootPromiseId,
+			&record.Recv,
+			&record.Mesg,
+			&record.Timeout,
+			&record.Counter,
+			&record.Attempt,
+			&record.Ttl,
+			&record.ExpiresAt,
+			&record.CreatedOn,
+			&record.CompletedOn,
+		); err != nil {
+			return nil, store.StoreErr(err)
+		}
+
+		records = append(records, record)
+		rowsReturned++
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.ReadEnqueueableTasks,
+		ReadEnquableTasks: &t_aio.QueryTasksResult{
+			RowsReturned: rowsReturned,
+			Records:      records,
+		},
+	}, nil
+}
+
 func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
@@ -1479,18 +1565,18 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 
 	mesg, err := json.Marshal(cmd.Mesg)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
 			rowsAffected = 0
 		} else {
-			return nil, err
+			return nil, store.StoreErr(err)
 		}
 	}
 
@@ -1506,12 +1592,12 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 func (w *PostgresStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1543,12 +1629,12 @@ func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 		cmd.CurrentCounter,
 	)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{
@@ -1562,12 +1648,12 @@ func (w *PostgresStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 func (w *PostgresStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
-		return nil, err
+		return nil, store.StoreErr(err)
 	}
 
 	return &t_aio.Result{

@@ -2792,22 +2792,24 @@ var TestCases = []*testCase{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
 						{
-							Id:        "1",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("foo"),
-							Mesg:      []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
-							Timeout:   1,
-							CreatedOn: util.ToPointer[int64](1),
+							Id:            "2",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "bar",
+							Recv:          []byte("bar"),
+							Mesg:          []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
+							Timeout:       2,
+							CreatedOn:     util.ToPointer[int64](2),
 						},
 						{
-							Id:        "2",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("bar"),
-							Mesg:      []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
-							Timeout:   2,
-							CreatedOn: util.ToPointer[int64](2),
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
+							Timeout:       1,
+							CreatedOn:     util.ToPointer[int64](1),
 						},
 					},
 				},
@@ -2903,30 +2905,291 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*task.TaskRecord{
 						{
-							Id:        "1",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("foo"),
-							Mesg:      []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "2",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "bar",
+							Recv:          []byte("bar"),
+							Mesg:          []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:        "2",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("bar"),
-							Mesg:      []byte(`{"type":"resume","root":"bar","leaf":"bar"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "3",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "baz",
+							Recv:          []byte("baz"),
+							Mesg:          []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:        "3",
-							Counter:   1,
-							State:     task.Init,
-							Recv:      []byte("baz"),
-							Mesg:      []byte(`{"type":"resume","root":"baz","leaf":"baz"}`),
-							CreatedOn: util.ToPointer[int64](0),
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
 						},
 					},
+				},
+			},
+		},
+	},
+	{
+		name: "ReadEnquableTasks",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "pbar",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "baz"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "pbar",
+					Recv:      []byte("baz"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "baz"},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "pbar",
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "1",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Enqueued,
+					Counter:        2,
+					Attempt:        1,
+					Ttl:            1,
+					ExpiresAt:      1,
+					CompletedOn:    util.ToPointer[int64](1),
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.UpdateTaskCommand{
+					Id:             "5",
+					ProcessId:      util.ToPointer("pid"),
+					State:          task.Enqueued,
+					Counter:        2,
+					Attempt:        1,
+					Ttl:            1,
+					ExpiresAt:      1,
+					CompletedOn:    util.ToPointer[int64](1),
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+					Limit: 10,
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "4",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "5",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "6",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 2,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "1",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+						{
+							Id:            "4",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "pbar",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"pbar","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "4",
+							Counter:       1,
+							State:         task.Init,
+							RootPromiseId: "pbar",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"pbar","leaf":"foo"}`),
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.UpdateTask,
+				UpdateTask: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadEnqueueableTasks,
+				ReadEnquableTasks: &t_aio.QueryTasksResult{
+					RowsReturned: 0,
 				},
 			},
 		},
@@ -3094,17 +3357,18 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:          "1",
-							ProcessId:   util.ToPointer("pid"),
-							State:       task.Completed,
-							Recv:        []byte("foo"),
-							Mesg:        []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
-							Counter:     6,
-							Attempt:     5,
-							Ttl:         5,
-							ExpiresAt:   5,
-							CreatedOn:   util.ToPointer[int64](0),
-							CompletedOn: util.ToPointer[int64](5),
+							Id:            "1",
+							ProcessId:     util.ToPointer("pid"),
+							State:         task.Completed,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+							Counter:       6,
+							Attempt:       5,
+							Ttl:           5,
+							ExpiresAt:     5,
+							CreatedOn:     util.ToPointer[int64](0),
+							CompletedOn:   util.ToPointer[int64](5),
 						},
 					},
 				},

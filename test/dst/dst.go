@@ -352,8 +352,18 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return true, updatedModel
 			case Bc:
+				// There is only one "validator" for Bc once we have more than one validator
+				// we an consider moving this into its own file and set of data structures
 				updatedModel := model.Copy()
 				if req.bc.Task != nil {
+					for _, stored := range *updatedModel.tasks {
+						if stored.value.RootPromiseId == req.bc.Task.RootPromiseId &&
+							stored.value.State != task.Completed &&
+							stored.value.ExpiresAt > req.time {
+							fmt.Printf("Enqueue task invariant has been violated t1: %v t2: %v", stored.value, req.bc.Task)
+							return false, updatedModel
+						}
+					}
 					updatedModel.tasks.set(req.bc.Task.Id, req.bc.Task)
 				}
 				return true, updatedModel
