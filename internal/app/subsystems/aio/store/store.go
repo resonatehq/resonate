@@ -1,9 +1,7 @@
 package store
 
 import (
-	"fmt"
 	"log/slog"
-	"runtime"
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -72,14 +70,4 @@ func Collect(c <-chan *bus.SQE[t_aio.Submission, t_aio.Completion], f <-chan int
 	}
 
 	return batch, true
-}
-
-func StoreErr(err error) error {
-	pc, file, loc, ok := runtime.Caller(1)
-	details := runtime.FuncForPC(pc)
-	if ok && details != nil {
-		return fmt.Errorf("%w at %s %s:%d", err, details.Name(), file, loc)
-	}
-
-	return err
 }
