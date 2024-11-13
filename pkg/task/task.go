@@ -9,28 +9,26 @@ import (
 )
 
 type Task struct {
-	Id            string          `json:"id"`
-	Counter       int             `json:"counter"`
-	Timeout       int64           `json:"timeout"`
-	ProcessId     *string         `json:"processId,omitempty"`
-	State         State           `json:"-"`
-	RootPromiseId string          `json:"-"`
-	Recv          json.RawMessage `json:"-"`
-	Mesg          *message.Mesg   `json:"-"`
-	Attempt       int             `json:"-"`
-	Ttl           int             `json:"-"`
-	ExpiresAt     int64           `json:"-"`
-	CreatedOn     *int64          `json:"createdOn,omitempty"`
-	CompletedOn   *int64          `json:"completedOn,omitempty"`
+	Id          string          `json:"id"`
+	Counter     int             `json:"counter"`
+	Timeout     int64           `json:"timeout"`
+	ProcessId   *string         `json:"processId,omitempty"`
+	State       State           `json:"-"`
+	Recv        json.RawMessage `json:"-"`
+	Mesg        *message.Mesg   `json:"-"`
+	Attempt     int             `json:"-"`
+	Ttl         int             `json:"-"`
+	ExpiresAt   int64           `json:"-"`
+	CreatedOn   *int64          `json:"createdOn,omitempty"`
+	CompletedOn *int64          `json:"completedOn,omitempty"`
 }
 
 func (t *Task) String() string {
 	return fmt.Sprintf(
-		"Task(id=%s, processId=%s, state=%s, rootPromiseId=%s, recv=%s, mesg=%v, timeout=%d, counter=%d, attempt=%d, ttl=%d, expiresAt=%d, createdOn=%d, completedOn=%d)",
+		"Task(id=%s, processId=%s, state=%s, recv=%s, mesg=%v, timeout=%d, counter=%d, attempt=%d, ttl=%d, expiresAt=%d, createdOn=%d, completedOn=%d)",
 		t.Id,
 		util.SafeDeref(t.ProcessId),
 		t.State,
-		t.RootPromiseId,
 		t.Recv,
 		t.Mesg,
 		t.Timeout,

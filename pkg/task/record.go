@@ -7,19 +7,18 @@ import (
 )
 
 type TaskRecord struct {
-	Id            string
-	ProcessId     *string
-	State         State
-	RootPromiseId string
-	Recv          []byte
-	Mesg          []byte
-	Timeout       int64
-	Counter       int
-	Attempt       int
-	Ttl           int
-	ExpiresAt     int64
-	CreatedOn     *int64
-	CompletedOn   *int64
+	Id          string
+	ProcessId   *string
+	State       State
+	Recv        []byte
+	Mesg        []byte
+	Timeout     int64
+	Counter     int
+	Attempt     int
+	Ttl         int
+	ExpiresAt   int64
+	CreatedOn   *int64
+	CompletedOn *int64
 }
 
 func (r *TaskRecord) Task() (*Task, error) {
@@ -29,18 +28,17 @@ func (r *TaskRecord) Task() (*Task, error) {
 	}
 
 	return &Task{
-		Id:            r.Id,
-		ProcessId:     r.ProcessId,
-		State:         r.State,
-		RootPromiseId: r.RootPromiseId,
-		Recv:          r.Recv,
-		Mesg:          mesg,
-		Timeout:       r.Timeout,
-		Counter:       r.Counter,
-		Attempt:       r.Attempt,
-		Ttl:           r.Ttl,
-		ExpiresAt:     r.ExpiresAt,
-		CreatedOn:     r.CreatedOn,
-		CompletedOn:   r.CompletedOn,
+		Id:          r.Id,
+		ProcessId:   r.ProcessId,
+		State:       r.State,
+		Recv:        r.Recv,
+		Mesg:        mesg,
+		Timeout:     r.Timeout,
+		Counter:     r.Counter,
+		Attempt:     r.Attempt,
+		Ttl:         r.Ttl,
+		ExpiresAt:   r.ExpiresAt,
+		CreatedOn:   r.CreatedOn,
+		CompletedOn: r.CompletedOn,
 	}, nil
 }

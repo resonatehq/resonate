@@ -8,13 +8,12 @@ import (
 )
 
 type Callback struct {
-	Id            string          `json:"id"`
-	PromiseId     string          `json:"promiseId"`
-	RootPromiseId string          `json:"rootPromiseId"`
-	Recv          json.RawMessage `json:"-"`
-	Mesg          *message.Mesg   `json:"-"`
-	Timeout       int64           `json:"timeout"`
-	CreatedOn     int64           `json:"createdOn"`
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"-"`
+	Mesg      *message.Mesg   `json:"-"`
+	Timeout   int64           `json:"timeout"`
+	CreatedOn int64           `json:"createdOn"`
 }
 
 func (c *Callback) String() string {
