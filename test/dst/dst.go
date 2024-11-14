@@ -357,10 +357,16 @@ func (d *DST) Model() porcupine.Model {
 				updatedModel := model.Copy()
 				if req.bc.Task != nil {
 					for _, stored := range *updatedModel.tasks {
+						if stored.value.Id == req.bc.Task.Id &&
+							(stored.value.Counter >= req.bc.Task.Counter ||
+								stored.value.Attempt >= req.bc.Task.Attempt) {
+							return false, updatedModel
+						}
+
 						if stored.value.RootPromiseId == req.bc.Task.RootPromiseId &&
 							stored.value.State != task.Completed &&
-							stored.value.ExpiresAt > req.time {
-							fmt.Printf("Enqueue task invariant has been violated t1: %v t2: %v", stored.value, req.bc.Task)
+							stored.value.ExpiresAt > req.time &&
+							stored.value.Timeout > req.time {
 							return false, updatedModel
 						}
 					}

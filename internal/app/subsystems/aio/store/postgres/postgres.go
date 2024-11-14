@@ -316,7 +316,7 @@ const (
 		completed_on
 	FROM tasks t1
 	WHERE
-		state = 1 AND (expires_at <= $1 OR timeout <= $1)
+		state = 1
 	AND NOT EXISTS (
 		SELECT 1
 		FROM tasks t2
@@ -324,7 +324,7 @@ const (
 		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
 	ORDER BY root_promise_id, id
-	LIMIT $2`
+	LIMIT $1`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
@@ -1515,7 +1515,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 }
 
 func (w *PostgresStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
-	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, cmd.Time, cmd.Limit)
+	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
