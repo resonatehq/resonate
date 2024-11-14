@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 import time
@@ -17,6 +18,7 @@ from typing import (
     final,
 )
 
+import requests
 from typing_extensions import ParamSpec, TypeAlias, assert_never
 
 from resonate import utils
@@ -32,7 +34,7 @@ from resonate.actions import (
 )
 from resonate.batching import CommandBuffer
 from resonate.collections import Awaiting, DoubleDict, EphemeralMemo
-from resonate.commands import Command, CreateDurablePromiseReq, remote_function
+from resonate.commands import Command, CreateDurablePromiseReq
 from resonate.context import Context
 from resonate.dataclasses import (
     FnOrCoroutine,
@@ -53,7 +55,7 @@ from resonate.events import (
 from resonate.functools import AsyncFnWrapper, FnWrapper, wrap_fn
 from resonate.itertools import FinalValue, iterate_coro
 from resonate.logging import logger
-from resonate.options import LOptions
+from resonate.options import LOptions, ROptions
 from resonate.promise import (
     Promise,
     all_promises_are_done,
@@ -268,7 +270,6 @@ class Scheduler:
 
         self._deps = Dependencies()
         self._ctx = Context(
-            seed=None,
             deps=self._deps,
         )
         self._json_encoder = JsonEncoder()
@@ -305,10 +306,12 @@ class Scheduler:
         self._worker_thread.start()
 
     def _heartbeat(self) -> None:
+        assert isinstance(self._store, RemoteStore)
         while True:
-            assert isinstance(self._store, RemoteStore)
-            affected = self._store.tasks.heartbeat(pid=self.pid)
-            logger.debug("Heatbeat affected %s tasks", affected)
+            affected: int | None = None
+            with contextlib.suppress(requests.exceptions.ConnectionError):
+                affected = self._store.tasks.heartbeat(pid=self.pid)
+                logger.debug("Heatbeat affected %s tasks", affected)
             time.sleep(2)
 
     def enqueue_task_record(self, task_record: TaskRecord) -> None:
@@ -584,9 +587,6 @@ class Scheduler:
         req: CreateDurablePromiseReq
         if isinstance(promise.action, LFI):
             if isinstance(promise.action.exec_unit, Command):
-                assert not isinstance(
-                    promise.action.exec_unit, CreateDurablePromiseReq
-                ), "This command is not allowed for lfi"
                 req = CreateDurablePromiseReq(id=promise.id)
             elif isinstance(promise.action.exec_unit, FnOrCoroutine):
                 func_name = self._registered_function.get_from_value(
@@ -607,10 +607,7 @@ class Scheduler:
             assert isinstance(
                 self._store, RemoteStore
             ), "Used storage does not support rfi."
-            if isinstance(promise.action.exec_unit, Command):
-                assert isinstance(
-                    promise.action.exec_unit, CreateDurablePromiseReq
-                ), "This is the only command allowed for rfi"
+            if isinstance(promise.action.exec_unit, CreateDurablePromiseReq):
                 req = promise.action.exec_unit
                 if req.id is None:
                     req.id = promise.id
@@ -624,7 +621,6 @@ class Scheduler:
                 attached_options = self._attached_options_to_top_lvl[func_name]
 
                 final_tags = attached_options.tags.copy()
-                target_url: str
                 if promise.action.opts.target is not None:
                     target_url = f"poll://{promise.action.opts.target}"
                 else:
@@ -635,6 +631,19 @@ class Scheduler:
                     promise.id,
                     func_name,
                     tags=final_tags,
+                )
+            elif isinstance(promise.action.exec_unit, tuple):
+                func_name, args, kwargs = promise.action.exec_unit
+                target_url = (
+                    promise.action.opts.target
+                    if promise.action.opts.target is not None
+                    else self.group
+                )
+                req = CreateDurablePromiseReq(
+                    id=promise.id,
+                    data={"func": func_name, "args": args, "kwargs": kwargs},
+                    headers=None,
+                    tags={"resonate:invoke": f"poll://{target_url}"},
                 )
 
             else:
@@ -678,21 +687,21 @@ class Scheduler:
     ) -> Promise[T]:
         return self.lfi(id, coro, *args, **kwargs)
 
-    def rfc(self, id: str, func_name: str, args: list[Any], *, target: str) -> Any:  # noqa: ANN401
+    def rfc(
+        self, id: str, func_name: str, args: tuple[Any, ...], *, target: str
+    ) -> Any:  # noqa: ANN401
         return self.rfi(id, func_name, args, target=target).result()
 
     def rfi(
-        self, id: str, func_name: str, args: list[Any], *, target: str
+        self, id: str, func_name: str, args: tuple[Any, ...], *, target: str
     ) -> Promise[Any]:
         p = self._dedup_promise(id)
         if p is not None:
             return p
-
-        invokable = remote_function(func_name, args, target=target, id=id)
         p = self._create_promise(
             parent_promise=None,
             id=id,
-            action=RFI(invokable),
+            action=RFI((func_name, args, {}), opts=ROptions(id=id, target=target)),
             claiming_task=False,
             registering_callback=True,
         )
@@ -700,7 +709,7 @@ class Scheduler:
         return p
 
     def trigger(
-        self, id: str, func_name: str, args: list[Any], *, target: str
+        self, id: str, func_name: str, args: tuple[Any, ...], *, target: str
     ) -> Promise[Any]:
         return self.rfi(id, func_name, args, target=target)
 
@@ -1079,9 +1088,6 @@ class Scheduler:
         self._awaiting.append(p, coro, awaiting_for)
 
         if isinstance(p.action, LFI) and isinstance(p.action.exec_unit, Command):
-            assert not isinstance(
-                p.action.exec_unit, CreateDurablePromiseReq
-            ), "This command is reserved for rfi."
             self._send_pending_commands_to_processor(type(p.action.exec_unit))
 
         promise = coro.route_info.promise
@@ -1154,10 +1160,8 @@ class Scheduler:
                 parent_id=promise.parent_id(),
             )
         )
-        if isinstance(self._store, RemoteStore):
-            assert self._claimed_tasks is not None
-            if promise.id in self._claimed_tasks:
-                self._complete_task_monitoring_promise(promise.id)
+        if self._claimed_tasks is not None and promise.id in self._claimed_tasks:
+            self._complete_task_monitoring_promise(promise.id)
 
     def _pop_from_memo_or_finish_partition_execution(
         self, promise: Promise[Any]
@@ -1347,11 +1351,11 @@ class Scheduler:
             self._store, RemoteStore
         ), "Used storage does not support rfi."
         id: str | None
-        if not isinstance(invocation.exec_unit, Command):
-            id = invocation.opts.id
-        else:
-            assert isinstance(invocation.exec_unit, CreateDurablePromiseReq)
+        if isinstance(invocation.exec_unit, CreateDurablePromiseReq):
             id = invocation.exec_unit.id
+        else:
+            id = invocation.opts.id
+
         if id is None:
             id = runnable.coro.route_info.promise.child_name()
 
@@ -1388,10 +1392,6 @@ class Scheduler:
         )
 
         if isinstance(invocation.exec_unit, Command):
-            assert not isinstance(
-                invocation.exec_unit, CreateDurablePromiseReq
-            ), "This command is reserved only for rfi."
-
             cmd_type = type(invocation.exec_unit)
             cmd_queue = self._cmd_buffers[cmd_type]
             cmd_queue.add(invocation.exec_unit, p)

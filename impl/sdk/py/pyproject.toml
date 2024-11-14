@@ -34,10 +34,12 @@ dev-dependencies = [
     "ruff>=0.6.3",
     "pydoctor>=24.3.3",
     "pydoclint>=0.5.8",
+    "vulture>=2.13",
 ]
 
 [tool.rye.scripts]
 check-types = "dmypy run --timeout 60 -- src tests"
+find-deadcode = "vulture src tests"
 
 [tool.hatch.metadata]
 allow-direct-references = true

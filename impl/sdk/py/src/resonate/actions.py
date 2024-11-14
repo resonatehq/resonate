@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, final
 
 from typing_extensions import ParamSpec, Self
 
-from resonate.commands import Command
+from resonate.commands import Command, CreateDurablePromiseReq
 from resonate.options import LOptions, ROptions
 from resonate.retry_policy import never
 
@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from resonate.dataclasses import FnOrCoroutine
     from resonate.promise import Promise
     from resonate.retry_policy import RetryPolicy
-    from resonate.typing import ExecutionUnit
 
 
 P = ParamSpec("P")
@@ -23,13 +22,17 @@ T = TypeVar("T")
 @final
 @dataclass
 class RFI:
-    exec_unit: ExecutionUnit
+    exec_unit: (
+        FnOrCoroutine
+        | tuple[str, tuple[Any, ...], dict[str, Any]]
+        | CreateDurablePromiseReq
+    )
     opts: ROptions = field(default=ROptions())
 
     def options(self, id: str | None = None, target: str | None = None) -> Self:
         assert not isinstance(
-            self.exec_unit, Command
-        ), "Options must be set on the command."
+            self.exec_unit, CreateDurablePromiseReq
+        ), "Options must be set on the cmd."
         self.opts = ROptions(id=id, target=target)
         return self
 
@@ -37,13 +40,17 @@ class RFI:
 @final
 @dataclass
 class RFC:
-    exec_unit: ExecutionUnit
+    exec_unit: (
+        FnOrCoroutine
+        | tuple[str, tuple[Any, ...], dict[str, Any]]
+        | CreateDurablePromiseReq
+    )
     opts: ROptions = field(default=ROptions())
 
     def options(self, id: str | None = None, target: str | None = None) -> Self:
         assert not isinstance(
-            self.exec_unit, Command
-        ), "Options must be set on the command."
+            self.exec_unit, CreateDurablePromiseReq
+        ), "Options must be set on the cmd."
         self.opts = ROptions(id=id, target=target)
         return self
 
@@ -54,7 +61,7 @@ class RFC:
 @final
 @dataclass
 class LFC:
-    exec_unit: ExecutionUnit
+    exec_unit: FnOrCoroutine | Command
     opts: LOptions = field(default=LOptions())
 
     def options(
@@ -95,7 +102,7 @@ class DeferredInvocation:
 @final
 @dataclass
 class LFI:
-    exec_unit: ExecutionUnit
+    exec_unit: FnOrCoroutine | Command
     opts: LOptions = field(default=LOptions())
 
     def options(

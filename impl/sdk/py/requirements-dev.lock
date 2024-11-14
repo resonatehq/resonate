@@ -55,6 +55,7 @@ twisted==24.7.0
 types-requests==2.32.0.20241016
 typing-extensions==4.12.2
 urllib3==2.2.3
+vulture==2.13
 wrapt==1.16.0
 zipp==3.20.2
 zope-interface==7.1.0

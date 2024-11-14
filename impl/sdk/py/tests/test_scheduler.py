@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from resonate import scheduler
-from resonate.commands import Command, CreateDurablePromiseReq
+from resonate.commands import Command
 from resonate.result import Ok
 from resonate.retry_policy import (
     Linear,
@@ -40,15 +40,6 @@ def baz(ctx: Context, name: str, sleep_time: float) -> Generator[Yieldable, Any,
         retry_policy=never()
     )
     return (yield p)
-
-
-def bar(
-    ctx: Context, name: str, sleep_time: float
-) -> Generator[Yieldable, Any, Promise[str]]:
-    p: Promise[str] = yield ctx.lfi(foo, name=name, sleep_time=sleep_time).options(
-        retry_policy=never()
-    )
-    return p
 
 
 @cache
@@ -512,37 +503,6 @@ def test_coro_retry(store: LocalStore | RemoteStore) -> None:
         p.result()
 
     assert tries == 4  # noqa: PLR2004
-
-
-def _raw_rfc(ctx: Context) -> Generator[Yieldable, Any, None]:
-    yield ctx.rfc(
-        CreateDurablePromiseReq(
-            id="abc",
-            data={
-                "func": "func",
-                "args": (1, 2),
-            },
-            tags={"demo": "test"},
-        )
-    )
-
-
-@pytest.mark.skipif(
-    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
-)
-def test_rfc_raw() -> None:
-    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
-
-    s = scheduler.Scheduler(store=store)
-    s.register(_raw_rfc)
-    p: Promise[None] = s.run("test-raw-rfc", _raw_rfc)
-    s.wait_until_blocked()
-    assert not p.done()
-
-    child_promise_record = store.promises.get(id="abc")
-    assert child_promise_record.id == "abc"
-    assert child_promise_record.state == "PENDING"
-    assert child_promise_record.tags == {"demo": "test"}
 
 
 @pytest.mark.parametrize("store", _promise_storages())

@@ -1,20 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from resonate.context import Context
+from typing import Any
 
 
-class Command:
-    def __call__(self, ctx: Context) -> None:
-        # This is not meant to be call. We are making the type system happy.
-        _ = ctx
-        msg = "You should never be here!"
-        raise AssertionError(msg)
+class Command: ...
 
 
-class CreateDurablePromiseReq(Command):
+class CreateDurablePromiseReq:
     def __init__(
         self,
         id: str | None,
@@ -26,22 +18,3 @@ class CreateDurablePromiseReq(Command):
         self.data = data
         self.headers = headers
         self.tags = tags
-
-
-def manual_completion(id: str | None) -> CreateDurablePromiseReq:
-    return CreateDurablePromiseReq(id=id)
-
-
-def remote_function(
-    func_name: str,
-    args: list[Any],
-    *,
-    target: str,
-    id: str | None = None,
-) -> CreateDurablePromiseReq:
-    return CreateDurablePromiseReq(
-        id=id,
-        data={"func": func_name, "args": args, "kwargs": {}},
-        headers=None,
-        tags={"resonate:invoke": f"poll://{target}"},
-    )

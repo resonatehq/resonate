@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from typing import TYPE_CHECKING, Any, final
+from typing import TYPE_CHECKING, final
 
 from opentelemetry import context, trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
@@ -44,12 +43,6 @@ class OpenTelemetryAdapter(IAdapter):
 
     def _get_span(self, id: str) -> Span:
         return self._spans[id][0]
-
-    def _json_serialize_or_default(self, obj: Any) -> str:  # noqa: ANN401
-        try:
-            return json.dumps(obj)
-        except TypeError as e:
-            return str(e)
 
     def process_event(self, event: SchedulerEvents) -> None:
         if isinstance(event, PromiseCreated):

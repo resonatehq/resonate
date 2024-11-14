@@ -16,17 +16,14 @@ from resonate.actions import (
     DeferredInvocation,
     Race,
 )
-from resonate.batching import CmdBuffer
 from resonate.commands import Command
 from resonate.context import Context
-from resonate.dataclasses import FnOrCoroutine, Runnable
+from resonate.dataclasses import Runnable
 from resonate.promise import Promise
 
 T = TypeVar("T")
 P = ParamSpec("P")
 
-
-ExecutionUnit: TypeAlias = Union[Command, FnOrCoroutine]
 
 Combinator: TypeAlias = Union[All, AllSettled, Race]
 
@@ -38,18 +35,10 @@ DurableCoro: TypeAlias = Callable[Concatenate[Context, P], Generator[Yieldable, 
 DurableSyncFn: TypeAlias = Callable[Concatenate[Context, P], T]
 DurableAsyncFn: TypeAlias = Callable[Concatenate[Context, P], Coroutine[Any, Any, T]]
 DurableFn: TypeAlias = Union[DurableSyncFn[P, T], DurableAsyncFn[P, T]]
-MockFn: TypeAlias = Callable[[], T]
 
 
 AwaitingFor: TypeAlias = Literal["local", "remote"]
 Runnables: TypeAlias = deque[tuple[Runnable[Any], bool]]
-
-CommandHandlers: TypeAlias = dict[
-    type[Command], Callable[[list[Any]], Union[list[Any], None]]
-]
-CommandHandlerQueues: TypeAlias = dict[
-    type[Command], CmdBuffer[tuple[Promise[Any], Command]]
-]
 
 
 Headers: TypeAlias = Union[dict[str, str], None]

@@ -5,7 +5,6 @@ import sys
 from typing import (
     TYPE_CHECKING,
     Any,
-    Final,
     Generic,
     NoReturn,
     TypeVar,
@@ -151,7 +150,6 @@ Result: TypeAlias = Union[Ok[T_co], Err[E_co]]
 A type to use in `isinstance` checks.
 This is purely for convenience sake, as you could also just write `isinstance(res, (Ok, Err))`
 """  # noqa: E501
-OkErr: Final = (Ok, Err)
 
 
 class UnwrapError(Exception):

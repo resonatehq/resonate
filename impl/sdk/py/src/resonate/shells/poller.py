@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from threading import Thread
 from typing import TYPE_CHECKING
 
@@ -26,19 +27,24 @@ class LongPoller:
         self._worket_thread.start()
 
     def _run(self) -> None:
-        while True:
-            poll_url = f"{self._url}:8002/{self._scheduler.group}/{self._scheduler.pid}"
-            response = requests.get(  # noqa: S113
-                url=poll_url,
-                headers={"Accept": "text/event-stream"},
-                stream=True,
-            )
-            for line in response.iter_lines(chunk_size=None, decode_unicode=True):
-                if not line:
-                    continue
-                stripped: str = line.strip()
-                assert stripped.startswith("data:")
-                info = json.loads(stripped[5:])
-                self._scheduler.enqueue_task_record(
-                    TaskRecord.decode(info["task"], encoder=self._encoder)
+        try:
+            while True:
+                poll_url = (
+                    f"{self._url}:8002/{self._scheduler.group}/{self._scheduler.pid}"
                 )
+                response = requests.get(  # noqa: S113
+                    url=poll_url,
+                    headers={"Accept": "text/event-stream"},
+                    stream=True,
+                )
+                for line in response.iter_lines(chunk_size=None, decode_unicode=True):
+                    if not line:
+                        continue
+                    stripped: str = line.strip()
+                    assert stripped.startswith("data:")
+                    info = json.loads(stripped[5:])
+                    self._scheduler.enqueue_task_record(
+                        TaskRecord.decode(info["task"], encoder=self._encoder)
+                    )
+        except requests.exceptions.ConnectionError:
+            time.sleep(2)
