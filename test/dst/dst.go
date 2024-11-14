@@ -358,9 +358,9 @@ func (d *DST) Model() porcupine.Model {
 				if req.bc.Task != nil {
 					for _, stored := range *updatedModel.tasks {
 						if stored.value.Id == req.bc.Task.Id &&
-							(stored.value.Counter >= req.bc.Task.Counter ||
-								stored.value.Attempt >= req.bc.Task.Attempt) {
-							return false, updatedModel
+							(stored.value.Counter < req.bc.Task.Counter ||
+								stored.value.Attempt < req.bc.Task.Attempt) {
+							continue
 						}
 
 						if stored.value.RootPromiseId == req.bc.Task.RootPromiseId &&
