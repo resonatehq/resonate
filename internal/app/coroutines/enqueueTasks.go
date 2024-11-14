@@ -23,11 +23,10 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
-							Kind: t_aio.ReadTasks,
-							ReadTasks: &t_aio.ReadTasksCommand{
-								States: []task.State{task.Init},
-								Time:   c.Time(),
-								Limit:  config.TaskBatchSize,
+							Kind: t_aio.ReadEnqueueableTasks,
+							ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
+								Time:  c.Time(),
+								Limit: config.TaskBatchSize,
 							},
 						},
 					},
@@ -43,12 +42,13 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-		result := completion.Store.Results[0].ReadTasks
+		result := completion.Store.Results[0].ReadEnquableTasks
 		util.Assert(result != nil, "result must not be nil")
 
 		commands := []*t_aio.Command{}
 		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(result.Records))
 
+		expiresAt := c.Time() + config.TaskEnqueueDelay.Milliseconds()
 		for i, r := range result.Records {
 			if c.Time() < r.Timeout {
 				t, err := r.Task()
@@ -61,7 +61,21 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 					Kind: t_aio.Sender,
 					Tags: tags,
 					Sender: &t_aio.SenderSubmission{
-						Task:          t,
+						Task: &task.Task{
+							Id:            t.Id,
+							Counter:       t.Counter,
+							Timeout:       t.Timeout,
+							ProcessId:     t.ProcessId,
+							State:         task.Enqueued,
+							RootPromiseId: t.RootPromiseId,
+							Recv:          t.Recv,
+							Mesg:          t.Mesg,
+							Attempt:       t.Attempt,
+							Ttl:           t.Ttl,
+							ExpiresAt:     expiresAt,
+							CreatedOn:     t.CreatedOn,
+							CompletedOn:   t.CompletedOn,
+						},
 						ClaimHref:     fmt.Sprintf("%s/tasks/claim/%s/%d", config.Url, t.Id, t.Counter),
 						CompleteHref:  fmt.Sprintf("%s/tasks/complete/%s/%d", config.Url, t.Id, t.Counter),
 						HeartbeatHref: fmt.Sprintf("%s/tasks/heartbeat/%s/%d", config.Url, t.Id, t.Counter),
@@ -107,7 +121,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						Counter:        t.Counter,
 						Attempt:        t.Attempt,
 						Ttl:            0,
-						ExpiresAt:      c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time to be claimed
+						ExpiresAt:      expiresAt, // time to be claimed
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
@@ -121,7 +135,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						Counter:        t.Counter,
 						Attempt:        t.Attempt + 1,
 						Ttl:            0,
-						ExpiresAt:      c.Time() + config.TaskEnqueueDelay.Milliseconds(), // time until reenqueued
+						ExpiresAt:      expiresAt, // time until reenqueued
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
