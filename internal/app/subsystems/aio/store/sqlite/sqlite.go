@@ -341,14 +341,6 @@ const (
 	WHERE
 		id = ? AND state & ? != 0 AND counter = ?`
 
-	TASK_COMPLETE_BY_ROOT_ID_STATEMENT = `
-	UPDATE
-		tasks
-	SET
-		state = 8, completed_on = ? -- State 8 -> Completed
-	WHERE
-		root_promise_id = ? AND state <> 8`
-
 	TASK_HEARTBEAT_STATEMENT = `
 	UPDATE
 		tasks
@@ -543,7 +535,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	var lockTimeoutStmt *sql.Stmt
 	var taskInsertStmt *sql.Stmt
 	var tasksInsertStmt *sql.Stmt
-	var tasksCompleteStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
 	var taskHeartbeatStmt *sql.Stmt
 
@@ -740,17 +731,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 				util.Assert(command.CreateTasks != nil, "command must not be nil")
 				results[i][j], err = w.createTasks(tx, tasksInsertStmt, command.CreateTasks)
-			case t_aio.CompleteTasks:
-				if tasksCompleteStmt == nil {
-					tasksCompleteStmt, err = tx.Prepare(TASK_COMPLETE_BY_ROOT_ID_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-					defer tasksCompleteStmt.Close()
-				}
-
-				util.Assert(command.CompleteTasks != nil, "command must not be nil")
-				results[i][j], err = w.completeTasks(tx, tasksCompleteStmt, command.CompleteTasks)
 			case t_aio.UpdateTask:
 				if taskUpdateStmt == nil {
 					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
@@ -1627,25 +1607,6 @@ func (w *SqliteStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.C
 	return &t_aio.Result{
 		Kind: t_aio.CreateTasks,
 		CreateTasks: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
-	}, nil
-}
-
-func (w *SqliteStoreWorker) completeTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CompleteTasksCommand) (*t_aio.Result, error) {
-	res, err := stmt.Exec(cmd.CompletedOn, cmd.RootPromiseId)
-	if err != nil {
-		return nil, store.StoreErr(err)
-	}
-
-	rowsAffected, err := res.RowsAffected()
-	if err != nil {
-		return nil, store.StoreErr(err)
-	}
-
-	return &t_aio.Result{
-		Kind: t_aio.CompleteTasks,
-		CompleteTasks: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil
