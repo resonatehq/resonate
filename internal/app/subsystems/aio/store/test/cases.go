@@ -3376,6 +3376,424 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "CompleteTasks_MultipleTasksSameRoot",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "root",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "bar",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo2"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "bar",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "bar",
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.CompleteTasksCommand{
+					RootPromiseId: "root",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "3",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 2,
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 3,
+				},
+			},
+		},
+	},
+	{
+		name: "CompleteTasks_MixedRoots",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "root1",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "root2",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "bar",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root1", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "bar",
+					Recv:      []byte("bar"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root2", Leaf: "bar"},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "bar",
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.CompleteTasksCommand{
+					RootPromiseId: "root1",
+					CompletedOn:   5,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "1",
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "2",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "2",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "1",
+							State:         task.Completed,
+							RootPromiseId: "root1",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"resume","root":"root1","leaf":"foo"}`),
+							Counter:       1,
+							Attempt:       0,
+							Ttl:           0,
+							ExpiresAt:     0,
+							CreatedOn:     util.ToPointer[int64](0),
+							CompletedOn:   util.ToPointer[int64](5),
+						},
+					},
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "2",
+							State:         task.Init,
+							RootPromiseId: "root2",
+							Recv:          []byte("bar"),
+							Mesg:          []byte(`{"type":"resume","root":"root2","leaf":"bar"}`),
+							Counter:       1,
+							Attempt:       0,
+							Ttl:           0,
+							ExpiresAt:     0,
+							CreatedOn:     util.ToPointer[int64](0),
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "CompleteTasks_AlreadyCompleted",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "root",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					PromiseId: "foo",
+					Recv:      []byte("foo"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.CreateTasksCommand{
+					PromiseId: "foo",
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.CompleteTasksCommand{
+					RootPromiseId: "root",
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.CompleteTasksCommand{
+					RootPromiseId: "root",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+					LastInsertId: "1",
+				},
+			},
+			{
+				Kind: t_aio.CreateTasks,
+				CreateTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
+		name: "CompleteTasks_NonExistentRoot",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.CompleteTasksCommand{
+					RootPromiseId: "non_existent_root",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CompleteTasks,
+				CompleteTasks: &t_aio.AlterTasksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
+	{
 		name: "HeartbeatTasks",
 		commands: []*t_aio.Command{
 			{
