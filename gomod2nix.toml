@@ -2,8 +2,8 @@ schema = 3
 
 [mod]
   [mod."github.com/anishathalye/porcupine"]
-    version = "v0.1.6"
-    hash = "sha256-hM8nlRwPCjtSolROEnnmIOHnPzRIrdssZo7AtD8D9oA="
+    version = "v1.0.0"
+    hash = "sha256-c25CARK91Crt6AvFhTL1iacGFZTP+YPFF+q1/hP5tcE="
   [mod."github.com/apapsch/go-jsonmerge/v2"]
     version = "v2.0.0"
     hash = "sha256-xp/1B6XUN2EbddBfoUkTV3oTk+34m4kOZP+66HhfLg4="
