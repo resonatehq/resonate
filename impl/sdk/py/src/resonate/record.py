@@ -1,174 +1,150 @@
 from __future__ import annotations
 
-import json
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, TypedDict, final
+from concurrent.futures import Future
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 
-from typing_extensions import Self
+from typing_extensions import assert_never
 
-from resonate.encoders import IEncoder
+from resonate.actions import LFI, RFI
+from resonate.logging import logger
+from resonate.result import Err, Ok, Result
+from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
 if TYPE_CHECKING:
-    from resonate.encoders import IEncoder
-    from resonate.typing import Data, Headers, IdempotencyKey, State, Tags
+    from resonate.actions import LFI
+    from resonate.context import Context
+    from resonate.dataclasses import ResonateCoro
+    from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
-
-class _InvokeInfo(TypedDict):
-    func_name: str
-    args: list[Any]
-    kwargs: dict[str, Any]
-
-
-class Decodable(ABC):
-    @classmethod
-    @abstractmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self: ...
+T = TypeVar("T")
 
 
 @final
 @dataclass(frozen=True)
-class Param:
-    data: Data
-    headers: Headers
-
-
-@final
-@dataclass(frozen=True)
-class Value:
-    data: Data
-    headers: Headers
-
-
-@final
-@dataclass(frozen=True)
-class CallbackRecord(Decodable):
-    callback_id: str
+class Promise(Generic[T]):
     id: str
-    timeout: int
-    created_on: int
-
-    @classmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        _ = encoder
-        return cls(
-            callback_id=data["id"],
-            id=data["promiseId"],
-            timeout=data["timeout"],
-            created_on=data["createdOn"],
-        )
 
 
 @final
 @dataclass(frozen=True)
-class DurablePromiseRecord(Decodable):
-    state: State
+class Handle(Generic[T]):
     id: str
-    timeout: int
-    param: Param
-    value: Value
-    created_on: int
-    completed_on: int | None
-    idempotency_key_for_create: IdempotencyKey
-    idempotency_key_for_complete: IdempotencyKey
-    tags: Tags
+    _f: Future[T] = field(repr=False)
 
-    def invoke_info(self) -> _InvokeInfo:
-        assert self.param.data is not None
-        data_dict = json.loads(self.param.data)
-        return {
-            "func_name": data_dict["func"],
-            "args": data_dict["args"],
-            "kwargs": data_dict["kwargs"],
-        }
+    def result(self, timeout: float | None = None) -> T:
+        return self._f.result(timeout=timeout)
 
-    def is_completed(self) -> bool:
-        return not self.is_pending()
 
-    def is_timeout(self) -> bool:
-        return self.state == "REJECTED_TIMEDOUT"
+@final
+class Record(Generic[T]):
+    def __init__(
+        self,
+        id: str,
+        invocation: LFI | RFI,
+        parent: Record[Any] | None,
+        ctx: Context,
+    ) -> None:
+        self.id: str = id
+        self.parent: Record[Any] | None = parent
+        self.is_root: bool = (
+            True if self.parent is None else isinstance(invocation, RFI)
+        )
+        self._f = Future[T]()
+        self.children: list[Record[Any]] = []
+        self.invocation: LFI | RFI = invocation
+        self.promise = Promise[T](id=id)
+        self.handle = Handle[T](id=self.id, _f=self._f)
+        self.durable_promise: DurablePromiseRecord | None = None
+        self._task: TaskRecord | None = None
+        self.ctx = ctx
+        self.coro: ResonateCoro[T] | None = None
+        self.blocked_on: Record[Any] | None = None
+        self._num_children: int = 0
+        logger.info(
+            "New record %s %s created. Child of %s",
+            type(self.invocation).__name__,
+            self.id,
+            self.parent.id if self.parent else None,
+        )
 
-    def is_canceled(self) -> bool:
-        return self.state == "REJECTED_CANCELED"
+    def root(self) -> Record[Any]:
+        maybe_is_the_root = self
+        while True:
+            if maybe_is_the_root.is_root:
+                return maybe_is_the_root
+            assert maybe_is_the_root.parent is not None
+            maybe_is_the_root = maybe_is_the_root.parent
 
-    def is_rejected(self) -> bool:
-        return self.state == "REJECTED"
+    def add_child(self, record: Record[Any]) -> None:
+        self.children.append(record)
+        self._num_children += 1
 
-    def is_resolved(self) -> bool:
-        return self.state == "RESOLVED"
+    def add_coro(self, coro: ResonateCoro[T]) -> None:
+        assert self.coro is None
+        self.coro = coro
 
-    def is_pending(self) -> bool:
-        return self.state == "PENDING"
+    def add_durable_promise(self, durable_promise: DurablePromiseRecord) -> None:
+        assert self.id == durable_promise.id
+        assert self.durable_promise is None
+        self.durable_promise = durable_promise
+        logger.info("Durable promise added to %s", self.id)
 
-    @classmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        if data["param"]:
-            param = Param(
-                data=encoder.decode(data["param"]["data"]),
-                headers=data["param"].get("headers"),
-            )
+    def add_task(self, task: TaskRecord) -> None:
+        assert not self.has_task()
+        self._task = task
+        logger.info("Task added to %s", self.id)
+
+    def has_task(self) -> bool:
+        return self._task is not None
+
+    def remove_task(self) -> None:
+        assert self.has_task()
+        self._task = None
+        logger.info("Task completed for %s", self.id)
+
+    def get_task(self) -> TaskRecord:
+        assert self._task
+        return self._task
+
+    def clear_coro(self) -> None:
+        assert self.coro is not None
+        self.coro = None
+
+    def set_result(self, result: Result[Any, Exception]) -> None:
+        assert all(
+            r.done() for r in self.children
+        ), "All children record must be completed."
+        if isinstance(result, Ok):
+            self._f.set_result(result.unwrap())
+        elif isinstance(result, Err):
+            self._f.set_exception(result.err())
         else:
-            param = Param(data=None, headers=None)
+            assert_never(result)
 
-        if data["value"]:
-            value = Value(
-                data=encoder.decode(data["value"]["data"]),
-                headers=data["value"].get("headers"),
-            )
-        else:
-            value = Value(data=None, headers=None)
+    def safe_result(self) -> Result[Any, Exception]:
+        assert self.done()
+        try:
+            return Ok(self._f.result())
+        except Exception as e:  # noqa: BLE001
+            return Err(e)
 
-        return cls(
-            id=data["id"],
-            state=data["state"],
-            param=param,
-            value=value,
-            timeout=data["timeout"],
-            tags=data.get("tags"),
-            created_on=data["createdOn"],
-            completed_on=data.get("completedOn"),
-            idempotency_key_for_complete=data.get("idempotencyKeyForComplete"),
-            idempotency_key_for_create=data.get("idempotencyKeyForCreate"),
+    def done(self) -> bool:
+        return self._f.done()
+
+    def next_child_name(self) -> str:
+        return f"{self.id}.{self._num_children+1}"
+
+    def create_child(
+        self,
+        id: str,
+        invocation: LFI | RFI,
+    ) -> Record[Any]:
+        child_record = Record[Any](
+            id=id,
+            parent=self,
+            invocation=invocation,
+            ctx=self.ctx,
         )
-
-
-@final
-@dataclass(frozen=True)
-class Invoke(Decodable):
-    root_promise_store: DurablePromiseRecord
-
-    @classmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        return cls(
-            root_promise_store=DurablePromiseRecord.decode(data, encoder=encoder),
-        )
-
-
-@final
-@dataclass(frozen=True)
-class Resume(Decodable):
-    root_promise_store: DurablePromiseRecord
-    leaf_promise_store: DurablePromiseRecord
-
-    @classmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        return cls(
-            root_promise_store=DurablePromiseRecord.decode(
-                data["root"]["data"], encoder=encoder
-            ),
-            leaf_promise_store=DurablePromiseRecord.decode(
-                data["leaf"]["data"], encoder=encoder
-            ),
-        )
-
-
-@final
-@dataclass(frozen=True)
-class TaskRecord(Decodable):
-    task_id: str
-    counter: int
-
-    @classmethod
-    def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        _ = encoder
-        return cls(task_id=data["id"], counter=data["counter"])
+        self.add_child(child_record)
+        return child_record

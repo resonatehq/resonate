@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Callable, final
+from typing import TYPE_CHECKING, Any, Callable, final
 
 from resonate.errors import ResonateError
-from resonate.record import (
+from resonate.stores.record import (
+    CallbackRecord,
     DurablePromiseRecord,
     Param,
+    TaskRecord,
     Value,
 )
 from resonate.stores.traits import IPromiseStore
@@ -68,6 +70,53 @@ class MemoryStorage(IStorage):
 class LocalPromiseStore(IPromiseStore):
     def __init__(self, storage: IStorage) -> None:
         self._storage = storage
+
+    def create_with_task(  # noqa: PLR0913
+        self,
+        *,
+        id: str,
+        ikey: str | None,
+        strict: bool,
+        headers: dict[str, str] | None,
+        data: str | None,
+        timeout: int,
+        tags: dict[str, str] | None,
+        pid: str,  # noqa: ARG002
+        ttl: int,  # noqa: ARG002
+        recv: str | dict[str, Any],  # noqa: ARG002
+    ) -> tuple[DurablePromiseRecord, TaskRecord | None]:
+        return self.create(
+            id=id,
+            ikey=ikey,
+            strict=strict,
+            headers=headers,
+            data=data,
+            timeout=timeout,
+            tags=tags,
+        ), None
+
+    def create_with_callback(  # noqa: PLR0913
+        self,
+        *,
+        id: str,
+        ikey: str | None,
+        strict: bool,
+        timeout: int,
+        headers: dict[str, str] | None,
+        data: str | None,
+        tags: dict[str, str] | None,
+        root_id: str,  # noqa: ARG002
+        recv: str | dict[str, Any],  # noqa: ARG002
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        return self.create(
+            id=id,
+            ikey=ikey,
+            strict=strict,
+            headers=headers,
+            data=data,
+            timeout=timeout,
+            tags=tags,
+        ), None
 
     def create(  # noqa: PLR0913
         self,
@@ -249,6 +298,5 @@ class LocalPromiseStore(IPromiseStore):
 
 @final
 class LocalStore:
-    def __init__(self, storage: IStorage | None = None) -> None:
-        self._storage = storage or MemoryStorage()
-        self.promises = LocalPromiseStore(storage=self._storage)
+    def __init__(self, storage: IStorage) -> None:
+        self.promises = LocalPromiseStore(storage=storage)

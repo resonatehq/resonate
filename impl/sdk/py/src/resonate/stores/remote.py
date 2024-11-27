@@ -6,7 +6,7 @@ import requests
 
 from resonate.encoders import Base64Encoder, IEncoder
 from resonate.errors import ResonateError
-from resonate.record import (
+from resonate.stores.record import (
     CallbackRecord,
     DurablePromiseRecord,
     Invoke,
@@ -236,10 +236,10 @@ class RemotePromiseStore(IPromiseStore):
         self,
         *,
         id: str,
-        ikey: IdempotencyKey,
+        ikey: str | None,
         strict: bool,
-        headers: Headers,
-        data: Data,
+        headers: dict[str, str] | None,
+        data: str | None,
     ) -> DurablePromiseRecord:
         request_headers = self._initialize_headers(strict=strict, ikey=ikey)
 
@@ -358,11 +358,10 @@ class RemoteStore:
         self,
         url: str,
         request_timeout: int = 10,
-        encoder: IEncoder[str, str] | None = None,
     ) -> None:
         self.url = url
         self._request_timeout = request_timeout
-        self._encoder = encoder or Base64Encoder()
+        self._encoder = Base64Encoder()
         self.tasks = RemoteTaskStore(
             url=self.url, request_timeout=self._request_timeout, encoder=self._encoder
         )

@@ -6,7 +6,7 @@ from typing import Any
 class Command: ...
 
 
-class CreateDurablePromiseReq:
+class DurablePromise:
     def __init__(
         self,
         id: str | None,

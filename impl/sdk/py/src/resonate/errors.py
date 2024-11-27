@@ -22,27 +22,6 @@ ResonateErrorCode: TypeAlias = Literal[
 ]
 
 
-def _error_to_code(string: ResonateErrorCode) -> int:
-    error_code_map = {
-        "UNKNOWN": 0,
-        "FETCH": 1,
-        "CANCELED": 10,
-        "TIMEDOUT": 20,
-        "ABORT": 30,
-        "STORE": 40,
-        "STORE_UNAUTHORIZED": 41,
-        "STORE_PAYLOAD": 42,
-        "STORE_FORBIDDEN": 43,
-        "STORE_NOT_FOUND": 44,
-        "STORE_ALREADY_EXISTS": 45,
-        "STORE_INVALID_STATE": 46,
-        "STORE_ENCODER": 47,
-        "USER": 60,
-    }
-
-    return error_code_map[string]
-
-
 class ResonateError(Exception):
     def __init__(
         self,
