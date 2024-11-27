@@ -316,7 +316,6 @@ def test_fibonacci_preorder_rfi() -> None:
     assert p.result() == _fib(n)
 
 
-@pytest.mark.skip
 @pytest.mark.skipif(
     os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
 )
@@ -335,13 +334,13 @@ def test_fibonacci_postorder_rfi() -> None:
         p2 = yield ctx.rfi(fib_rfi, n - 2).options(
             id=exec_id(n - 2), send_to=poll(group)
         )
-        n2 = yield p2
         n1 = yield p1
+        n2 = yield p2
         return n1 + n2
 
     resonate = Resonate(
         store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
-        task_source=Poller("http://localhost:8002", group="default"),
+        task_source=Poller("http://localhost:8002", group=group),
     )
     resonate.register(fib_rfi)
     n = 10
