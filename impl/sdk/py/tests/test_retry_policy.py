@@ -8,6 +8,16 @@ from resonate.retry_policy import (
 )
 
 
+def test_infinite_retry() -> None:
+    exponential_policy = exponential(base_delay=1, factor=2, max_retries=-1)
+    constant_policy = constant(delay=1, max_retries=-1)
+    linear_policy = linear(delay=1, max_retries=-1)
+    for i in range(10, 1000, 10):
+        assert exponential_policy.should_retry(i)
+        assert constant_policy.should_retry(i)
+        assert linear_policy.should_retry(i)
+
+
 def test_exponential() -> None:
     policy = exponential(base_delay=1, factor=2, max_retries=3)
     expected_delays = (2, 4, 8)

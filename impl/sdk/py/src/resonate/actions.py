@@ -9,6 +9,7 @@ from resonate.commands import Command, DurablePromise
 from resonate.options import Options
 
 if TYPE_CHECKING:
+    from resonate import retry_policy
     from resonate.dataclasses import Invocation
 
 
@@ -42,7 +43,7 @@ class RFC:
         self.opts = Options(id=id, send_to=send_to)
         return self
 
-    def to_invocation(self) -> RFI:
+    def to_rfi(self) -> RFI:
         return RFI(self.unit, self.opts)
 
 
@@ -57,8 +58,9 @@ class LFC:
         *,
         id: str | None = None,
         durable: bool = True,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> Self:
-        self.opts = Options(durable=durable, id=id)
+        self.opts = Options(durable=durable, id=id, retry_policy=retry_policy)
         return self
 
     def to_lfi(self) -> LFI:
@@ -93,6 +95,7 @@ class LFI:
         *,
         id: str | None = None,
         durable: bool = True,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> Self:
-        self.opts = Options(durable=durable, id=id)
+        self.opts = Options(durable=durable, id=id, retry_policy=retry_policy)
         return self

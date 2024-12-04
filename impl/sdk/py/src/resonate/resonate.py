@@ -18,6 +18,7 @@ from resonate.task_sources.traits import ITaskSource
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
 
+    from resonate import retry_policy
     from resonate.context import Context
     from resonate.record import Handle
     from resonate.scheduler.traits import IScheduler
@@ -81,6 +82,7 @@ class Resonate:
         ],
         name: str | None = None,
         version: int = 1,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> RegisteredFn[P, T]: ...
     @overload
     def register(
@@ -88,6 +90,7 @@ class Resonate:
         func: Callable[Concatenate[Context, P], Coroutine[Any, Any, T]],
         name: str | None = None,
         version: int = 1,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> RegisteredFn[P, T]: ...
     @overload
     def register(
@@ -95,16 +98,21 @@ class Resonate:
         func: Callable[Concatenate[Context, P], T],
         name: str | None = None,
         version: int = 1,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> RegisteredFn[P, T]: ...
     def register(
         self,
         func: DurableCoro[P, T] | DurableFn[P, T],
         name: str | None = None,
         version: int = 1,
+        retry_policy: retry_policy.RetryPolicy | None = None,
     ) -> RegisteredFn[P, T]:
         if name is None:
             name = func.__name__
-        self._fn_registry.add(name, (func, Options(version=version, durable=True)))
+        self._fn_registry.add(
+            name,
+            (func, Options(version=version, durable=True, retry_policy=retry_policy)),
+        )
         return RegisteredFn[P, T](self._scheduler, func)
 
     @overload

@@ -20,7 +20,6 @@ from resonate.context import Context
 from resonate.dataclasses import FinalValue, Invocation, ResonateCoro
 from resonate.encoders import JsonEncoder
 from resonate.logging import logger
-from resonate.options import Options
 from resonate.processor import SQE, Processor
 from resonate.queue import Queue
 from resonate.record import Promise, Record
@@ -120,9 +119,7 @@ class Scheduler(IScheduler):
         record = Record[Any](
             id=id,
             parent=None,
-            invocation=RFI(
-                Invocation(func, *args, **kwargs), Options(durable=True, id=id)
-            ),
+            invocation=RFI(Invocation(func, *args, **kwargs), opts),
             ctx=Context(self._deps),
         )
         self._records[record.id] = record
@@ -150,7 +147,7 @@ class Scheduler(IScheduler):
 
         if durable_promise.is_completed():
             assert task is None
-            record.set_result(durable_promise.get_value(self._encoder))
+            record.set_result(durable_promise.get_value(self._encoder), deduping=True)
         else:
             self._record_queue.put_nowait(record.id)
             self._continue()
@@ -205,8 +202,8 @@ class Scheduler(IScheduler):
             while self._runnable:
                 id, next_value = self._runnable.pop()
                 record = self._records[id]
-                assert record.coro
-                yielded_value = record.coro.advance(next_value)
+                coro = record.get_coro()
+                yielded_value = coro.advance(next_value)
 
                 if isinstance(yielded_value, LFI):
                     self._process_lfi(record, yielded_value)
@@ -215,7 +212,7 @@ class Scheduler(IScheduler):
                 elif isinstance(yielded_value, RFI):
                     self._process_rfi(record, yielded_value)
                 elif isinstance(yielded_value, RFC):
-                    raise NotImplementedError
+                    self._process_rfc(record, yielded_value)
                 elif isinstance(yielded_value, Promise):
                     self._process_promise(record, yielded_value)
                 elif isinstance(yielded_value, FinalValue):
@@ -274,9 +271,9 @@ class Scheduler(IScheduler):
             assert leaf_record.is_root
             root_record.add_task(task)
             if not leaf_record.done():
-                assert leaf_record.coro, "This had to be done here."
+                assert leaf_record.has_coro(), "This had to be done here."
                 leaf_record.set_result(
-                    resume.leaf_durable_promise.get_value(self._encoder)
+                    resume.leaf_durable_promise.get_value(self._encoder), deduping=False
                 )
 
             self._unblock_awaiting_remote(leaf_record.id)
@@ -296,7 +293,7 @@ class Scheduler(IScheduler):
                 promise_record.is_root
             ), "Callbacks can only be registered partition roots"
 
-            root_id = record.root().id
+            root = record.root()
             leaf_id = promise_record.id
 
             assert self._default_recv
@@ -305,16 +302,17 @@ class Scheduler(IScheduler):
             ), f"Record {promise_record.id} not backed by a promise"
             durable_promise, callback = self._store.callbacks.create(
                 id=leaf_id,
-                root_id=root_id,
+                root_id=root.id,
                 timeout=sys.maxsize,
                 recv=self._default_recv,
             )
             if callback is None:
                 assert durable_promise.is_completed()
-                record.set_result(durable_promise.get_value(self._encoder))
+                record.set_result(
+                    durable_promise.get_value(self._encoder), deduping=True
+                )
             else:
                 self._add_to_awaiting_remote(promise_record.id, record.id)
-                root = record.root()
                 if self._blocked_only_on_remote(root.id):
                     self._complete_task(root.id)
 
@@ -452,6 +450,74 @@ class Scheduler(IScheduler):
         )
         record.remove_task()
 
+    def _process_rfc(self, record: Record[Any], rfc: RFC) -> None:
+        child_id = rfc.opts.id if rfc.opts.id is not None else record.next_child_name()
+        child_record = self._records.get(child_id)
+        root = record.root()
+        if child_record is not None:
+            record.add_child(child_record)
+            if child_record.done():
+                self._add_to_runnable(record.id, child_record.safe_result())
+            else:
+                self._add_to_awaiting_remote(child_id, record.id)
+                if self._blocked_only_on_remote(root.id):
+                    self._complete_task(root.id)
+        else:
+            child_record = record.create_child(id=child_id, invocation=rfc.to_rfi())
+            self._records[child_id] = child_record
+            assert rfc.opts.durable
+
+            data = self._get_data_from_rfi(rfc.to_rfi())
+
+            assert self._default_recv
+
+            durable_promise, callback = self._store.promises.create_with_callback(
+                id=child_id,
+                ikey=utils.string_to_ikey(child_id),
+                strict=False,
+                headers=None,
+                data=self._encoder.encode(data),
+                timeout=sys.maxsize,
+                tags={"resonate:invoke": rfc.opts.send_to or "default"},
+                root_id=root.id,
+                recv=self._default_recv,
+            )
+            assert child_id in self._records
+            assert not record.done()
+            child_record.add_durable_promise(durable_promise)
+
+            if durable_promise.is_completed():
+                assert callback is None
+                value = durable_promise.get_value(self._encoder)
+                child_record.set_result(value, deduping=True)
+                self._add_to_runnable(record.id, child_record.safe_result())
+            else:
+                self._add_to_awaiting_remote(child_id, record.id)
+                if self._blocked_only_on_remote(root.id):
+                    self._complete_task(root.id)
+
+    def _get_data_from_rfi(self, rfi: RFI) -> dict[str, Any]:
+        if isinstance(rfi.unit, DurablePromise):
+            raise NotImplementedError
+        if isinstance(rfi.unit, Invocation):
+            func: str
+            if isinstance(rfi.unit.fn, str):
+                func = rfi.unit.fn
+            else:
+                assert isfunction(rfi.unit.fn)
+                registered_fn_name = self._fn_registry.get_from_value(rfi.unit.fn)
+                assert registered_fn_name is not None
+                func = registered_fn_name
+            data = {
+                "func": func,
+                "args": rfi.unit.args,
+                "kwargs": rfi.unit.kwargs,
+            }
+        else:
+            assert_never(rfi.unit)
+
+        return data
+
     def _process_lfc(self, record: Record[Any], lfc: LFC) -> None:
         child_id = lfc.opts.id if lfc.opts.id is not None else record.next_child_name()
         child_record = self._records.get(child_id)
@@ -481,7 +547,7 @@ class Scheduler(IScheduler):
                 child_record.add_durable_promise(durable_promise)
                 if durable_promise.is_completed():
                     value = durable_promise.get_value(self._encoder)
-                    child_record.set_result(value)
+                    child_record.set_result(value, deduping=True)
                     self._add_to_runnable(record.id, child_record.safe_result())
                 else:
                     self._ingest(child_id)
@@ -502,24 +568,7 @@ class Scheduler(IScheduler):
             self._records[child_id] = child_record
             assert rfi.opts.durable
 
-            func: str
-            if isinstance(rfi.unit, DurablePromise):
-                raise NotImplementedError
-            if isinstance(rfi.unit, Invocation):
-                if isinstance(rfi.unit.fn, str):
-                    func = rfi.unit.fn
-                else:
-                    assert isfunction(rfi.unit.fn)
-                    registered_fn_name = self._fn_registry.get_from_value(rfi.unit.fn)
-                    assert registered_fn_name is not None
-                    func = registered_fn_name
-                data: dict[str, Any] = {
-                    "func": func,
-                    "args": rfi.unit.args,
-                    "kwargs": rfi.unit.kwargs,
-                }
-            else:
-                assert_never(rfi.unit)
+            data = self._get_data_from_rfi(rfi)
 
             durable_promise = self._store.promises.create(
                 id=child_id,
@@ -536,7 +585,7 @@ class Scheduler(IScheduler):
 
             if durable_promise.is_completed():
                 value = durable_promise.get_value(self._encoder)
-                child_record.set_result(value)
+                child_record.set_result(value, deduping=True)
             self._add_to_runnable(record.id, Ok(child_record.promise))
 
     def _process_lfi(self, record: Record[Any], lfi: LFI) -> None:
@@ -566,7 +615,7 @@ class Scheduler(IScheduler):
 
                 if durable_promise.is_completed():
                     value = durable_promise.get_value(self._encoder)
-                    child_record.set_result(value)
+                    child_record.set_result(value, deduping=True)
                 else:
                     self._ingest(child_id)
                 self._add_to_runnable(record.id, Ok(child_record.promise))
@@ -577,7 +626,11 @@ class Scheduler(IScheduler):
     def _process_final_value(
         self, record: Record[Any], final_value: Result[Any, Exception]
     ) -> None:
-        if record.invocation.opts.durable:
+        if record.should_retry(final_value):
+            record.increate_attempt()
+            self._ingest(record.id)
+
+        elif record.invocation.opts.durable:
             durable_promise: DurablePromiseRecord
             if isinstance(final_value, Ok):
                 durable_promise = self._store.promises.resolve(
@@ -605,7 +658,7 @@ class Scheduler(IScheduler):
             if record.has_task():
                 self._complete_task(record.id)
 
-            record.set_result(final_value)
+            record.set_result(final_value, deduping=False)
             self._unblock_awaiting_local(record.id)
 
             root = record.root()
@@ -613,5 +666,5 @@ class Scheduler(IScheduler):
                 self._complete_task(root.id)
 
         else:
-            record.set_result(final_value)
+            record.set_result(final_value, deduping=False)
             self._unblock_awaiting_local(record.id)

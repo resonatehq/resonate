@@ -128,7 +128,7 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> RFI:
-        return self.rfc(func_or_cmd, *args, **kwargs).to_invocation()
+        return self.rfc(func_or_cmd, *args, **kwargs).to_rfi()
 
     @overload
     def lfi(self, cmd: Command, /) -> LFI: ...

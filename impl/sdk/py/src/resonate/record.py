@@ -9,6 +9,7 @@ from typing_extensions import assert_never
 from resonate.actions import LFI, RFI
 from resonate.logging import logger
 from resonate.result import Err, Ok, Result
+from resonate.retry_policy import Never
 from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
 if TYPE_CHECKING:
@@ -53,12 +54,14 @@ class Record(Generic[T]):
         self._f = Future[T]()
         self.children: list[Record[Any]] = []
         self.invocation: LFI | RFI = invocation
+        self.retry_policy = invocation.opts.retry_policy
+        self._attempt: int = 1
         self.promise = Promise[T](id=id)
         self.handle = Handle[T](id=self.id, _f=self._f)
         self.durable_promise: DurablePromiseRecord | None = None
         self._task: TaskRecord | None = None
         self.ctx = ctx
-        self.coro: ResonateCoro[T] | None = None
+        self._coro: ResonateCoro[T] | None = None
         self.blocked_on: Record[Any] | None = None
         self._num_children: int = 0
         logger.info(
@@ -67,6 +70,18 @@ class Record(Generic[T]):
             self.id,
             self.parent.id if self.parent else None,
         )
+
+    def get_coro(self) -> ResonateCoro[T]:
+        assert self._coro
+        return self._coro
+
+    def has_coro(self) -> bool:
+        return self._coro is not None
+
+    def increate_attempt(self) -> None:
+        self._attempt += 1
+        if self._coro is not None:
+            self._coro = None
 
     def root(self) -> Record[Any]:
         maybe_is_the_root = self
@@ -81,8 +96,8 @@ class Record(Generic[T]):
         self._num_children += 1
 
     def add_coro(self, coro: ResonateCoro[T]) -> None:
-        assert self.coro is None
-        self.coro = coro
+        assert self._coro is None
+        self._coro = coro
 
     def add_durable_promise(self, durable_promise: DurablePromiseRecord) -> None:
         assert self.id == durable_promise.id
@@ -108,10 +123,20 @@ class Record(Generic[T]):
         return self._task
 
     def clear_coro(self) -> None:
-        assert self.coro is not None
-        self.coro = None
+        assert self._coro is not None
+        self._coro = None
 
-    def set_result(self, result: Result[Any, Exception]) -> None:
+    def should_retry(self, result: Result[T, Exception]) -> bool:
+        if isinstance(result, Ok) or isinstance(self.retry_policy, Never):
+            return False
+        return self.retry_policy.should_retry(self._attempt)
+
+    def set_result(self, result: Result[T, Exception], *, deduping: bool) -> None:
+        if not deduping:
+            assert not self.should_retry(
+                result
+            ), "Result cannot be set if retry policy allows for another attempt."
+
         assert all(
             r.done() for r in self.children
         ), "All children record must be completed."
