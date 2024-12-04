@@ -353,6 +353,14 @@ const (
 	WHERE
 		id = $8 AND state & $9 != 0 AND counter = $10`
 
+	TASK_COMPLETE_BY_ROOT_ID_STATEMENT = `
+	UPDATE
+		tasks
+	SET
+		state = 8, completed_on = $1 -- State = 8 -> Completed
+	WHERE
+		root_promise_id = $2 AND state in (1, 2) -- State in (Init, Enqueued)`
+
 	TASK_HEARTBEAT_STATEMENT = `
 	UPDATE
 		tasks
@@ -580,6 +588,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var lockTimeoutStmt *sql.Stmt
 	var tasksInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
+	var tasksCompleteStmt *sql.Stmt
 	var taskHeartbeatStmt *sql.Stmt
 
 	// Results
@@ -770,6 +779,17 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
 				results[i][j], err = w.updateTask(tx, taskUpdateStmt, command.UpdateTask)
+			case t_aio.CompleteTasks:
+				if tasksCompleteStmt == nil {
+					tasksCompleteStmt, err = tx.Prepare(TASK_COMPLETE_BY_ROOT_ID_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer tasksCompleteStmt.Close()
+				}
+
+				util.Assert(command.CompleteTasks != nil, "command must not be nil")
+				results[i][j], err = w.completeTasks(tx, tasksCompleteStmt, command.CompleteTasks)
 			case t_aio.HeartbeatTasks:
 				if taskHeartbeatStmt == nil {
 					taskHeartbeatStmt, err = tx.Prepare(TASK_HEARTBEAT_STATEMENT)
@@ -1603,6 +1623,25 @@ func (w *PostgresStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	return &t_aio.Result{
 		Kind: t_aio.CreateTasks,
 		CreateTasks: &t_aio.AlterTasksResult{
+			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) completeTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CompleteTasksCommand) (*t_aio.Result, error) {
+	res, err := stmt.Exec(cmd.CompletedOn, cmd.RootPromiseId)
+	if err != nil {
+		return nil, store.StoreErr(err)
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, store.StoreErr(err)
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CompleteTasks,
+		CompleteTasks: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
 		},
 	}, nil

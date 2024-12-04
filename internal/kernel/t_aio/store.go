@@ -39,6 +39,7 @@ const (
 	ReadTasks
 	CreateTask
 	CreateTasks
+	CompleteTasks
 	UpdateTask
 	HeartbeatTasks
 
@@ -92,6 +93,8 @@ func (k StoreKind) String() string {
 		return "CreateTask"
 	case CreateTasks:
 		return "CreateTasks"
+	case CompleteTasks:
+		return "CompleteTasks"
 	case UpdateTask:
 		return "UpdateTask"
 	case HeartbeatTasks:
@@ -161,6 +164,7 @@ type Command struct {
 	ReadEnquableTasks *ReadEnqueueableTasksCommand
 	CreateTask        *CreateTaskCommand
 	CreateTasks       *CreateTasksCommand
+	CompleteTasks     *CompleteTasksCommand
 	UpdateTask        *UpdateTaskCommand
 	HeartbeatTasks    *HeartbeatTasksCommand
 
@@ -204,6 +208,7 @@ type Result struct {
 	ReadEnquableTasks *QueryTasksResult
 	CreateTask        *AlterTasksResult
 	CreateTasks       *AlterTasksResult
+	CompleteTasks     *AlterTasksResult
 	UpdateTask        *AlterTasksResult
 	HeartbeatTasks    *AlterTasksResult
 
@@ -373,6 +378,11 @@ type CreateTaskCommand struct {
 type CreateTasksCommand struct {
 	PromiseId string
 	CreatedOn int64
+}
+
+type CompleteTasksCommand struct {
+	RootPromiseId string
+	CompletedOn   int64
 }
 
 type UpdateTaskCommand struct {
