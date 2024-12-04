@@ -24,7 +24,7 @@ func (v *BcValidator) AddBcValidator(bcv BcValidatorFn) {
 }
 
 func (v *BcValidator) Validate(model *Model, req *Req) (*Model, error) {
-	var err error = nil
+	var err error
 	for _, bcv := range v.validators {
 		model, err = bcv(model, req)
 		if err != nil {
