@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Union, final
 
-from typing_extensions import TypeAlias, assert_never
+from typing_extensions import TypeAlias
 
 
 class Retriable(ABC):
@@ -22,11 +22,12 @@ class Exponential(Retriable):
 
     base_delay: float
     factor: float
+    max_delay: float
     max_retries: int
 
     def calculate_delay(self, attempt: int) -> float:
         assert attempt > 0, "Attempt must be positive."
-        return self.base_delay * (self.factor**attempt)
+        return min(self.base_delay * (self.factor**attempt), self.max_delay)
 
     def should_retry(self, attempt: int) -> bool:
         assert attempt > 0, "Attempt must be positive."
@@ -86,8 +87,15 @@ def linear(delay: float, max_retries: int) -> Linear:
     return Linear(delay=delay, max_retries=max_retries)
 
 
-def exponential(base_delay: float, factor: float, max_retries: int) -> Exponential:
-    return Exponential(base_delay=base_delay, factor=factor, max_retries=max_retries)
+def exponential(
+    base_delay: float, factor: float, max_delay: float, max_retries: int
+) -> Exponential:
+    return Exponential(
+        base_delay=base_delay,
+        factor=factor,
+        max_retries=max_retries,
+        max_delay=max_delay,
+    )
 
 
 def constant(delay: float, max_retries: int) -> Constant:
@@ -96,26 +104,3 @@ def constant(delay: float, max_retries: int) -> Constant:
 
 def never() -> Never:
     return Never()
-
-
-def default_policy() -> RetryPolicy:
-    return exponential(base_delay=1, factor=2, max_retries=10)
-
-
-def calculate_total_possible_delay(policy: Exponential | Linear | Constant) -> float:
-    total_possible_delay: float
-    if isinstance(policy, Exponential):
-        # Geometric series sum formula
-        total_possible_delay = policy.base_delay * (
-            (policy.factor * (1 - policy.factor**policy.max_retries))
-            / (1 - policy.factor)
-        )
-    elif isinstance(policy, Linear):
-        total_possible_delay = (
-            policy.delay * (policy.max_retries * (policy.max_retries + 1)) / 2
-        )
-    elif isinstance(policy, Constant):
-        total_possible_delay = policy.delay * policy.max_retries
-    else:
-        assert_never(policy)
-    return total_possible_delay

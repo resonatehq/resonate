@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+from asyncio import iscoroutinefunction
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from inspect import isfunction, isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
 
 from typing_extensions import assert_never
 
 from resonate.actions import LFI, RFI
+from resonate.dataclasses import Invocation
 from resonate.logging import logger
 from resonate.result import Err, Ok, Result
-from resonate.retry_policy import Never
+from resonate.retry_policy import Never, exponential, never
 from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
 if TYPE_CHECKING:
+    from resonate import retry_policy
     from resonate.actions import LFI
     from resonate.context import Context
     from resonate.dataclasses import ResonateCoro
@@ -54,7 +58,24 @@ class Record(Generic[T]):
         self._f = Future[T]()
         self.children: list[Record[Any]] = []
         self.invocation: LFI | RFI = invocation
-        self.retry_policy = invocation.opts.retry_policy
+        self.retry_policy: retry_policy.RetryPolicy | None
+        if not isinstance(invocation.unit, Invocation):
+            self.retry_policy = None
+        elif isinstance(invocation.unit.fn, str):
+            self.retry_policy = invocation.opts.retry_policy or None
+        elif isgeneratorfunction(invocation.unit.fn):
+            self.retry_policy = invocation.opts.retry_policy or never()
+        else:
+            assert iscoroutinefunction(invocation.unit.fn) or isfunction(
+                invocation.unit.fn
+            )
+            self.retry_policy = invocation.opts.retry_policy or exponential(
+                base_delay=1,
+                factor=2,
+                max_retries=-1,
+                max_delay=30,
+            )
+
         self._attempt: int = 1
         self.promise = Promise[T](id=id)
         self.handle = Handle[T](id=self.id, _f=self._f)
@@ -127,6 +148,7 @@ class Record(Generic[T]):
         self._coro = None
 
     def should_retry(self, result: Result[T, Exception]) -> bool:
+        assert self.retry_policy is not None
         if isinstance(result, Ok) or isinstance(self.retry_policy, Never):
             return False
         return self.retry_policy.should_retry(self._attempt)

@@ -14,6 +14,9 @@ if TYPE_CHECKING:
 
 
 T = TypeVar("T")
+_ASSERT_MSG = (
+    "Creating durable promises directly does not support adding options this way"
+)
 
 
 @final
@@ -23,9 +26,7 @@ class RFI:
     opts: Options = field(default=Options())
 
     def options(self, id: str | None = None, send_to: str | None = None) -> Self:
-        assert not isinstance(
-            self.unit, DurablePromise
-        ), "Options must be set on the cmd."
+        assert not isinstance(self.unit, DurablePromise), _ASSERT_MSG
         self.opts = Options(id=id, send_to=send_to)
         return self
 
@@ -37,9 +38,7 @@ class RFC:
     opts: Options = field(default=Options())
 
     def options(self, id: str | None = None, send_to: str | None = None) -> Self:
-        assert not isinstance(
-            self.unit, DurablePromise
-        ), "Options must be set on the cmd."
+        assert not isinstance(self.unit, DurablePromise), _ASSERT_MSG
         self.opts = Options(id=id, send_to=send_to)
         return self
 

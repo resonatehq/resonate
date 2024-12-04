@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import random
+import time
 from functools import cache, lru_cache
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from resonate.commands import DurablePromise
 from resonate.record import Handle, Promise
 from resonate.resonate import Resonate
 from resonate.retry_policy import constant, exponential, linear, never
@@ -624,7 +627,7 @@ def test_retry_policies_local_coroutine(store: LocalStore | RemoteStore) -> None
         never(),
         constant(delay=0, max_retries=3),
         linear(delay=0, max_retries=3),
-        exponential(base_delay=0, factor=1, max_retries=1),
+        exponential(base_delay=0, factor=1, max_retries=1, max_delay=5),
     ):
         resonate = Resonate(store=store)
         resonate.register(foo_retry_policy, retry_policy=policy)
@@ -645,7 +648,7 @@ def test_retry_policies_local_func(store: LocalStore | RemoteStore) -> None:
         never(),
         constant(delay=0, max_retries=3),
         linear(delay=0, max_retries=3),
-        exponential(base_delay=0, factor=1, max_retries=1),
+        exponential(base_delay=0, factor=1, max_retries=1, max_delay=5),
     ):
         resonate = Resonate(store=store)
         resonate.register(foo_retry_policy, retry_policy=policy)
@@ -654,3 +657,45 @@ def test_retry_policies_local_func(store: LocalStore | RemoteStore) -> None:
         )
         with pytest.raises(RuntimeError):
             p.result()
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_human_in_the_loop() -> None:
+    group = "test-human-in-the-loop"
+
+    def _user_manual_completion(id: str) -> DurablePromise:
+        return DurablePromise(id=id)
+
+    def human_in_the_loop(ctx: Context) -> Generator[Yieldable, Any, str]:
+        name: str = yield ctx.rfc(
+            _user_manual_completion("test-human-in-loop-question-to-answer-1")
+        )
+        age: int = yield ctx.rfc(
+            _user_manual_completion(id="test-human-in-loop-question-to-answer-2")
+        )
+        return f"Hi {name} with age {age}"
+
+    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
+    s = Resonate(store=store, task_source=Poller("http://localhost:8002", group=group))
+    s.register(human_in_the_loop)
+    p: Handle[str] = s.run("test-feature-human-in-the-loop", human_in_the_loop)
+    time.sleep(3)
+    store.promises.resolve(
+        id="test-human-in-loop-question-to-answer-1",
+        ikey=None,
+        strict=False,
+        headers=None,
+        data=json.dumps("Peter"),
+    )
+    time.sleep(3)
+    store.promises.resolve(
+        id="test-human-in-loop-question-to-answer-2",
+        ikey=None,
+        strict=False,
+        headers=None,
+        data=json.dumps(50),
+    )
+    time.sleep(3)
+    assert p.result() == "Hi Peter with age 50"

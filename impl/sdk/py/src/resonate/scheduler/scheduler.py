@@ -271,9 +271,8 @@ class Scheduler(IScheduler):
             assert leaf_record.is_root
             root_record.add_task(task)
             if not leaf_record.done():
-                assert leaf_record.has_coro(), "This had to be done here."
                 leaf_record.set_result(
-                    resume.leaf_durable_promise.get_value(self._encoder), deduping=False
+                    resume.leaf_durable_promise.get_value(self._encoder), deduping=True
                 )
 
             self._unblock_awaiting_remote(leaf_record.id)
@@ -451,7 +450,14 @@ class Scheduler(IScheduler):
         record.remove_task()
 
     def _process_rfc(self, record: Record[Any], rfc: RFC) -> None:
-        child_id = rfc.opts.id if rfc.opts.id is not None else record.next_child_name()
+        child_id: str
+        next_child_name = record.next_child_name()
+        if isinstance(rfc.unit, Invocation):
+            child_id = rfc.opts.id if rfc.opts.id is not None else next_child_name
+        elif isinstance(rfc.unit, DurablePromise):
+            child_id = rfc.unit.id if rfc.unit.id is not None else next_child_name
+        else:
+            assert_never(rfc.unit)
         child_record = self._records.get(child_id)
         root = record.root()
         if child_record is not None:
@@ -467,7 +473,7 @@ class Scheduler(IScheduler):
             self._records[child_id] = child_record
             assert rfc.opts.durable
 
-            data = self._get_data_from_rfi(rfc.to_rfi())
+            data, headers, tags = self._get_info_from_rfi(rfc.to_rfi())
 
             assert self._default_recv
 
@@ -475,10 +481,10 @@ class Scheduler(IScheduler):
                 id=child_id,
                 ikey=utils.string_to_ikey(child_id),
                 strict=False,
-                headers=None,
+                headers=headers,
                 data=self._encoder.encode(data),
                 timeout=sys.maxsize,
-                tags={"resonate:invoke": rfc.opts.send_to or "default"},
+                tags=tags,
                 root_id=root.id,
                 recv=self._default_recv,
             )
@@ -495,28 +501,6 @@ class Scheduler(IScheduler):
                 self._add_to_awaiting_remote(child_id, record.id)
                 if self._blocked_only_on_remote(root.id):
                     self._complete_task(root.id)
-
-    def _get_data_from_rfi(self, rfi: RFI) -> dict[str, Any]:
-        if isinstance(rfi.unit, DurablePromise):
-            raise NotImplementedError
-        if isinstance(rfi.unit, Invocation):
-            func: str
-            if isinstance(rfi.unit.fn, str):
-                func = rfi.unit.fn
-            else:
-                assert isfunction(rfi.unit.fn)
-                registered_fn_name = self._fn_registry.get_from_value(rfi.unit.fn)
-                assert registered_fn_name is not None
-                func = registered_fn_name
-            data = {
-                "func": func,
-                "args": rfi.unit.args,
-                "kwargs": rfi.unit.kwargs,
-            }
-        else:
-            assert_never(rfi.unit)
-
-        return data
 
     def _process_lfc(self, record: Record[Any], lfc: LFC) -> None:
         child_id = lfc.opts.id if lfc.opts.id is not None else record.next_child_name()
@@ -558,7 +542,14 @@ class Scheduler(IScheduler):
                 self._add_to_awaiting_local(child_id, record.id)
 
     def _process_rfi(self, record: Record[Any], rfi: RFI) -> None:
-        child_id = rfi.opts.id if rfi.opts.id is not None else record.next_child_name()
+        child_id: str
+        next_child_name = record.next_child_name()
+        if isinstance(rfi.unit, Invocation):
+            child_id = rfi.opts.id if rfi.opts.id is not None else next_child_name
+        elif isinstance(rfi.unit, DurablePromise):
+            child_id = rfi.unit.id if rfi.unit.id is not None else next_child_name
+        else:
+            assert_never(rfi.unit)
         child_record = self._records.get(child_id)
         if child_record is not None:
             record.add_child(child_record)
@@ -568,16 +559,16 @@ class Scheduler(IScheduler):
             self._records[child_id] = child_record
             assert rfi.opts.durable
 
-            data = self._get_data_from_rfi(rfi)
+            data, headers, tags = self._get_info_from_rfi(rfi)
 
             durable_promise = self._store.promises.create(
                 id=child_id,
                 ikey=utils.string_to_ikey(child_id),
                 strict=False,
-                headers=None,
+                headers=headers,
                 data=self._encoder.encode(data),
                 timeout=sys.maxsize,
-                tags={"resonate:invoke": rfi.opts.send_to or "default"},
+                tags=tags,
             )
             assert child_id in self._records
             assert not record.done()
@@ -668,3 +659,33 @@ class Scheduler(IScheduler):
         else:
             record.set_result(final_value, deduping=False)
             self._unblock_awaiting_local(record.id)
+
+    def _get_info_from_rfi(
+        self, rfi: RFI
+    ) -> tuple[dict[str, Any] | None, dict[str, str] | None, dict[str, str] | None]:
+        data: dict[str, Any] | None
+        tags: dict[str, str] | None
+        headers: dict[str, str] | None
+        if isinstance(rfi.unit, DurablePromise):
+            data = rfi.unit.data
+            tags = rfi.unit.tags
+            headers = rfi.unit.headers
+        elif isinstance(rfi.unit, Invocation):
+            func: str
+            if isinstance(rfi.unit.fn, str):
+                func = rfi.unit.fn
+            else:
+                assert isfunction(rfi.unit.fn)
+                registered_fn_name = self._fn_registry.get_from_value(rfi.unit.fn)
+                assert registered_fn_name is not None
+                func = registered_fn_name
+            data = {
+                "func": func,
+                "args": rfi.unit.args,
+                "kwargs": rfi.unit.kwargs,
+            }
+            tags = {"resonate:invoke": rfi.opts.send_to or "default"}
+            headers = None
+        else:
+            assert_never(rfi.unit)
+        return (data, headers, tags)

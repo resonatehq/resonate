@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, final
 
-from resonate.retry_policy import constant
-
 if TYPE_CHECKING:
     from resonate import retry_policy
 
@@ -21,6 +19,6 @@ class Options:
     ) -> None:
         self.durable = durable
         self.id = id
-        self.retry_policy = retry_policy or constant(delay=3, max_retries=-1)
+        self.retry_policy = retry_policy
         self.send_to = send_to
         self.version = version
