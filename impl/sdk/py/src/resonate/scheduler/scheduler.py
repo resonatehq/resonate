@@ -21,7 +21,7 @@ from resonate.dataclasses import FinalValue, Invocation, ResonateCoro
 from resonate.encoders import JsonEncoder
 from resonate.logging import logger
 from resonate.processor import SQE, Processor
-from resonate.queue import Queue
+from resonate.queue import DelayQueue, Queue
 from resonate.record import Promise, Record
 from resonate.result import Err, Ok
 from resonate.scheduler.traits import IScheduler
@@ -81,6 +81,7 @@ class Scheduler(IScheduler):
             self._heartbeating_thread.start()
 
         self._event_loop = Event()
+        self._delay_queue = DelayQueue[str](caller_event=self._event_loop)
         self._thread = Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -168,6 +169,10 @@ class Scheduler(IScheduler):
     def _loop(self) -> None:  # noqa: C901, PLR0912
         while self._event_loop.wait():
             self._event_loop.clear()
+
+            # get record to retry
+            for id in self._delay_queue.dequeue_all():
+                self._ingest(id)
 
             # check for cqe in cq and run associated callbacks
             for cqe in self._cq.dequeue_all():
@@ -619,7 +624,7 @@ class Scheduler(IScheduler):
     ) -> None:
         if record.should_retry(final_value):
             record.increate_attempt()
-            self._ingest(record.id)
+            self._delay_queue.put_nowait(record.id, record.next_retry_delay())
 
         elif record.invocation.opts.durable:
             durable_promise: DurablePromiseRecord

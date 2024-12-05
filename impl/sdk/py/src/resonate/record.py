@@ -153,6 +153,11 @@ class Record(Generic[T]):
             return False
         return self.retry_policy.should_retry(self._attempt)
 
+    def next_retry_delay(self) -> float:
+        assert self.retry_policy is not None
+        assert not isinstance(self.retry_policy, Never)
+        return self.retry_policy.calculate_delay(self._attempt)
+
     def set_result(self, result: Result[T, Exception], *, deduping: bool) -> None:
         if not deduping:
             assert not self.should_retry(
