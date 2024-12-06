@@ -205,6 +205,7 @@ func (s *server) CreatePromiseAndCallback(c context.Context, r *pb.CreatePromise
 				Tags:           r.Promise.Tags,
 			},
 			Callback: &t_api.CreateCallbackRequest{
+				Id:            r.Callback.Id,
 				PromiseId:     r.Promise.Id,
 				RootPromiseId: r.Callback.RootPromiseId,
 				Timeout:       r.Callback.Timeout,

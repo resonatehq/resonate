@@ -46,7 +46,7 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
 
 	CREATE TABLE IF NOT EXISTS callbacks (
-		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		id              TEXT UNIQUE,
 		promise_id      TEXT,
 		root_promise_id TEXT,
 		recv            BLOB,
@@ -162,11 +162,13 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, root_promise_id, recv, mesg, timeout, created_on)
+		(id, promise_id, root_promise_id, recv, mesg, timeout, created_on)
 	SELECT
-		?, ?, ?, ?, ?, ?
+		?, ?, ?, ?, ?, ?, ?
 	WHERE EXISTS
-		(SELECT 1 FROM promises WHERE id = ? AND state = 1)`
+		(SELECT 1 FROM promises WHERE id = ? AND state = 1)
+	AND NOT EXISTS
+		(SELECT 1 FROM callbacks WHERE id = ?)`
 
 	CALLBACK_DELETE_STATEMENT = `
 	DELETE FROM callbacks WHERE promise_id = ?`
@@ -1035,7 +1037,18 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	res, err := stmt.Exec(cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn, cmd.PromiseId)
+	res, err := stmt.Exec(
+		cmd.Id,
+		cmd.PromiseId,
+		cmd.Mesg.Root,
+		cmd.Recv,
+		mesg,
+		cmd.Timeout,
+		cmd.CreatedOn,
+		cmd.PromiseId,
+		cmd.Id,
+	)
+
 	if err != nil {
 		return nil, err
 	}
@@ -1045,21 +1058,10 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	lastInsertId, err := res.LastInsertId()
-	if err != nil {
-		return nil, err
-	}
-
-	var lastInsertIdStr string
-	if rowsAffected != 0 {
-		lastInsertIdStr = strconv.FormatInt(lastInsertId, 10)
-	}
-
 	return &t_aio.Result{
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.AlterCallbacksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertIdStr,
 		},
 	}, nil
 }

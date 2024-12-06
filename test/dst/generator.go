@@ -203,12 +203,14 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 
 func (g *Generator) GenerateCreatePromiseAndCallback(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
+	id := g.callbackId(r)
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromiseAndCallback,
 		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
 			Promise: req.CreatePromise,
 			Callback: &t_api.CreateCallbackRequest{
+				Id:            id,
 				PromiseId:     req.CreatePromise.Id,
 				RootPromiseId: g.promiseId(r),
 				Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
@@ -244,11 +246,13 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	promiseId := g.promiseId(r)
 	rootPromiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	id := g.callbackId(r)
 	g.callback++
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:            id,
 			PromiseId:     promiseId,
 			RootPromiseId: rootPromiseId,
 			Timeout:       timeout,
@@ -399,6 +403,10 @@ func (g *Generator) promiseId(r *rand.Rand) string {
 
 func (g *Generator) scheduleId(r *rand.Rand) string {
 	return "s" + g.idSet[r.Intn(len(g.idSet))]
+}
+
+func (g *Generator) callbackId(r *rand.Rand) string {
+	return "cb" + g.idSet[r.Intn(len(g.idSet))]
 }
 
 func (g *Generator) promiseSearch(r *rand.Rand) string {

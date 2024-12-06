@@ -769,6 +769,7 @@ var TestCases = []*testCase{
 					Timeout: 1,
 				},
 				Callback: &t_api.CreateCallbackRequest{
+					Id:            "foo.1",
 					PromiseId:     "foo",
 					RootPromiseId: "bar",
 					Timeout:       2,
@@ -798,7 +799,7 @@ var TestCases = []*testCase{
 				},
 				Body: []byte(`{
 					"promise": {"id": "foo", "timeout": 1},
-					"callback": {"rootPromiseId": "bar", "timeout": 2, "recv": "baz"}
+					"callback": {"id": "foo.1", "rootPromiseId": "bar", "timeout": 2, "recv": "baz"}
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -813,6 +814,7 @@ var TestCases = []*testCase{
 					RequestId: "CreatePromiseAndCallback",
 				},
 				Callback: &pb.CreatePromiseCallbackRequest{
+					Id:            "foo.1",
 					RootPromiseId: "bar",
 					Timeout:       2,
 					Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "baz"}},
@@ -1382,6 +1384,7 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1402,6 +1405,7 @@ var TestCases = []*testCase{
 					"Request-Id": "CreateCallback",
 				},
 				Body: []byte(`{
+					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1414,6 +1418,7 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1428,6 +1433,7 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1448,6 +1454,7 @@ var TestCases = []*testCase{
 					"Request-Id": "CreateCallbackPhysicalReceiver",
 				},
 				Body: []byte(`{
+					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1460,6 +1467,7 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1474,6 +1482,7 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1494,6 +1503,7 @@ var TestCases = []*testCase{
 					"Request-Id": "CreateCallbackNotFound",
 				},
 				Body: []byte(`{
+					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1506,6 +1516,7 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
+				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,

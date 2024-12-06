@@ -221,6 +221,7 @@ type createPromiseAndCallbackBody struct {
 }
 
 type createPromiseCallbackBody struct {
+	Id            string          `json:"id" binding:"required"`
 	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
 	Timeout       int64           `json:"timeout"`
 	Recv          json.RawMessage `json:"recv" binding:"required"`
@@ -255,6 +256,7 @@ func (s *server) createPromiseAndCallback(c *gin.Context) {
 				Tags:           body.Promise.Tags,
 			},
 			Callback: &t_api.CreateCallbackRequest{
+				Id:            body.Callback.Id,
 				PromiseId:     body.Promise.Id,
 				RootPromiseId: body.Callback.RootPromiseId,
 				Timeout:       body.Callback.Timeout,

@@ -112,6 +112,7 @@ func (r *CompletePromiseRequest) String() string {
 // Callbacks
 
 type CreateCallbackRequest struct {
+	Id            string          `json:"id"`
 	PromiseId     string          `json:"promiseId"`
 	RootPromiseId string          `json:"rootPromiseId"` // TODO: we should be able to know this from the promise itself
 	Timeout       int64           `json:"timeout"`

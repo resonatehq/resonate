@@ -70,6 +70,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
+									Id:        r.CreateCallback.Id,
 									PromiseId: r.CreateCallback.PromiseId,
 									Recv:      r.CreateCallback.Recv,
 									Mesg:      mesg,
@@ -94,25 +95,30 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			util.Assert(result != nil, "result must not be nil")
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
+			// If the callback was already created return 200 and an empty callback
+			var cb *callback.Callback
+			status := t_api.StatusOK
 			if result.RowsAffected == 1 {
-				res = &t_api.Response{
-					Kind: t_api.CreateCallback,
-					Tags: r.Tags,
-					CreateCallback: &t_api.CreateCallbackResponse{
-						Status: t_api.StatusCreated,
-						Callback: &callback.Callback{
-							Id:        result.LastInsertId,
-							PromiseId: r.CreateCallback.PromiseId,
-							Recv:      r.CreateCallback.Recv,
-							Mesg:      mesg,
-							Timeout:   r.CreateCallback.Timeout,
-							CreatedOn: createdOn,
-						},
-						Promise: p,
-					},
+				cb = &callback.Callback{
+					Id:        r.CreateCallback.Id,
+					PromiseId: r.CreateCallback.PromiseId,
+					Recv:      r.CreateCallback.Recv,
+					Mesg:      mesg,
+					Timeout:   r.CreateCallback.Timeout,
+					CreatedOn: createdOn,
 				}
-			} else {
-				return CreateCallback(c, r)
+				status = t_api.StatusCreated
+			}
+
+			res = &t_api.Response{
+				Kind: t_api.CreateCallback,
+				Tags: r.Tags,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					// Status could be StatusOk or StatusCreated if the Callback Id was already present
+					Status:   status,
+					Callback: cb,
+					Promise:  p,
+				},
 			}
 		} else {
 			res = &t_api.Response{

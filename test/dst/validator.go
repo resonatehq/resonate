@@ -329,6 +329,11 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
 		}
+
+		cb := model.callbacks.get(req.CreateCallback.Id)
+		if cb == nil {
+			return model, fmt.Errorf("callback '%s' must exists", req.CreateCallback.Id)
+		}
 		return model, nil
 	case t_api.StatusPromiseNotFound:
 		if p != nil {

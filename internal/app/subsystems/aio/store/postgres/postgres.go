@@ -174,12 +174,13 @@ const (
 
 	CALLBACK_INSERT_STATEMENT = `
 	INSERT INTO callbacks
-		(promise_id, root_promise_id, recv, mesg, timeout, created_on)
+		(id, promise_id, root_promise_id, recv, mesg, timeout, created_on)
 	SELECT
-		$1, $2, $3, $4, $5, $6
+		$1, $2, $3, $4, $5, $6, $7
 	WHERE EXISTS
-		(SELECT 1 FROM promises WHERE id = $1 AND state = 1)
-	RETURNING id`
+		(SELECT 1 FROM promises WHERE id = $2 AND state = 1)
+	AND NOT EXISTS
+		(SELECT 1 FROM callbacks WHERE id = $1)`
 
 	CALLBACK_DELETE_STATEMENT = `
 	DELETE FROM callbacks WHERE promise_id = $1`
@@ -578,6 +579,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	// Lazily defined prepared statements
 	var promiseInsertStmt *sql.Stmt
 	var promiseUpdateStmt *sql.Stmt
+	var callbackInsertStmt *sql.Stmt
 	var callbackDeleteStmt *sql.Stmt
 	var scheduleInsertStmt *sql.Stmt
 	var scheduleUpdateStmt *sql.Stmt
@@ -637,8 +639,16 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 			// Callbacks
 			case t_aio.CreateCallback:
+				if callbackInsertStmt == nil {
+					callbackInsertStmt, err = tx.Prepare(CALLBACK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer callbackInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateCallback != nil, "command must not be nil")
-				results[i][j], err = w.createCallback(tx, command.CreateCallback)
+				results[i][j], err = w.createCallback(tx, callbackInsertStmt, command.CreateCallback)
 			case t_aio.DeleteCallbacks:
 				if callbackDeleteStmt == nil {
 					callbackDeleteStmt, err = tx.Prepare(CALLBACK_DELETE_STATEMENT)
@@ -1050,7 +1060,7 @@ func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 
 // Callbacks
 
-func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
 
@@ -1059,23 +1069,20 @@ func (w *PostgresStoreWorker) createCallback(tx *sql.Tx, cmd *t_aio.CreateCallba
 		return nil, err
 	}
 
-	var lastInsertId string
-	rowsAffected := int64(1)
-	row := tx.QueryRow(CALLBACK_INSERT_STATEMENT, cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.PromiseId, cmd.Mesg.Root, cmd.Recv, mesg, cmd.Timeout, cmd.CreatedOn)
+	if err != nil {
+		return nil, err
+	}
 
-	if err := row.Scan(&lastInsertId); err != nil {
-		if err == sql.ErrNoRows {
-			rowsAffected = 0
-		} else {
-			return nil, err
-		}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &t_aio.Result{
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.AlterCallbacksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
 		},
 	}, nil
 }
