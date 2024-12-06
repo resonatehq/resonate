@@ -80,7 +80,7 @@ class Context:
     ) -> RFC:
         unit: Invocation[Any] | DurablePromise
         if isinstance(func_or_cmd, str):
-            unit = Invocation(func_or_cmd, args, kwargs)
+            unit = Invocation(func_or_cmd, *args, **kwargs)
         elif isinstance(func_or_cmd, DurablePromise):
             unit = func_or_cmd
         elif isinstance(func_or_cmd, RegisteredFn):
