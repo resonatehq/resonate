@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -46,7 +47,7 @@ func CreatePromiseAndCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Compl
 	return createPromiseAndTaskOrCallback(c, r, r.CreatePromiseAndCallback.Promise, &t_aio.Command{
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.CreateCallbackCommand{
-			Id:        r.CreatePromiseAndCallback.Callback.Id,
+			Id:        fmt.Sprintf("%s.%s", r.CreatePromiseAndCallback.Promise.Id, r.CreatePromiseAndCallback.Callback.Id),
 			PromiseId: r.CreatePromiseAndCallback.Callback.PromiseId,
 			Recv:      r.CreatePromiseAndCallback.Callback.Recv,
 			Mesg:      &message.Mesg{Type: message.Resume, Root: r.CreatePromiseAndCallback.Callback.RootPromiseId, Leaf: r.CreatePromiseAndCallback.Callback.PromiseId},

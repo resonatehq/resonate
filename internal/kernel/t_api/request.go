@@ -120,7 +120,7 @@ type CreateCallbackRequest struct {
 }
 
 func (r *CreateCallbackRequest) String() string {
-	return fmt.Sprintf("CreateCallback(promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
+	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.Id, r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
 }
 
 // Schedules

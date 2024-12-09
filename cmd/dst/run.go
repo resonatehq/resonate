@@ -195,7 +195,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			if !ok {
-				return errors.New("DST failed")
+				return errors.New(fmt.Sprintf("DST failed for seed='%d'", seed))
 			}
 
 			return nil

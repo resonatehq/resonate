@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -61,6 +62,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			createdOn := c.Time()
 
+			callbackId := fmt.Sprintf("%s.%s", r.CreateCallback.PromiseId, r.CreateCallback.Id)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -70,7 +72,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
-									Id:        r.CreateCallback.Id,
+									Id:        callbackId,
 									PromiseId: r.CreateCallback.PromiseId,
 									Recv:      r.CreateCallback.Recv,
 									Mesg:      mesg,
@@ -100,7 +102,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			status := t_api.StatusOK
 			if result.RowsAffected == 1 {
 				cb = &callback.Callback{
-					Id:        r.CreateCallback.Id,
+					Id:        callbackId,
 					PromiseId: r.CreateCallback.PromiseId,
 					Recv:      r.CreateCallback.Recv,
 					Mesg:      mesg,

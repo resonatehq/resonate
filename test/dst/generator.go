@@ -20,7 +20,6 @@ type Generator struct {
 	headersSet         []map[string]string
 	dataSet            [][]byte
 	tagsSet            []map[string]string
-	callback           uint64
 	requests           map[t_api.Kind][]*t_api.Request
 	generators         []RequestGenerator
 }
@@ -203,14 +202,14 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 
 func (g *Generator) GenerateCreatePromiseAndCallback(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
-	id := g.callbackId(r)
+	callbackId := g.callbackId(r)
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromiseAndCallback,
 		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
 			Promise: req.CreatePromise,
 			Callback: &t_api.CreateCallbackRequest{
-				Id:            id,
+				Id:            callbackId,
 				PromiseId:     req.CreatePromise.Id,
 				RootPromiseId: g.promiseId(r),
 				Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
@@ -247,7 +246,6 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	rootPromiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	id := g.callbackId(r)
-	g.callback++
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,

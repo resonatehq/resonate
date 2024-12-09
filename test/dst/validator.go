@@ -159,12 +159,19 @@ func (v *Validator) ValidateCreatePromiseAndCallback(model *Model, reqTime int64
 	// now validate the callback
 	switch res.CreatePromiseAndCallback.Status {
 	case t_api.StatusCreated:
-		if model.callbacks.get(res.CreatePromiseAndCallback.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%s' exists", res.CreatePromiseAndCallback.Callback.Id)
-		}
+		// Callback might have been created before
+		if res.CreatePromiseAndCallback.Callback == nil {
+			if model.callbacks.get(req.CreatePromiseAndCallback.Callback.Id) != nil {
+				return model, fmt.Errorf("callback '%s' must exists", req.CreatePromiseAndCallback.Callback.Id)
+			}
+		} else {
+			if model.callbacks.get(res.CreatePromiseAndCallback.Callback.Id) != nil {
+				return model, fmt.Errorf("callback '%s' exists", res.CreatePromiseAndCallback.Callback.Id)
+			}
 
-		// model has already been copied
-		model.callbacks.set(res.CreatePromiseAndCallback.Callback.Id, res.CreatePromiseAndCallback.Callback)
+			// model has already been copied
+			model.callbacks.set(res.CreatePromiseAndCallback.Callback.Id, res.CreatePromiseAndCallback.Callback)
+		}
 	}
 
 	return model, nil
@@ -315,9 +322,11 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
 		}
+
 		if p.State != promise.Pending {
 			return model, fmt.Errorf("promise '%s' must be pending", req.CreateCallback.PromiseId)
 		}
+
 		if model.callbacks.get(res.CreateCallback.Callback.Id) != nil {
 			return model, fmt.Errorf("callback '%s' exists", res.CreateCallback.Callback.Id)
 		}
@@ -325,23 +334,42 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		model = model.Copy()
 		model.callbacks.set(res.CreateCallback.Callback.Id, res.CreateCallback.Callback)
 		return model, nil
+
 	case t_api.StatusOK:
+		// If the status is Ok there has to be a promise
 		if p == nil {
-			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
 		}
 
-		cb := model.callbacks.get(req.CreateCallback.Id)
-		if cb == nil {
-			return model, fmt.Errorf("callback '%s' must exists", req.CreateCallback.Id)
+		// If the promise is completed we don't create a callback but return 200
+		if p.State != promise.Pending {
+			return model, nil
 		}
+
+		// If the promise is pending is possible that it has been timeout so we update the promises model
+		// if the promise is timedout we can handle it as if it was completed
+		if resTime >= p.Timeout {
+			model = model.Copy()
+			model.promises.set(p.Id, res.CreateCallback.Promise)
+			return model, nil
+		}
+
+		// otherwise verify the callback was created previously
+		callbackId := fmt.Sprintf("%s.%s", p.Id, req.CreateCallback.Id)
+		if model.callbacks.get(callbackId) == nil {
+			return model, fmt.Errorf("callback '%s' must exist", callbackId)
+		}
+
 		return model, nil
+
 	case t_api.StatusPromiseNotFound:
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)
 		}
 		return model, nil
+
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.CreateCallback.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.CreateCallback.Status)
 	}
 }
 
