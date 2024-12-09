@@ -53,6 +53,10 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
+		// If the callback was already created return 200 and an empty callback
+		var cb *callback.Callback
+		status := t_api.StatusOK
+
 		if p.State == promise.Pending {
 			mesg := &message.Mesg{
 				Type: message.Resume,
@@ -97,10 +101,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			util.Assert(result != nil, "result must not be nil")
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-			// If the callback was already created return 200 and an empty callback
-			var cb *callback.Callback
-			status := t_api.StatusOK
 			if result.RowsAffected == 1 {
+				status = t_api.StatusCreated
 				cb = &callback.Callback{
 					Id:        callbackId,
 					PromiseId: r.CreateCallback.PromiseId,
@@ -109,31 +111,20 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					Timeout:   r.CreateCallback.Timeout,
 					CreatedOn: createdOn,
 				}
-				status = t_api.StatusCreated
-			}
-
-			res = &t_api.Response{
-				Kind: t_api.CreateCallback,
-				Tags: r.Tags,
-				CreateCallback: &t_api.CreateCallbackResponse{
-					// Status could be StatusOk or StatusCreated if the Callback Id was already present
-					Status:   status,
-					Callback: cb,
-					Promise:  p,
-				},
-			}
-		} else {
-			res = &t_api.Response{
-				Kind: t_api.CreateCallback,
-				Tags: r.Tags,
-				CreateCallback: &t_api.CreateCallbackResponse{
-					// ok indicates that the promise is completed and the process
-					// may continue
-					Status:  t_api.StatusOK,
-					Promise: p,
-				},
 			}
 		}
+
+		res = &t_api.Response{
+			Kind: t_api.CreateCallback,
+			Tags: r.Tags,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				// Status could be StatusOk or StatusCreated if the Callback Id was already present
+				Status:   status,
+				Callback: cb,
+				Promise:  p,
+			},
+		}
+
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.CreateCallback,
