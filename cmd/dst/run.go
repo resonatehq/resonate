@@ -1,7 +1,6 @@
 package dst
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand" // nosemgrep
@@ -195,7 +194,7 @@ func RunDSTCmd() *cobra.Command {
 			}
 
 			if !ok {
-				return errors.New(fmt.Sprintf("DST failed for seed='%d'", seed))
+				return fmt.Errorf("DST failed for seed='%d'", seed)
 			}
 
 			return nil

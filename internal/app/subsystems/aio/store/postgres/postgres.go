@@ -47,7 +47,7 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
 
 	CREATE TABLE IF NOT EXISTS callbacks (
-		id              SERIAL PRIMARY KEY,
+		id              TEXT,
 		promise_id      TEXT,
 		root_promise_id TEXT,
 		recv            BYTEA,
