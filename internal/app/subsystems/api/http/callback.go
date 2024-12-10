@@ -16,6 +16,7 @@ type createCallbackHeader struct {
 }
 
 type createCallbackBody struct {
+	Id            string          `json:"Id" binding:"required"`
 	PromiseId     string          `json:"promiseId" binding:"required"`
 	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
 	Timeout       int64           `json:"timeout"`
@@ -40,6 +41,7 @@ func (s *server) createCallback(c *gin.Context) {
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:            body.Id,
 			PromiseId:     body.PromiseId,
 			RootPromiseId: body.RootPromiseId,
 			Timeout:       body.Timeout,

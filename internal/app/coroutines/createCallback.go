@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -52,6 +53,10 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
+		// If the callback was already created return 200 and an empty callback
+		var cb *callback.Callback
+		status := t_api.StatusOK
+
 		if p.State == promise.Pending {
 			mesg := &message.Mesg{
 				Type: message.Resume,
@@ -61,6 +66,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			createdOn := c.Time()
 
+			callbackId := fmt.Sprintf("%s.%s", r.CreateCallback.PromiseId, r.CreateCallback.Id)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -70,6 +76,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
+									Id:        callbackId,
 									PromiseId: r.CreateCallback.PromiseId,
 									Recv:      r.CreateCallback.Recv,
 									Mesg:      mesg,
@@ -95,37 +102,29 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				res = &t_api.Response{
-					Kind: t_api.CreateCallback,
-					Tags: r.Tags,
-					CreateCallback: &t_api.CreateCallbackResponse{
-						Status: t_api.StatusCreated,
-						Callback: &callback.Callback{
-							Id:        result.LastInsertId,
-							PromiseId: r.CreateCallback.PromiseId,
-							Recv:      r.CreateCallback.Recv,
-							Mesg:      mesg,
-							Timeout:   r.CreateCallback.Timeout,
-							CreatedOn: createdOn,
-						},
-						Promise: p,
-					},
+				status = t_api.StatusCreated
+				cb = &callback.Callback{
+					Id:        callbackId,
+					PromiseId: r.CreateCallback.PromiseId,
+					Recv:      r.CreateCallback.Recv,
+					Mesg:      mesg,
+					Timeout:   r.CreateCallback.Timeout,
+					CreatedOn: createdOn,
 				}
-			} else {
-				return CreateCallback(c, r)
-			}
-		} else {
-			res = &t_api.Response{
-				Kind: t_api.CreateCallback,
-				Tags: r.Tags,
-				CreateCallback: &t_api.CreateCallbackResponse{
-					// ok indicates that the promise is completed and the process
-					// may continue
-					Status:  t_api.StatusOK,
-					Promise: p,
-				},
 			}
 		}
+
+		res = &t_api.Response{
+			Kind: t_api.CreateCallback,
+			Tags: r.Tags,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				// Status could be StatusOk or StatusCreated if the Callback Id was already present
+				Status:   status,
+				Callback: cb,
+				Promise:  p,
+			},
+		}
+
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.CreateCallback,

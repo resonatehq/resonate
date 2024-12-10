@@ -85,9 +85,10 @@ message CreatePromiseAndCallbackRequest {
 }
 
 message CreatePromiseCallbackRequest {
-    string rootPromiseId = 1;
-    int64 timeout = 2;
-    callback_t.Recv recv = 3;
+    string id = 1;
+    string rootPromiseId = 2;
+    int64 timeout = 3;
+    callback_t.Recv recv = 4;
 }
 
 message CreatePromiseAndCallbackResponse {

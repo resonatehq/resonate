@@ -2035,7 +2035,110 @@ var TestCases = []*testCase{
 		},
 	},
 
-	// CALLBACKS
+	// CALLBACK
+
+	{
+		name: "CreateCallback_DifferentIds",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
+					PromiseId: "foo",
+					Recv:      []byte("foo1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
+					PromiseId: "foo",
+					Recv:      []byte("foo2"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+				},
+			},
+		},
+	},
+	{
+		name: "CreateCallback_SameId",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:    "foo",
+					Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:  map[string]string{},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
+					PromiseId: "foo",
+					Recv:      []byte("foo1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
+					PromiseId: "foo",
+					Recv:      []byte("foo1"),
+					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreateCallback,
+				CreateCallback: &t_aio.AlterCallbacksResult{
+					RowsAffected: 0,
+				},
+			},
+		},
+	},
 	{
 		name: "CreateCallback",
 		commands: []*t_aio.Command{
@@ -2050,6 +2153,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2067,7 +2171,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 		},
@@ -2078,6 +2181,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2115,6 +2219,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2139,6 +2244,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "bar.1",
 					PromiseId: "bar",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
@@ -2163,6 +2269,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "baz.1",
 					PromiseId: "baz",
 					Recv:      []byte("baz"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "baz", Leaf: "baz"},
@@ -2187,6 +2294,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "qux.1",
 					PromiseId: "qux",
 					Recv:      []byte("qux"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "qux", Leaf: "qux"},
@@ -2290,6 +2398,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo1"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2298,6 +2407,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
 					PromiseId: "foo",
 					Recv:      []byte("foo2"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2306,6 +2416,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "bar.1",
 					PromiseId: "bar",
 					Recv:      []byte("bar1"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
@@ -2347,21 +2458,18 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "3",
 				},
 			},
 			{
@@ -2830,6 +2938,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2838,6 +2947,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
 					PromiseId: "foo",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "bar", Leaf: "bar"},
@@ -2846,6 +2956,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.3",
 					PromiseId: "foo",
 					Recv:      []byte("baz"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "baz", Leaf: "baz"},
@@ -2876,21 +2987,18 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "3",
 				},
 			},
 			{
@@ -2958,6 +3066,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -2966,6 +3075,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
 					PromiseId: "foo",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"},
@@ -2974,6 +3084,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.3",
 					PromiseId: "foo",
 					Recv:      []byte("baz"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "baz"},
@@ -2982,6 +3093,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "pbar.1",
 					PromiseId: "pbar",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "foo"},
@@ -2990,6 +3102,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "pbar.2",
 					PromiseId: "pbar",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "bar"},
@@ -2998,6 +3111,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "pbar.3",
 					PromiseId: "pbar",
 					Recv:      []byte("baz"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "pbar", Leaf: "baz"},
@@ -3081,42 +3195,36 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "3",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "4",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "5",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "6",
 				},
 			},
 			{
@@ -3208,6 +3316,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -3312,7 +3421,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
@@ -3405,6 +3513,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
@@ -3413,6 +3522,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
 					PromiseId: "foo",
 					Recv:      []byte("foo2"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
@@ -3421,6 +3531,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "bar.1",
 					PromiseId: "bar",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "bar"},
@@ -3468,21 +3579,18 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "3",
 				},
 			},
 			{
@@ -3543,6 +3651,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root1", Leaf: "foo"},
@@ -3551,6 +3660,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "bar.1",
 					PromiseId: "bar",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root2", Leaf: "bar"},
@@ -3617,14 +3727,12 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
@@ -3710,6 +3818,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
@@ -3751,7 +3860,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
@@ -3815,6 +3923,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
@@ -3871,7 +3980,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
@@ -3937,6 +4045,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "root", Leaf: "foo"},
@@ -3993,7 +4102,6 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
@@ -4051,6 +4159,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.1",
 					PromiseId: "foo",
 					Recv:      []byte("foo1"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -4059,6 +4168,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.2",
 					PromiseId: "foo",
 					Recv:      []byte("foo2"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -4067,6 +4177,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.CreateCallbackCommand{
+					Id:        "foo.3",
 					PromiseId: "foo",
 					Recv:      []byte("foo3"),
 					Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
@@ -4132,21 +4243,18 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
 				Kind: t_aio.CreateCallback,
 				CreateCallback: &t_aio.AlterCallbacksResult{
 					RowsAffected: 1,
-					LastInsertId: "3",
 				},
 			},
 			{

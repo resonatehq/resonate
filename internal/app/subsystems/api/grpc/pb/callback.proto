@@ -12,11 +12,12 @@ service Callbacks {
 }
 
 message CreateCallbackRequest {
-    string promiseId = 1;
-    string rootPromiseId = 2;
-    int64 timeout = 3;
-    callback_t.Recv recv = 4;
-    string requestId = 5;
+    string id = 1;
+    string promiseId = 2;
+    string rootPromiseId = 3;
+    int64 timeout = 4;
+    callback_t.Recv recv = 5;
+    string requestId = 6;
 }
 
 message CreateCallbackResponse {

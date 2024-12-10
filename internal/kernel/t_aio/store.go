@@ -275,6 +275,7 @@ type AlterPromisesResult struct {
 // Callback commands
 
 type CreateCallbackCommand struct {
+	Id        string
 	PromiseId string
 	Recv      []byte
 	Mesg      *message.Mesg
@@ -290,7 +291,6 @@ type DeleteCallbacksCommand struct {
 
 type AlterCallbacksResult struct {
 	RowsAffected int64
-	LastInsertId string
 }
 
 // Schedule commands

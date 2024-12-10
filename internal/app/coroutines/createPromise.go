@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -46,6 +47,7 @@ func CreatePromiseAndCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Compl
 	return createPromiseAndTaskOrCallback(c, r, r.CreatePromiseAndCallback.Promise, &t_aio.Command{
 		Kind: t_aio.CreateCallback,
 		CreateCallback: &t_aio.CreateCallbackCommand{
+			Id:        fmt.Sprintf("%s.%s", r.CreatePromiseAndCallback.Promise.Id, r.CreatePromiseAndCallback.Callback.Id),
 			PromiseId: r.CreatePromiseAndCallback.Callback.PromiseId,
 			Recv:      r.CreatePromiseAndCallback.Callback.Recv,
 			Mesg:      &message.Mesg{Type: message.Resume, Root: r.CreatePromiseAndCallback.Callback.RootPromiseId, Leaf: r.CreatePromiseAndCallback.Callback.PromiseId},
@@ -159,13 +161,15 @@ func createPromiseAndTaskOrCallback(
 			util.Assert(completion.Store.Results[1].Kind == t_aio.CreateCallback, "completion must be create callback")
 			cmd := additionalCmds[0].CreateCallback
 
-			cb = &callback.Callback{
-				Id:        completion.Store.Results[1].CreateCallback.LastInsertId,
-				PromiseId: cmd.PromiseId,
-				Recv:      cmd.Recv,
-				Mesg:      cmd.Mesg,
-				Timeout:   cmd.Timeout,
-				CreatedOn: cmd.CreatedOn,
+			if completion.Store.Results[1].CreateCallback.RowsAffected != 0 {
+				cb = &callback.Callback{
+					Id:        cmd.Id,
+					PromiseId: cmd.PromiseId,
+					Recv:      cmd.Recv,
+					Mesg:      cmd.Mesg,
+					Timeout:   cmd.Timeout,
+					CreatedOn: cmd.CreatedOn,
+				}
 			}
 		}
 	} else {

@@ -22,6 +22,7 @@ func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:            r.Id,
 			PromiseId:     r.PromiseId,
 			RootPromiseId: r.RootPromiseId,
 			Timeout:       r.Timeout,
