@@ -105,7 +105,8 @@ class LocalPromiseStore(IPromiseStore):
         headers: dict[str, str] | None,
         data: str | None,
         tags: dict[str, str] | None,
-        root_id: str,  # noqa: ARG002
+        callback_id: str,  # noqa: ARG002
+        root_promise_id: str,  # noqa: ARG002
         recv: str | dict[str, Any],  # noqa: ARG002
     ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
         return self.create(

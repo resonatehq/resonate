@@ -129,7 +129,7 @@ class Scheduler(IScheduler):
         assert self._default_recv
         durable_promise, task = self._store.promises.create_with_task(
             id=id,
-            ikey=utils.string_to_ikey(id),
+            ikey=utils.string_to_uuid(id),
             strict=False,
             headers=None,
             data=self._encoder.encode(
@@ -305,8 +305,9 @@ class Scheduler(IScheduler):
                 promise_record.durable_promise
             ), f"Record {promise_record.id} not backed by a promise"
             durable_promise, callback = self._store.callbacks.create(
-                id=leaf_id,
-                root_id=root.id,
+                id=utils.string_to_uuid(record.id),
+                promise_id=leaf_id,
+                root_promise_id=root.id,
                 timeout=sys.maxsize,
                 recv=self._default_recv,
             )
@@ -484,13 +485,14 @@ class Scheduler(IScheduler):
 
             durable_promise, callback = self._store.promises.create_with_callback(
                 id=child_id,
-                ikey=utils.string_to_ikey(child_id),
+                ikey=utils.string_to_uuid(child_id),
                 strict=False,
                 headers=headers,
                 data=self._encoder.encode(data),
                 timeout=sys.maxsize,
                 tags=tags,
-                root_id=root.id,
+                callback_id=utils.string_to_uuid(record.id),
+                root_promise_id=root.id,
                 recv=self._default_recv,
             )
             assert child_id in self._records
@@ -524,7 +526,7 @@ class Scheduler(IScheduler):
             if lfc.opts.durable:
                 durable_promise = self._store.promises.create(
                     id=child_id,
-                    ikey=utils.string_to_ikey(child_id),
+                    ikey=utils.string_to_uuid(child_id),
                     strict=False,
                     headers=None,
                     data=None,
@@ -568,7 +570,7 @@ class Scheduler(IScheduler):
 
             durable_promise = self._store.promises.create(
                 id=child_id,
-                ikey=utils.string_to_ikey(child_id),
+                ikey=utils.string_to_uuid(child_id),
                 strict=False,
                 headers=headers,
                 data=self._encoder.encode(data),
@@ -597,7 +599,7 @@ class Scheduler(IScheduler):
             if lfi.opts.durable:
                 durable_promise = self._store.promises.create(
                     id=child_id,
-                    ikey=utils.string_to_ikey(child_id),
+                    ikey=utils.string_to_uuid(child_id),
                     strict=False,
                     headers=None,
                     data=None,
@@ -631,7 +633,7 @@ class Scheduler(IScheduler):
             if isinstance(final_value, Ok):
                 durable_promise = self._store.promises.resolve(
                     id=record.id,
-                    ikey=utils.string_to_ikey(record.id),
+                    ikey=utils.string_to_uuid(record.id),
                     strict=False,
                     headers=None,
                     data=self._encoder.encode(final_value.unwrap()),
@@ -640,7 +642,7 @@ class Scheduler(IScheduler):
             elif isinstance(final_value, Err):
                 durable_promise = self._store.promises.reject(
                     id=record.id,
-                    ikey=utils.string_to_ikey(record.id),
+                    ikey=utils.string_to_uuid(record.id),
                     strict=False,
                     headers=None,
                     data=self._encoder.encode(final_value.err()),

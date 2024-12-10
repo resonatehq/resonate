@@ -7,5 +7,5 @@ from uuid import UUID
 T = TypeVar("T")
 
 
-def string_to_ikey(string: str) -> str:
+def string_to_uuid(string: str) -> str:
     return UUID(bytes=hashlib.sha1(string.encode("utf-8")).digest()[:16]).hex[-4:]  # noqa: S324

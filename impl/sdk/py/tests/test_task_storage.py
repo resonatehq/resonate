@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 
+from resonate import utils
 from resonate.stores.remote import (
     RemoteStore,
 )
@@ -16,8 +17,9 @@ from resonate.stores.remote import (
 )
 def test_case_0_callback_on_existing_promise() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
+    id = "0.0"
     store.promises.create(
-        id="0.0",
+        id=id,
         ikey=None,
         strict=False,
         headers=None,
@@ -26,12 +28,16 @@ def test_case_0_callback_on_existing_promise() -> None:
         tags=None,
     )
     promise_record, callback_record = store.callbacks.create(
-        id="0.0", root_id="0.0", timeout=sys.maxsize, recv="default"
+        id=id + id,
+        promise_id=id,
+        root_promise_id=id,
+        timeout=sys.maxsize,
+        recv="default",
     )
     assert callback_record is not None
     assert promise_record.id == callback_record.id
     assert callback_record.timeout == sys.maxsize
-    assert callback_record.id == "0.0"
+    assert callback_record.id == id
 
 
 @pytest.mark.skipif(
@@ -39,9 +45,14 @@ def test_case_0_callback_on_existing_promise() -> None:
 )
 def test_case_1_callback_on_non_existing_promise() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
+    id = "1.1"
     with pytest.raises(Exception):  # noqa: B017, PT011
         store.callbacks.create(
-            id="1.1", root_id="1.0", timeout=sys.maxsize, recv="default"
+            id=id + id,
+            promise_id=id,
+            root_promise_id=id,
+            timeout=sys.maxsize,
+            recv="default",
         )
 
 
@@ -50,8 +61,9 @@ def test_case_1_callback_on_non_existing_promise() -> None:
 )
 def test_case_2_callback_on_resolved_promise() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
+    id = "2.0"
     store.promises.create(
-        id="2.0",
+        id=id,
         ikey=None,
         strict=False,
         headers=None,
@@ -59,9 +71,13 @@ def test_case_2_callback_on_resolved_promise() -> None:
         timeout=sys.maxsize,
         tags=None,
     )
-    store.promises.resolve(id="2.0", ikey=None, strict=False, headers=None, data="1")
+    store.promises.resolve(id=id, ikey=None, strict=False, headers=None, data="1")
     promise_record, callback_record = store.callbacks.create(
-        id="2.0", root_id="2.0", timeout=sys.maxsize, recv="default"
+        id=id + id,
+        promise_id=id,
+        root_promise_id=id,
+        timeout=sys.maxsize,
+        recv="default",
     )
     assert promise_record.is_completed()
     assert callback_record is None
@@ -74,8 +90,9 @@ def test_case_3_create_durable_promise_with_task() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
     pid = uuid.uuid4().hex
     ttl = 5 * 1000
+    id = "3.0"
     durable_promise, task_record = store.promises.create_with_task(
-        id="3.0",
+        id=id,
         ikey=None,
         strict=False,
         headers=None,
@@ -86,7 +103,7 @@ def test_case_3_create_durable_promise_with_task() -> None:
         ttl=ttl,
         recv={"type": "poll", "data": {"group": "default", "id": pid}},
     )
-    assert durable_promise.id == "3.0"
+    assert durable_promise.id == id
     assert task_record is not None
     assert task_record.counter == 1
     store.tasks.heartbeat(pid=pid)
@@ -99,15 +116,17 @@ def test_case_3_create_durable_promise_with_task() -> None:
 def test_case_3_create_durable_promise_with_callback() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
     pid = uuid.uuid4().hex
+    id = "4.0"
     durable_promise, callback_record = store.promises.create_with_callback(
-        id="4.0",
+        id=id,
         ikey=None,
         strict=False,
         timeout=sys.maxsize,
         headers=None,
         data=None,
         tags=None,
-        root_id="4.0",
+        callback_id=id + id,
+        root_promise_id=id,
         recv={"type": "poll", "data": {"group": "default", "id": pid}},
     )
     assert callback_record is not None
@@ -121,22 +140,26 @@ def test_case_3_create_durable_promise_with_callback() -> None:
 )
 def test_case_4_create_with_callback_dedup() -> None:
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
+    id = "5.0"
     store.promises.create(
-        id="5.0",
-        ikey="5.0",
+        id=id,
+        ikey=utils.string_to_uuid(id),
         strict=False,
         headers=None,
         data=None,
         timeout=sys.maxsize,
         tags=None,
     )
-    store.promises.resolve(id="5.0", ikey="5.0", strict=False, headers=None, data="1")
+    store.promises.resolve(
+        id=id, ikey=utils.string_to_uuid(id), strict=False, headers=None, data="1"
+    )
     promise_record, callback_record = store.promises.create_with_callback(
-        id="5.0",
-        root_id="5.0",
+        callback_id=id + id,
+        id=id,
+        root_promise_id=id,
         timeout=sys.maxsize,
         recv="default",
-        ikey="5.0",
+        ikey=utils.string_to_uuid(id),
         strict=False,
         headers=None,
         data=None,

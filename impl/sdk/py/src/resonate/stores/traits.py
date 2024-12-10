@@ -24,7 +24,8 @@ class IPromiseStore(ABC):
         headers: dict[str, str] | None,
         data: str | None,
         tags: dict[str, str] | None,
-        root_id: str,
+        callback_id: str,
+        root_promise_id: str,
         recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, CallbackRecord | None]: ...
     @abstractmethod

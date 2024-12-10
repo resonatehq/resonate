@@ -35,15 +35,17 @@ class RemoteCallbackStore:
         self,
         *,
         id: str,
-        root_id: str,
+        promise_id: str,
+        root_promise_id: str,
         timeout: int,
         recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
         response = requests.post(
             url=f"{self.url}/callbacks",
             json={
-                "promiseId": id,
-                "rootPromiseId": root_id,
+                "Id": id,
+                "promiseId": promise_id,
+                "rootPromiseId": root_promise_id,
                 "timeout": timeout,
                 "recv": recv,
             },
@@ -142,7 +144,8 @@ class RemotePromiseStore(IPromiseStore):
         headers: dict[str, str] | None,
         data: str | None,
         tags: dict[str, str] | None,
-        root_id: str,
+        callback_id: str,
+        root_promise_id: str,
         recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
         request_headers = self._initialize_headers(strict=strict, ikey=ikey)
@@ -158,7 +161,8 @@ class RemotePromiseStore(IPromiseStore):
                     "tags": tags,
                 },
                 "callback": {
-                    "rootPromiseId": root_id,
+                    "Id": callback_id,
+                    "rootPromiseId": root_promise_id,
                     "timeout": timeout,
                     "recv": recv,
                 },

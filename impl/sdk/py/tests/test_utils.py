@@ -19,5 +19,5 @@ if TYPE_CHECKING:
         ("greeting-peter", "050d"),
     ],
 )
-def test_string_to_ikey(string: str, expected: UUID) -> None:
-    assert utils.string_to_ikey(string) == expected
+def test_string_to_uuid(string: str, expected: UUID) -> None:
+    assert utils.string_to_uuid(string) == expected
