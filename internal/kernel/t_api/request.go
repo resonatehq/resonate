@@ -18,7 +18,6 @@ type Request struct {
 	SearchPromises           *SearchPromisesRequest
 	CreatePromise            *CreatePromiseRequest
 	CreatePromiseAndTask     *CreatePromiseAndTaskRequest
-	CreatePromiseAndCallback *CreatePromiseAndCallbackRequest
 	CompletePromise          *CompletePromiseRequest
 
 	// CALLBACKS
@@ -86,15 +85,6 @@ type CreatePromiseAndTaskRequest struct {
 
 func (r *CreatePromiseAndTaskRequest) String() string {
 	return fmt.Sprintf("CreatePromiseAndTask(promise=%v, task=%v)", r.Promise, r.Task)
-}
-
-type CreatePromiseAndCallbackRequest struct {
-	Promise  *CreatePromiseRequest
-	Callback *CreateCallbackRequest
-}
-
-func (r *CreatePromiseAndCallbackRequest) String() string {
-	return fmt.Sprintf("CreatePromiseAndCallback(promise=%v, callback=%v)", r.Promise, r.Callback)
 }
 
 type CompletePromiseRequest struct {
@@ -272,8 +262,6 @@ func (r *Request) String() string {
 		return r.CreatePromise.String()
 	case CreatePromiseAndTask:
 		return r.CreatePromiseAndTask.String()
-	case CreatePromiseAndCallback:
-		return r.CreatePromiseAndCallback.String()
 	case CompletePromise:
 		return r.CompletePromise.String()
 

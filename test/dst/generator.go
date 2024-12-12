@@ -200,25 +200,6 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 	}
 }
 
-func (g *Generator) GenerateCreatePromiseAndCallback(r *rand.Rand, t int64) *t_api.Request {
-	req := g.GenerateCreatePromise(r, t)
-	callbackId := g.callbackId(r)
-
-	return &t_api.Request{
-		Kind: t_api.CreatePromiseAndCallback,
-		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
-			Promise: req.CreatePromise,
-			Callback: &t_api.CreateCallbackRequest{
-				Id:            callbackId,
-				PromiseId:     req.CreatePromise.Id,
-				RootPromiseId: g.promiseId(r),
-				Timeout:       RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick),
-				Recv:          []byte(`"dst"`),
-			},
-		},
-	}
-}
-
 func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
 	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]

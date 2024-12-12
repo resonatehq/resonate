@@ -22,6 +22,7 @@ import (
 type MockHttpRequestDoer struct {
 	ctrl     *gomock.Controller
 	recorder *MockHttpRequestDoerMockRecorder
+	isgomock struct{}
 }
 
 // MockHttpRequestDoerMockRecorder is the mock recorder for MockHttpRequestDoer.
@@ -60,6 +61,7 @@ func (mr *MockHttpRequestDoerMockRecorder) Do(req any) *gomock.Call {
 type MockClientInterface struct {
 	ctrl     *gomock.Controller
 	recorder *MockClientInterfaceMockRecorder
+	isgomock struct{}
 }
 
 // MockClientInterfaceMockRecorder is the mock recorder for MockClientInterface.
@@ -337,46 +339,6 @@ func (mr *MockClientInterfaceMockRecorder) CreatePromise(ctx, params, body any, 
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, params, body}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromise", reflect.TypeOf((*MockClientInterface)(nil).CreatePromise), varargs...)
-}
-
-// CreatePromiseAndCallback mocks base method.
-func (m *MockClientInterface) CreatePromiseAndCallback(ctx context.Context, params *CreatePromiseAndCallbackParams, body CreatePromiseAndCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreatePromiseAndCallback", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreatePromiseAndCallback indicates an expected call of CreatePromiseAndCallback.
-func (mr *MockClientInterfaceMockRecorder) CreatePromiseAndCallback(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndCallback", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseAndCallback), varargs...)
-}
-
-// CreatePromiseAndCallbackWithBody mocks base method.
-func (m *MockClientInterface) CreatePromiseAndCallbackWithBody(ctx context.Context, params *CreatePromiseAndCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreatePromiseAndCallbackWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreatePromiseAndCallbackWithBody indicates an expected call of CreatePromiseAndCallbackWithBody.
-func (mr *MockClientInterfaceMockRecorder) CreatePromiseAndCallbackWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndCallbackWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseAndCallbackWithBody), varargs...)
 }
 
 // CreatePromiseAndTask mocks base method.
@@ -723,6 +685,7 @@ func (mr *MockClientInterfaceMockRecorder) SearchSchedules(ctx, params any, reqE
 type MockClientWithResponsesInterface struct {
 	ctrl     *gomock.Controller
 	recorder *MockClientWithResponsesInterfaceMockRecorder
+	isgomock struct{}
 }
 
 // MockClientWithResponsesInterfaceMockRecorder is the mock recorder for MockClientWithResponsesInterface.
@@ -980,46 +943,6 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateCallbackWithRespon
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, params, body}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCallbackWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateCallbackWithResponse), varargs...)
-}
-
-// CreatePromiseAndCallbackWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreatePromiseAndCallbackWithBodyWithResponse(ctx context.Context, params *CreatePromiseAndCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseAndCallbackResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreatePromiseAndCallbackWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreatePromiseAndCallbackResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreatePromiseAndCallbackWithBodyWithResponse indicates an expected call of CreatePromiseAndCallbackWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseAndCallbackWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndCallbackWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseAndCallbackWithBodyWithResponse), varargs...)
-}
-
-// CreatePromiseAndCallbackWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreatePromiseAndCallbackWithResponse(ctx context.Context, params *CreatePromiseAndCallbackParams, body CreatePromiseAndCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseAndCallbackResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreatePromiseAndCallbackWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreatePromiseAndCallbackResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreatePromiseAndCallbackWithResponse indicates an expected call of CreatePromiseAndCallbackWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseAndCallbackWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndCallbackWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseAndCallbackWithResponse), varargs...)
 }
 
 // CreatePromiseAndTaskWithBodyWithResponse mocks base method.

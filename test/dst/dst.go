@@ -89,7 +89,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	d.Add(t_api.SearchPromises, d.generator.GenerateSearchPromises, d.validator.ValidateSearchPromises)
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
-	d.Add(t_api.CreatePromiseAndCallback, d.generator.GenerateCreatePromiseAndCallback, d.validator.ValidateCreatePromiseAndCallback)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
 
 	// callbacks
@@ -180,11 +179,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					// of requests to partitions is as follows:
 					// CreatePromise        -> p partition
 					// CreatePromiseAndTask -> t partition
-					//
-					// Note:
-					// A similar approach is not needed for CreatePromiseAndCallback
-					// because callbacks and promises are part of the same
-					// partition.
 					if req.Kind == t_api.CreatePromiseAndTask {
 						j++
 
@@ -320,7 +314,7 @@ func (d *DST) Model() porcupine.Model {
 				switch req.kind {
 				case Op:
 					switch req.req.Kind {
-					case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CreatePromiseAndCallback, t_api.CompletePromise, t_api.CreateCallback:
+					case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
 						p = append(p, op)
 					case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
 						s = append(s, op)
