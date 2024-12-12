@@ -9,7 +9,7 @@ class Command: ...
 class DurablePromise:
     def __init__(
         self,
-        id: str | None,
+        id: str | None = None,
         data: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         tags: dict[str, str] | None = None,
