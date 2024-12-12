@@ -53,20 +53,20 @@ class Queue(Generic[T]):
 
 @final
 class DelayQueue(Generic[T]):
-    def __init__(self, caller_event: Event | None, maxsize: int = 0) -> None:
-        self._inq = Queue[tuple[T, float]](maxsize=maxsize)
-        self._outq = Queue[T](maxsize=maxsize)
+    def __init__(self) -> None:
+        self._inq = Queue[tuple[T, float]]()
+        self._outq = Queue[T]()
         self._delayed: list[tuple[float, int, T]] = []
-        self._caller_event = caller_event
         self._continue_event = Event()
 
-        self._worker_thread = Thread(target=self._run, daemon=True)
+    def start(self, event: Event | None = None) -> None:
+        self._worker_thread = Thread(target=self._run, args=(event,), daemon=True)
         self._worker_thread.start()
 
     def _next_release_time(self) -> float:
         return self._delayed[0][0]
 
-    def _run(self) -> None:
+    def _run(self, event: Event | None) -> None:
         """Worker thread that processes the delayed queue."""
         while True:
             current_time = now()
@@ -81,8 +81,8 @@ class DelayQueue(Generic[T]):
             while self._delayed and self._next_release_time() <= current_time:
                 _, _, item = heapq.heappop(self._delayed)
                 self._outq.put_nowait(item)  # Put the item in the consumer queue
-                if self._caller_event:
-                    self._caller_event.set()
+                if event:
+                    event.set()
 
             # Calculate the time to wait until the next item is ready
 

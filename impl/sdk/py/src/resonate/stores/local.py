@@ -68,8 +68,8 @@ class MemoryStorage(IStorage):
 
 @final
 class LocalPromiseStore(IPromiseStore):
-    def __init__(self, storage: IStorage) -> None:
-        self._storage = storage
+    def __init__(self, storage: IStorage | None = None) -> None:
+        self._storage = storage or MemoryStorage()
 
     def create_with_task(  # noqa: PLR0913
         self,
@@ -299,5 +299,5 @@ class LocalPromiseStore(IPromiseStore):
 
 @final
 class LocalStore:
-    def __init__(self, storage: IStorage) -> None:
-        self.promises = LocalPromiseStore(storage=storage)
+    def __init__(self, promises: LocalPromiseStore | None = None) -> None:
+        self.promises = promises or LocalPromiseStore()

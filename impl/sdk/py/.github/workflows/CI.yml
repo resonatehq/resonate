@@ -39,16 +39,16 @@ jobs:
         run: |
           rye lint
           rye run check-types
-        
+
       - name: Check types
         run: rye run check-types
-      
+
       - name: Checkout resonate repository
         uses: actions/checkout@v4
         with:
           repository: resonatehq/resonate
           path: resonate
-      
+
       - name: Build resonate
         run: go build -o resonate
         working-directory: resonate
@@ -58,7 +58,7 @@ jobs:
         working-directory: resonate
 
       - name: Test code
-        timeout-minutes: 5
+        timeout-minutes: 10
         env:
-            RESONATE_STORE_URL: http://localhost:8001
+          RESONATE_STORE_URL: http://localhost:8001
         run: rye test

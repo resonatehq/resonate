@@ -6,19 +6,12 @@ from typing_extensions import TypeAlias
 
 ResonateErrorCode: TypeAlias = Literal[
     "UNKNOWN",
-    "FETCH",
-    "CANCELED",
-    "TIMEDOUT",
-    "ABORT",
-    "STORE",
-    "STORE_UNAUTHORIZED",
     "STORE_PAYLOAD",
+    "STORE_UNAUTHORIZED",
     "STORE_FORBIDDEN",
     "STORE_NOT_FOUND",
     "STORE_ALREADY_EXISTS",
-    "STORE_INVALID_STATE",
     "STORE_ENCODER",
-    "USER",
 ]
 
 

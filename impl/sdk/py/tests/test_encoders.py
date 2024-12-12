@@ -32,7 +32,7 @@ class _CustomerError(Exception):
 @pytest.mark.parametrize(
     "data",
     [
-        ResonateError("I'm here for testing", code="ABORT", retriable=True),
+        ResonateError("I'm here for testing", code="UNKNOWN", retriable=True),
         _CustomerError(age=10232, testable=False),
     ],
 )

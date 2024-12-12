@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
-    from threading import Event
-
     from resonate.record import Handle
     from resonate.typing import DurableCoro, DurableFn
 
@@ -17,6 +15,9 @@ T = TypeVar("T")
 
 class IScheduler(ABC):
     @abstractmethod
+    def start(self) -> None: ...
+
+    @abstractmethod
     def run(
         self,
         id: str,
@@ -25,9 +26,3 @@ class IScheduler(ABC):
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[T]: ...
-
-    @abstractmethod
-    def set_default_recv(self, recv: dict[str, Any]) -> None: ...
-
-    @abstractmethod
-    def get_sync_event(self) -> Event: ...

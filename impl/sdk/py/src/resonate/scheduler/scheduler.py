@@ -20,7 +20,7 @@ from resonate.context import Context
 from resonate.dataclasses import FinalValue, Invocation, ResonateCoro
 from resonate.encoders import JsonEncoder
 from resonate.logging import logger
-from resonate.processor import SQE, Processor
+from resonate.processor.processor import SQE, Processor
 from resonate.queue import DelayQueue, Queue
 from resonate.record import Promise, Record
 from resonate.result import Err, Ok
@@ -36,7 +36,6 @@ from resonate.stores.remote import RemoteStore
 if TYPE_CHECKING:
     from resonate.collections import FunctionRegistry
     from resonate.dependencies import Dependencies
-    from resonate.processor import CQE
     from resonate.record import Handle
     from resonate.result import Result
     from resonate.stores.local import LocalStore
@@ -51,50 +50,50 @@ P = ParamSpec("P")
 class Scheduler(IScheduler):
     def __init__(
         self,
-        fn_registry: FunctionRegistry,
         deps: Dependencies,
         pid: str,
+        registry: FunctionRegistry,
         store: LocalStore | RemoteStore,
         task_source: ITaskSource,
     ) -> None:
-        self._pid = pid
         self._deps = deps
-        self._fn_registry = fn_registry
+        self._pid = pid
+        self._processor = Processor()
+        self._registry = registry
+        self._store = store
         self._task_source = task_source
 
-        self._store = store
         self._runnable: deque[tuple[str, Result[Any, Exception] | None]] = deque()
         self._awaiting_rfi: dict[str, list[str]] = {}
         self._awaiting_lfi: dict[str, list[str]] = {}
-        self._records: dict[str, Record[Any]] = {}
 
-        self._record_queue: Queue[str] = Queue()
-        self._sq: Queue[SQE[Any]] = Queue()
-        self._cq: Queue[CQE[Any]] = Queue()
-
+        self._event = Event()
         self._encoder = JsonEncoder()
+        self._recv = self._task_source.default_recv(self._pid)
 
-        self._default_recv: dict[str, Any] | None = None
+        self._records: dict[str, Record[Any]] = {}
+        self._record_queue: Queue[str] = Queue()
+        self._delay_queue = DelayQueue[str]()
 
+        self._heartbeat_thread = Thread(target=self._heartbeat, daemon=True)
+        self._scheduler_thread = Thread(target=self._loop, daemon=True)
+
+    def start(self) -> None:
         if isinstance(self._store, RemoteStore):
-            self._heartbeating_thread = Thread(target=self._heartbeat, daemon=True)
-            self._heartbeating_thread.start()
+            # start the heartbeat thread
+            self._heartbeat_thread.start()
 
-        self._event_loop = Event()
-        self._delay_queue = DelayQueue[str](caller_event=self._event_loop)
-        self._thread = Thread(target=self._loop, daemon=True)
-        self._thread.start()
+            # start the task source
+            self._task_source.start(self._event, self._pid)
 
-        self._processor = Processor(max_workers=None, sq=self._sq, scheduler=self)
+        # start delay queue
+        self._delay_queue.start(self._event)
 
-    def _heartbeat(self) -> None:
-        assert isinstance(self._store, RemoteStore)
-        while True:
-            affected: int | None = None
-            with contextlib.suppress(requests.exceptions.ConnectionError):
-                affected = self._store.tasks.heartbeat(pid=self._pid)
-                logger.debug("Heatbeat affected %s tasks", affected)
-            time.sleep(2)
+        # start the processor
+        self._processor.start(self._event)
+
+        # start the scheduler
+        self._scheduler_thread.start()
 
     def run(
         self,
@@ -110,9 +109,9 @@ class Scheduler(IScheduler):
             return record.handle
 
         # Get function name from registry
-        fn_name = self._fn_registry.get_from_value(func)
+        fn_name = self._registry.get_from_value(func)
         assert fn_name is not None, f"Function {func.__name__} must be registered"
-        func_with_options = self._fn_registry.get(fn_name)
+        func_with_options = self._registry.get(fn_name)
         assert func_with_options is not None
         opts = func_with_options[-1]
         assert opts.durable, "Top level must always be durable."
@@ -126,7 +125,7 @@ class Scheduler(IScheduler):
         self._records[record.id] = record
 
         # Create durable promise while claiming the task.
-        assert self._default_recv
+        assert self._recv
         durable_promise, task = self._store.promises.create_with_task(
             id=id,
             ikey=utils.string_to_uuid(id),
@@ -139,7 +138,7 @@ class Scheduler(IScheduler):
             tags={},
             pid=self._pid,
             ttl=5 * 1_000,
-            recv=self._default_recv,
+            recv=self._recv,
         )
 
         record.add_durable_promise(durable_promise)
@@ -155,88 +154,96 @@ class Scheduler(IScheduler):
 
         return record.handle
 
-    def add_cqe(self, cqe: CQE[Any]) -> None:
-        self._cq.put_nowait(cqe)
-        self._continue()
+    def _heartbeat(self) -> None:
+        assert isinstance(self._store, RemoteStore)
+        while True:
+            affected: int | None = None
+            with contextlib.suppress(requests.exceptions.ConnectionError):
+                affected = self._store.tasks.heartbeat(pid=self._pid)
+                logger.debug("Heatbeat affected %s tasks", affected)
+            time.sleep(2)
 
-    def get_sync_event(self) -> Event:
-        return self._event_loop
+    def _loop(self) -> None:
+        # wait until an event occurs, either:
+        # - resonate run is called
+        # - a completion is enqueued by the processor
+        # - a task is enqueued by the task source
+        while self._event.wait():
+            # immediately clear the event so the next tick waits
+            # unless another event occurs in the meantime
+            self._event.clear()
 
-    def set_default_recv(self, recv: dict[str, Any]) -> None:
-        assert self._default_recv is None
-        self._default_recv = recv
+            # start the next tick
+            self._tick()
 
-    def _loop(self) -> None:  # noqa: C901, PLR0912
-        while self._event_loop.wait():
-            self._event_loop.clear()
+    def _tick(self) -> None:  # noqa: C901,PLR0912
+        # get record to retry
+        for id in self._delay_queue.dequeue_all():
+            self._ingest(id)
 
-            # get record to retry
-            for id in self._delay_queue.dequeue_all():
-                self._ingest(id)
+        # dequeue all cqes and call the callback
+        for cqe in self._processor.dequeue():
+            cqe.callback(cqe.result)
 
-            # check for cqe in cq and run associated callbacks
-            for cqe in self._cq.dequeue_all():
-                cqe.callback(cqe.thunk_result)
+        # check for newly added records from application thread
+        # to feed runnable.
+        for id in self._record_queue.dequeue_all():
+            self._ingest(id)
 
-            # check for newly added records from application thread
-            # to feed runnable.
-            for id in self._record_queue.dequeue_all():
-                self._ingest(id)
+        # check for tasks added from task_source
+        # to firt claim the task, then try to resume if in memory
+        # else invoke.
+        for task in self._task_source.dequeue():
+            assert isinstance(self._store, RemoteStore)
 
-            # check for tasks added from task_source
-            # to firt claim the task, then try to resume if in memory
-            # else invoke.
-            for task in self._task_source.get_tasks():
-                assert isinstance(self._store, RemoteStore)
+            invoke_or_resume = self._store.tasks.claim(
+                task_id=task.task_id,
+                counter=task.counter,
+                pid=self._pid,
+                ttl=5 * 1000,
+            )
+            if isinstance(invoke_or_resume, Invoke):
+                self._process_invoke(invoke_or_resume, task)
+            elif isinstance(invoke_or_resume, Resume):
+                self._process_resume(invoke_or_resume, task)
+            else:
+                assert_never(invoke_or_resume)
 
-                invoke_or_resume = self._store.tasks.claim(
-                    task_id=task.task_id,
-                    counter=task.counter,
-                    pid=self._pid,
-                    ttl=5 * 1000,
-                )
-                if isinstance(invoke_or_resume, Invoke):
-                    self._process_invoke(invoke_or_resume, task)
-                elif isinstance(invoke_or_resume, Resume):
-                    self._process_resume(invoke_or_resume, task)
-                else:
-                    assert_never(invoke_or_resume)
+        # for each item in runnable advance one step in the
+        # coroutine to collect server commands.
+        while self._runnable:
+            id, next_value = self._runnable.pop()
+            record = self._records[id]
+            coro = record.get_coro()
+            yielded_value = coro.advance(next_value)
 
-            # for each item in runnable advance one step in the
-            # coroutine to collect server commands.
-            while self._runnable:
-                id, next_value = self._runnable.pop()
-                record = self._records[id]
-                coro = record.get_coro()
-                yielded_value = coro.advance(next_value)
-
-                if isinstance(yielded_value, LFI):
-                    self._process_lfi(record, yielded_value)
-                elif isinstance(yielded_value, LFC):
-                    self._process_lfc(record, yielded_value)
-                elif isinstance(yielded_value, RFI):
-                    self._process_rfi(record, yielded_value)
-                elif isinstance(yielded_value, RFC):
-                    self._process_rfc(record, yielded_value)
-                elif isinstance(yielded_value, Promise):
-                    self._process_promise(record, yielded_value)
-                elif isinstance(yielded_value, FinalValue):
-                    self._process_final_value(record, yielded_value.v)
-                elif isinstance(yielded_value, DI):
-                    # start execution from the top. Add current record to runnable
-                    raise NotImplementedError
-                else:
-                    assert_never(yielded_value)
+            if isinstance(yielded_value, LFI):
+                self._process_lfi(record, yielded_value)
+            elif isinstance(yielded_value, LFC):
+                self._process_lfc(record, yielded_value)
+            elif isinstance(yielded_value, RFI):
+                self._process_rfi(record, yielded_value)
+            elif isinstance(yielded_value, RFC):
+                self._process_rfc(record, yielded_value)
+            elif isinstance(yielded_value, Promise):
+                self._process_promise(record, yielded_value)
+            elif isinstance(yielded_value, FinalValue):
+                self._process_final_value(record, yielded_value.v)
+            elif isinstance(yielded_value, DI):
+                # start execution from the top. Add current record to runnable
+                raise NotImplementedError
+            else:
+                assert_never(yielded_value)
 
     def _continue(self) -> None:
-        self._event_loop.set()
+        self._event.set()
 
     def _process_invoke(self, invoke: Invoke, task: TaskRecord) -> None:
         logger.info("Invoke message for %s received", invoke.root_durable_promise.id)
 
         invoke_info = invoke.root_durable_promise.invoke_info(self._encoder)
         func_name = invoke_info["func_name"]
-        registered_func = self._fn_registry.get(func_name)
+        registered_func = self._registry.get(func_name)
         assert registered_func, f"There's no function registered under name {func_name}"
         func, opts = registered_func
         assert opts.durable
@@ -300,7 +307,7 @@ class Scheduler(IScheduler):
             root = record.root()
             leaf_id = promise_record.id
 
-            assert self._default_recv
+            assert self._recv
             assert (
                 promise_record.durable_promise
             ), f"Record {promise_record.id} not backed by a promise"
@@ -309,7 +316,7 @@ class Scheduler(IScheduler):
                 promise_id=leaf_id,
                 root_promise_id=root.id,
                 timeout=sys.maxsize,
-                recv=self._default_recv,
+                recv=self._recv,
             )
             if callback is None:
                 assert durable_promise.is_completed()
@@ -481,7 +488,7 @@ class Scheduler(IScheduler):
 
             data, headers, tags = self._get_info_from_rfi(rfc.to_rfi())
 
-            assert self._default_recv
+            assert self._recv
 
             durable_promise, callback = self._store.promises.create_with_callback(
                 id=child_id,
@@ -493,7 +500,7 @@ class Scheduler(IScheduler):
                 tags=tags,
                 callback_id=utils.string_to_uuid(record.id),
                 root_promise_id=root.id,
-                recv=self._default_recv,
+                recv=self._recv,
             )
             assert child_id in self._records
             assert not record.done()
@@ -683,7 +690,7 @@ class Scheduler(IScheduler):
                 func = rfi.unit.fn
             else:
                 assert isfunction(rfi.unit.fn)
-                registered_fn_name = self._fn_registry.get_from_value(rfi.unit.fn)
+                registered_fn_name = self._registry.get_from_value(rfi.unit.fn)
                 assert registered_fn_name is not None
                 func = registered_fn_name
             data = {

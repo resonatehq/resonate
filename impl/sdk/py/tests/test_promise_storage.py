@@ -7,13 +7,13 @@ from functools import cache
 
 import pytest
 
-from resonate.stores.local import LocalStore, MemoryStorage
+from resonate.stores.local import LocalStore
 from resonate.stores.remote import RemoteStore
 
 
 @cache
 def _promise_storages() -> list[LocalStore | RemoteStore]:
-    stores: list[LocalStore | RemoteStore] = [LocalStore(MemoryStorage())]
+    stores: list[LocalStore | RemoteStore] = [LocalStore()]
     if os.getenv("RESONATE_STORE_URL") is not None:
         stores.append(RemoteStore(url=os.environ["RESONATE_STORE_URL"]))
     return stores

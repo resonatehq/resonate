@@ -13,7 +13,7 @@ from resonate.commands import DurablePromise
 from resonate.record import Handle, Promise
 from resonate.resonate import Resonate
 from resonate.retry_policy import constant, exponential, linear, never
-from resonate.stores.local import LocalStore, MemoryStorage
+from resonate.stores.local import LocalStore
 from resonate.stores.remote import RemoteStore
 from resonate.targets import poll
 from resonate.task_sources.poller import Poller
@@ -41,7 +41,7 @@ def _factorial(n: int) -> int:
 
 @cache
 def _promise_storages() -> list[LocalStore | RemoteStore]:
-    stores: list[LocalStore | RemoteStore] = [LocalStore(MemoryStorage())]
+    stores: list[LocalStore | RemoteStore] = [LocalStore()]
     if os.getenv("RESONATE_STORE_URL") is not None:
         stores.append(RemoteStore(url=os.environ["RESONATE_STORE_URL"]))
     return stores

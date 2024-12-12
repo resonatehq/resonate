@@ -39,36 +39,21 @@ class Resonate:
         self,
         pid: str | None = None,
         store: LocalStore | RemoteStore | None = None,
-        scheduler: IScheduler | None = None,
         task_source: ITaskSource | None = None,
     ) -> None:
         self._deps = Dependencies()
-        self._fn_registry = FunctionRegistry()
-        self.pid = pid if pid is not None else uuid4().hex
+        self._registry = FunctionRegistry()
 
-        self._task_source: ITaskSource = task_source or Poller(
-            url="http://localhost:8002",
-            group="default",
+        self._scheduler: IScheduler = Scheduler(
+            deps=self._deps,
+            pid=pid or uuid4().hex,
+            registry=self._registry,
+            store=store or RemoteStore(),
+            task_source=task_source or Poller(),
         )
 
-        self._scheduler: IScheduler = (
-            scheduler
-            if scheduler is not None
-            else Scheduler(
-                fn_registry=self._fn_registry,
-                deps=self._deps,
-                pid=self.pid,
-                store=store
-                if store is not None
-                else RemoteStore("http://localhost:8001"),
-                task_source=self._task_source,
-            )
-        )
-
-        self._task_source.set_sync_event(self._scheduler.get_sync_event())
-        self._scheduler.set_default_recv(self._task_source.default_recv())
-
-        self._task_source.start(self.pid)
+        # start the scheduler
+        self._scheduler.start()
 
     def set_dependency(self, key: str, obj: Any) -> None:  # noqa: ANN401
         self._deps.set(key, obj)
@@ -109,7 +94,7 @@ class Resonate:
     ) -> RegisteredFn[P, T]:
         if name is None:
             name = func.__name__
-        self._fn_registry.add(
+        self._registry.add(
             name,
             (func, Options(version=version, durable=True, retry_policy=retry_policy)),
         )
