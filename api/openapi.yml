@@ -283,10 +283,13 @@ paths:
                 callback:
                   type: object
                   required:
+                    - id
                     - rootPromiseId
                     - timeout
                     - recv
                   properties:
+                    id:
+                      type: string
                     rootPromiseId:
                       type: string
                     timeout:
@@ -430,11 +433,14 @@ paths:
             schema:
               type: object
               required:
+                - id
                 - promiseId
                 - rootPromiseId
                 - timeout
                 - recv
               properties:
+                id:
+                  type: string
                 promiseId:
                   type: string
                 rootPromiseId:
