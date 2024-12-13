@@ -146,37 +146,6 @@ func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, re
 	return model, nil
 }
 
-func (v *Validator) ValidateCreatePromiseAndCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	// first validate the create promise
-	model, err := v.validateCreatePromise(model, reqTime, resTime, req.CreatePromiseAndCallback.Promise, &t_api.CreatePromiseResponse{
-		Status:  res.CreatePromiseAndCallback.Status,
-		Promise: res.CreatePromiseAndCallback.Promise,
-	})
-	if err != nil {
-		return model, err
-	}
-
-	// now validate the callback
-	switch res.CreatePromiseAndCallback.Status {
-	case t_api.StatusCreated:
-		// Callback might have been created before
-		if res.CreatePromiseAndCallback.Callback == nil {
-			if model.callbacks.get(req.CreatePromiseAndCallback.Callback.Id) != nil {
-				return model, fmt.Errorf("callback '%s' must exists", req.CreatePromiseAndCallback.Callback.Id)
-			}
-		} else {
-			if model.callbacks.get(res.CreatePromiseAndCallback.Callback.Id) != nil {
-				return model, fmt.Errorf("callback '%s' exists", res.CreatePromiseAndCallback.Callback.Id)
-			}
-
-			// model has already been copied
-			model.callbacks.set(res.CreatePromiseAndCallback.Callback.Id, res.CreatePromiseAndCallback.Callback)
-		}
-	}
-
-	return model, nil
-}
-
 func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.CreatePromiseRequest, res *t_api.CreatePromiseResponse) (*Model, error) {
 	p := model.promises.get(req.Id)
 

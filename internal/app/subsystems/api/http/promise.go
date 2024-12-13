@@ -215,67 +215,6 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 	})
 }
 
-type createPromiseAndCallbackBody struct {
-	Promise  createPromiseBody         `json:"promise" binding:"required"`
-	Callback createPromiseCallbackBody `json:"callback" binding:"required"`
-}
-
-type createPromiseCallbackBody struct {
-	Id            string          `json:"id" binding:"required"`
-	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
-	Timeout       int64           `json:"timeout"`
-	Recv          json.RawMessage `json:"recv" binding:"required"`
-}
-
-func (s *server) createPromiseAndCallback(c *gin.Context) {
-	var header createPromiseHeader
-	if err := c.ShouldBindHeader(&header); err != nil {
-		err := api.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{
-			"error": err,
-		})
-		return
-	}
-
-	var body createPromiseAndCallbackBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		err := api.RequestValidationError(err)
-		c.JSON(s.code(err.Code), gin.H{"error": err})
-		return
-	}
-
-	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromiseAndCallback,
-		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
-			Promise: &t_api.CreatePromiseRequest{
-				Id:             body.Promise.Id,
-				IdempotencyKey: header.IdempotencyKey,
-				Strict:         header.Strict,
-				Param:          body.Promise.Param,
-				Timeout:        body.Promise.Timeout,
-				Tags:           body.Promise.Tags,
-			},
-			Callback: &t_api.CreateCallbackRequest{
-				Id:            body.Callback.Id,
-				PromiseId:     body.Promise.Id,
-				RootPromiseId: body.Callback.RootPromiseId,
-				Timeout:       body.Callback.Timeout,
-				Recv:          body.Callback.Recv,
-			},
-		},
-	})
-	if err != nil {
-		c.JSON(s.code(err.Code), gin.H{"error": err})
-		return
-	}
-
-	util.Assert(res.CreatePromiseAndCallback != nil, "result must not be nil")
-	c.JSON(s.code(res.CreatePromiseAndCallback.Status), gin.H{
-		"promise":  res.CreatePromiseAndCallback.Promise,
-		"callback": res.CreatePromiseAndCallback.Callback,
-	})
-}
-
 // Complete
 
 type completePromiseHeader struct {

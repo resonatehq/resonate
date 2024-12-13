@@ -12,7 +12,6 @@ service Promises {
     rpc SearchPromises(SearchPromisesRequest) returns (SearchPromisesResponse) {}
     rpc CreatePromise(CreatePromiseRequest) returns (CreatePromiseResponse) {}
     rpc CreatePromiseAndTask(CreatePromiseAndTaskRequest) returns (CreatePromiseAndTaskResponse) {}
-    rpc CreatePromiseAndCallback(CreatePromiseAndCallbackRequest) returns (CreatePromiseAndCallbackResponse) {}
     rpc ResolvePromise(ResolvePromiseRequest) returns (ResolvePromiseResponse) {}
     rpc RejectPromise(RejectPromiseRequest) returns (RejectPromiseResponse) {}
     rpc CancelPromise(CancelPromiseRequest) returns (CancelPromiseResponse) {}
@@ -75,23 +74,6 @@ message CreatePromiseTaskRequest {
 }
 
 message CreatePromiseAndTaskResponse {
-    bool noop = 1;
-    promise_t.Promise promise = 2;
-}
-
-message CreatePromiseAndCallbackRequest {
-    CreatePromiseRequest promise = 1;
-    CreatePromiseCallbackRequest callback = 2;
-}
-
-message CreatePromiseCallbackRequest {
-    string id = 1;
-    string rootPromiseId = 2;
-    int64 timeout = 3;
-    callback_t.Recv recv = 4;
-}
-
-message CreatePromiseAndCallbackResponse {
     bool noop = 1;
     promise_t.Promise promise = 2;
 }

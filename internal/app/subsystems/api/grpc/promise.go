@@ -164,66 +164,6 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 	}, nil
 }
 
-func (s *server) CreatePromiseAndCallback(c context.Context, r *pb.CreatePromiseAndCallbackRequest) (*pb.CreatePromiseAndCallbackResponse, error) {
-	if r.Promise == nil {
-		return nil, status.Error(codes.InvalidArgument, "The field promise is required.")
-	}
-
-	if r.Callback == nil {
-		return nil, status.Error(codes.InvalidArgument, "The field callback is required.")
-	}
-
-	var idempotencyKey *idempotency.Key
-	if r.Promise.IdempotencyKey != "" {
-		idempotencyKey = util.ToPointer(idempotency.Key(r.Promise.IdempotencyKey))
-	}
-
-	var headers map[string]string
-	if r.Promise.Param != nil {
-		headers = r.Promise.Param.Headers
-	}
-
-	var data []byte
-	if r.Promise.Param != nil {
-		data = r.Promise.Param.Data
-	}
-
-	recv, rErr := protoRecv(r.Callback.Recv)
-	if rErr != nil {
-		return nil, rErr
-	}
-
-	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromiseAndCallback,
-		CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
-			Promise: &t_api.CreatePromiseRequest{
-				Id:             r.Promise.Id,
-				IdempotencyKey: idempotencyKey,
-				Strict:         r.Promise.Strict,
-				Param:          promise.Value{Headers: headers, Data: data},
-				Timeout:        r.Promise.Timeout,
-				Tags:           r.Promise.Tags,
-			},
-			Callback: &t_api.CreateCallbackRequest{
-				Id:            r.Callback.Id,
-				PromiseId:     r.Promise.Id,
-				RootPromiseId: r.Callback.RootPromiseId,
-				Timeout:       r.Callback.Timeout,
-				Recv:          recv,
-			},
-		},
-	})
-	if err != nil {
-		return nil, status.Error(s.code(err.Code), err.Error())
-	}
-
-	util.Assert(res.CreatePromiseAndCallback != nil, "result must not be nil")
-	return &pb.CreatePromiseAndCallbackResponse{
-		Noop:    res.CreatePromiseAndCallback.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CreatePromiseAndCallback.Promise),
-	}, nil
-}
-
 func (s *server) ResolvePromise(c context.Context, r *pb.ResolvePromiseRequest) (*pb.ResolvePromiseResponse, error) {
 	var idempotencyKey *idempotency.Key
 	if r.IdempotencyKey != "" {

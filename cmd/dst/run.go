@@ -141,7 +141,6 @@ func RunDSTCmd() *cobra.Command {
 			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 			system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
-			system.AddOnRequest(t_api.CreatePromiseAndCallback, coroutines.CreatePromiseAndCallback)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
