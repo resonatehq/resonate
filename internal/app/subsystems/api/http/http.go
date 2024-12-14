@@ -60,7 +60,6 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	// Promises API
 	authorized.POST("/promises", server.createPromise)
 	authorized.POST("/promises/task", server.createPromiseAndTask)
-	authorized.POST("/promises/callback", server.createPromiseAndCallback)
 	authorized.GET("/promises", server.searchPromises)
 	authorized.GET("/promises/*id", server.readPromise)
 	authorized.PATCH("/promises/*id", server.completePromise)

@@ -15,12 +15,11 @@ type Response struct {
 	Tags map[string]string
 
 	// Promises
-	ReadPromise              *ReadPromiseResponse
-	SearchPromises           *SearchPromisesResponse
-	CreatePromise            *CreatePromiseResponse
-	CreatePromiseAndTask     *CreatePromiseAndTaskResponse
-	CreatePromiseAndCallback *CreatePromiseAndCallbackResponse
-	CompletePromise          *CompletePromiseResponse
+	ReadPromise          *ReadPromiseResponse
+	SearchPromises       *SearchPromisesResponse
+	CreatePromise        *CreatePromiseResponse
+	CreatePromiseAndTask *CreatePromiseAndTaskResponse
+	CompletePromise      *CompletePromiseResponse
 
 	// CALLBACKS
 	CreateCallback *CreateCallbackResponse
@@ -83,16 +82,6 @@ type CreatePromiseAndTaskResponse struct {
 
 func (r *CreatePromiseAndTaskResponse) String() string {
 	return fmt.Sprintf("CreatePromiseAndTask(status=%d, promise=%v, task=%v)", r.Status, r.Promise, r.Task)
-}
-
-type CreatePromiseAndCallbackResponse struct {
-	Status   StatusCode         `json:"status"`
-	Promise  *promise.Promise   `json:"promise,omitempty"`
-	Callback *callback.Callback `json:"callback,omitempty"`
-}
-
-func (r *CreatePromiseAndCallbackResponse) String() string {
-	return fmt.Sprintf("CreatePromiseAndCallback(status=%d, promise=%v, callback=%v)", r.Status, r.Promise, r.Callback)
 }
 
 type CompletePromiseResponse struct {
@@ -236,8 +225,6 @@ func (r *Response) Status() StatusCode {
 		return r.CreatePromise.Status
 	case CreatePromiseAndTask:
 		return r.CreatePromiseAndTask.Status
-	case CreatePromiseAndCallback:
-		return r.CreatePromiseAndCallback.Status
 	case CompletePromise:
 		return r.CompletePromise.Status
 
@@ -291,8 +278,6 @@ func (r *Response) String() string {
 		return r.CreatePromise.String()
 	case CreatePromiseAndTask:
 		return r.CreatePromiseAndTask.String()
-	case CreatePromiseAndCallback:
-		return r.CreatePromiseAndCallback.String()
 	case CompletePromise:
 		return r.CompletePromise.String()
 

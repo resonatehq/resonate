@@ -3,7 +3,6 @@ package test
 import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/callback"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/lock"
 	"github.com/resonatehq/resonate/pkg/message"
@@ -746,81 +745,6 @@ var TestCases = []*testCase{
 				},
 			},
 			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
-		},
-	},
-	{
-		Name: "CreatePromiseAndCallback",
-		Req: &t_api.Request{
-			Kind: t_api.CreatePromiseAndCallback,
-			Tags: map[string]string{"id": "CreatePromiseAndCallback", "name": "CreatePromiseAndCallback"},
-			CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackRequest{
-				Promise: &t_api.CreatePromiseRequest{
-					Id:      "foo",
-					Timeout: 1,
-				},
-				Callback: &t_api.CreateCallbackRequest{
-					Id:            "foo.1",
-					PromiseId:     "foo",
-					RootPromiseId: "bar",
-					Timeout:       2,
-					Recv:          []byte(`"baz"`),
-				},
-			},
-		},
-		Res: &t_api.Response{
-			Kind: t_api.CreatePromiseAndCallback,
-			CreatePromiseAndCallback: &t_api.CreatePromiseAndCallbackResponse{
-				Status: t_api.StatusCreated,
-				Promise: &promise.Promise{
-					Id:      "foo",
-					State:   promise.Pending,
-					Param:   promise.Value{},
-					Timeout: 1,
-				},
-				Callback: &callback.Callback{},
-			},
-		},
-		Http: &httpTestCase{
-			Req: &httpTestCaseRequest{
-				Method: "POST",
-				Path:   "promises/callback",
-				Headers: map[string]string{
-					"Request-Id": "CreatePromiseAndCallback",
-				},
-				Body: []byte(`{
-					"promise": {"id": "foo", "timeout": 1},
-					"callback": {"id": "foo.1", "rootPromiseId": "bar", "timeout": 2, "recv": "baz"}
-				}`),
-			},
-			Res: &httpTestCaseResponse{
-				Code: 201,
-			},
-		},
-		Grpc: &grpcTestCase{
-			Req: &pb.CreatePromiseAndCallbackRequest{
-				Promise: &pb.CreatePromiseRequest{
-					Id:        "foo",
-					Timeout:   1,
-					RequestId: "CreatePromiseAndCallback",
-				},
-				Callback: &pb.CreatePromiseCallbackRequest{
-					Id:            "foo.1",
-					RootPromiseId: "bar",
-					Timeout:       2,
-					Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "baz"}},
-				},
-			},
-			Res: &pb.CreatePromiseAndCallbackResponse{
 				Noop: false,
 				Promise: &pb.Promise{
 					Id:                      "foo",

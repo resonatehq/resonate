@@ -8,7 +8,6 @@ const (
 	SearchPromises
 	CreatePromise
 	CreatePromiseAndTask
-	CreatePromiseAndCallback
 	CompletePromise
 
 	// CALLBACKS
@@ -45,8 +44,6 @@ func (k Kind) String() string {
 		return "CreatePromise"
 	case CreatePromiseAndTask:
 		return "CreatePromiseAndTask"
-	case CreatePromiseAndCallback:
-		return "CreatePromiseAndCallback"
 	case CompletePromise:
 		return "CompletePromise"
 	// CALLBACKS

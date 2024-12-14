@@ -19,14 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Promises_ReadPromise_FullMethodName              = "/promise.Promises/ReadPromise"
-	Promises_SearchPromises_FullMethodName           = "/promise.Promises/SearchPromises"
-	Promises_CreatePromise_FullMethodName            = "/promise.Promises/CreatePromise"
-	Promises_CreatePromiseAndTask_FullMethodName     = "/promise.Promises/CreatePromiseAndTask"
-	Promises_CreatePromiseAndCallback_FullMethodName = "/promise.Promises/CreatePromiseAndCallback"
-	Promises_ResolvePromise_FullMethodName           = "/promise.Promises/ResolvePromise"
-	Promises_RejectPromise_FullMethodName            = "/promise.Promises/RejectPromise"
-	Promises_CancelPromise_FullMethodName            = "/promise.Promises/CancelPromise"
+	Promises_ReadPromise_FullMethodName          = "/promise.Promises/ReadPromise"
+	Promises_SearchPromises_FullMethodName       = "/promise.Promises/SearchPromises"
+	Promises_CreatePromise_FullMethodName        = "/promise.Promises/CreatePromise"
+	Promises_CreatePromiseAndTask_FullMethodName = "/promise.Promises/CreatePromiseAndTask"
+	Promises_ResolvePromise_FullMethodName       = "/promise.Promises/ResolvePromise"
+	Promises_RejectPromise_FullMethodName        = "/promise.Promises/RejectPromise"
+	Promises_CancelPromise_FullMethodName        = "/promise.Promises/CancelPromise"
 )
 
 // PromisesClient is the client API for Promises service.
@@ -37,7 +36,6 @@ type PromisesClient interface {
 	SearchPromises(ctx context.Context, in *SearchPromisesRequest, opts ...grpc.CallOption) (*SearchPromisesResponse, error)
 	CreatePromise(ctx context.Context, in *CreatePromiseRequest, opts ...grpc.CallOption) (*CreatePromiseResponse, error)
 	CreatePromiseAndTask(ctx context.Context, in *CreatePromiseAndTaskRequest, opts ...grpc.CallOption) (*CreatePromiseAndTaskResponse, error)
-	CreatePromiseAndCallback(ctx context.Context, in *CreatePromiseAndCallbackRequest, opts ...grpc.CallOption) (*CreatePromiseAndCallbackResponse, error)
 	ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error)
 	RejectPromise(ctx context.Context, in *RejectPromiseRequest, opts ...grpc.CallOption) (*RejectPromiseResponse, error)
 	CancelPromise(ctx context.Context, in *CancelPromiseRequest, opts ...grpc.CallOption) (*CancelPromiseResponse, error)
@@ -91,16 +89,6 @@ func (c *promisesClient) CreatePromiseAndTask(ctx context.Context, in *CreatePro
 	return out, nil
 }
 
-func (c *promisesClient) CreatePromiseAndCallback(ctx context.Context, in *CreatePromiseAndCallbackRequest, opts ...grpc.CallOption) (*CreatePromiseAndCallbackResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreatePromiseAndCallbackResponse)
-	err := c.cc.Invoke(ctx, Promises_CreatePromiseAndCallback_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *promisesClient) ResolvePromise(ctx context.Context, in *ResolvePromiseRequest, opts ...grpc.CallOption) (*ResolvePromiseResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ResolvePromiseResponse)
@@ -139,7 +127,6 @@ type PromisesServer interface {
 	SearchPromises(context.Context, *SearchPromisesRequest) (*SearchPromisesResponse, error)
 	CreatePromise(context.Context, *CreatePromiseRequest) (*CreatePromiseResponse, error)
 	CreatePromiseAndTask(context.Context, *CreatePromiseAndTaskRequest) (*CreatePromiseAndTaskResponse, error)
-	CreatePromiseAndCallback(context.Context, *CreatePromiseAndCallbackRequest) (*CreatePromiseAndCallbackResponse, error)
 	ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error)
 	RejectPromise(context.Context, *RejectPromiseRequest) (*RejectPromiseResponse, error)
 	CancelPromise(context.Context, *CancelPromiseRequest) (*CancelPromiseResponse, error)
@@ -164,9 +151,6 @@ func (UnimplementedPromisesServer) CreatePromise(context.Context, *CreatePromise
 }
 func (UnimplementedPromisesServer) CreatePromiseAndTask(context.Context, *CreatePromiseAndTaskRequest) (*CreatePromiseAndTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreatePromiseAndTask not implemented")
-}
-func (UnimplementedPromisesServer) CreatePromiseAndCallback(context.Context, *CreatePromiseAndCallbackRequest) (*CreatePromiseAndCallbackResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreatePromiseAndCallback not implemented")
 }
 func (UnimplementedPromisesServer) ResolvePromise(context.Context, *ResolvePromiseRequest) (*ResolvePromiseResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolvePromise not implemented")
@@ -270,24 +254,6 @@ func _Promises_CreatePromiseAndTask_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Promises_CreatePromiseAndCallback_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreatePromiseAndCallbackRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PromisesServer).CreatePromiseAndCallback(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Promises_CreatePromiseAndCallback_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PromisesServer).CreatePromiseAndCallback(ctx, req.(*CreatePromiseAndCallbackRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Promises_ResolvePromise_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResolvePromiseRequest)
 	if err := dec(in); err != nil {
@@ -364,10 +330,6 @@ var Promises_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreatePromiseAndTask",
 			Handler:    _Promises_CreatePromiseAndTask_Handler,
-		},
-		{
-			MethodName: "CreatePromiseAndCallback",
-			Handler:    _Promises_CreatePromiseAndCallback_Handler,
 		},
 		{
 			MethodName: "ResolvePromise",

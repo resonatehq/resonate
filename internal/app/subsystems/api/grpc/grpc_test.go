@@ -100,8 +100,6 @@ func TestGrpc(t *testing.T) {
 				res, err = grpcTest.promises.CreatePromise(ctx, req)
 			case *pb.CreatePromiseAndTaskRequest:
 				res, err = grpcTest.promises.CreatePromiseAndTask(ctx, req)
-			case *pb.CreatePromiseAndCallbackRequest:
-				res, err = grpcTest.promises.CreatePromiseAndCallback(ctx, req)
 			case *pb.ResolvePromiseRequest:
 				res, err = grpcTest.promises.ResolvePromise(ctx, req)
 			case *pb.RejectPromiseRequest:
