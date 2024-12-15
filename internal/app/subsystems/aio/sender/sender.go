@@ -226,7 +226,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	// } else {
 	// 	recv = physicalRecv
 	// }
-	recv, _ = schemeToRecv(*logicalRecv)
+	recv, _ = SchemeToRecv(*logicalRecv)
 
 	if recv == nil {
 		cqe.Error = fmt.Errorf("unknown receiver %s", *logicalRecv)
@@ -295,7 +295,7 @@ func boolToStatus(b bool) string {
 	}
 }
 
-func schemeToRecv(v string) (*receiver.Recv, bool) {
+func SchemeToRecv(v string) (*receiver.Recv, bool) {
 	u, err := url.Parse(v)
 	if err != nil {
 		return nil, false
