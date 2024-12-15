@@ -221,12 +221,15 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	util.Assert((logicalRecv != nil) != (physicalRecv != nil), "one of logical or physical recv must be nil, but not both")
 
 	var recv *receiver.Recv
-	// if logicalRecv != nil {
-	// 	recv = w.targets[*logicalRecv]
-	// } else {
-	// 	recv = physicalRecv
-	// }
-	recv, _ = SchemeToRecv(*logicalRecv)
+
+	if logicalRecv != nil {
+		recv = w.targets[*logicalRecv]
+		if recv == nil {
+			recv, _ = SchemeToRecv(*logicalRecv)
+		}
+	} else {
+		recv = physicalRecv
+	}
 
 	if recv == nil {
 		cqe.Error = fmt.Errorf("unknown receiver %s", *logicalRecv)
