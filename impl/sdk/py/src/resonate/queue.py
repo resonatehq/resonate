@@ -3,12 +3,19 @@ from __future__ import annotations
 import contextlib
 import heapq
 import queue
+import time
 from threading import Event, Thread
 from typing import Generic, TypeVar, final
 
-from resonate.time import now, ns_to_secs, secs_to_ns
-
 T = TypeVar("T")
+
+
+def _ns_to_secs(ns: float) -> float:
+    return ns / 1e9
+
+
+def _secs_to_ns(secs: float) -> float:
+    return secs * 1e9
 
 
 @final
@@ -69,12 +76,12 @@ class DelayQueue(Generic[T]):
     def _run(self, event: Event | None) -> None:
         """Worker thread that processes the delayed queue."""
         while True:
-            current_time = now()
+            current_time = time.time_ns()
 
             sqes = self._inq.dequeue_batch(self._inq.qsize())
             for idx, (item, delay) in enumerate(sqes):
                 heapq.heappush(
-                    self._delayed, (current_time + secs_to_ns(delay), idx, item)
+                    self._delayed, (current_time + _secs_to_ns(delay), idx, item)
                 )
 
             # Release any items whose delay has expired
@@ -92,7 +99,7 @@ class DelayQueue(Generic[T]):
                 wait_time = max(0, next_item_time - current_time)
 
             self._continue_event.wait(
-                ns_to_secs(wait_time) if wait_time is not None else wait_time
+                _ns_to_secs(wait_time) if wait_time is not None else wait_time
             )
             self._continue_event.clear()
 

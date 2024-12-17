@@ -20,7 +20,7 @@ from resonate.stores.traits import IPromiseStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from resonate.typing import Data, Headers, IdempotencyKey
+    from resonate.typing import Data, Headers, IdempotencyKey, Tags
 
 
 @final
@@ -41,10 +41,10 @@ class RemotePromiseStore(IPromiseStore):
         id: str,
         ikey: str | None,
         strict: bool,
-        headers: dict[str, str] | None,
-        data: str | None,
+        headers: Headers,
+        data: Data,
         timeout: int,
-        tags: dict[str, str] | None,
+        tags: Tags,
     ) -> DurablePromiseRecord:
         request_headers = self._initialize_headers(strict=strict, ikey=ikey)
 
@@ -70,10 +70,10 @@ class RemotePromiseStore(IPromiseStore):
         id: str,
         ikey: str | None,
         strict: bool,
-        headers: dict[str, str] | None,
-        data: str | None,
+        headers: Headers,
+        data: Data,
         timeout: int,
-        tags: dict[str, str] | None,
+        tags: Tags,
         pid: str,
         ttl: int,
         recv: str | dict[str, Any],
@@ -110,63 +110,14 @@ class RemotePromiseStore(IPromiseStore):
             return durable_promise, None
         return durable_promise, TaskRecord.decode(task_data, encoder=self._encoder)
 
-    def create_with_callback(  # noqa: PLR0913
-        self,
-        *,
-        id: str,
-        ikey: str | None,
-        strict: bool,
-        timeout: int,
-        headers: dict[str, str] | None,
-        data: str | None,
-        tags: dict[str, str] | None,
-        callback_id: str,
-        root_promise_id: str,
-        recv: str | dict[str, Any],
-    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
-        request_headers = self._initialize_headers(strict=strict, ikey=ikey)
-
-        res = self._call(
-            requests.Request(
-                method="post",
-                url=f"{self.url}/promises/callback",
-                headers=request_headers,
-                json={
-                    "promise": {
-                        "id": id,
-                        "timeout": timeout,
-                        "param": {"headers": headers, "data": self._encode_data(data)},
-                        "tags": tags,
-                    },
-                    "callback": {
-                        "id": callback_id,
-                        "rootPromiseId": root_promise_id,
-                        "timeout": timeout,
-                        "recv": recv,
-                    },
-                },
-            )
-        )
-
-        data_json = res.json()
-        callback_data = data_json["callback"]
-        durable_promise = DurablePromiseRecord.decode(
-            data_json["promise"], encoder=self._encoder
-        )
-        if callback_data is None:
-            return durable_promise, None
-        return durable_promise, CallbackRecord.decode(
-            callback_data, encoder=self._encoder
-        )
-
     def resolve(
         self,
         *,
         id: str,
         ikey: str | None,
         strict: bool,
-        headers: dict[str, str] | None,
-        data: str | None,
+        headers: Headers,
+        data: Data,
     ) -> DurablePromiseRecord:
         request_headers = self._initialize_headers(strict=strict, ikey=ikey)
 
@@ -253,7 +204,7 @@ class RemotePromiseStore(IPromiseStore):
 
         return headers
 
-    def _encode_data(self, data: str | None) -> str | None:
+    def _encode_data(self, data: Data) -> str | None:
         if data is None:
             return None
         return _encode(data, self._encoder)

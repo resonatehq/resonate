@@ -699,3 +699,19 @@ def test_human_in_the_loop() -> None:
     )
     time.sleep(3)
     assert p.result() == "Hi Peter with age 50"
+
+
+def test_sleep() -> None:
+    group = "test-sleep"
+
+    store = RemoteStore(url="http://localhost:8001")
+    s = Resonate(store=store, task_source=Poller("http://localhost:8002", group=group))
+
+    @s.register
+    def foo_sleep(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
+        yield ctx.sleep(n)
+        return n
+
+    n = 1
+    p = foo_sleep.run(f"{group}-{n}", n)
+    assert p.result() == n

@@ -13,16 +13,13 @@ from resonate.actions import (
 )
 from resonate.commands import Command, DurablePromise
 from resonate.dataclasses import Invocation, RegisteredFn
+from resonate.time import now
 
 if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
 
     from resonate.dependencies import Dependencies
-    from resonate.typing import (
-        DurableCoro,
-        DurableFn,
-        Yieldable,
-    )
+    from resonate.typing import DurableCoro, DurableFn, Yieldable
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -38,6 +35,13 @@ class Context:
 
     def get_dependency(self, key: str) -> Any:  # noqa: ANN401
         return self._deps.get(key)
+
+    def sleep(self, secs: int) -> RFC:
+        return self.rfc(
+            DurablePromise(
+                tags={"resonate:timeout": "true"}, timeout=now() + (secs * 1_000)
+            )
+        )
 
     @overload
     def rfc(self, cmd: DurablePromise, /) -> RFC: ...

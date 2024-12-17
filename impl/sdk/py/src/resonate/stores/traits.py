@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from resonate.stores.record import (
-        CallbackRecord,
         DurablePromiseRecord,
         TaskRecord,
     )
@@ -26,31 +25,16 @@ class IPromiseStore(ABC):
         tags: Tags,
     ) -> DurablePromiseRecord: ...
     @abstractmethod
-    def create_with_callback(  # noqa: PLR0913
-        self,
-        *,
-        id: str,
-        ikey: str | None,
-        strict: bool,
-        timeout: int,
-        headers: dict[str, str] | None,
-        data: str | None,
-        tags: dict[str, str] | None,
-        callback_id: str,
-        root_promise_id: str,
-        recv: str | dict[str, Any],
-    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]: ...
-    @abstractmethod
     def create_with_task(  # noqa: PLR0913
         self,
         *,
         id: str,
         ikey: str | None,
         strict: bool,
-        headers: dict[str, str] | None,
-        data: str | None,
+        headers: Headers,
+        data: Data,
         timeout: int,
-        tags: dict[str, str] | None,
+        tags: Tags,
         pid: str,
         ttl: int,
         recv: str | dict[str, Any],

@@ -6,7 +6,6 @@ import uuid
 
 import pytest
 
-from resonate import utils
 from resonate.stores.remote import (
     RemoteStore,
 )
@@ -108,62 +107,3 @@ def test_case_3_create_durable_promise_with_task() -> None:
     assert task_record.counter == 1
     store.tasks.heartbeat(pid=pid)
     store.tasks.complete(task_id=task_record.task_id, counter=task_record.counter)
-
-
-@pytest.mark.skipif(
-    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
-)
-def test_case_3_create_durable_promise_with_callback() -> None:
-    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
-    pid = uuid.uuid4().hex
-    id = "4.0"
-    durable_promise, callback_record = store.promises.create_with_callback(
-        id=id,
-        ikey=None,
-        strict=False,
-        timeout=sys.maxsize,
-        headers=None,
-        data=None,
-        tags=None,
-        callback_id=id + id,
-        root_promise_id=id,
-        recv={"type": "poll", "data": {"group": "default", "id": pid}},
-    )
-    assert callback_record is not None
-    assert durable_promise.id == callback_record.id
-    assert durable_promise.is_pending()
-    assert durable_promise.timeout == callback_record.timeout
-
-
-@pytest.mark.skipif(
-    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
-)
-def test_case_4_create_with_callback_dedup() -> None:
-    store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
-    id = "5.0"
-    store.promises.create(
-        id=id,
-        ikey=utils.string_to_uuid(id),
-        strict=False,
-        headers=None,
-        data=None,
-        timeout=sys.maxsize,
-        tags=None,
-    )
-    store.promises.resolve(
-        id=id, ikey=utils.string_to_uuid(id), strict=False, headers=None, data="1"
-    )
-    promise_record, callback_record = store.promises.create_with_callback(
-        callback_id=id + id,
-        id=id,
-        root_promise_id=id,
-        timeout=sys.maxsize,
-        recv="default",
-        ikey=utils.string_to_uuid(id),
-        strict=False,
-        headers=None,
-        data=None,
-        tags=None,
-    )
-    assert promise_record.is_completed()
-    assert callback_record is None

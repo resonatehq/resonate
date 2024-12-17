@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from resonate.stores.local import LocalStore
     from resonate.stores.record import TaskRecord
     from resonate.task_sources.traits import ITaskSource
-    from resonate.typing import DurableCoro, DurableFn
+    from resonate.typing import Data, DurableCoro, DurableFn, Headers, Tags
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -462,7 +462,8 @@ class Scheduler(IScheduler):
         )
         record.remove_task()
 
-    def _process_rfc(self, record: Record[Any], rfc: RFC) -> None:
+    def _process_rfc(self, record: Record[Any], rfc: RFC) -> None:  # noqa: PLR0912
+        assert isinstance(self._store, RemoteStore)
         child_id: str
         next_child_name = record.next_child_name()
         if isinstance(rfc.unit, Invocation):
@@ -486,35 +487,46 @@ class Scheduler(IScheduler):
             self._records[child_id] = child_record
             assert rfc.opts.durable
 
-            data, headers, tags = self._get_info_from_rfi(rfc.to_rfi())
+            data, headers, tags, timeout = self._get_info_from_rfi(rfc.to_rfi())
 
             assert self._recv
 
-            durable_promise, callback = self._store.promises.create_with_callback(
+            durable_promise = self._store.promises.create(
                 id=child_id,
                 ikey=utils.string_to_uuid(child_id),
                 strict=False,
                 headers=headers,
-                data=self._encoder.encode(data),
-                timeout=sys.maxsize,
+                data=data,
+                timeout=timeout or sys.maxsize,
                 tags=tags,
-                callback_id=utils.string_to_uuid(record.id),
-                root_promise_id=root.id,
-                recv=self._recv,
             )
             assert child_id in self._records
             assert not record.done()
             child_record.add_durable_promise(durable_promise)
 
             if durable_promise.is_completed():
-                assert callback is None
                 value = durable_promise.get_value(self._encoder)
                 child_record.set_result(value, deduping=True)
                 self._add_to_runnable(record.id, child_record.safe_result())
+
             else:
-                self._add_to_awaiting_remote(child_id, record.id)
-                if self._blocked_only_on_remote(root.id):
-                    self._complete_task(root.id)
+                durable_promise, callback = self._store.callbacks.create(
+                    id=utils.string_to_uuid(record.id),
+                    promise_id=child_id,
+                    root_promise_id=root.id,
+                    timeout=sys.maxsize,
+                    recv=self._recv,
+                )
+                if durable_promise.is_completed():
+                    assert callback is None
+                    value = durable_promise.get_value(self._encoder)
+                    child_record.set_result(value, deduping=True)
+                    self._add_to_runnable(record.id, child_record.safe_result())
+                else:
+                    assert callback is not None
+                    self._add_to_awaiting_remote(child_id, record.id)
+                    if self._blocked_only_on_remote(root.id):
+                        self._complete_task(root.id)
 
     def _process_lfc(self, record: Record[Any], lfc: LFC) -> None:
         child_id = lfc.opts.id if lfc.opts.id is not None else record.next_child_name()
@@ -573,15 +585,15 @@ class Scheduler(IScheduler):
             self._records[child_id] = child_record
             assert rfi.opts.durable
 
-            data, headers, tags = self._get_info_from_rfi(rfi)
+            data, headers, tags, timeout = self._get_info_from_rfi(rfi)
 
             durable_promise = self._store.promises.create(
                 id=child_id,
                 ikey=utils.string_to_uuid(child_id),
                 strict=False,
                 headers=headers,
-                data=self._encoder.encode(data),
-                timeout=sys.maxsize,
+                data=data,
+                timeout=timeout or sys.maxsize,
                 tags=tags,
             )
             assert child_id in self._records
@@ -674,16 +686,16 @@ class Scheduler(IScheduler):
             record.set_result(final_value, deduping=False)
             self._unblock_awaiting_local(record.id)
 
-    def _get_info_from_rfi(
-        self, rfi: RFI
-    ) -> tuple[dict[str, Any] | None, dict[str, str] | None, dict[str, str] | None]:
-        data: dict[str, Any] | None
-        tags: dict[str, str] | None
-        headers: dict[str, str] | None
+    def _get_info_from_rfi(self, rfi: RFI) -> tuple[Data, Headers, Tags, int | None]:
+        data: Data
+        tags: Tags
+        headers: Headers
+        timeout: int | None = None
         if isinstance(rfi.unit, DurablePromise):
             data = rfi.unit.data
             tags = rfi.unit.tags
             headers = rfi.unit.headers
+            timeout = rfi.unit.timeout
         elif isinstance(rfi.unit, Invocation):
             func: str
             if isinstance(rfi.unit.fn, str):
@@ -693,13 +705,15 @@ class Scheduler(IScheduler):
                 registered_fn_name = self._registry.get_from_value(rfi.unit.fn)
                 assert registered_fn_name is not None
                 func = registered_fn_name
-            data = {
-                "func": func,
-                "args": rfi.unit.args,
-                "kwargs": rfi.unit.kwargs,
-            }
+            data = self._encoder.encode(
+                {
+                    "func": func,
+                    "args": rfi.unit.args,
+                    "kwargs": rfi.unit.kwargs,
+                }
+            )
             tags = {"resonate:invoke": rfi.opts.send_to or "default"}
             headers = None
         else:
             assert_never(rfi.unit)
-        return (data, headers, tags)
+        return (data, headers, tags, timeout)
