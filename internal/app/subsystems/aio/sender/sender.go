@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strings"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
@@ -219,8 +221,12 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	util.Assert((logicalRecv != nil) != (physicalRecv != nil), "one of logical or physical recv must be nil, but not both")
 
 	var recv *receiver.Recv
+
 	if logicalRecv != nil {
 		recv = w.targets[*logicalRecv]
+		if recv == nil {
+			recv, _ = schemeToRecv(*logicalRecv)
+		}
 	} else {
 		recv = physicalRecv
 	}
@@ -289,5 +295,36 @@ func boolToStatus(b bool) string {
 		return "success"
 	default:
 		return "failure"
+	}
+}
+
+func schemeToRecv(v string) (*receiver.Recv, bool) {
+	u, err := url.Parse(v)
+	if err != nil {
+		return nil, false
+	}
+
+	switch u.Scheme {
+	case "http", "https":
+		data, err := json.Marshal(map[string]string{"url": u.String()})
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "http", Data: data}, true
+	case "poll":
+		rawData := map[string]string{"group": u.Host}
+		if id := strings.TrimPrefix(u.Path, "/"); id != "" {
+			rawData["id"] = id
+		}
+
+		data, err := json.Marshal(rawData)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "poll", Data: data}, true
+	default:
+		return nil, false
 	}
 }

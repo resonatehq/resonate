@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strconv"
-	"strings"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -249,44 +247,9 @@ func coerce(v any) (any, bool) {
 	case *receiver.Recv:
 		return v, true
 	case string:
-		if recv, ok := schemeToRecv(v); ok {
-			return recv, true
-		}
-
 		// will be matched against logical receivers in the queueing
 		// subsystem
 		return v, true
-	default:
-		return nil, false
-	}
-}
-
-func schemeToRecv(v string) (*receiver.Recv, bool) {
-	u, err := url.Parse(v)
-	if err != nil {
-		return nil, false
-	}
-
-	switch u.Scheme {
-	case "http", "https":
-		data, err := json.Marshal(map[string]string{"url": u.String()})
-		if err != nil {
-			return nil, false
-		}
-
-		return &receiver.Recv{Type: "http", Data: data}, true
-	case "poll":
-		rawData := map[string]string{"group": u.Host}
-		if id := strings.TrimPrefix(u.Path, "/"); id != "" {
-			rawData["id"] = id
-		}
-
-		data, err := json.Marshal(rawData)
-		if err != nil {
-			return nil, false
-		}
-
-		return &receiver.Recv{Type: "poll", Data: data}, true
 	default:
 		return nil, false
 	}
