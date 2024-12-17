@@ -225,7 +225,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	if logicalRecv != nil {
 		recv = w.targets[*logicalRecv]
 		if recv == nil {
-			recv, _ = SchemeToRecv(*logicalRecv)
+			recv, _ = schemeToRecv(*logicalRecv)
 		}
 	} else {
 		recv = physicalRecv
@@ -298,7 +298,7 @@ func boolToStatus(b bool) string {
 	}
 }
 
-func SchemeToRecv(v string) (*receiver.Recv, bool) {
+func schemeToRecv(v string) (*receiver.Recv, bool) {
 	u, err := url.Parse(v)
 	if err != nil {
 		return nil, false

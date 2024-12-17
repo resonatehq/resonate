@@ -8,7 +8,6 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -248,10 +247,6 @@ func coerce(v any) (any, bool) {
 	case *receiver.Recv:
 		return v, true
 	case string:
-		if recv, ok := sender.SchemeToRecv(v); ok {
-			return recv, true
-		}
-
 		// will be matched against logical receivers in the queueing
 		// subsystem
 		return v, true
