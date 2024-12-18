@@ -32,6 +32,7 @@ func RunDSTCmd() *cobra.Command {
 		timeout           time.Duration
 		scenario          string
 		visualizationPath string
+		verbose           bool
 
 		reqsPerTick     = util.NewRangeIntFlag(1, 25)
 		ids             = util.NewRangeIntFlag(1, 25)
@@ -167,6 +168,7 @@ func RunDSTCmd() *cobra.Command {
 				Ticks:              ticks,
 				Timeout:            timeout,
 				VisualizationPath:  visualizationPath,
+				Verbose:            verbose,
 				TimeElapsedPerTick: 1000, // ms
 				TimeoutTicks:       t,
 				ReqsPerTick:        func() int { return reqsPerTick.Resolve(r) },
@@ -206,6 +208,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", 1*time.Hour, "timeout")
 	cmd.Flags().StringVar(&scenario, "scenario", "default", "can be one of: default, fault, lazy")
 	cmd.Flags().StringVar(&visualizationPath, "visualization-path", "dst.html", "porcupine visualization file path")
+	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "log additional information when run is non linearizable")
 	cmd.Flags().Var(reqsPerTick, "reqs-per-tick", "number of requests per tick")
 	cmd.Flags().Var(ids, "ids", "promise id set size")
 	cmd.Flags().Var(idempotencyKeys, "idempotency-keys", "idempotency key set size")

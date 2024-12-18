@@ -29,6 +29,7 @@ type Config struct {
 	Ticks              int64
 	Timeout            time.Duration
 	VisualizationPath  string
+	Verbose            bool
 	TimeElapsedPerTick int64
 	TimeoutTicks       int64
 	ReqsPerTick        func() int
@@ -47,6 +48,15 @@ type Kind int
 const (
 	Op Kind = iota
 	Bc
+)
+
+type Partition int
+
+const (
+	Promise Partition = iota
+	Schedule
+	Lock
+	Task
 )
 
 type Req struct {
@@ -289,12 +299,62 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	case porcupine.Ok:
 		slog.Info("DST is linearizable")
 	case porcupine.Illegal:
-		slog.Error("DST is non linearizable")
+		slog.Error("DST is non linearizable, run with -v flag for more information", "v", d.config.Verbose)
+		if d.config.Verbose {
+			d.logNonLinearizable(ops, history)
+		}
 	case porcupine.Unknown:
 		slog.Error("DST timed out before linearizability could be determined")
 	}
 
 	return result == porcupine.Ok
+}
+
+func (d *DST) logNonLinearizable(ops []porcupine.Operation, history porcupine.LinearizationInfo) {
+	// log the linearizations
+	linearizations := history.PartialLinearizationsOperations()
+	util.Assert(len(linearizations) == 3, "linearizations must be equal to the number of partitions")
+
+	// check each parition individually
+	// partitions are in order: promise, schedule, lock
+	for i, p := range []Partition{Promise, Schedule, Lock} {
+		util.Assert(len(linearizations[i]) > 0, "partition must have at least one linearization")
+
+		// take the first linearization
+		linearization := linearizations[i][0]
+
+		// determine the next operation that breaks linearizability
+		if next, ok := next(linearization, ops, p); ok {
+			// add the next operation to the linearization, so that we can log
+			// the non linearizable path
+			linearization = append(linearization, next)
+		} else {
+			// if no op is found, we can assume the partition is linearizable
+			continue
+		}
+
+		// re run and log operations
+		d.log(linearization)
+	}
+}
+
+func (d *DST) log(ops []porcupine.Operation) {
+	// create a new model
+	model := NewModel()
+
+	// re feed operations through model
+	for i, op := range ops {
+		req := op.Input.(*Req)
+		res := op.Output.(*Res)
+
+		var err error
+
+		// step through the model (again)
+		model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		slog.Info("DST", "t", fmt.Sprintf("%d|%d", req.time, res.time), "id", req.req.Tags["id"], "req", req.req, "res", res.res, "err", err)
+
+		util.Assert(i != len(ops)-1 || err != nil, "the last operation must result in an error")
+	}
 }
 
 func (d *DST) Model() porcupine.Model {
@@ -311,28 +371,16 @@ func (d *DST) Model() porcupine.Model {
 			for _, op := range history {
 				req := op.Input.(*Req)
 
-				switch req.kind {
-				case Op:
-					switch req.req.Kind {
-					case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
-						p = append(p, op)
-					case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
-						s = append(s, op)
-					case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
-						l = append(l, op)
-					case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks, t_api.CreatePromiseAndTask:
-						// TODO(avillega): Temporaly disable validations over tasks
-						// t = append(t, op)
-					default:
-						panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
-					}
-				case Bc:
+				switch partition(req) {
+				case Promise:
+					p = append(p, op)
+				case Schedule:
+					s = append(s, op)
+				case Lock:
+					l = append(l, op)
 					// TODO(avillega): Temporaly disable validations over tasks
-					// if req.bc.Task != nil {
+					// case Task:
 					// 	t = append(t, op)
-					// }
-				default:
-					panic(fmt.Sprintf("unknown request kind: %d", req.kind))
 				}
 			}
 
@@ -343,7 +391,7 @@ func (d *DST) Model() porcupine.Model {
 			req := input.(*Req)
 			res := output.(*Res)
 
-			util.Assert(req.kind == res.kind, "kinds must match ")
+			util.Assert(req.kind == res.kind, "kinds must match")
 
 			switch req.kind {
 			case Op:
@@ -422,7 +470,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 
 				return fmt.Sprintf(`
-					<table border="0" cellspacing="0" cellpadding="5">
+					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
 						<thead>
 							<tr>
 								<td><b>Promises</b></td>
@@ -476,7 +524,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 
 				return fmt.Sprintf(`
-					<table border="0" cellspacing="0" cellpadding="5">
+					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
 						<thead>
 							<tr>
 								<td><b>Schedules</b></td>
@@ -515,7 +563,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 
 				return fmt.Sprintf(`
-					<table border="0" cellspacing="0" cellpadding="5">
+					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
 						<thead>
 							<tr>
 								<td><b>Locks</b></td>
@@ -558,7 +606,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 
 				return fmt.Sprintf(`
-						<table border="0" cellspacing="0" cellpadding="5">
+						<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
 							<thead>
 								<tr>
 									<td><b>Tasks</b></td>
@@ -643,4 +691,56 @@ func (d *DST) String() string {
 		d.config.Tags,
 		cap(d.config.Backchannel),
 	)
+}
+
+// Helper functions
+
+func partition(req *Req) Partition {
+	switch req.kind {
+	case Op:
+		switch req.req.Kind {
+		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
+			return Promise
+		case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
+			return Schedule
+		case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
+			return Lock
+		case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks, t_api.CreatePromiseAndTask:
+			return Task
+		default:
+			panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
+		}
+	case Bc:
+		return Task
+	default:
+		panic(fmt.Sprintf("unknown request kind: %d", req.kind))
+	}
+}
+
+func next(linearizable []porcupine.Operation, ops []porcupine.Operation, p Partition) (porcupine.Operation, bool) {
+	// convert to map for quick lookup
+	linearizableMap := map[porcupine.Operation]bool{}
+	for _, op := range linearizable {
+		linearizableMap[op] = true
+	}
+
+	for _, op := range ops {
+		req := op.Input.(*Req)
+
+		// if req is part of a different partition, skip
+		if partition(req) != p {
+			continue
+		}
+
+		// if req is part of the linearizable path, skip
+		if _, ok := linearizableMap[op]; ok {
+			continue
+		}
+
+		// ops are ordered by time, so the first op is not part of the
+		// linearizable path should break the model
+		return op, true
+	}
+
+	return porcupine.Operation{}, false
 }
