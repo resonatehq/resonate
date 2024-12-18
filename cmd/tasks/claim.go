@@ -12,7 +12,7 @@ import (
 
 // Example command usage for claiming a task
 var claimTasksExample = `
-# Claim a task 
+# Claim a task
 resonate tasks claim foo --counter 1 --process-id bar --ttl 1m`
 
 // ClaimTaskCmd returns a cobra command for claiming a task.
@@ -74,9 +74,9 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
-	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "Unique process ID that identifies the claimer")
-	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "Time to live in milliseconds")
+	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "task counter")
+	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "unique id that identifies the claimer")
+	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "task time to live")
 
 	// Mark flags as required
 	_ = cmd.MarkFlagRequired("id")

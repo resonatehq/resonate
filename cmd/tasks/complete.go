@@ -11,7 +11,7 @@ import (
 
 // Example command usage for completing a task
 var completeTasksExample = `
-# Complete a task 
+# Complete a task
 resonate tasks complete foo --counter 1`
 
 // CompleteTaskCmd returns a cobra command for completing a task.
@@ -63,7 +63,7 @@ func CompleteTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "The task counter")
+	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "task counter")
 
 	// Mark flags as required
 	_ = cmd.MarkFlagRequired("id")

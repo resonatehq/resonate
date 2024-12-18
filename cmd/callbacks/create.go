@@ -3,7 +3,7 @@ package callbacks
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"errors"
 	"time"
 
 	"github.com/resonatehq/resonate/pkg/client"
@@ -13,13 +13,13 @@ import (
 
 var createCallbacksExample = `
 # Create a callback
-resonate callback create --promise-id foo --root-promise-id bar --timeout 1h --recv default
+resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv default
 
 # Create a callback with url
-resonate callback create --promise-id foo --root-promise-id bar --timeout 1h --recv poll://default/6fa89b7e-4a56-40e8-ba4e-78864caa3278
+resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv poll://default/6fa89b7e-4a56-40e8-ba4e-78864caa3278
 
 # Create a callback with object
-resonate callback create --promise-id foo --root-promise-id bar --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "6fa89b7e-4a56-40e8-ba4e-78864caa3278"}}
+resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "6fa89b7e-4a56-40e8-ba4e-78864caa3278"}}
 `
 
 func CreateCallbackCmd(c client.Client) *cobra.Command {
@@ -27,78 +27,69 @@ func CreateCallbackCmd(c client.Client) *cobra.Command {
 		promiseId     string
 		rootPromiseId string
 		timeout       time.Duration
-		recv          string
+		recvStr       string
 	)
 	cmd := &cobra.Command{
-		Use:     "create ",
-		Short:   "Create callbacks",
+		Use:     "create <id>",
+		Short:   "Create callback",
 		Example: createCallbacksExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
-
-			// What should requestID be?
-			paramsByte, err := json.Marshal(struct {
-				RequestId string `json:"request-id"`
-			}{RequestId: ""})
-
-			if err != nil {
-				return nil
+			if len(args) != 1 {
+				return errors.New("must specify an id")
 			}
 
-			paramsStr := string(paramsByte)
-			params := &v1.CreateCallbackParams{
-				RequestId: &paramsStr,
-			}
+			id := args[0]
 
-			decoder := json.NewDecoder(strings.NewReader(recv))
-			var recvJson v1.Recv
+			var recv v1.Recv
 
-			if err := decoder.Decode(&recvJson); err == nil {
-				body := v1.CreateCallbackJSONRequestBody{
-					PromiseId:     promiseId,
-					RootPromiseId: rootPromiseId,
-					Timeout:       time.Now().Add(timeout).UnixMilli(),
-					Recv:          recvJson,
-				}
+			if json.Valid([]byte(recvStr)) {
+				var recv0 v1.Recv0
 
-				res, err := c.V1().CreateCallbackWithResponse(context.TODO(), params, body)
-
-				if err != nil {
+				if err := json.Unmarshal([]byte(recvStr), &recv0); err != nil {
 					return err
 				}
-
-				if res.StatusCode() == 201 {
-					cmd.Printf("Created callback for promise: %s\n", promiseId)
-				} else if res.StatusCode() == 200 {
-					cmd.Printf("Callback exists for the promise: %s\n", promiseId)
-				} else {
-					cmd.PrintErrln(res.Status(), string(res.Body))
+				if err := recv.FromRecv0(recv0); err != nil {
+					return err
 				}
 			} else {
-				// Either input is string/url or bad json input
-				// Need to check for the above before making request
-				// This does not work
-				res, err := c.V1().CreateCallbackWithBodyWithResponse(context.TODO(), params, "application/text", strings.NewReader(recv))
-
-				if err != nil {
+				if err := recv.FromRecv1(recvStr); err != nil {
 					return err
 				}
-
-				if res.StatusCode() == 201 {
-					cmd.Printf("Created callback for promise: %s\n", promiseId)
-				} else if res.StatusCode() == 200 {
-					cmd.Printf("Callback exists for the promise: %s\n", promiseId)
-				} else {
-					cmd.PrintErrln(res.Status(), string(res.Body))
-				}
 			}
+
+			body := v1.CreateCallbackJSONRequestBody{
+				Id:            id,
+				PromiseId:     promiseId,
+				RootPromiseId: rootPromiseId,
+				Timeout:       time.Now().Add(timeout).UnixMilli(),
+				Recv:          recv,
+			}
+
+			res, err := c.V1().CreateCallbackWithResponse(context.TODO(), nil, body)
+			if err != nil {
+				return err
+			}
+
+			if res.StatusCode() == 201 {
+				cmd.Printf("Created callback: %s\n", id)
+			} else if res.StatusCode() == 200 {
+				cmd.Printf("Created callback: %s (deduplicated)\n", id)
+			} else {
+				cmd.PrintErrln(res.Status(), string(res.Body))
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVar(&promiseId, "promise-id", "", "promise id")
 	cmd.Flags().StringVar(&rootPromiseId, "root-promise-id", "", "root promise id")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "callback timeout")
-	cmd.Flags().StringVar(&recv, "recv", "", "receive object")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "task timeout")
+	cmd.Flags().StringVar(&recvStr, "recv", "default", "task receiver")
+
+	_ = cmd.MarkFlagRequired("promise-id")
+	_ = cmd.MarkFlagRequired("root-promise-id")
+	_ = cmd.MarkFlagRequired("timeout")
 
 	return cmd
 }

@@ -10,7 +10,7 @@ import (
 
 // Example command usage for sending a heartbeat to a task
 var heartbeatTasksExample = `
-# Heartbeat a task 
+# Heartbeat a task
 resonate tasks heartbeat --process-id foo`
 
 // HeartbeatTaskCmd returns a cobra command for sending a heartbeat to a task.
@@ -22,7 +22,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 	// Define the cobra command
 	cmd := &cobra.Command{
 		Use:     "heartbeat",
-		Short:   "Send a heartbeat to a task",
+		Short:   "Heartbeat tasks",
 		Example: heartbeatTasksExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Create parameters for the request
@@ -42,7 +42,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 
 			// Handle the response based on the status code
 			if res.StatusCode() == 200 {
-				cmd.Printf("Heartbeat tasks for process-id: %s\n", processId)
+				cmd.Printf("Tasks heartbeated: %d\n", *res.JSON200.TasksAffected)
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))
 				return nil
@@ -53,7 +53,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "Unique process ID to heartbeat tasks")
+	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "unique id that identifies the claimer")
 
 	// Mark flags as required
 	_ = cmd.MarkFlagRequired("process-id")
