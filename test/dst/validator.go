@@ -331,6 +331,38 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 
 		return model, nil
 
+	case t_api.StatusPromiseAlreadyResolved:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Resolved && !(p.State == promise.Pending && p.Tags["resonate:timeout"] == "true" && resTime >= p.Timeout) {
+			return model, fmt.Errorf("promise '%s' not resolved", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	case t_api.StatusPromiseAlreadyRejected:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Rejected {
+			return model, fmt.Errorf("promise '%s' not rejected", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	case t_api.StatusPromiseAlreadyCanceled:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Canceled {
+			return model, fmt.Errorf("promise '%s' not canceled", req.CreateCallback.PromiseId)
+		}
+		return model, nil
+	case t_api.StatusPromiseAlreadyTimedout:
+		if p == nil {
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateCallback.PromiseId)
+		}
+		if p.State != promise.Timedout && !(p.State == promise.Pending && p.Tags["resonate:timeout"] != "true" && resTime >= p.Timeout) {
+			return model, fmt.Errorf("promise '%s' not timedout", req.CreateCallback.PromiseId)
+		}
+		return model, nil
 	case t_api.StatusPromiseNotFound:
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.CreateCallback.PromiseId)

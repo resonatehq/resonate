@@ -53,11 +53,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
-		// If the callback was already created return 200 and an empty callback
-		var cb *callback.Callback
-		status := t_api.StatusOK
-
 		if p.State == promise.Pending {
+			// If the callback was already created return 200 and an empty callback
+			var cb *callback.Callback
+			status := t_api.StatusOK
+
 			mesg := &message.Mesg{
 				Type: message.Resume,
 				Root: r.CreateCallback.RootPromiseId,
@@ -112,19 +112,25 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					CreatedOn: createdOn,
 				}
 			}
-		}
 
-		res = &t_api.Response{
-			Kind: t_api.CreateCallback,
-			Tags: r.Tags,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				// Status could be StatusOk or StatusCreated if the Callback Id was already present
-				Status:   status,
-				Callback: cb,
-				Promise:  p,
-			},
+			res = &t_api.Response{
+				Kind: t_api.CreateCallback,
+				Tags: r.Tags,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					Status:   status, // StatusCreated if the callback was created, otherwise StatusOk
+					Callback: cb,
+					Promise:  p,
+				},
+			}
+		} else {
+			res = &t_api.Response{
+				Kind: t_api.CreateCallback,
+				Tags: r.Tags,
+				CreateCallback: &t_api.CreateCallbackResponse{
+					Status: alreadyCompletedStatus(p.State),
+				},
+			}
 		}
-
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.CreateCallback,
