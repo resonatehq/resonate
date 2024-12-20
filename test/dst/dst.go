@@ -313,7 +313,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 func (d *DST) logNonLinearizable(ops []porcupine.Operation, history porcupine.LinearizationInfo) {
 	// log the linearizations
 	linearizations := history.PartialLinearizationsOperations()
-	util.Assert(len(linearizations) == 3, "linearizations must be equal to the number of partitions")
+	util.Assert(len(linearizations) == 4, "linearizations must be equal to the number of partitions")
 
 	// check each parition individually
 	// partitions are in order: promise, schedule, lock
