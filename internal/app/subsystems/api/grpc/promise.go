@@ -128,11 +128,6 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 		data = r.Promise.Param.Data
 	}
 
-	recv, rErr := protoRecv(r.Task.Recv)
-	if rErr != nil {
-		return nil, rErr
-	}
-
 	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
 		Kind: t_api.CreatePromiseAndTask,
 		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
@@ -149,7 +144,6 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 				ProcessId: r.Task.ProcessId,
 				Ttl:       int(r.Task.Ttl),
 				Timeout:   r.Promise.Timeout,
-				Recv:      recv,
 			},
 		},
 	})

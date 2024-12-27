@@ -184,6 +184,11 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 
 func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
+	if req.CreatePromise.Tags == nil {
+		req.CreatePromise.Tags = map[string]string{"resonate:invoke": "dst"}
+	} else {
+		req.CreatePromise.Tags["resonate:invoke"] = "dst"
+	}
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromiseAndTask,
@@ -194,7 +199,6 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 				ProcessId: req.CreatePromise.Id,
 				Ttl:       RangeIntn(r, 1000, 5000),
 				Timeout:   req.CreatePromise.Timeout,
-				Recv:      []byte(`"dst"`),
 			},
 		},
 	}

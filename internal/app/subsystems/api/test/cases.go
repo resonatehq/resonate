@@ -692,13 +692,13 @@ var TestCases = []*testCase{
 				Promise: &t_api.CreatePromiseRequest{
 					Id:      "foo",
 					Timeout: 1,
+					Tags:    map[string]string{"resonate:invoke": "baz"},
 				},
 				Task: &t_api.CreateTaskRequest{
 					PromiseId: "foo",
 					ProcessId: "bar",
 					Ttl:       2,
 					Timeout:   1,
-					Recv:      []byte(`"baz"`),
 				},
 			},
 		},
@@ -723,8 +723,8 @@ var TestCases = []*testCase{
 					"Request-Id": "CreatePromiseAndTask",
 				},
 				Body: []byte(`{
-					"promise": {"id": "foo", "timeout": 1},
-					"task": {"processId": "bar", "ttl": 2, "recv": "baz"}
+					"promise": {"id": "foo", "timeout": 1, "tags": {"resonate:invoke": "baz"}},
+					"task": {"processId": "bar", "ttl": 2}
 				}`),
 			},
 			Res: &httpTestCaseResponse{
@@ -737,11 +737,11 @@ var TestCases = []*testCase{
 					Id:        "foo",
 					Timeout:   1,
 					RequestId: "CreatePromiseAndTask",
+					Tags:      map[string]string{"resonate:invoke": "baz"},
 				},
 				Task: &pb.CreatePromiseTaskRequest{
 					ProcessId: "bar",
 					Ttl:       2,
-					Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "baz"}},
 				},
 			},
 			Res: &pb.CreatePromiseAndTaskResponse{
