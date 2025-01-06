@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from resonate.commands import DurablePromise
+from resonate.dataclasses import DurablePromise
 from resonate.record import Handle, Promise
 from resonate.resonate import Resonate
 from resonate.retry_policy import constant, exponential, linear, never
@@ -56,6 +56,7 @@ def test_calling_only_sync_function(store: LocalStore | RemoteStore) -> None:
     resonate.register(foo_sync)
     p: Handle[str] = resonate.run("foo-sync", foo_sync, "hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -67,6 +68,7 @@ def test_calling_only_async_function(store: LocalStore | RemoteStore) -> None:
     resonate.register(foo_async)
     p: Handle[str] = resonate.run("foo-async", foo_async, "hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -88,6 +90,7 @@ def test_golden_device_lfi(store: LocalStore | RemoteStore) -> None:
     p: Handle[str] = resonate.run("test-golden-device-lfi", foo_golden_device_lfi, "hi")
     assert isinstance(p, Handle)
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -109,6 +112,7 @@ def test_factorial_lfi(store: LocalStore | RemoteStore) -> None:
     n = 30
     p: Handle[int] = resonate.run(exec_id(n), factorial_lfi, n)
     assert p.result() == _factorial(n)
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -136,6 +140,7 @@ def test_fibonacci_preorder_lfi(store: LocalStore | RemoteStore) -> None:
     n = 30
     p: Handle[int] = resonate.run(exec_id(n), fib_lfi, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -163,6 +168,7 @@ def test_fibonacci_postorder_lfi(store: LocalStore | RemoteStore) -> None:
     n = 30
     p: Handle[int] = resonate.run(exec_id(n), fib_lfi, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -182,6 +188,7 @@ def test_golden_device_lfc(store: RemoteStore | LocalStore) -> None:
     p: Handle[str] = resonate.run("test-golden-device-lfc", foo_golden_device_lfc, "hi")
     assert isinstance(p, Handle)
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -205,6 +212,7 @@ def test_factorial_lfc(store: LocalStore | RemoteStore) -> None:
     n = 30
     p: Handle[int] = resonate.run(exec_id(n), factorial_lfc, n)
     assert p.result() == _factorial(n)
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -230,6 +238,7 @@ def test_fibonacci_lfc(store: LocalStore | RemoteStore) -> None:
     n = 30
     p: Handle[int] = resonate.run(exec_id(n), fib_lfc, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -259,6 +268,7 @@ def test_golden_device_rfi() -> None:
     p: Handle[str] = resonate.run(f"{group}-foo", foo_golden_device_rfi, "hi")
     assert isinstance(p, Handle)
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -286,6 +296,7 @@ def test_factorial_rfi() -> None:
     n = 10
     p: Handle[int] = resonate.run(exec_id(n), factorial_rfi, n)
     assert p.result() == _factorial(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -318,6 +329,7 @@ def test_fibonacci_preorder_rfi() -> None:
     n = 10
     p: Handle[int] = resonate.run(exec_id(n), fib_rfi, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -351,6 +363,7 @@ def test_fibonacci_postorder_rfi() -> None:
 
     p: Handle[int] = resonate.run(exec_id(n), fib_rfi, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -382,6 +395,7 @@ def test_golden_device_rfi_and_lfc() -> None:
     resonate.register(baz)
     p: Handle[str] = resonate.run(f"{group}-foo", foo, "hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.skip
@@ -433,6 +447,7 @@ def test_fibonacci_full_random() -> None:
     n = 3
     p: Handle[int] = resonate.run(exec_id(n), fib, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -465,6 +480,7 @@ def test_golden_device_rfi_and_lfc_with_decorator() -> None:
 
     p: Handle[str] = foo.run(f"{group}-foo", n="hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -492,6 +508,7 @@ def test_golden_device_rfc() -> None:
     p: Handle[str] = resonate.run(f"{group}-foo", foo_golden_device_rfc, "hi")
     assert isinstance(p, Handle)
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -520,6 +537,7 @@ def test_factorial_rfc() -> None:
     n = 10
     p: Handle[int] = resonate.run(exec_id(n), factorial_rfc, n)
     assert p.result() == _factorial(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -550,6 +568,7 @@ def test_fibonacci_preorder_rfc() -> None:
     n = 10
     p: Handle[int] = resonate.run(exec_id(n), fib_rfc, n)
     assert p.result() == _fib(n)
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -580,6 +599,7 @@ def test_golden_device_rfc_and_lfc() -> None:
     resonate.register(baz)
     p: Handle[str] = resonate.run(f"{group}-foo", foo, "hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -611,6 +631,7 @@ def test_golden_device_rfc_and_lfc_with_decorator() -> None:
 
     p: Handle[str] = foo.run(f"{group}-foo", n="hi")
     assert p.result() == "hi"
+    resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -636,6 +657,7 @@ def test_retry_policies_local_coroutine(store: LocalStore | RemoteStore) -> None
         )
         with pytest.raises(RuntimeError):
             p.result()
+        resonate.stop()
 
 
 @pytest.mark.parametrize("store", _promise_storages())
@@ -657,6 +679,7 @@ def test_retry_policies_local_func(store: LocalStore | RemoteStore) -> None:
         )
         with pytest.raises(RuntimeError):
             p.result()
+        resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -699,6 +722,7 @@ def test_human_in_the_loop() -> None:
     )
     time.sleep(3)
     assert p.result() == "Hi Peter with age 50"
+    s.stop()
 
 
 def test_sleep() -> None:
@@ -715,3 +739,4 @@ def test_sleep() -> None:
     n = 1
     p = foo_sleep.run(f"{group}-{n}", n)
     assert p.result() == n
+    s.stop()

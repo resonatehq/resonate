@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any, TypeVar, final
 
 from typing_extensions import Self
 
-from resonate.commands import Command, DurablePromise
+from resonate.dataclasses import DurablePromise
 from resonate.options import Options
 
 if TYPE_CHECKING:
@@ -49,7 +49,7 @@ class RFC:
 @final
 @dataclass
 class LFC:
-    unit: Invocation[Any] | Command
+    unit: Invocation[Any]
     opts: Options = field(default=Options())
 
     def options(
@@ -86,7 +86,7 @@ class DI:
 @final
 @dataclass
 class LFI:
-    unit: Invocation[Any] | Command
+    unit: Invocation[Any]
     opts: Options = field(default=Options())
 
     def options(

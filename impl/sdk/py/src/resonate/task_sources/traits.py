@@ -1,22 +1,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from resonate.stores.record import TaskRecord
-
-if TYPE_CHECKING:
-    from threading import Event
-
-    from resonate.stores.record import TaskRecord
+from resonate.traits import Subsystem
 
 
-class ITaskSource(ABC):
+class ITaskSource(Subsystem, ABC):
     @abstractmethod
-    def start(self, event: Event, pid: str) -> None: ...
-
+    def set_pid(self, pid: str) -> None: ...
     @abstractmethod
-    def dequeue(self) -> list[TaskRecord]: ...
-
-    @abstractmethod
-    def default_recv(self, pid: str) -> dict[str, Any]: ...
+    def default_recv(self) -> dict[str, Any]: ...

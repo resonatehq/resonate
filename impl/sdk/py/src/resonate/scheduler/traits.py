@@ -18,6 +18,8 @@ class IScheduler(ABC):
     def start(self) -> None: ...
 
     @abstractmethod
+    def stop(self) -> None: ...
+    @abstractmethod
     def run(
         self,
         id: str,

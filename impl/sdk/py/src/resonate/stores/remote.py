@@ -11,8 +11,8 @@ from resonate.logging import logger
 from resonate.stores.record import (
     CallbackRecord,
     DurablePromiseRecord,
-    Invoke,
-    Resume,
+    InvokeMsg,
+    ResumeMsg,
     TaskRecord,
 )
 from resonate.stores.traits import IPromiseStore
@@ -271,7 +271,7 @@ class RemoteTaskStore:
 
     def claim(
         self, *, task_id: str, counter: int, pid: str, ttl: int
-    ) -> Invoke | Resume:
+    ) -> InvokeMsg | ResumeMsg:
         res = self._call(
             requests.Request(
                 method="post",
@@ -291,9 +291,11 @@ class RemoteTaskStore:
 
         promises: dict[str, Any] = data["promises"]
         if promises.get("leaf") is None:
-            return Invoke.decode(data=promises["root"]["data"], encoder=self._encoder)
+            return InvokeMsg.decode(
+                data=promises["root"]["data"], encoder=self._encoder
+            )
 
-        return Resume.decode(data=promises, encoder=self._encoder)
+        return ResumeMsg.decode(data=promises, encoder=self._encoder)
 
     def complete(self, *, task_id: str, counter: int) -> None:
         self._call(

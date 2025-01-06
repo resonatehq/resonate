@@ -148,7 +148,7 @@ class DurablePromiseRecord(Decodable):
 
 @final
 @dataclass(frozen=True)
-class Invoke(Decodable):
+class InvokeMsg(Decodable):
     root_durable_promise: DurablePromiseRecord
 
     @classmethod
@@ -160,7 +160,7 @@ class Invoke(Decodable):
 
 @final
 @dataclass(frozen=True)
-class Resume(Decodable):
+class ResumeMsg(Decodable):
     root_durable_promise: DurablePromiseRecord
     leaf_durable_promise: DurablePromiseRecord
 

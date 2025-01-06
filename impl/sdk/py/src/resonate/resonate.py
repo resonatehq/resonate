@@ -55,6 +55,9 @@ class Resonate:
         # start the scheduler
         self._scheduler.start()
 
+    def stop(self) -> None:
+        self._scheduler.stop()
+
     def set_dependency(self, key: str, obj: Any) -> None:  # noqa: ANN401
         self._deps.set(key, obj)
 
