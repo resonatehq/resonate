@@ -130,7 +130,7 @@ func (w *HttpWorker) Process(data []byte, body []byte) (bool, error) {
 	}
 
 	// set non-overridable headers
-	httpData.Headers["Content-Type"] = "application/json"
+	req.Header.Set("Content-Type", "application/json")
 
 	res, err := w.client.Do(req)
 	if err != nil {
