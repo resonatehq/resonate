@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from threading import Thread
 from typing import Any
@@ -16,9 +17,11 @@ from resonate.task_sources.traits import ITaskSource
 class Poller(ITaskSource):
     def __init__(
         self,
-        url: str = "http://localhost:8002",
+        url: str | None = None,
         group: str = "default",
     ) -> None:
+        if url is None:
+            url = os.getenv("RESONATE_POLLER", "http://localhost:8002")
         self._url = url
         self._group = group
         self._encoder = JsonEncoder()

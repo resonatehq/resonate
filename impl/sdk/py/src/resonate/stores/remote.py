@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import TYPE_CHECKING, Any, Literal, final
 
@@ -327,10 +328,12 @@ class RemoteTaskStore:
 class RemoteStore:
     def __init__(
         self,
-        url: str = "http://localhost:8001",
+        url: str | None = None,
         connect_timeout: int = 5,
         request_timeout: int = 5,
     ) -> None:
+        if url is None:
+            url = os.getenv("RESONATE_SERVER", "http://localhost:8002")
         self.url = url
         self._encoder = Base64Encoder()
         self._session = requests.Session()
