@@ -31,4 +31,4 @@ jobs:
         run: rye build
     
       - name: Push build artifacts to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.8.14
+        uses: pypa/gh-action-pypi-publish@v1.12.3
