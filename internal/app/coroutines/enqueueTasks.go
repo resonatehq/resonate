@@ -42,7 +42,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-		result := completion.Store.Results[0].ReadEnquableTasks
+		result := completion.Store.Results[0].ReadEnqueueableTasks
 		util.Assert(result != nil, "result must not be nil")
 
 		commands := []*t_aio.Command{}

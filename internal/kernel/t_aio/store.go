@@ -203,14 +203,14 @@ type Result struct {
 	DeleteSchedule  *AlterSchedulesResult
 
 	// TASKS
-	ReadTask          *QueryTasksResult
-	ReadTasks         *QueryTasksResult
-	ReadEnquableTasks *QueryTasksResult
-	CreateTask        *AlterTasksResult
-	CreateTasks       *AlterTasksResult
-	CompleteTasks     *AlterTasksResult
-	UpdateTask        *AlterTasksResult
-	HeartbeatTasks    *AlterTasksResult
+	ReadTask             *QueryTasksResult
+	ReadTasks            *QueryTasksResult
+	ReadEnqueueableTasks *QueryTasksResult
+	CreateTask           *AlterTasksResult
+	CreateTasks          *AlterTasksResult
+	CompleteTasks        *AlterTasksResult
+	UpdateTask           *AlterTasksResult
+	HeartbeatTasks       *AlterTasksResult
 
 	// LOCKS
 	ReadLock       *QueryLocksResult

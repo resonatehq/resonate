@@ -28,8 +28,12 @@ type RequestGenerator func(*rand.Rand, int64) *t_api.Request
 
 func NewGenerator(r *rand.Rand, config *Config) *Generator {
 	idSet := make([]string, config.Ids)
+	width := len(strconv.Itoa(config.Ids))
+
 	for i := 0; i < config.Ids; i++ {
-		idSet[i] = strconv.Itoa(i)
+		// pad ids with leading zeros to ensure ids are the same length
+		// this helps with lexigraphical sorting across different databases
+		idSet[i] = fmt.Sprintf(fmt.Sprintf("%%0%dd", width), i)
 	}
 
 	idempotencyKeySet := []*idempotency.Key{}
