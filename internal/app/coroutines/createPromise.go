@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
