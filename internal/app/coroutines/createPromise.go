@@ -232,7 +232,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 		}
 
 		if taskCmd != nil && (err != nil || !completion.Router.Matched) {
-			slog.Error("failed to match promise when creating a task", "cmd", promiseCmd, "taskCmd", taskCmd)
+			slog.Error("failed to match promise when creating a task", "cmd", promiseCmd)
 			return nil, t_api.NewError(t_api.StatusPromiseRecvNotFound, err)
 		}
 
