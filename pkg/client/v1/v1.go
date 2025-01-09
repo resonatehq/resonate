@@ -253,9 +253,8 @@ type CreatePromiseAndTaskJSONBody struct {
 		Timeout int64              `json:"timeout"`
 	} `json:"promise"`
 	Task struct {
-		ProcessId string                 `json:"processId"`
-		Recv      map[string]interface{} `json:"recv"`
-		Ttl       int                    `json:"ttl"`
+		ProcessId string `json:"processId"`
+		Ttl       int    `json:"ttl"`
 	} `json:"task"`
 }
 

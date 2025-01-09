@@ -195,14 +195,11 @@ paths:
                   required:
                     - processId
                     - ttl
-                    - recv
                   properties:
                     processId:
                       type: string
                     ttl:
                       type: integer
-                    recv:
-                      type: object
       responses:
         200:
           description: Operation deduplicated, promise fetched successfully
