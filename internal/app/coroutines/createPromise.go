@@ -118,8 +118,6 @@ func createPromiseAndTask(
 		switch r.Kind {
 		case t_api.CreatePromiseAndTask:
 			util.Assert(taskCmd != nil, "create task cmd must not be nil")
-			fmt.Printf("tcmd=%v\n", taskCmd)
-			fmt.Printf("c=%v\n", completion)
 			util.Assert(completion.Store.Results[1].Kind == t_aio.CreateTask, "completion must be create task")
 
 			t = &task.Task{
