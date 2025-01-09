@@ -1,5 +1,7 @@
 package idempotency
 
+import "strings"
+
 type Key string
 
 func (i1 *Key) Match(i2 *Key) bool {
@@ -13,4 +15,12 @@ func (i1 *Key) Equals(i2 *Key) bool {
 
 func (i *Key) String() string {
 	return string(*i)
+}
+
+func (i *Key) Clone() *Key {
+	if i == nil {
+		return nil
+	}
+	k := Key(strings.Clone(i.String()))
+	return &k
 }

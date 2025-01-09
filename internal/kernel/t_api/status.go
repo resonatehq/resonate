@@ -27,6 +27,7 @@ const (
 	StatusScheduleNotFound       StatusCode = 4041
 	StatusLockNotFound           StatusCode = 4042
 	StatusTaskNotFound           StatusCode = 4043
+	StatusPromiseRecvNotFound    StatusCode = 4044
 	StatusPromiseAlreadyExists   StatusCode = 4090
 	StatusScheduleAlreadyExists  StatusCode = 4091
 

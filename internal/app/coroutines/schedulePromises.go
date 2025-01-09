@@ -86,7 +86,7 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 				CreatedOn: c.Time(),
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(tags, commands[i], &t_aio.Command{
+			awaiting[i] = gocoro.Spawn(c, createPromise(tags, commands[i], nil, &t_aio.Command{
 				Kind: t_aio.UpdateSchedule,
 				UpdateSchedule: &t_aio.UpdateScheduleCommand{
 					Id:          s.Id,

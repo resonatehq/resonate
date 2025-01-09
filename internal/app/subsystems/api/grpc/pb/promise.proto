@@ -70,7 +70,6 @@ message CreatePromiseAndTaskRequest {
 message CreatePromiseTaskRequest {
     string processId = 1;
     int32 ttl = 2;
-    callback_t.Recv recv = 3;
 }
 
 message CreatePromiseAndTaskResponse {

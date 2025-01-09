@@ -14,11 +14,11 @@ type Request struct {
 	Tags map[string]string
 
 	// PROMISES
-	ReadPromise              *ReadPromiseRequest
-	SearchPromises           *SearchPromisesRequest
-	CreatePromise            *CreatePromiseRequest
-	CreatePromiseAndTask     *CreatePromiseAndTaskRequest
-	CompletePromise          *CompletePromiseRequest
+	ReadPromise          *ReadPromiseRequest
+	SearchPromises       *SearchPromisesRequest
+	CreatePromise        *CreatePromiseRequest
+	CreatePromiseAndTask *CreatePromiseAndTaskRequest
+	CompletePromise      *CompletePromiseRequest
 
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
@@ -179,7 +179,13 @@ type AcquireLockRequest struct {
 }
 
 func (r *AcquireLockRequest) String() string {
-	return fmt.Sprintf("AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d)", r.ResourceId, r.ExecutionId, r.ProcessId, r.Ttl)
+	return fmt.Sprintf(
+		"AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d)",
+		r.ResourceId,
+		r.ExecutionId,
+		r.ProcessId,
+		r.Ttl,
+	)
 }
 
 type ReleaseLockRequest struct {
@@ -202,15 +208,20 @@ func (r *HeartbeatLocksRequest) String() string {
 // Tasks
 
 type CreateTaskRequest struct {
-	PromiseId string          `json:"promiseId"`
-	ProcessId string          `json:"processId"`
-	Ttl       int             `json:"ttl"`
-	Timeout   int64           `json:"timeout"`
-	Recv      json.RawMessage `json:"recv"`
+	PromiseId string `json:"promiseId"`
+	ProcessId string `json:"processId"`
+	Ttl       int    `json:"ttl"`
+	Timeout   int64  `json:"timeout"`
 }
 
 func (r *CreateTaskRequest) String() string {
-	return fmt.Sprintf("CreateTask(promiseId=%s, processId=%s, ttl=%d, timeout=%d, recv=%s)", r.PromiseId, r.ProcessId, r.Ttl, r.Timeout, r.Recv)
+	return fmt.Sprintf(
+		"CreateTask(promiseId=%s, processId=%s, ttl=%d, timeout=%d)",
+		r.PromiseId,
+		r.ProcessId,
+		r.Ttl,
+		r.Timeout,
+	)
 }
 
 type ClaimTaskRequest struct {

@@ -1,7 +1,6 @@
 package http
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
@@ -161,9 +160,8 @@ type createPromiseAndTaskBody struct {
 }
 
 type createPromiseTaskBody struct {
-	ProcessId string          `json:"processId" binding:"required"`
-	Ttl       int             `json:"ttl"`
-	Recv      json.RawMessage `json:"recv" binding:"required"`
+	ProcessId string `json:"processId" binding:"required"`
+	Ttl       int    `json:"ttl"`
 }
 
 func (s *server) createPromiseAndTask(c *gin.Context) {
@@ -199,7 +197,6 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 				ProcessId: body.Task.ProcessId,
 				Ttl:       body.Task.Ttl,
 				Timeout:   body.Promise.Timeout,
-				Recv:      body.Task.Recv,
 			},
 		},
 	})

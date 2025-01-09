@@ -2,6 +2,7 @@ package dst
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"math/rand" // nosemgrep
 	"strconv"
@@ -130,7 +131,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 
 	id := g.promiseSearch(r)
 	limit := RangeIntn(r, 1, 11)
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
+	tags := g.tags(r)
 	states := []promise.State{}
 
 	// states
@@ -162,12 +163,12 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 
 func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	idempotencyKey := g.idempotencyKey(r)
 	strict := r.Intn(2) == 0
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 	timeout := RangeInt63n(r, t, t+(g.timeoutTicks*g.timeElapsedPerTick))
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
+	tags := g.tags(r)
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
@@ -184,6 +185,11 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 
 func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
+	if req.CreatePromise.Tags == nil {
+		req.CreatePromise.Tags = map[string]string{"resonate:invoke": "dst"}
+	} else {
+		req.CreatePromise.Tags["resonate:invoke"] = "dst"
+	}
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromiseAndTask,
@@ -194,7 +200,6 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 				ProcessId: req.CreatePromise.Id,
 				Ttl:       RangeIntn(r, 1000, 5000),
 				Timeout:   req.CreatePromise.Timeout,
-				Recv:      []byte(`"dst"`),
 			},
 		},
 	}
@@ -202,10 +207,10 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 
 func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	idempotencyKey := g.idempotencyKey(r)
 	strict := r.Intn(2) == 0
 	state := promise.State(math.Exp2(float64(r.Intn(3) + 1)))
-	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	headers := g.headers(r)
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 
 	return &t_api.Request{
@@ -261,7 +266,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 
 	id := g.scheduleSearch(r)
 	limit := RangeIntn(r, 1, 11)
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
+	tags := g.tags(r)
 
 	return &t_api.Request{
 		Kind: t_api.SearchSchedules,
@@ -276,13 +281,13 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.scheduleId(r)
 	cron := fmt.Sprintf("%d * * * *", r.Intn(60))
-	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
-	idempotencyKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	tags := g.tags(r)
+	idempotencyKey := g.idempotencyKey(r)
 
 	promiseTimeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-	promiseHeaders := g.headersSet[r.Intn(len(g.headersSet))]
+	promiseHeaders := g.headers(r)
 	promiseData := g.dataSet[r.Intn(len(g.dataSet))]
-	promiseTags := g.tagsSet[r.Intn(len(g.tagsSet))]
+	promiseTags := g.tags(r)
 
 	return &t_api.Request{
 		Kind: t_api.CreateSchedule,
@@ -453,4 +458,19 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 			// do nothing
 		}
 	}
+}
+
+func (g *Generator) tags(r *rand.Rand) map[string]string {
+	tags := g.tagsSet[r.Intn(len(g.tagsSet))]
+	return maps.Clone(tags)
+}
+
+func (g *Generator) headers(r *rand.Rand) map[string]string {
+	headers := g.headersSet[r.Intn(len(g.headersSet))]
+	return maps.Clone(headers)
+}
+
+func (g *Generator) idempotencyKey(r *rand.Rand) *idempotency.Key {
+	iKey := g.idemotencyKeySet[r.Intn(len(g.idemotencyKeySet))]
+	return iKey.Clone()
 }
