@@ -226,7 +226,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 		system.Tick(time)
 
-		// now read from the callback channel
+		// now read from the backchannel
 		for len(d.config.Backchannel) > 0 {
 			var bc *Backchannel
 			obj := <-d.config.Backchannel

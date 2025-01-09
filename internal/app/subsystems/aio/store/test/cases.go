@@ -3241,7 +3241,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueueableTasks,
-				ReadEnquableTasks: &t_aio.QueryTasksResult{
+				ReadEnqueueableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
 						{
@@ -3273,7 +3273,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueueableTasks,
-				ReadEnquableTasks: &t_aio.QueryTasksResult{
+				ReadEnqueueableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
@@ -3296,7 +3296,7 @@ var TestCases = []*testCase{
 			},
 			{
 				Kind: t_aio.ReadEnqueueableTasks,
-				ReadEnquableTasks: &t_aio.QueryTasksResult{
+				ReadEnqueueableTasks: &t_aio.QueryTasksResult{
 					RowsReturned: 0,
 				},
 			},

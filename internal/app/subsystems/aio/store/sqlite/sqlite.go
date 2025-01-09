@@ -289,7 +289,7 @@ const (
 	ORDER BY root_promise_id, id
 	LIMIT ?`
 
-	TASK_SELECT_ENQUABLE_STATEMENT = `
+	TASK_SELECT_ENQUEUEABLE_STATEMENT = `
 	SELECT
 		id,
 	    process_id,
@@ -719,7 +719,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 				results[i][j], err = w.readTasks(tx, command.ReadTasks)
 			case t_aio.ReadEnqueueableTasks:
 				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
-				results[i][j], err = w.readEnquableTasks(tx, command.ReadEnquableTasks)
+				results[i][j], err = w.readEnqueueableTasks(tx, command.ReadEnquableTasks)
 			case t_aio.CreateTask:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
@@ -1532,8 +1532,8 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
-	rows, err := tx.Query(TASK_SELECT_ENQUABLE_STATEMENT, cmd.Limit)
+func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
+	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
@@ -1568,7 +1568,7 @@ func (w *SqliteStoreWorker) readEnquableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueue
 
 	return &t_aio.Result{
 		Kind: t_aio.ReadEnqueueableTasks,
-		ReadEnquableTasks: &t_aio.QueryTasksResult{
+		ReadEnqueueableTasks: &t_aio.QueryTasksResult{
 			RowsReturned: rowsReturned,
 			Records:      records,
 		},
