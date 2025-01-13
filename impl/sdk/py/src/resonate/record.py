@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 from asyncio import iscoroutinefunction
-from concurrent.futures import Future
-from dataclasses import dataclass, field
 from inspect import isfunction, isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Generic, TypeVar, final
-
-from typing_extensions import assert_never
 
 from resonate.actions import LFI, RFI
 from resonate.dataclasses import Invocation
 from resonate.logging import logger
-from resonate.result import Err, Ok, Result
+from resonate.result import Ok, Result
 from resonate.retry_policy import Never, exponential, never
 from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
@@ -23,22 +19,6 @@ if TYPE_CHECKING:
     from resonate.stores.record import DurablePromiseRecord, TaskRecord
 
 T = TypeVar("T")
-
-
-@final
-@dataclass(frozen=True)
-class Promise(Generic[T]):
-    id: str
-
-
-@final
-@dataclass(frozen=True)
-class Handle(Generic[T]):
-    id: str
-    _f: Future[T] = field(repr=False)
-
-    def result(self, timeout: float | None = None) -> T:
-        return self._f.result(timeout=timeout)
 
 
 @final
@@ -55,7 +35,7 @@ class Record(Generic[T]):
         self.is_root: bool = (
             True if self.parent is None else isinstance(invocation, RFI)
         )
-        self._f = Future[T]()
+        self._result: Result[T, Exception] | None = None
         self.children: list[Record[Any]] = []
         self.invocation: LFI | RFI = invocation
         self.retry_policy: retry_policy.RetryPolicy | None
@@ -77,8 +57,6 @@ class Record(Generic[T]):
             )
 
         self._attempt: int = 1
-        self.promise = Promise[T](id=id)
-        self.handle = Handle[T](id=self.id, _f=self._f)
         self.durable_promise: DurablePromiseRecord | None = None
         self._task: TaskRecord | None = None
         self.ctx = ctx
@@ -167,22 +145,15 @@ class Record(Generic[T]):
         assert all(
             r.done() for r in self.children
         ), "All children record must be completed."
-        if isinstance(result, Ok):
-            self._f.set_result(result.unwrap())
-        elif isinstance(result, Err):
-            self._f.set_exception(result.err())
-        else:
-            assert_never(result)
+        assert self._result is None
+        self._result = result
 
     def safe_result(self) -> Result[Any, Exception]:
-        assert self.done()
-        try:
-            return Ok(self._f.result())
-        except Exception as e:  # noqa: BLE001
-            return Err(e)
+        assert self._result is not None
+        return self._result
 
     def done(self) -> bool:
-        return self._f.done()
+        return self._result is not None
 
     def next_child_name(self) -> str:
         return f"{self.id}.{self._num_children+1}"

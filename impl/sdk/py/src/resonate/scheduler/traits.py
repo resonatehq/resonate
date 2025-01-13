@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from typing_extensions import ParamSpec
 
 if TYPE_CHECKING:
-    from resonate.record import Handle
+    from resonate.handle import Handle
     from resonate.typing import DurableCoro, DurableFn
 
 P = ParamSpec("P")
@@ -28,3 +28,6 @@ class IScheduler(ABC):
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[T]: ...
+
+    @abstractmethod
+    def get(self, id: str) -> Handle[Any]: ...

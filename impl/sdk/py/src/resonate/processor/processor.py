@@ -4,8 +4,8 @@ from threading import Thread
 from typing import TYPE_CHECKING, Any
 
 from resonate.cmd_queue import CommandQ, Complete
+from resonate.delay_queue import Queue
 from resonate.processor.traits import IProcessor
-from resonate.queue import Queue
 from resonate.result import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -24,7 +24,7 @@ class Processor(IProcessor):
 
         self._sq: Queue[SQE[Any]] = Queue()
 
-    def start(self, cmd_queue: CommandQ) -> None:
+    def start(self, cmd_queue: CommandQ, pid: str) -> None:
         for _ in range(self._workers):
             t = Thread(target=self._run, args=(cmd_queue,), daemon=True)
             self._threads.add(t)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import uuid
@@ -97,10 +98,13 @@ def test_case_3_create_durable_promise_with_task() -> None:
         headers=None,
         data=None,
         timeout=sys.maxsize,
-        tags=None,
+        tags={
+            "resonate:invoke": json.dumps(
+                {"type": "poll", "data": {"group": "default", "id": pid}}
+            )
+        },
         pid=pid,
         ttl=ttl,
-        recv={"type": "poll", "data": {"group": "default", "id": pid}},
     )
     assert durable_promise.id == id
     assert task_record is not None

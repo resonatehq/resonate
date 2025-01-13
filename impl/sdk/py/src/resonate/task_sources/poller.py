@@ -18,31 +18,29 @@ class Poller(ITaskSource):
     def __init__(
         self,
         url: str | None = None,
-        group: str = "default",
+        group: str | None = None,
     ) -> None:
-        if url is None:
-            url = os.getenv("RESONATE_POLLER", "http://localhost:8002")
-        self._url = url
-        self._group = group
+        self._url = (
+            url
+            if url is not None
+            else os.getenv("RESONATE_POLLER", "http://localhost:8002")
+        )
+        self._group = (
+            group if group is not None else os.getenv("RESONATE_GROUP", "default")
+        )
         self._encoder = JsonEncoder()
-        self._pid: str | None = None
         self._t: Thread | None = None
 
-    def start(self, cmd_queue: CommandQ) -> None:
+    def start(self, cmd_queue: CommandQ, pid: str) -> None:
         assert self._t is None
-        self._t = Thread(target=self._run, args=(cmd_queue,), daemon=True)
+        self._t = Thread(target=self._run, args=(cmd_queue, pid), daemon=True)
         self._t.start()
 
     def stop(self) -> None:
         raise NotImplementedError
 
-    def set_pid(self, pid: str) -> None:
-        assert self._pid is None
-        self._pid = pid
-
-    def _run(self, cmd_queue: CommandQ) -> None:
-        assert self._pid is not None
-        url = f"{self._url}/{self._group}/{self._pid}"
+    def _run(self, cmd_queue: CommandQ, pid: str) -> None:
+        url = f"{self._url}/{self._group}/{pid}"
 
         while True:
             try:
@@ -73,5 +71,5 @@ class Poller(ITaskSource):
 
             time.sleep(1)
 
-    def default_recv(self) -> dict[str, Any]:
-        return {"type": "poll", "data": {"group": self._group, "id": self._pid}}
+    def default_recv(self, pid: str) -> dict[str, Any]:
+        return {"type": "poll", "data": {"group": self._group, "id": pid}}

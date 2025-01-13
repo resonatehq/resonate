@@ -6,12 +6,14 @@ from typing import TYPE_CHECKING, Any, Callable, Generic, TypeVar, final, overlo
 
 from typing_extensions import ParamSpec, assert_never
 
+from resonate.promise import Promise
 from resonate.result import Err, Ok, Result
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate.record import Handle, Record
+    from resonate.handle import Handle
+    from resonate.record import Record
     from resonate.scheduler.traits import IScheduler
     from resonate.typing import Data, DurableCoro, DurableFn, Headers, Tags, Yieldable
 
@@ -36,6 +38,9 @@ class RegisteredFn(Generic[P, T]):
 
     def run(self, id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
         return self._scheduler.run(id, self.fn, *args, **kwargs)
+
+    def get(self, id: str) -> Handle[T]:
+        return self._scheduler.get(id)
 
 
 @final
@@ -93,7 +98,7 @@ class ResonateCoro(Generic[T]):
             self._next_child_to_yield += 1
             if child.done():
                 continue
-            return child.promise
+            return Promise[Any](child.id)
 
         assert all(child.done() for child in self._record.children)
         assert not self._coro_active
@@ -117,7 +122,7 @@ class ResonateCoro(Generic[T]):
             self._next_child_to_yield += 1
             if child.done():
                 continue
-            return child.promise
+            return Promise[Any](child.id)
         assert all(
             child.done() for child in self._record.children
         ), "All children promise must have been resolved."

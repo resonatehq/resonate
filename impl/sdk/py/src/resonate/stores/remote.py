@@ -77,7 +77,6 @@ class RemotePromiseStore(IPromiseStore):
         tags: Tags,
         pid: str,
         ttl: int,
-        recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, TaskRecord | None]:
         request_headers = self._initialize_headers(strict=strict, ikey=ikey)
 
@@ -96,7 +95,6 @@ class RemotePromiseStore(IPromiseStore):
                     "task": {
                         "processId": pid,
                         "ttl": ttl,
-                        "recv": recv,
                     },
                 },
             )
@@ -332,9 +330,11 @@ class RemoteStore:
         connect_timeout: int = 5,
         request_timeout: int = 5,
     ) -> None:
-        if url is None:
-            url = os.getenv("RESONATE_SERVER", "http://localhost:8002")
-        self.url = url
+        self.url = (
+            url
+            if url is not None
+            else os.getenv("RESONATE_SERVER", "http://localhost:8001")
+        )
         self._encoder = Base64Encoder()
         self._session = requests.Session()
         self._timeout = (connect_timeout, request_timeout)

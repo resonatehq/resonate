@@ -25,9 +25,15 @@ class RFI:
     unit: Invocation[Any] | DurablePromise
     opts: Options = field(default=Options())
 
-    def options(self, id: str | None = None, send_to: str | None = None) -> Self:
+    def options(
+        self,
+        *,
+        id: str | None = None,
+        send_to: str | None = None,
+        execute_here: bool = False,
+    ) -> Self:
         assert not isinstance(self.unit, DurablePromise), _ASSERT_MSG
-        self.opts = Options(id=id, send_to=send_to)
+        self.opts = Options(id=id, send_to=send_to, execute_here=execute_here)
         return self
 
 
@@ -37,9 +43,15 @@ class RFC:
     unit: Invocation[Any] | DurablePromise
     opts: Options = field(default=Options())
 
-    def options(self, id: str | None = None, send_to: str | None = None) -> Self:
+    def options(
+        self,
+        *,
+        id: str | None = None,
+        send_to: str | None = None,
+        execute_here: bool = False,
+    ) -> Self:
         assert not isinstance(self.unit, DurablePromise), _ASSERT_MSG
-        self.opts = Options(id=id, send_to=send_to)
+        self.opts = Options(id=id, send_to=send_to, execute_here=execute_here)
         return self
 
     def to_rfi(self) -> RFI:

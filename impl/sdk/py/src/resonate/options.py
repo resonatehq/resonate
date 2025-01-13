@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, final
 
 if TYPE_CHECKING:
@@ -7,18 +8,11 @@ if TYPE_CHECKING:
 
 
 @final
+@dataclass
 class Options:
-    def __init__(
-        self,
-        *,
-        id: str | None = None,
-        durable: bool = True,
-        send_to: str | None = None,
-        retry_policy: retry_policy.RetryPolicy | None = None,
-        version: int = 1,
-    ) -> None:
-        self.durable = durable
-        self.id = id
-        self.retry_policy = retry_policy
-        self.send_to = send_to
-        self.version = version
+    id: str | None = None
+    durable: bool = True
+    send_to: str | None = None
+    retry_policy: retry_policy.RetryPolicy | None = None
+    version: int = 1
+    execute_here: bool = True

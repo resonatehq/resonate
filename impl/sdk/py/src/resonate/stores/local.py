@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Callable, final
+from typing import TYPE_CHECKING, Callable, final
 
 from resonate.errors import ResonateError
 from resonate.stores.record import (
@@ -84,9 +84,8 @@ class LocalPromiseStore(IPromiseStore):
         data: Data,
         timeout: int,
         tags: Tags,
-        pid: str,  # noqa: ARG002
-        ttl: int,  # noqa: ARG002
-        recv: str | dict[str, Any],  # noqa: ARG002
+        pid: str,
+        ttl: int,
     ) -> tuple[DurablePromiseRecord, TaskRecord | None]:
         return self.create(
             id=id,

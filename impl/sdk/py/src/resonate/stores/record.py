@@ -50,7 +50,6 @@ class CallbackRecord(Decodable):
 
     @classmethod
     def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        _ = encoder
         return cls(
             callback_id=data["id"],
             id=data["promiseId"],
@@ -184,5 +183,4 @@ class TaskRecord(Decodable):
 
     @classmethod
     def decode(cls, data: dict[str, Any], encoder: IEncoder[str, str]) -> Self:
-        _ = encoder
         return cls(task_id=data["id"], counter=data["counter"])

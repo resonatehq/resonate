@@ -60,7 +60,9 @@ ignore = [
     "ANN101",
     "COM812",
     "ISC001",
-    "S101"
+    "S101",
+    "ARG002",
+    "ARG003",
 ]
 logger-objects = ["resonate.logging.logger"]
 

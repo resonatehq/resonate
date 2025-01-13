@@ -13,7 +13,7 @@ from resonate.actions import (
     RFI,
 )
 from resonate.context import Context
-from resonate.record import Promise
+from resonate.promise import Promise
 
 T = TypeVar("T")
 P = ParamSpec("P")

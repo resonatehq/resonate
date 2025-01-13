@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from resonate.stores.record import (
@@ -37,7 +37,6 @@ class IPromiseStore(ABC):
         tags: Tags,
         pid: str,
         ttl: int,
-        recv: str | dict[str, Any],
     ) -> tuple[DurablePromiseRecord, TaskRecord | None]: ...
 
     @abstractmethod

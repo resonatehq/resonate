@@ -31,6 +31,7 @@ jobs:
       - uses: eifinger/setup-rye@v2
         with:
           enable-cache: true
+          version: '0.40.0'
 
       - name: Sync dependencies
         run: rye sync --no-lock

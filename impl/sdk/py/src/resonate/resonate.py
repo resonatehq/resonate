@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from resonate import retry_policy
     from resonate.context import Context
-    from resonate.record import Handle
+    from resonate.handle import Handle
     from resonate.scheduler.traits import IScheduler
     from resonate.stores.local import LocalStore
     from resonate.task_sources.traits import ITaskSource

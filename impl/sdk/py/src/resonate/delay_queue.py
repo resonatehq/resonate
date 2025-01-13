@@ -28,7 +28,7 @@ class DelayQueue(Subsystem):
         self._delayed: list[tuple[float, Invoke]] = []
         self._worker_thread: Thread | None = None
 
-    def start(self, cmd_queue: CommandQ) -> None:
+    def start(self, cmd_queue: CommandQ, pid: str) -> None:
         assert self._worker_thread is None, "Already been started."
         self._worker_thread = Thread(target=self._run, args=(cmd_queue,), daemon=True)
         self._worker_thread.start()
