@@ -7,6 +7,7 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Optional, TypeVar, final
 
+from resonate import utils
 from resonate.cmd_queue import CommandQ, Invoke
 from resonate.traits import Subsystem
 
@@ -41,6 +42,7 @@ class DelayQueue(Subsystem):
     def _next_release_time(self) -> float:
         return self._delayed[0][0]
 
+    @utils.exit_on_exception
     def _run(self, cmd_queue: CommandQ) -> None:
         """Worker thread that processes the delayed queue."""
         wait_time: float | None = None

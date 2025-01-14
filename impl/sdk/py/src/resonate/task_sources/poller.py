@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from resonate import utils
 from resonate.cmd_queue import Claim, CommandQ
 from resonate.encoders import JsonEncoder
 from resonate.logging import logger
@@ -39,6 +40,7 @@ class Poller(ITaskSource):
     def stop(self) -> None:
         raise NotImplementedError
 
+    @utils.exit_on_exception
     def _run(self, cmd_queue: CommandQ, pid: str) -> None:
         url = f"{self._url}/{self._group}/{pid}"
 

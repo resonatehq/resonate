@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import Thread
 from typing import TYPE_CHECKING, Any
 
+from resonate import utils
 from resonate.cmd_queue import CommandQ, Complete
 from resonate.delay_queue import Queue
 from resonate.processor.traits import IProcessor
@@ -37,6 +38,7 @@ class Processor(IProcessor):
     def enqueue(self, sqe: SQE[Any]) -> None:
         self._sq.put(sqe)
 
+    @utils.exit_on_exception
     def _run(self, cmd_queue: CommandQ) -> None:
         while True:
             sqe = self._sq.get()

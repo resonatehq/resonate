@@ -130,6 +130,7 @@ class Scheduler(IScheduler):
         self._cmd_queue.put(ForkOrJoin(id, handle, Invocation(func, *args, **kwargs)))
         return handle
 
+    @utils.exit_on_exception
     def _heartbeat(self) -> None:
         assert isinstance(self._store, RemoteStore)
         while True:
@@ -139,6 +140,7 @@ class Scheduler(IScheduler):
                 logger.debug("Heatbeat affected %s tasks", affected)
             time.sleep(2)
 
+    @utils.exit_on_exception
     def _loop(self) -> None:
         while True:
             cmd = self._cmd_queue.get()
