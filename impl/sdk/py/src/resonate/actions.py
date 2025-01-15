@@ -23,7 +23,7 @@ _ASSERT_MSG = (
 @dataclass
 class RFI:
     unit: Invocation[Any] | DurablePromise
-    opts: Options = field(default=Options())
+    opts: Options = field(default_factory=Options)
 
     def options(
         self,
@@ -41,7 +41,7 @@ class RFI:
 @dataclass
 class RFC:
     unit: Invocation[Any] | DurablePromise
-    opts: Options = field(default=Options())
+    opts: Options = field(default_factory=Options)
 
     def options(
         self,
@@ -62,7 +62,7 @@ class RFC:
 @dataclass
 class LFC:
     unit: Invocation[Any]
-    opts: Options = field(default=Options())
+    opts: Options = field(default_factory=Options)
 
     def options(
         self,
@@ -88,7 +88,7 @@ class DI:
 
     id: str
     unit: Invocation[Any]
-    opts: Options = field(default=Options())
+    opts: Options = field(default_factory=Options)
 
     def options(self) -> Self:
         self.opts = Options(durable=True, id=self.id)
@@ -99,7 +99,7 @@ class DI:
 @dataclass
 class LFI:
     unit: Invocation[Any]
-    opts: Options = field(default=Options())
+    opts: Options = field(default_factory=Options)
 
     def options(
         self,
