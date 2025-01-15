@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
@@ -112,12 +113,25 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 			}
 
 			if err == nil && completion.Sender.Success {
+
+				decodedT, decodeErr := t.Task()
+				if decodeErr != nil {
+					slog.Warn("error decoding task", "err", decodeErr)
+				}
+
+				nextState := task.Enqueued
+				if decodedT.Mesg.Type == message.Notify {
+					// When a task message is of type notify we do a
+					// best effort delivery.
+					nextState = task.Completed
+				}
+
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
 						ProcessId:      nil,
-						State:          task.Enqueued,
+						State:          nextState,
 						Counter:        t.Counter,
 						Attempt:        t.Attempt,
 						Ttl:            0,

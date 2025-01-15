@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package notify;
+
+import "internal/app/subsystems/api/grpc/pb/callback_t.proto";
+import "internal/app/subsystems/api/grpc/pb/promise_t.proto";
+
+option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/grpc/pb";
+
+service Notify {
+    rpc CreateNotify (CreateNotifyRequest) returns (CreateNotifyResponse) {}
+}
+
+message CreateNotifyRequest {
+    string id = 1;
+    string promiseId = 2;
+    int64 timeout = 4;
+    callback_t.Recv recv = 5;
+    string requestId = 6;
+}
+
+message CreateNotifyResponse {
+    bool noop = 1;
+    callback_t.Callback callback = 2;
+    promise_t.Promise promise = 3;
+}
