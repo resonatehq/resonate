@@ -25,6 +25,7 @@ type grpcTest struct {
 	conn      *grpc.ClientConn
 	promises  pb.PromisesClient
 	callbacks pb.CallbacksClient
+	notify    pb.NotifyClient
 	schedules pb.SchedulesClient
 	locks     pb.LocksClient
 	tasks     pb.TasksClient
@@ -54,6 +55,7 @@ func setup() (*grpcTest, error) {
 		conn:      conn,
 		promises:  pb.NewPromisesClient(conn),
 		callbacks: pb.NewCallbacksClient(conn),
+		notify:    pb.NewNotifyClient(conn),
 		schedules: pb.NewSchedulesClient(conn),
 		locks:     pb.NewLocksClient(conn),
 		tasks:     pb.NewTasksClient(conn),
@@ -108,6 +110,8 @@ func TestGrpc(t *testing.T) {
 				res, err = grpcTest.promises.CancelPromise(ctx, req)
 			case *pb.CreateCallbackRequest:
 				_, err = grpcTest.callbacks.CreateCallback(ctx, req)
+			case *pb.CreateNotifyRequest:
+				_, err = grpcTest.notify.CreateNotify(ctx, req)
 			case *pb.ReadScheduleRequest:
 				_, err = grpcTest.schedules.ReadSchedule(ctx, req)
 			case *pb.SearchSchedulesRequest:

@@ -23,6 +23,9 @@ type Request struct {
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
 
+	// NOTIFY
+	CreateNotify *CreateNotifyRequest
+
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
 	SearchSchedules *SearchSchedulesRequest
@@ -111,6 +114,19 @@ type CreateCallbackRequest struct {
 
 func (r *CreateCallbackRequest) String() string {
 	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.Id, r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
+}
+
+// Notify
+
+type CreateNotifyRequest struct {
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Timeout   int64           `json:"timeout"`
+	Recv      json.RawMessage `json:"recv"`
+}
+
+func (r *CreateNotifyRequest) String() string {
+	return fmt.Sprintf("CreateNotify(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
 }
 
 // Schedules
@@ -279,6 +295,10 @@ func (r *Request) String() string {
 	// CALLBACKS
 	case CreateCallback:
 		return r.CreateCallback.String()
+
+	// NOTIFY
+	case CreateNotify:
+		return r.CreateNotify.String()
 
 	// SCHEDULES
 	case ReadSchedule:

@@ -24,6 +24,9 @@ type Response struct {
 	// CALLBACKS
 	CreateCallback *CreateCallbackResponse
 
+	// NOTIFY
+	CreateNotify *CreateNotifyResponse
+
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleResponse
 	SearchSchedules *SearchSchedulesResponse
@@ -103,6 +106,18 @@ type CreateCallbackResponse struct {
 
 func (r *CreateCallbackResponse) String() string {
 	return fmt.Sprintf("CreateCallback(status=%d, promise=%v, callback=%v)", r.Status, r.Promise, r.Callback)
+}
+
+// Notify
+
+type CreateNotifyResponse struct {
+	Status   StatusCode         `json:"status"`
+	Promise  *promise.Promise   `json:"promise,omitempty"`
+	Callback *callback.Callback `json:"callback,omitempty"`
+}
+
+func (r *CreateNotifyResponse) String() string {
+	return fmt.Sprintf("CreateNotify(status=%d, promise=%v, callback=%v)", r.Status, r.Promise, r.Callback)
 }
 
 // Schedules
@@ -231,6 +246,10 @@ func (r *Response) Status() StatusCode {
 	// CALLBACKS
 	case CreateCallback:
 		return r.CreateCallback.Status
+
+	// NOTIFY
+	case CreateNotify:
+		return r.CreateNotify.Status
 
 	// SCHEDULES
 	case ReadSchedule:

@@ -13,6 +13,9 @@ const (
 	// CALLBACKS
 	CreateCallback
 
+	// NOTIFY
+	CreateNotify
+
 	// SCHEDULES
 	ReadSchedule
 	SearchSchedules
@@ -49,6 +52,9 @@ func (k Kind) String() string {
 	// CALLBACKS
 	case CreateCallback:
 		return "CreateCallback"
+	// NOTIFY
+	case CreateNotify:
+		return "CreateNotify"
 	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
