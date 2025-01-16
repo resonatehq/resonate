@@ -29,7 +29,7 @@ jobs:
         run: |
 
           # Run pydoctor build
-          pydoctor --config=docs/pydoctor.ini src/resonate
+          pydoctor --config=docs/pydoctor.ini src/resonate --docformat=google
 
       - name: Push API documentation to Github Pages
         uses: peaceiris/actions-gh-pages@v3

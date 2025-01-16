@@ -59,7 +59,7 @@ class Ok(Generic[T_co]):
 
     def err(self) -> None:
         """
-        Return `None`.
+        Return None.
         """
         return
 
@@ -72,11 +72,11 @@ class Ok(Generic[T_co]):
 
 class DoExceptionError(Exception):
     """
-    This is used to signal to `do()` that the result is an `Err`,
-    which short-circuits the generator and returns that Err.
-    Using this exception for control flow in `do()` allows us
-    to simulate `and_then()` in the Err case: namely, we don't call `op`,
-    we just return `self` (the Err).
+    This is used to signal to ``do()`` that the result is an `Err`,
+    which short-circuits the generator and returns that `Err`.
+    Using this exception for control flow in ``do()`` allows us
+    to simulate ``and_then()`` in the Err case: namely, we don't call ``op``,
+    we just return ``self`` (the `Err`).
     """
 
     def __init__(self, err: Err[E_co]) -> None:
@@ -114,7 +114,7 @@ class Err(Generic[E_co]):
 
     def ok(self) -> None:
         """
-        Return `None`.
+        Return ``None``.
         """
         return
 
@@ -130,7 +130,7 @@ class Err(Generic[E_co]):
         """
         exc = UnwrapError(
             self,
-            f"Called `Result.unwrap()` on an `Err` value: {self._value!r}",
+            f"Called ``Result.unwrap()`` on an `Err` value: {self._value!r}",
         )
         if isinstance(self._value, BaseException):
             raise exc from self._value
@@ -147,8 +147,8 @@ have been implemented, only the ones that make sense in the Python context.
 Result: TypeAlias = Union[Ok[T_co], Err[E_co]]
 
 """
-A type to use in `isinstance` checks.
-This is purely for convenience sake, as you could also just write `isinstance(res, (Ok, Err))`
+A type to use in isinstance checks.
+This is purely for convenience sake, as you could also just write isinstance(res, (Ok, Err))
 """  # noqa: E501
 
 
@@ -156,7 +156,7 @@ class UnwrapError(Exception):
     """
     Exception raised from ``.unwrap_<...>`` and ``.expect_<...>`` calls.
 
-    The original ``Result`` can be accessed via the ``.result`` attribute, but
+    The original `Result` can be accessed via the ``.result`` attribute, but
     this is not intended for regular use, as type information is lost:
     ``UnwrapError`` doesn't know about both ``T_co`` and ``E_co``, since it's raised
     from ``Ok()`` or ``Err()`` which only knows about either ``T_co`` or ``E_co``,

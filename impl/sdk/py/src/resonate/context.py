@@ -167,7 +167,7 @@ class Context:
         """
         Local function invocation.
 
-        Invoke and immediatelly receive a `Promise[T]` that
+        Invoke and immediatelly receive a ``Promise[T]`` that
         represents the future result of the execution.
 
         The `Promise` can be yielded later in the execution to await
@@ -210,7 +210,7 @@ class Context:
         Local function call.
 
         LFC and await for the result of the execution. It's syntax
-        sugar for `yield (yield ctx.lfi(...))`
+        sugar for ``yield (yield ctx.lfi(...))``
         """
         unit: Invocation[Any]
         if isinstance(func_or_cmd, RegisteredFn):
@@ -248,7 +248,7 @@ class Context:
         """
         Deferred invocation.
 
-        Invoke as a root invocation. Is equivalent to do `Scheduler.run(...)`
+        Invoke as a root invocation. Is equivalent to do ``Scheduler.run(...)``
         invoked execution will be retried and managed from the server.
         """
         return DI(id=id, unit=Invocation(coro, *args, **kwargs))

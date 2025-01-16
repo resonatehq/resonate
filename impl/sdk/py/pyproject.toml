@@ -32,7 +32,7 @@ dev-dependencies = [
     "pytest>=8.2.0",
     "types-requests>=2.32.0.20240712",
     "ruff>=0.6.3",
-    "pydoctor>=24.3.3",
+    "pydoctor>=24.11.2",
     "pydoclint>=0.5.8",
     "vulture>=2.13",
 ]
