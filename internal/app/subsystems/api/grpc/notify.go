@@ -30,8 +30,8 @@ func (s *server) CreateNotify(c context.Context, r *pb.CreateNotifyRequest) (*pb
 
 	util.Assert(res.CreateNotify != nil, "result must not be nil")
 	return &pb.CreateNotifyResponse{
-		Noop:     res.CreateCallback.Status == t_api.StatusOK,
-		Callback: protoCallback(res.CreateCallback.Callback),
-		Promise:  protoPromise(res.CreateCallback.Promise),
+		Noop:     res.CreateNotify.Status == t_api.StatusOK,
+		Callback: protoCallback(res.CreateNotify.Callback),
+		Promise:  protoPromise(res.CreateNotify.Promise),
 	}, nil
 }
