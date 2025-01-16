@@ -247,6 +247,10 @@ func (r *Response) Status() StatusCode {
 	case CreateCallback:
 		return r.CreateCallback.Status
 
+	// NOTIFY
+	case CreateNotify:
+		return r.CreateNotify.Status
+
 	// SCHEDULES
 	case ReadSchedule:
 		return r.ReadSchedule.Status
