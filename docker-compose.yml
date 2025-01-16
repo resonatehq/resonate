@@ -22,7 +22,9 @@ services:
       - "8001:8001"
       - "50051:50051"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+
   postgres:
     image: postgres:15
     container_name: postgres
