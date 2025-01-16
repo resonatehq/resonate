@@ -640,7 +640,6 @@ class Scheduler(IScheduler):
                         self._handle_continue(record.id, child_record.safe_result())
                     )
                 else:
-                    assert callback is not None
                     self._add_to_awaiting_remote(child_id, record.id)
                     if self._blocked_only_on_remote(root.id):
                         self._complete_task(root.id)
