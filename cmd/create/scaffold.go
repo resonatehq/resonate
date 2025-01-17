@@ -6,8 +6,15 @@ import (
 )
 
 var (
-	exampleCMD = `# Create Resonate project
-	resonate create --name my-python-app --sdk python`
+	exampleCMD = `
+	# Create Resonate project
+	resonate create --name my-python-app --sdk python
+	
+	OR
+
+	# Create Resonate project
+	resonate create -n my-python-app -s python
+	`
 
 	// valiate the user input sdk with the supported list
 	// TODO - may convert to map
@@ -22,7 +29,7 @@ var (
 
 	// Repos
 	Repos = map[string]string{
-		"python": "https://github.com/webpy/webpy-examples.git", // FIXME - will replace with the resonate hq url
+		"python": "https://github.com/resonatehq/scaffold-py.git",
 	}
 )
 
@@ -39,8 +46,6 @@ func scaffold(sdk, name string) error {
 	return nil
 }
 
-// TODO - make the repo public or do somthing with the ssh which will access to private repos as well.
-// NOTE - working only on public repos.
 func getRepositoryURL(sdk string) (string, error) {
 	url, ok := Repos[sdk]
 	if !ok {
@@ -50,7 +55,6 @@ func getRepositoryURL(sdk string) (string, error) {
 	return url, nil
 }
 
-// TODO - clone the same name repo only once need to handle either duplicate or return already exist project name to user
 func cloneRepository(url, name string) error {
 	cmd := exec.Command("git", "clone", url, name)
 	if err := cmd.Run(); err != nil {

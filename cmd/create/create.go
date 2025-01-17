@@ -3,6 +3,7 @@ package create
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/resonatehq/resonate/pkg/client"
@@ -13,6 +14,8 @@ var (
 	// cmd
 	name string // name of the project
 	sdk  string // type of the project
+
+	// TODO - may add the 3rd input as --template or short -t
 
 	// auth
 	c        = client.New()
@@ -69,6 +72,11 @@ func validate(sdk, name string) error {
 		return fmt.Errorf("unsupported sdk type. supported sdks are: %s", strings.Join(SDKs, ", "))
 	}
 
+	err := checkProjectExists(name)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -80,4 +88,22 @@ func isSupported(sdk string) bool {
 	}
 
 	return false
+}
+
+func checkProjectExists(name string) error {
+	info, err := os.Stat(name)
+
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	if info.IsDir() {
+		return fmt.Errorf("project named '%s' already exists", name)
+	}
+
+	return nil
 }
