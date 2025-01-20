@@ -44,6 +44,7 @@ from resonate.promise import Promise
 from resonate.record import Record
 from resonate.result import Err, Ok, Result
 from resonate.scheduler.traits import IScheduler
+from resonate.stores.local import LocalStore
 from resonate.stores.record import (
     DurablePromiseRecord,
     InvokeMsg,
@@ -55,7 +56,6 @@ from resonate.stores.remote import RemoteStore
 if TYPE_CHECKING:
     from resonate.collections import FunctionRegistry
     from resonate.dependencies import Dependencies
-    from resonate.stores.local import LocalStore
     from resonate.stores.record import TaskRecord
     from resonate.task_sources.traits import ITaskSource
     from resonate.typing import Data, DurableCoro, DurableFn, Headers, Tags
@@ -348,17 +348,21 @@ class Scheduler(IScheduler):
         )
 
         record.add_durable_promise(durable_promise)
-        if task:
-            record.add_task(task)
-
         if durable_promise.is_completed():
             assert task is None
             record.set_result(durable_promise.get_value(self._encoder), deduping=True)
             fork_or_join.handle.set_result(record.safe_result())
-        else:
-            return [Invoke(record.id), Subscribe(record.id, fork_or_join.handle)]
+            return []
 
-        return []
+        if isinstance(self._store, LocalStore):
+            assert task is None
+        elif isinstance(self._store, RemoteStore):
+            if task is None:
+                return [Subscribe(record.id, fork_or_join.handle)]
+            record.add_task(task)
+        else:
+            assert_never(self._store)
+        return [Invoke(record.id), Subscribe(record.id, fork_or_join.handle)]
 
     def _handle_subscribe(self, subscribe: Subscribe) -> list[Command]:
         self._subsriptions.setdefault(subscribe.id, []).append(subscribe.handle)
@@ -397,6 +401,7 @@ class Scheduler(IScheduler):
     def _process_invoke_msg(
         self, invoke_msg: InvokeMsg, task: TaskRecord
     ) -> list[Command]:
+        assert isinstance(self._store, RemoteStore)
         logger.info(
             "Invoke message for %s received", invoke_msg.root_durable_promise.id
         )
@@ -433,10 +438,10 @@ class Scheduler(IScheduler):
     def _process_resume_msg(
         self, resume_msg: ResumeMsg, task: TaskRecord
     ) -> list[Command]:
+        assert isinstance(self._store, RemoteStore)
         logger.info(
             "Continue message for %s received", resume_msg.leaf_durable_promise.id
         )
-        assert isinstance(self._store, RemoteStore)
         assert resume_msg.leaf_durable_promise.is_completed()
 
         root_record = self._records.get(resume_msg.root_durable_promise.id)
@@ -561,10 +566,10 @@ class Scheduler(IScheduler):
         )
 
     def _complete_task(self, id: str) -> None:
+        assert isinstance(self._store, RemoteStore)
         record = self._records[id]
         assert record.has_task()
 
-        assert isinstance(self._store, RemoteStore)
         task = record.get_task()
         self._store.tasks.complete(
             task_id=task.task_id,
@@ -573,8 +578,8 @@ class Scheduler(IScheduler):
         record.remove_task()
 
     def _process_rfc(self, record: Record[Any], rfc: RFC) -> list[Command]:  # noqa: PLR0912
-        loopback: list[Command] = []
         assert isinstance(self._store, RemoteStore)
+        loopback: list[Command] = []
         child_id: str
         next_child_name = record.next_child_name()
         if isinstance(rfc.unit, Invocation):
@@ -692,6 +697,7 @@ class Scheduler(IScheduler):
         return loopback
 
     def _process_rfi(self, record: Record[Any], rfi: RFI) -> list[Command]:
+        assert isinstance(self._store, RemoteStore)
         loopback: list[Command] = []
         child_id: str
         next_child_name = record.next_child_name()
