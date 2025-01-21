@@ -220,7 +220,7 @@ class Context:
         return LFC(unit)
 
     @overload
-    def deferred(
+    def detached(
         self,
         id: str,
         coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, Any]],
@@ -229,7 +229,7 @@ class Context:
         **kwargs: P.kwargs,
     ) -> DI: ...
     @overload
-    def deferred(
+    def detached(
         self,
         id: str,
         coro: Callable[Concatenate[Context, P], Any | Coroutine[Any, Any, Any]],
@@ -237,7 +237,7 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> DI: ...
-    def deferred(
+    def detached(
         self,
         id: str,
         coro: DurableCoro[P, T] | DurableFn[P, T],
@@ -246,7 +246,7 @@ class Context:
         **kwargs: P.kwargs,
     ) -> DI:
         """
-        Deferred invocation.
+        Detached invocation.
 
         Invoke as a root invocation. Is equivalent to do ``Scheduler.run(...)``
         invoked execution will be retried and managed from the server.

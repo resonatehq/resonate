@@ -394,7 +394,7 @@ class Scheduler(IScheduler):
         elif isinstance(yielded_value, FinalValue):
             loopback = self._process_final_value(record, yielded_value.v)
         elif isinstance(yielded_value, DI):
-            loopback = self._process_deferred(record, yielded_value)
+            loopback = self._process_detached(record, yielded_value)
         else:
             assert_never(yielded_value)
         return loopback
@@ -792,20 +792,20 @@ class Scheduler(IScheduler):
     ) -> list[Command]:
         return [Complete(record.id, final_value)]
 
-    def _process_deferred(self, record: Record[Any], deferred: DI) -> list[Command]:
+    def _process_detached(self, record: Record[Any], detached: DI) -> list[Command]:
         loopback = self._handle_fork_or_join(
             ForkOrJoin(
-                deferred.id,
-                Handle[Any](deferred.id),
+                detached.id,
+                Handle[Any](detached.id),
                 Invocation(
-                    deferred.unit.fn,
-                    *deferred.unit.args,
-                    **deferred.unit.kwargs,
+                    detached.unit.fn,
+                    *detached.unit.args,
+                    **detached.unit.kwargs,
                 ),
             )
         )
         loopback.extend(
-            self._handle_continue(record.id, next_value=Ok(Promise[Any](deferred.id)))
+            self._handle_continue(record.id, next_value=Ok(Promise[Any](detached.id)))
         )
         return loopback
 

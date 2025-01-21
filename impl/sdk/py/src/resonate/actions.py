@@ -83,7 +83,7 @@ class LFC:
 class DI:
     """
     Dataclass that contains all required information to do a
-    deferred invocation.
+    detached invocation.
     """
 
     id: str
