@@ -17,7 +17,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 	util.Assert(tags != nil, "tags must be set")
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
-		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+		tasksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: tags,
 			Store: &t_aio.StoreSubmission{
@@ -40,21 +40,64 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 			return nil, nil
 		}
 
-		util.Assert(completion.Store != nil, "completion must not be nil")
-		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
+		util.Assert(tasksCompletion.Store != nil, "completion must not be nil")
+		util.Assert(len(tasksCompletion.Store.Results) == 1, "completion must have one result")
 
-		result := completion.Store.Results[0].ReadEnqueueableTasks
-		util.Assert(result != nil, "result must not be nil")
+		tasksResult := tasksCompletion.Store.Results[0].ReadEnqueueableTasks
+		util.Assert(tasksResult != nil, "tasksResult must not be nil")
+
+		if len(tasksResult.Records) == 0 {
+			return nil, nil
+		}
+
+		promiseCmds := make([]*t_aio.Command, len(tasksResult.Records))
+		for i, r := range tasksResult.Records {
+			promiseCmds[i] = &t_aio.Command{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
+					Id: r.RootPromiseId,
+				},
+			}
+		}
+		util.Assert(len(promiseCmds) > 0, "there must be more that 0 promiseCmds")
+
+		promisesCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
+			Kind: t_aio.Store,
+			Tags: tags,
+			Store: &t_aio.StoreSubmission{
+				Transaction: &t_aio.Transaction{
+					Commands: promiseCmds,
+				},
+			},
+		})
+
+		if err != nil {
+			slog.Error("failed to read promises", "err", err)
+			return nil, nil
+		}
+
+		util.Assert(promisesCompletion.Store != nil, "completion must not be nil")
+		util.Assert(len(promisesCompletion.Store.Results) == len(promiseCmds), "There must be one result per cmd")
+
+		promisesResults := promisesCompletion.Store.Results
 
 		commands := []*t_aio.Command{}
-		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(result.Records))
+		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
 
 		expiresAt := c.Time() + config.TaskEnqueueDelay.Milliseconds()
-		for i, r := range result.Records {
+		for i, r := range tasksResult.Records {
 			if c.Time() < r.Timeout {
 				t, err := r.Task()
 				if err != nil {
 					slog.Warn("failed to parse task", "err", err)
+					continue
+				}
+
+				util.Assert(promisesResults[i].ReadPromise != nil, "ReadPromise must not be nil")
+
+				promise, err := promisesResults[i].ReadPromise.Records[0].Promise()
+				if err != nil {
+					slog.Warn("failed to parse promise", "err", err)
 					continue
 				}
 
@@ -77,6 +120,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 							CreatedOn:     t.CreatedOn,
 							CompletedOn:   t.CompletedOn,
 						},
+						Promise:       promise,
 						ClaimHref:     fmt.Sprintf("%s/tasks/claim/%s/%d", config.Url, t.Id, t.Counter),
 						CompleteHref:  fmt.Sprintf("%s/tasks/complete/%s/%d", config.Url, t.Id, t.Counter),
 						HeartbeatHref: fmt.Sprintf("%s/tasks/heartbeat/%s/%d", config.Url, t.Id, t.Counter),
@@ -102,7 +146,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 			}
 		}
 
-		for i, t := range result.Records {
+		for i, t := range tasksResult.Records {
 			if awaiting[i] == nil {
 				continue
 			}

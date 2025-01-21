@@ -66,7 +66,7 @@ func CreateNotify(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 			createdOn := c.Time()
 
-			callbackId := fmt.Sprintf("%s.%s", r.CreateCallback.PromiseId, r.CreateCallback.Id)
+			callbackId := fmt.Sprintf("%s.%s", r.CreateNotify.PromiseId, r.CreateNotify.Id)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -105,10 +105,10 @@ func CreateNotify(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				status = t_api.StatusCreated
 				cb = &callback.Callback{
 					Id:        callbackId,
-					PromiseId: r.CreateCallback.PromiseId,
-					Recv:      r.CreateCallback.Recv,
+					PromiseId: r.CreateNotify.PromiseId,
+					Recv:      r.CreateNotify.Recv,
 					Mesg:      mesg,
-					Timeout:   r.CreateCallback.Timeout,
+					Timeout:   r.CreateNotify.Timeout,
 					CreatedOn: createdOn,
 				}
 			}
