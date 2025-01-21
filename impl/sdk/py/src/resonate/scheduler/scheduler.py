@@ -376,27 +376,28 @@ class Scheduler(IScheduler):
     def _handle_continue(
         self, id: str, next_value: Result[Any, Exception] | None
     ) -> list[Command]:
+        loopback: list[Command]
         record = self._records[id]
         coro = record.get_coro()
         yielded_value = coro.advance(next_value)
 
         if isinstance(yielded_value, LFI):
-            return self._process_lfi(record, yielded_value)
-        if isinstance(yielded_value, LFC):
-            return self._process_lfc(record, yielded_value)
-        if isinstance(yielded_value, RFI):
-            return self._process_rfi(record, yielded_value)
-        if isinstance(yielded_value, RFC):
-            return self._process_rfc(record, yielded_value)
-        if isinstance(yielded_value, Promise):
-            return self._process_promise(record, yielded_value)
-        if isinstance(yielded_value, FinalValue):
-            return self._process_final_value(record, yielded_value.v)
-        if isinstance(yielded_value, DI):
-            # start execution from the top. Add current record to runnable
-            raise NotImplementedError
-
-        assert_never(yielded_value)
+            loopback = self._process_lfi(record, yielded_value)
+        elif isinstance(yielded_value, LFC):
+            loopback = self._process_lfc(record, yielded_value)
+        elif isinstance(yielded_value, RFI):
+            loopback = self._process_rfi(record, yielded_value)
+        elif isinstance(yielded_value, RFC):
+            loopback = self._process_rfc(record, yielded_value)
+        elif isinstance(yielded_value, Promise):
+            loopback = self._process_promise(record, yielded_value)
+        elif isinstance(yielded_value, FinalValue):
+            loopback = self._process_final_value(record, yielded_value.v)
+        elif isinstance(yielded_value, DI):
+            loopback = self._process_deferred(record, yielded_value)
+        else:
+            assert_never(yielded_value)
+        return loopback
 
     def _process_invoke_msg(
         self, invoke_msg: InvokeMsg, task: TaskRecord
@@ -790,6 +791,23 @@ class Scheduler(IScheduler):
         self, record: Record[Any], final_value: Result[Any, Exception]
     ) -> list[Command]:
         return [Complete(record.id, final_value)]
+
+    def _process_deferred(self, record: Record[Any], deferred: DI) -> list[Command]:
+        loopback = self._handle_fork_or_join(
+            ForkOrJoin(
+                deferred.id,
+                Handle[Any](deferred.id),
+                Invocation(
+                    deferred.unit.fn,
+                    *deferred.unit.args,
+                    **deferred.unit.kwargs,
+                ),
+            )
+        )
+        loopback.extend(
+            self._handle_continue(record.id, next_value=Ok(Promise[Any](deferred.id)))
+        )
+        return loopback
 
     def _get_info_from_rfi(self, rfi: RFI) -> tuple[Data, Headers, Tags, int | None]:
         data: Data

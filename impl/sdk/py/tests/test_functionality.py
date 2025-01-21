@@ -741,3 +741,31 @@ def test_sleep() -> None:
     p = foo_sleep.run(f"{group}-{n}", n)
     assert p.result() == n
     s.stop()
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_golden_device_deferred() -> None:
+    group = "test-golden-device-deferred"
+
+    def foo_golden_device_deferred(
+        ctx: Context, n: str
+    ) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.deferred("bar", bar_golden_device_deferred, n)
+        v: str = yield p
+        return v
+
+    def bar_golden_device_deferred(ctx: Context, n: str) -> str:  # noqa: ARG001
+        return n
+
+    resonate = Resonate(
+        store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
+        task_source=Poller("http://localhost:8002", group=group),
+    )
+    resonate.register(foo_golden_device_deferred)
+    resonate.register(bar_golden_device_deferred)
+    p: Handle[str] = resonate.run(f"{group}-foo", foo_golden_device_deferred, "hi")
+    assert isinstance(p, Handle)
+    assert p.result() == "hi"
+    resonate.stop()
