@@ -496,8 +496,11 @@ class Scheduler(IScheduler):
             )
             if callback is None:
                 assert durable_promise.is_completed()
-                record.set_result(
+                promise_record.set_result(
                     durable_promise.get_value(self._encoder), deduping=True
+                )
+                loopback.extend(
+                    self._handle_continue(record.id, promise_record.safe_result())
                 )
             else:
                 self._add_to_awaiting_remote(promise_record.id, record.id)
