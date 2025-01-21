@@ -249,6 +249,24 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
+// NOTIFICATIONS
+
+func (g *Generator) GenerateCreateNotify(r *rand.Rand, t int64) *t_api.Request {
+	promiseId := g.promiseId(r)
+	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
+	id := g.notifyId(r)
+
+	return &t_api.Request{
+		Kind: t_api.CreateNotify,
+		CreateNotify: &t_api.CreateNotifyRequest{
+			Id:        id,
+			PromiseId: promiseId,
+			Timeout:   timeout,
+			Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
+		},
+	}
+}
+
 // SCHEDULES
 
 func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
@@ -395,6 +413,10 @@ func (g *Generator) scheduleId(r *rand.Rand) string {
 
 func (g *Generator) callbackId(r *rand.Rand) string {
 	return "cb" + g.idSet[r.Intn(len(g.idSet))]
+}
+
+func (g *Generator) notifyId(r *rand.Rand) string {
+	return "nt" + g.idSet[r.Intn(len(g.idSet))]
 }
 
 func (g *Generator) promiseSearch(r *rand.Rand) string {

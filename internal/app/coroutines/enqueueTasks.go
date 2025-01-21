@@ -5,11 +5,12 @@ import (
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
-	"github.com/resonatehq/gocoro/pkg/promise"
+	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
+	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
@@ -82,7 +83,7 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		promisesResults := promisesCompletion.Store.Results
 
 		commands := []*t_aio.Command{}
-		awaiting := make([]promise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
+		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
 
 		expiresAt := c.Time() + config.TaskEnqueueDelay.Milliseconds()
 		for i, r := range tasksResult.Records {
@@ -95,10 +96,13 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 
 				util.Assert(promisesResults[i].ReadPromise != nil, "ReadPromise must not be nil")
 
-				promise, err := promisesResults[i].ReadPromise.Records[0].Promise()
-				if err != nil {
-					slog.Warn("failed to parse promise", "err", err)
-					continue
+				var promise *promise.Promise
+				if promisesResults[i].ReadPromise.RowsReturned > 0 {
+					promise, err = promisesResults[i].ReadPromise.Records[0].Promise()
+					if err != nil {
+						slog.Warn("failed to parse promise", "err", err)
+						continue
+					}
 				}
 
 				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
@@ -151,31 +155,39 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 				continue
 			}
 
+			decodedT, decodeErr := t.Task()
+			if decodeErr != nil {
+				slog.Warn("error decoding task, continuing", "err", decodeErr)
+				continue
+			}
+
 			completion, err := gocoro.Await(c, awaiting[i])
-			if err != nil {
+			if err != nil && decodedT.Mesg.Type != message.Notify {
 				slog.Warn("failed to enqueue task", "err", err)
 			}
 
-			if err == nil && completion.Sender.Success {
-
-				decodedT, decodeErr := t.Task()
-				if decodeErr != nil {
-					slog.Warn("error decoding task", "err", decodeErr)
-				}
-
-				nextState := task.Enqueued
-				if decodedT.Mesg.Type == message.Notify {
-					// When a task message is of type notify we do a
-					// best effort delivery.
-					nextState = task.Completed
-				}
-
+			if decodedT.Mesg.Type == message.Notify {
 				commands = append(commands, &t_aio.Command{
 					Kind: t_aio.UpdateTask,
 					UpdateTask: &t_aio.UpdateTaskCommand{
 						Id:             t.Id,
 						ProcessId:      nil,
-						State:          nextState,
+						State:          task.Completed,
+						Counter:        t.Counter,
+						Attempt:        t.Attempt,
+						Ttl:            0,
+						ExpiresAt:      expiresAt, // time to be claimed
+						CurrentStates:  []task.State{task.Init},
+						CurrentCounter: t.Counter,
+					},
+				})
+			} else if err == nil && completion.Sender.Success {
+				commands = append(commands, &t_aio.Command{
+					Kind: t_aio.UpdateTask,
+					UpdateTask: &t_aio.UpdateTaskCommand{
+						Id:             t.Id,
+						ProcessId:      nil,
+						State:          task.Enqueued,
 						Counter:        t.Counter,
 						Attempt:        t.Attempt,
 						Ttl:            0,

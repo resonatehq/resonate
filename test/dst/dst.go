@@ -379,6 +379,7 @@ func (d *DST) Model() porcupine.Model {
 				case Lock:
 					l = append(l, op)
 					// TODO(avillega): Temporaly disable validations over tasks
+					// TODO(avillega): Add validations over notify tasks. this will require to have the task and promise accesible in the same partition.
 					// case Task:
 					// 	t = append(t, op)
 				}
@@ -699,7 +700,7 @@ func partition(req *Req) Partition {
 	switch req.kind {
 	case Op:
 		switch req.req.Kind {
-		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback:
+		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback, t_api.CreateNotify:
 			return Promise
 		case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
 			return Schedule
