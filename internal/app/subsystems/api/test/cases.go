@@ -1451,13 +1451,13 @@ var TestCases = []*testCase{
 		},
 	},
 
-	// Notification
+	// Suscriptions
 	{
-		Name: "CreateNotifyLogicalReceiver",
+		Name: "CreateSuscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateNotify,
-			Tags: map[string]string{"id": "CreateNotify", "name": "CreateNotify"},
-			CreateNotify: &t_api.CreateNotifyRequest{
+			Kind: t_api.CreateSuscription,
+			Tags: map[string]string{"id": "CreateSuscription", "name": "CreateSuscription"},
+			CreateSuscription: &t_api.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
@@ -1465,17 +1465,17 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateNotify,
-			CreateNotify: &t_api.CreateNotifyResponse{
+			Kind: t_api.CreateSuscription,
+			CreateSuscription: &t_api.CreateSuscriptionResponse{
 				Status: t_api.StatusCreated,
 			},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
-				Path:   "notify",
+				Path:   "suscriptions",
 				Headers: map[string]string{
-					"Request-Id": "CreateNotify",
+					"Request-Id": "CreateSuscription",
 				},
 				Body: []byte(`{
 					"id": "foo.1",
@@ -1489,21 +1489,21 @@ var TestCases = []*testCase{
 			},
 		},
 		Grpc: &grpcTestCase{
-			Req: &pb.CreateNotifyRequest{
+			Req: &pb.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
 				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateNotify",
+				RequestId: "CreateSuscription",
 			},
 		},
 	},
 	{
-		Name: "CreateNotifyPhysicalReceiver",
+		Name: "CreateSuscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateNotify,
-			Tags: map[string]string{"id": "CreateNotifyPhysicalRecv", "name": "CreateNotify"},
-			CreateNotify: &t_api.CreateNotifyRequest{
+			Kind: t_api.CreateSuscription,
+			Tags: map[string]string{"id": "CreateSuscriptionPhysicalRecv", "name": "CreateSuscription"},
+			CreateSuscription: &t_api.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
@@ -1511,17 +1511,17 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateNotify,
-			CreateNotify: &t_api.CreateNotifyResponse{
+			Kind: t_api.CreateSuscription,
+			CreateSuscription: &t_api.CreateSuscriptionResponse{
 				Status: t_api.StatusCreated,
 			},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
-				Path:   "notify",
+				Path:   "suscriptions",
 				Headers: map[string]string{
-					"Request-Id": "CreateNotifyPhysicalRecv",
+					"Request-Id": "CreateSuscriptionPhysicalRecv",
 				},
 				Body: []byte(`{
 					"id": "foo.1",
@@ -1535,21 +1535,21 @@ var TestCases = []*testCase{
 			},
 		},
 		Grpc: &grpcTestCase{
-			Req: &pb.CreateNotifyRequest{
+			Req: &pb.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
 				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
-				RequestId: "CreateNotifyPhysicalRecv",
+				RequestId: "CreateSuscriptionPhysicalRecv",
 			},
 		},
 	},
 	{
-		Name: "CreateNotifyNotFound",
+		Name: "CreateSuscriptionNotFound",
 		Req: &t_api.Request{
-			Kind: t_api.CreateNotify,
-			Tags: map[string]string{"id": "CreateNotifyNotFound", "name": "CreateNotify"},
-			CreateNotify: &t_api.CreateNotifyRequest{
+			Kind: t_api.CreateSuscription,
+			Tags: map[string]string{"id": "CreateSuscriptionNotFound", "name": "CreateSuscription"},
+			CreateSuscription: &t_api.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
@@ -1557,17 +1557,17 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateNotify,
-			CreateNotify: &t_api.CreateNotifyResponse{
+			Kind: t_api.CreateSuscription,
+			CreateSuscription: &t_api.CreateSuscriptionResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
-				Path:   "notify",
+				Path:   "suscriptions",
 				Headers: map[string]string{
-					"Request-Id": "CreateNotifyNotFound",
+					"Request-Id": "CreateSuscriptionNotFound",
 				},
 				Body: []byte(`{
 					"id": "foo.1",
@@ -1581,12 +1581,12 @@ var TestCases = []*testCase{
 			},
 		},
 		Grpc: &grpcTestCase{
-			Req: &pb.CreateNotifyRequest{
+			Req: &pb.CreateSuscriptionRequest{
 				Id:        "foo.1",
 				PromiseId: "foo",
 				Timeout:   1,
 				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
-				RequestId: "CreateNotifyNotFound",
+				RequestId: "CreateSuscriptionNotFound",
 			},
 			Code: codes.NotFound,
 		},

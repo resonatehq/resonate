@@ -36,7 +36,7 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	server := grpc.NewServer(grpc.UnaryInterceptor(s.log)) // nosemgrep
 	pb.RegisterPromisesServer(server, s)
 	pb.RegisterCallbacksServer(server, s)
-	pb.RegisterNotifyServer(server, s)
+	pb.RegisterSuscriptionsServer(server, s)
 	pb.RegisterSchedulesServer(server, s)
 	pb.RegisterLocksServer(server, s)
 	pb.RegisterTasksServer(server, s)
@@ -76,7 +76,7 @@ func (g *Grpc) Stop() error {
 type server struct {
 	pb.UnimplementedPromisesServer
 	pb.UnimplementedCallbacksServer
-	pb.UnimplementedNotifyServer
+	pb.UnimplementedSuscriptionsServer
 	pb.UnimplementedSchedulesServer
 	pb.UnimplementedLocksServer
 	pb.UnimplementedTasksServer

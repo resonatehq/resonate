@@ -342,33 +342,33 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 	}
 }
 
-// CALLBACKS
+// SUSCRIPTIONS
 
-func (v *Validator) ValidateCreateNotify(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	p := model.promises.get(req.CreateNotify.PromiseId)
+func (v *Validator) ValidateCreateSuscription(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	p := model.promises.get(req.CreateSuscription.PromiseId)
 
-	switch res.CreateNotify.Status {
+	switch res.CreateSuscription.Status {
 	case t_api.StatusCreated:
 		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", req.CreateNotify.PromiseId)
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateSuscription.PromiseId)
 		}
 
 		if p.State != promise.Pending {
-			return model, fmt.Errorf("promise '%s' must be pending", req.CreateNotify.PromiseId)
+			return model, fmt.Errorf("promise '%s' must be pending", req.CreateSuscription.PromiseId)
 		}
 
-		if model.callbacks.get(res.CreateNotify.Callback.Id) != nil {
-			return model, fmt.Errorf("notify '%s' exists", res.CreateNotify.Callback.Id)
+		if model.callbacks.get(res.CreateSuscription.Callback.Id) != nil {
+			return model, fmt.Errorf("suscription '%s' exists", res.CreateSuscription.Callback.Id)
 		}
 
 		model = model.Copy()
-		model.callbacks.set(res.CreateNotify.Callback.Id, res.CreateNotify.Callback)
+		model.callbacks.set(res.CreateSuscription.Callback.Id, res.CreateSuscription.Callback)
 		return model, nil
 
 	case t_api.StatusOK:
 		// If the status is Ok there has to be a promise
 		if p == nil {
-			return model, fmt.Errorf("promise '%s' does not exist", req.CreateNotify.PromiseId)
+			return model, fmt.Errorf("promise '%s' does not exist", req.CreateSuscription.PromiseId)
 		}
 
 		// If the promise is completed we don't create a callback but return 200
@@ -380,26 +380,26 @@ func (v *Validator) ValidateCreateNotify(model *Model, reqTime int64, resTime in
 		// if the promise is timedout we can handle it as if it was completed
 		if resTime >= p.Timeout {
 			model = model.Copy()
-			model.promises.set(p.Id, res.CreateNotify.Promise)
+			model.promises.set(p.Id, res.CreateSuscription.Promise)
 			return model, nil
 		}
 
-		// otherwise verify the callback was created previously
-		notifyId := fmt.Sprintf("%s.%s", p.Id, req.CreateNotify.Id)
-		if model.callbacks.get(notifyId) == nil {
-			return model, fmt.Errorf("notify '%s' must exist", notifyId)
+		// otherwise verify the suscription was created previously
+		suscriptionId := fmt.Sprintf("%s.%s", p.Id, req.CreateSuscription.Id)
+		if model.callbacks.get(suscriptionId) == nil {
+			return model, fmt.Errorf("suscription '%s' must exist", suscriptionId)
 		}
 
 		return model, nil
 
 	case t_api.StatusPromiseNotFound:
 		if p != nil {
-			return model, fmt.Errorf("promise '%s' exists", req.CreateNotify.PromiseId)
+			return model, fmt.Errorf("promise '%s' exists", req.CreateSuscription.PromiseId)
 		}
 		return model, nil
 
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.CreateNotify.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.CreateSuscription.Status)
 	}
 }
 

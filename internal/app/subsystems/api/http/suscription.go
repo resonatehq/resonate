@@ -10,26 +10,26 @@ import (
 )
 
 // Create
-type createNotifyHeader struct {
+type createSuscriptionHeader struct {
 	RequestId string `header:"request-id"`
 }
 
-type createNotifyBody struct {
+type createSuscriptionBody struct {
 	Id        string          `json:"Id" binding:"required"`
 	PromiseId string          `json:"promiseId" binding:"required"`
 	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv" binding:"required"`
 }
 
-func (s *server) createNotify(c *gin.Context) {
-	var header createNotifyHeader
+func (s *server) createSuscription(c *gin.Context) {
+	var header createSuscriptionHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
 		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var body createNotifyBody
+	var body createSuscriptionBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -37,8 +37,8 @@ func (s *server) createNotify(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateNotify,
-		CreateNotify: &t_api.CreateNotifyRequest{
+		Kind: t_api.CreateSuscription,
+		CreateSuscription: &t_api.CreateSuscriptionRequest{
 			Id:        body.Id,
 			PromiseId: body.PromiseId,
 			Timeout:   body.Timeout,
@@ -50,9 +50,9 @@ func (s *server) createNotify(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateNotify != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateNotify.Status), gin.H{
-		"callback": res.CreateNotify.Callback,
-		"promise":  res.CreateNotify.Promise,
+	util.Assert(res.CreateSuscription != nil, "result must not be nil")
+	c.JSON(s.code(res.CreateSuscription.Status), gin.H{
+		"callback": res.CreateSuscription.Callback,
+		"promise":  res.CreateSuscription.Promise,
 	})
 }

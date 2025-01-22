@@ -197,20 +197,6 @@ type ReleaseLockParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
-// CreateNotifyJSONBody defines parameters for CreateNotify.
-type CreateNotifyJSONBody struct {
-	Id        string `json:"id"`
-	PromiseId string `json:"promiseId"`
-	Recv      Recv   `json:"recv"`
-	Timeout   int64  `json:"timeout"`
-}
-
-// CreateNotifyParams defines parameters for CreateNotify.
-type CreateNotifyParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
-}
-
 // SearchPromisesParams defines parameters for SearchPromises.
 type SearchPromisesParams struct {
 	// Id Search promises for matching ids, can include wildcards.
@@ -366,6 +352,20 @@ type ReadScheduleParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
+// CreateSuscriptionJSONBody defines parameters for CreateSuscription.
+type CreateSuscriptionJSONBody struct {
+	Id        string `json:"id"`
+	PromiseId string `json:"promiseId"`
+	Recv      Recv   `json:"recv"`
+	Timeout   int64  `json:"timeout"`
+}
+
+// CreateSuscriptionParams defines parameters for CreateSuscription.
+type CreateSuscriptionParams struct {
+	// RequestId Unique tracking id
+	RequestId *string `json:"request-id,omitempty"`
+}
+
 // ClaimTaskJSONBody defines parameters for ClaimTask.
 type ClaimTaskJSONBody struct {
 	// Counter The task counter
@@ -437,9 +437,6 @@ type HeartbeatLocksJSONRequestBody HeartbeatLocksJSONBody
 // ReleaseLockJSONRequestBody defines body for ReleaseLock for application/json ContentType.
 type ReleaseLockJSONRequestBody ReleaseLockJSONBody
 
-// CreateNotifyJSONRequestBody defines body for CreateNotify for application/json ContentType.
-type CreateNotifyJSONRequestBody CreateNotifyJSONBody
-
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
 type CreatePromiseJSONRequestBody CreatePromiseJSONBody
 
@@ -451,6 +448,9 @@ type CompletePromiseJSONRequestBody CompletePromiseJSONBody
 
 // CreateScheduleJSONRequestBody defines body for CreateSchedule for application/json ContentType.
 type CreateScheduleJSONRequestBody CreateScheduleJSONBody
+
+// CreateSuscriptionJSONRequestBody defines body for CreateSuscription for application/json ContentType.
+type CreateSuscriptionJSONRequestBody CreateSuscriptionJSONBody
 
 // ClaimTaskJSONRequestBody defines body for ClaimTask for application/json ContentType.
 type ClaimTaskJSONRequestBody ClaimTaskJSONBody
@@ -616,11 +616,6 @@ type ClientInterface interface {
 
 	ReleaseLock(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateNotifyWithBody request with any body
-	CreateNotifyWithBody(ctx context.Context, params *CreateNotifyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	CreateNotify(ctx context.Context, params *CreateNotifyParams, body CreateNotifyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// SearchPromises request
 	SearchPromises(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -655,6 +650,11 @@ type ClientInterface interface {
 
 	// ReadSchedule request
 	ReadSchedule(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateSuscriptionWithBody request with any body
+	CreateSuscriptionWithBody(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreateSuscription(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ClaimTaskWithBody request with any body
 	ClaimTaskWithBody(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -767,30 +767,6 @@ func (c *Client) ReleaseLockWithBody(ctx context.Context, params *ReleaseLockPar
 
 func (c *Client) ReleaseLock(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReleaseLockRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateNotifyWithBody(ctx context.Context, params *CreateNotifyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateNotifyRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateNotify(ctx context.Context, params *CreateNotifyParams, body CreateNotifyJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateNotifyRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -947,6 +923,30 @@ func (c *Client) DeleteSchedule(ctx context.Context, id string, params *DeleteSc
 
 func (c *Client) ReadSchedule(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReadScheduleRequest(c.Server, id, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSuscriptionWithBody(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSuscriptionRequestWithBody(c.Server, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreateSuscription(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSuscriptionRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1251,61 +1251,6 @@ func NewReleaseLockRequestWithBody(server string, params *ReleaseLockParams, con
 	}
 
 	operationPath := fmt.Sprintf("/locks/release")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
-// NewCreateNotifyRequest calls the generic CreateNotify builder with application/json body
-func NewCreateNotifyRequest(server string, params *CreateNotifyParams, body CreateNotifyJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateNotifyRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewCreateNotifyRequestWithBody generates requests for CreateNotify with any type of body
-func NewCreateNotifyRequestWithBody(server string, params *CreateNotifyParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/notify")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2031,6 +1976,61 @@ func NewReadScheduleRequest(server string, id string, params *ReadScheduleParams
 	return req, nil
 }
 
+// NewCreateSuscriptionRequest calls the generic CreateSuscription builder with application/json body
+func NewCreateSuscriptionRequest(server string, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateSuscriptionRequestWithBody(server, params, "application/json", bodyReader)
+}
+
+// NewCreateSuscriptionRequestWithBody generates requests for CreateSuscription with any type of body
+func NewCreateSuscriptionRequestWithBody(server string, params *CreateSuscriptionParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/suscriptions")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewClaimTaskRequest calls the generic ClaimTask builder with application/json body
 func NewClaimTaskRequest(server string, params *ClaimTaskParams, body ClaimTaskJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2412,11 +2412,6 @@ type ClientWithResponsesInterface interface {
 
 	ReleaseLockWithResponse(ctx context.Context, params *ReleaseLockParams, body ReleaseLockJSONRequestBody, reqEditors ...RequestEditorFn) (*ReleaseLockResponse, error)
 
-	// CreateNotifyWithBodyWithResponse request with any body
-	CreateNotifyWithBodyWithResponse(ctx context.Context, params *CreateNotifyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateNotifyResponse, error)
-
-	CreateNotifyWithResponse(ctx context.Context, params *CreateNotifyParams, body CreateNotifyJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateNotifyResponse, error)
-
 	// SearchPromisesWithResponse request
 	SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error)
 
@@ -2451,6 +2446,11 @@ type ClientWithResponsesInterface interface {
 
 	// ReadScheduleWithResponse request
 	ReadScheduleWithResponse(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*ReadScheduleResponse, error)
+
+	// CreateSuscriptionWithBodyWithResponse request with any body
+	CreateSuscriptionWithBodyWithResponse(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error)
+
+	CreateSuscriptionWithResponse(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error)
 
 	// ClaimTaskWithBodyWithResponse request with any body
 	ClaimTaskWithBodyWithResponse(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClaimTaskResponse, error)
@@ -2566,34 +2566,6 @@ func (r ReleaseLockResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r ReleaseLockResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-type CreateNotifyResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		Promise *Promise `json:"promise,omitempty"`
-	}
-	JSON201 *struct {
-		Callback *Callback `json:"callback,omitempty"`
-		Promise  *Promise  `json:"promise,omitempty"`
-	}
-}
-
-// Status returns HTTPResponse.Status
-func (r CreateNotifyResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CreateNotifyResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2821,6 +2793,34 @@ func (r ReadScheduleResponse) StatusCode() int {
 	return 0
 }
 
+type CreateSuscriptionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Promise *Promise `json:"promise,omitempty"`
+	}
+	JSON201 *struct {
+		Callback *Callback `json:"callback,omitempty"`
+		Promise  *Promise  `json:"promise,omitempty"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateSuscriptionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateSuscriptionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type ClaimTaskResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3025,23 +3025,6 @@ func (c *ClientWithResponses) ReleaseLockWithResponse(ctx context.Context, param
 	return ParseReleaseLockResponse(rsp)
 }
 
-// CreateNotifyWithBodyWithResponse request with arbitrary body returning *CreateNotifyResponse
-func (c *ClientWithResponses) CreateNotifyWithBodyWithResponse(ctx context.Context, params *CreateNotifyParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateNotifyResponse, error) {
-	rsp, err := c.CreateNotifyWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateNotifyResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateNotifyWithResponse(ctx context.Context, params *CreateNotifyParams, body CreateNotifyJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateNotifyResponse, error) {
-	rsp, err := c.CreateNotify(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateNotifyResponse(rsp)
-}
-
 // SearchPromisesWithResponse request returning *SearchPromisesResponse
 func (c *ClientWithResponses) SearchPromisesWithResponse(ctx context.Context, params *SearchPromisesParams, reqEditors ...RequestEditorFn) (*SearchPromisesResponse, error) {
 	rsp, err := c.SearchPromises(ctx, params, reqEditors...)
@@ -3153,6 +3136,23 @@ func (c *ClientWithResponses) ReadScheduleWithResponse(ctx context.Context, id s
 		return nil, err
 	}
 	return ParseReadScheduleResponse(rsp)
+}
+
+// CreateSuscriptionWithBodyWithResponse request with arbitrary body returning *CreateSuscriptionResponse
+func (c *ClientWithResponses) CreateSuscriptionWithBodyWithResponse(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error) {
+	rsp, err := c.CreateSuscriptionWithBody(ctx, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSuscriptionResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreateSuscriptionWithResponse(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error) {
+	rsp, err := c.CreateSuscription(ctx, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateSuscriptionResponse(rsp)
 }
 
 // ClaimTaskWithBodyWithResponse request with arbitrary body returning *ClaimTaskResponse
@@ -3336,44 +3336,6 @@ func ParseReleaseLockResponse(rsp *http.Response) (*ReleaseLockResponse, error) 
 	response := &ReleaseLockResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
-	}
-
-	return response, nil
-}
-
-// ParseCreateNotifyResponse parses an HTTP response from a CreateNotifyWithResponse call
-func ParseCreateNotifyResponse(rsp *http.Response) (*CreateNotifyResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CreateNotifyResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Promise *Promise `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest struct {
-			Callback *Callback `json:"callback,omitempty"`
-			Promise  *Promise  `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
 	}
 
 	return response, nil
@@ -3639,6 +3601,44 @@ func ParseReadScheduleResponse(rsp *http.Response) (*ReadScheduleResponse, error
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateSuscriptionResponse parses an HTTP response from a CreateSuscriptionWithResponse call
+func ParseCreateSuscriptionResponse(rsp *http.Response) (*CreateSuscriptionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateSuscriptionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Promise *Promise `json:"promise,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest struct {
+			Callback *Callback `json:"callback,omitempty"`
+			Promise  *Promise  `json:"promise,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
 
 	}
 
