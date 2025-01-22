@@ -1451,6 +1451,146 @@ var TestCases = []*testCase{
 		},
 	},
 
+	// Notification
+	{
+		Name: "CreateNotifyLogicalReceiver",
+		Req: &t_api.Request{
+			Kind: t_api.CreateNotify,
+			Tags: map[string]string{"id": "CreateNotify", "name": "CreateNotify"},
+			CreateNotify: &t_api.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      []byte(`"foo"`),
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateNotify,
+			CreateNotify: &t_api.CreateNotifyResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "notify",
+				Headers: map[string]string{
+					"Request-Id": "CreateNotify",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"promiseId": "foo",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId: "CreateNotify",
+			},
+		},
+	},
+	{
+		Name: "CreateNotifyPhysicalReceiver",
+		Req: &t_api.Request{
+			Kind: t_api.CreateNotify,
+			Tags: map[string]string{"id": "CreateNotifyPhysicalRecv", "name": "CreateNotify"},
+			CreateNotify: &t_api.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateNotify,
+			CreateNotify: &t_api.CreateNotifyResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "notify",
+				Headers: map[string]string{
+					"Request-Id": "CreateNotifyPhysicalRecv",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"promiseId": "foo",
+					"timeout": 1,
+					"recv": {"type":"http","data":{"url":"http://localhost:3000"}}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
+				RequestId: "CreateNotifyPhysicalRecv",
+			},
+		},
+	},
+	{
+		Name: "CreateNotifyNotFound",
+		Req: &t_api.Request{
+			Kind: t_api.CreateNotify,
+			Tags: map[string]string{"id": "CreateNotifyNotFound", "name": "CreateNotify"},
+			CreateNotify: &t_api.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      []byte(`"foo"`),
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateNotify,
+			CreateNotify: &t_api.CreateNotifyResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "notify",
+				Headers: map[string]string{
+					"Request-Id": "CreateNotifyNotFound",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"promiseId": "foo",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 404,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateNotifyRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId: "CreateNotifyNotFound",
+			},
+			Code: codes.NotFound,
+		},
+	},
 	// Schedules
 	{
 		Name: "ReadSchedule",

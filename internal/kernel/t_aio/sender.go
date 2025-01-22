@@ -3,11 +3,13 @@ package t_aio
 import (
 	"fmt"
 
+	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type SenderSubmission struct {
 	Task          *task.Task
+	Promise       *promise.Promise
 	ClaimHref     string
 	CompleteHref  string
 	HeartbeatHref string
