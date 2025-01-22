@@ -70,12 +70,12 @@ func CreateNotifyCmd(c client.Client) *cobra.Command {
 			}
 
 			if res.StatusCode() == 201 {
-				cmd.Printf("Created callback: %s\n", id)
+				cmd.Printf("Created notification: %s\n", id)
 			} else if res.StatusCode() == 200 {
 				if res.JSON200.Promise != nil && res.JSON200.Promise.State != v1.PromiseStatePENDING {
 					cmd.Printf("Promise %s already %s\n", promiseId, strings.ToLower(string(res.JSON200.Promise.State)))
 				} else {
-					cmd.Printf("Created callback: %s (deduplicated)\n", id)
+					cmd.Printf("Created notification: %s (deduplicated)\n", id)
 				}
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))
