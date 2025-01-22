@@ -377,6 +377,64 @@ paths:
         404:
           description: Promise not found
 
+  # Notify
+  /notify:
+    post:
+      tags:
+        - Notify
+      summary: Create a Notification
+      operationId: createNotify
+      parameters:
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - promiseId
+                - timeout
+                - recv
+              properties:
+                id:
+                  type: string
+                promiseId:
+                  type: string
+                timeout:
+                  type: integer
+                  format: int64
+                recv:
+                  $ref: "#/components/schemas/Recv"
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        201:
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  callback:
+                    $ref: "#/components/schemas/Callback"
+                  promise:
+                    $ref: "#/components/schemas/Promise"
+        404:
+          description: Promise not found
+
   # Schedules
   /schedules:
     get:
