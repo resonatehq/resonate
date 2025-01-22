@@ -6,37 +6,21 @@ import (
 	"os"
 	"strings"
 
-	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 )
 
-var (
-	// cmd
-	name string // name of the project
-	sdk  string // type of the project
-
-	// TODO - may add the 3rd input as --template or short -t
-
-	// auth
-	c        = client.New()
-	server   string
-	username string
-	password string
-)
-
 func NewCmd() *cobra.Command {
+	var (
+		// cmd
+		// TODO - may add the 3rd input as --template or short -t
+		name string // name of the project
+		sdk  string // type of the project
+	)
+
 	cmd := &cobra.Command{
 		Use:     "create",
 		Short:   "Create a new Resonate project",
 		Example: exampleCMD,
-		// TODO - is this really needed at this time?
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if username != "" || password != "" {
-				c.SetBasicAuth(username, password)
-			}
-
-			return c.Setup(server)
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validate(sdk, name); err != nil {
 				return err
