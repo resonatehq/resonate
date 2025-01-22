@@ -249,16 +249,16 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
-// SUSCRIPTIONS
+// SUBSCRIPTIONS
 
-func (g *Generator) GenerateCreateSuscription(r *rand.Rand, t int64) *t_api.Request {
+func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-	id := g.suscriptionId(r)
+	id := g.subscriptionId(r)
 
 	return &t_api.Request{
-		Kind: t_api.CreateSuscription,
-		CreateSuscription: &t_api.CreateSuscriptionRequest{
+		Kind: t_api.CreateSubscription,
+		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        id,
 			PromiseId: promiseId,
 			Timeout:   timeout,
@@ -415,7 +415,7 @@ func (g *Generator) callbackId(r *rand.Rand) string {
 	return "cb" + g.idSet[r.Intn(len(g.idSet))]
 }
 
-func (g *Generator) suscriptionId(r *rand.Rand) string {
+func (g *Generator) subscriptionId(r *rand.Rand) string {
 	return "sb" + g.idSet[r.Intn(len(g.idSet))]
 }
 

@@ -23,8 +23,8 @@ type Request struct {
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
 
-	// SUSCRIPTIONS
-	CreateSuscription *CreateSuscriptionRequest
+	// SUBSCRIPTIONS
+	CreateSubscription *CreateSubscriptionRequest
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
@@ -116,17 +116,17 @@ func (r *CreateCallbackRequest) String() string {
 	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.Id, r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
 }
 
-// Suscription
+// Subscription
 
-type CreateSuscriptionRequest struct {
+type CreateSubscriptionRequest struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`
 	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv"`
 }
 
-func (r *CreateSuscriptionRequest) String() string {
-	return fmt.Sprintf("CreateSuscription(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
+func (r *CreateSubscriptionRequest) String() string {
+	return fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
 }
 
 // Schedules
@@ -296,9 +296,9 @@ func (r *Request) String() string {
 	case CreateCallback:
 		return r.CreateCallback.String()
 
-	// SUSCRIPTION
-	case CreateSuscription:
-		return r.CreateSuscription.String()
+	// SUBSCRIPTION
+	case CreateSubscription:
+		return r.CreateSubscription.String()
 
 	// SCHEDULES
 	case ReadSchedule:

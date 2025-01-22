@@ -9,15 +9,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-func (s *server) CreateSuscription(c context.Context, r *pb.CreateSuscriptionRequest) (*pb.CreateSuscriptionResponse, error) {
+func (s *server) CreateSubscription(c context.Context, r *pb.CreateSubscriptionRequest) (*pb.CreateSubscriptionResponse, error) {
 	recv, rErr := protoRecv(r.Recv)
 	if rErr != nil {
 		return nil, rErr
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CreateSuscription,
-		CreateSuscription: &t_api.CreateSuscriptionRequest{
+		Kind: t_api.CreateSubscription,
+		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        r.Id,
 			PromiseId: r.PromiseId,
 			Timeout:   r.Timeout,
@@ -28,10 +28,10 @@ func (s *server) CreateSuscription(c context.Context, r *pb.CreateSuscriptionReq
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreateSuscription != nil, "result must not be nil")
-	return &pb.CreateSuscriptionResponse{
-		Noop:     res.CreateSuscription.Status == t_api.StatusOK,
-		Callback: protoCallback(res.CreateSuscription.Callback),
-		Promise:  protoPromise(res.CreateSuscription.Promise),
+	util.Assert(res.CreateSubscription != nil, "result must not be nil")
+	return &pb.CreateSubscriptionResponse{
+		Noop:     res.CreateSubscription.Status == t_api.StatusOK,
+		Callback: protoCallback(res.CreateSubscription.Callback),
+		Promise:  protoPromise(res.CreateSubscription.Promise),
 	}, nil
 }

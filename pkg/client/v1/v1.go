@@ -352,16 +352,16 @@ type ReadScheduleParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
-// CreateSuscriptionJSONBody defines parameters for CreateSuscription.
-type CreateSuscriptionJSONBody struct {
+// CreateSubscriptionJSONBody defines parameters for CreateSubscription.
+type CreateSubscriptionJSONBody struct {
 	Id        string `json:"id"`
 	PromiseId string `json:"promiseId"`
 	Recv      Recv   `json:"recv"`
 	Timeout   int64  `json:"timeout"`
 }
 
-// CreateSuscriptionParams defines parameters for CreateSuscription.
-type CreateSuscriptionParams struct {
+// CreateSubscriptionParams defines parameters for CreateSubscription.
+type CreateSubscriptionParams struct {
 	// RequestId Unique tracking id
 	RequestId *string `json:"request-id,omitempty"`
 }
@@ -449,8 +449,8 @@ type CompletePromiseJSONRequestBody CompletePromiseJSONBody
 // CreateScheduleJSONRequestBody defines body for CreateSchedule for application/json ContentType.
 type CreateScheduleJSONRequestBody CreateScheduleJSONBody
 
-// CreateSuscriptionJSONRequestBody defines body for CreateSuscription for application/json ContentType.
-type CreateSuscriptionJSONRequestBody CreateSuscriptionJSONBody
+// CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
+type CreateSubscriptionJSONRequestBody CreateSubscriptionJSONBody
 
 // ClaimTaskJSONRequestBody defines body for ClaimTask for application/json ContentType.
 type ClaimTaskJSONRequestBody ClaimTaskJSONBody
@@ -651,10 +651,10 @@ type ClientInterface interface {
 	// ReadSchedule request
 	ReadSchedule(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateSuscriptionWithBody request with any body
-	CreateSuscriptionWithBody(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+	// CreateSubscriptionWithBody request with any body
+	CreateSubscriptionWithBody(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	CreateSuscription(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CreateSubscription(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ClaimTaskWithBody request with any body
 	ClaimTaskWithBody(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -933,8 +933,8 @@ func (c *Client) ReadSchedule(ctx context.Context, id string, params *ReadSchedu
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSuscriptionWithBody(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSuscriptionRequestWithBody(c.Server, params, contentType, body)
+func (c *Client) CreateSubscriptionWithBody(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -945,8 +945,8 @@ func (c *Client) CreateSuscriptionWithBody(ctx context.Context, params *CreateSu
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSuscription(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSuscriptionRequest(c.Server, params, body)
+func (c *Client) CreateSubscription(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateSubscriptionRequest(c.Server, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1976,19 +1976,19 @@ func NewReadScheduleRequest(server string, id string, params *ReadScheduleParams
 	return req, nil
 }
 
-// NewCreateSuscriptionRequest calls the generic CreateSuscription builder with application/json body
-func NewCreateSuscriptionRequest(server string, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody) (*http.Request, error) {
+// NewCreateSubscriptionRequest calls the generic CreateSubscription builder with application/json body
+func NewCreateSubscriptionRequest(server string, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
 	bodyReader = bytes.NewReader(buf)
-	return NewCreateSuscriptionRequestWithBody(server, params, "application/json", bodyReader)
+	return NewCreateSubscriptionRequestWithBody(server, params, "application/json", bodyReader)
 }
 
-// NewCreateSuscriptionRequestWithBody generates requests for CreateSuscription with any type of body
-func NewCreateSuscriptionRequestWithBody(server string, params *CreateSuscriptionParams, contentType string, body io.Reader) (*http.Request, error) {
+// NewCreateSubscriptionRequestWithBody generates requests for CreateSubscription with any type of body
+func NewCreateSubscriptionRequestWithBody(server string, params *CreateSubscriptionParams, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	serverURL, err := url.Parse(server)
@@ -1996,7 +1996,7 @@ func NewCreateSuscriptionRequestWithBody(server string, params *CreateSuscriptio
 		return nil, err
 	}
 
-	operationPath := fmt.Sprintf("/suscriptions")
+	operationPath := fmt.Sprintf("/subscriptions")
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2447,10 +2447,10 @@ type ClientWithResponsesInterface interface {
 	// ReadScheduleWithResponse request
 	ReadScheduleWithResponse(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*ReadScheduleResponse, error)
 
-	// CreateSuscriptionWithBodyWithResponse request with any body
-	CreateSuscriptionWithBodyWithResponse(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error)
+	// CreateSubscriptionWithBodyWithResponse request with any body
+	CreateSubscriptionWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error)
 
-	CreateSuscriptionWithResponse(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error)
+	CreateSubscriptionWithResponse(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error)
 
 	// ClaimTaskWithBodyWithResponse request with any body
 	ClaimTaskWithBodyWithResponse(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClaimTaskResponse, error)
@@ -2793,7 +2793,7 @@ func (r ReadScheduleResponse) StatusCode() int {
 	return 0
 }
 
-type CreateSuscriptionResponse struct {
+type CreateSubscriptionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	JSON200      *struct {
@@ -2806,7 +2806,7 @@ type CreateSuscriptionResponse struct {
 }
 
 // Status returns HTTPResponse.Status
-func (r CreateSuscriptionResponse) Status() string {
+func (r CreateSubscriptionResponse) Status() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Status
 	}
@@ -2814,7 +2814,7 @@ func (r CreateSuscriptionResponse) Status() string {
 }
 
 // StatusCode returns HTTPResponse.StatusCode
-func (r CreateSuscriptionResponse) StatusCode() int {
+func (r CreateSubscriptionResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -3138,21 +3138,21 @@ func (c *ClientWithResponses) ReadScheduleWithResponse(ctx context.Context, id s
 	return ParseReadScheduleResponse(rsp)
 }
 
-// CreateSuscriptionWithBodyWithResponse request with arbitrary body returning *CreateSuscriptionResponse
-func (c *ClientWithResponses) CreateSuscriptionWithBodyWithResponse(ctx context.Context, params *CreateSuscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error) {
-	rsp, err := c.CreateSuscriptionWithBody(ctx, params, contentType, body, reqEditors...)
+// CreateSubscriptionWithBodyWithResponse request with arbitrary body returning *CreateSubscriptionResponse
+func (c *ClientWithResponses) CreateSubscriptionWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
+	rsp, err := c.CreateSubscriptionWithBody(ctx, params, contentType, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSuscriptionResponse(rsp)
+	return ParseCreateSubscriptionResponse(rsp)
 }
 
-func (c *ClientWithResponses) CreateSuscriptionWithResponse(ctx context.Context, params *CreateSuscriptionParams, body CreateSuscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSuscriptionResponse, error) {
-	rsp, err := c.CreateSuscription(ctx, params, body, reqEditors...)
+func (c *ClientWithResponses) CreateSubscriptionWithResponse(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
+	rsp, err := c.CreateSubscription(ctx, params, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
-	return ParseCreateSuscriptionResponse(rsp)
+	return ParseCreateSubscriptionResponse(rsp)
 }
 
 // ClaimTaskWithBodyWithResponse request with arbitrary body returning *ClaimTaskResponse
@@ -3607,15 +3607,15 @@ func ParseReadScheduleResponse(rsp *http.Response) (*ReadScheduleResponse, error
 	return response, nil
 }
 
-// ParseCreateSuscriptionResponse parses an HTTP response from a CreateSuscriptionWithResponse call
-func ParseCreateSuscriptionResponse(rsp *http.Response) (*CreateSuscriptionResponse, error) {
+// ParseCreateSubscriptionResponse parses an HTTP response from a CreateSubscriptionWithResponse call
+func ParseCreateSubscriptionResponse(rsp *http.Response) (*CreateSubscriptionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
 	defer func() { _ = rsp.Body.Close() }()
 	if err != nil {
 		return nil, err
 	}
 
-	response := &CreateSuscriptionResponse{
+	response := &CreateSubscriptionResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
 	}

@@ -1,4 +1,4 @@
-package suscriptions
+package subscriptions
 
 import (
 	"context"
@@ -12,18 +12,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var suscriptionExample = `
-# Create a suscription
-resonate suscription create foo --promise-id bar --timeout 1h --recv default
+var subscriptionExample = `
+# Create a subscription
+resonate subscription create foo --promise-id bar --timeout 1h --recv default
 
-# Create a suscription with url
-resonate suscription create foo --promise-id bar --timeout 1h --recv poll://default/6fa89b7e-4a56-40e8-ba4e-78864caa3278
+# Create a subscription with url
+resonate subscription create foo --promise-id bar --timeout 1h --recv poll://default/6fa89b7e-4a56-40e8-ba4e-78864caa3278
 
-# Create a suscription with object
-resonate suscription create foo --promise-id bar --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "6fa89b7e-4a56-40e8-ba4e-78864caa3278"}}
+# Create a subscription with object
+resonate subscription create foo --promise-id bar --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "6fa89b7e-4a56-40e8-ba4e-78864caa3278"}}
 `
 
-func CreateSuscriptionCmd(c client.Client) *cobra.Command {
+func CreateSubscriptionCmd(c client.Client) *cobra.Command {
 	var (
 		promiseId string
 		timeout   time.Duration
@@ -31,8 +31,8 @@ func CreateSuscriptionCmd(c client.Client) *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:     "create <id>",
-		Short:   "Create suscription",
-		Example: suscriptionExample,
+		Short:   "Create subscription",
+		Example: subscriptionExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return errors.New("must specify an id")
@@ -57,25 +57,25 @@ func CreateSuscriptionCmd(c client.Client) *cobra.Command {
 				}
 			}
 
-			body := v1.CreateSuscriptionJSONRequestBody{
+			body := v1.CreateSubscriptionJSONRequestBody{
 				Id:        id,
 				PromiseId: promiseId,
 				Timeout:   time.Now().Add(timeout).UnixMilli(),
 				Recv:      recv,
 			}
 
-			res, err := c.V1().CreateSuscriptionWithResponse(context.TODO(), nil, body)
+			res, err := c.V1().CreateSubscriptionWithResponse(context.TODO(), nil, body)
 			if err != nil {
 				return err
 			}
 
 			if res.StatusCode() == 201 {
-				cmd.Printf("Created suscription: %s\n", id)
+				cmd.Printf("Created subscription: %s\n", id)
 			} else if res.StatusCode() == 200 {
 				if res.JSON200.Promise != nil && res.JSON200.Promise.State != v1.PromiseStatePENDING {
 					cmd.Printf("Promise %s already %s\n", promiseId, strings.ToLower(string(res.JSON200.Promise.State)))
 				} else {
-					cmd.Printf("Created suscription: %s (deduplicated)\n", id)
+					cmd.Printf("Created subscription: %s (deduplicated)\n", id)
 				}
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))

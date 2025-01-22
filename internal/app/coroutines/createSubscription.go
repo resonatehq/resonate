@@ -13,8 +13,8 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.Kind == t_api.CreateSuscription, "Request kind must be CreateSuscription")
+func CreateSubscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	util.Assert(r.Kind == t_api.CreateSubscription, "Request kind must be CreateSubscription")
 	var res *t_api.Response
 
 	// read the promise to see if it exists
@@ -27,7 +27,7 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: r.CreateSuscription.PromiseId,
+							Id: r.CreateSubscription.PromiseId,
 						},
 					},
 				},
@@ -54,19 +54,19 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 		}
 
-		// If the suscription is already created return 200 and an empty suscription
+		// If the subscription is already created return 200 and an empty subscription
 		var cb *callback.Callback
 		status := t_api.StatusOK
 
 		if p.State == promise.Pending {
 			mesg := &message.Mesg{
 				Type: message.Notify,
-				Root: r.CreateSuscription.PromiseId,
+				Root: r.CreateSubscription.PromiseId,
 			}
 
 			createdOn := c.Time()
 
-			callbackId := fmt.Sprintf("%s.%s", r.CreateSuscription.PromiseId, r.CreateSuscription.Id)
+			callbackId := fmt.Sprintf("%s.%s", r.CreateSubscription.PromiseId, r.CreateSubscription.Id)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -77,10 +77,10 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
 									Id:        callbackId,
-									PromiseId: r.CreateSuscription.PromiseId,
-									Recv:      r.CreateSuscription.Recv,
+									PromiseId: r.CreateSubscription.PromiseId,
+									Recv:      r.CreateSubscription.Recv,
 									Mesg:      mesg,
-									Timeout:   r.CreateSuscription.Timeout,
+									Timeout:   r.CreateSubscription.Timeout,
 									CreatedOn: createdOn,
 								},
 							},
@@ -90,7 +90,7 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 			})
 
 			if err != nil {
-				slog.Error("failed to create suscription", "req", r, "err", err)
+				slog.Error("failed to create subscription", "req", r, "err", err)
 				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 			}
 
@@ -105,19 +105,19 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 				status = t_api.StatusCreated
 				cb = &callback.Callback{
 					Id:        callbackId,
-					PromiseId: r.CreateSuscription.PromiseId,
-					Recv:      r.CreateSuscription.Recv,
+					PromiseId: r.CreateSubscription.PromiseId,
+					Recv:      r.CreateSubscription.Recv,
 					Mesg:      mesg,
-					Timeout:   r.CreateSuscription.Timeout,
+					Timeout:   r.CreateSubscription.Timeout,
 					CreatedOn: createdOn,
 				}
 			}
 		}
 
 		res = &t_api.Response{
-			Kind: t_api.CreateSuscription,
+			Kind: t_api.CreateSubscription,
 			Tags: r.Tags,
-			CreateSuscription: &t_api.CreateSuscriptionResponse{
+			CreateSubscription: &t_api.CreateSubscriptionResponse{
 				// Status could be StatusOk or StatusCreated if the Callback Id was already present
 				Status:   status,
 				Callback: cb,
@@ -127,9 +127,9 @@ func CreateSuscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, 
 
 	} else {
 		res = &t_api.Response{
-			Kind: t_api.CreateSuscription,
+			Kind: t_api.CreateSubscription,
 			Tags: r.Tags,
-			CreateSuscription: &t_api.CreateSuscriptionResponse{
+			CreateSubscription: &t_api.CreateSubscriptionResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},
 		}

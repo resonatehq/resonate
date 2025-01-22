@@ -20,15 +20,15 @@ import (
 
 type grpcTest struct {
 	*test.API
-	subsystem    api.Subsystem
-	errors       chan error
-	conn         *grpc.ClientConn
-	promises     pb.PromisesClient
-	callbacks    pb.CallbacksClient
-	suscriptions pb.SuscriptionsClient
-	schedules    pb.SchedulesClient
-	locks        pb.LocksClient
-	tasks        pb.TasksClient
+	subsystem     api.Subsystem
+	errors        chan error
+	conn          *grpc.ClientConn
+	promises      pb.PromisesClient
+	callbacks     pb.CallbacksClient
+	subscriptions pb.SubscriptionsClient
+	schedules     pb.SchedulesClient
+	locks         pb.LocksClient
+	tasks         pb.TasksClient
 }
 
 func setup() (*grpcTest, error) {
@@ -49,16 +49,16 @@ func setup() (*grpcTest, error) {
 	}
 
 	return &grpcTest{
-		API:          api,
-		subsystem:    subsystem,
-		errors:       errors,
-		conn:         conn,
-		promises:     pb.NewPromisesClient(conn),
-		callbacks:    pb.NewCallbacksClient(conn),
-		suscriptions: pb.NewSuscriptionsClient(conn),
-		schedules:    pb.NewSchedulesClient(conn),
-		locks:        pb.NewLocksClient(conn),
-		tasks:        pb.NewTasksClient(conn),
+		API:           api,
+		subsystem:     subsystem,
+		errors:        errors,
+		conn:          conn,
+		promises:      pb.NewPromisesClient(conn),
+		callbacks:     pb.NewCallbacksClient(conn),
+		subscriptions: pb.NewSubscriptionsClient(conn),
+		schedules:     pb.NewSchedulesClient(conn),
+		locks:         pb.NewLocksClient(conn),
+		tasks:         pb.NewTasksClient(conn),
 	}, nil
 }
 
@@ -110,8 +110,8 @@ func TestGrpc(t *testing.T) {
 				res, err = grpcTest.promises.CancelPromise(ctx, req)
 			case *pb.CreateCallbackRequest:
 				_, err = grpcTest.callbacks.CreateCallback(ctx, req)
-			case *pb.CreateSuscriptionRequest:
-				_, err = grpcTest.suscriptions.CreateSuscription(ctx, req)
+			case *pb.CreateSubscriptionRequest:
+				_, err = grpcTest.subscriptions.CreateSubscription(ctx, req)
 			case *pb.ReadScheduleRequest:
 				_, err = grpcTest.schedules.ReadSchedule(ctx, req)
 			case *pb.SearchSchedulesRequest:

@@ -10,26 +10,26 @@ import (
 )
 
 // Create
-type createSuscriptionHeader struct {
+type createSubscriptionHeader struct {
 	RequestId string `header:"request-id"`
 }
 
-type createSuscriptionBody struct {
+type createSubscriptionBody struct {
 	Id        string          `json:"Id" binding:"required"`
 	PromiseId string          `json:"promiseId" binding:"required"`
 	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv" binding:"required"`
 }
 
-func (s *server) createSuscription(c *gin.Context) {
-	var header createSuscriptionHeader
+func (s *server) createSubscription(c *gin.Context) {
+	var header createSubscriptionHeader
 	if err := c.ShouldBindHeader(&header); err != nil {
 		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}
 
-	var body createSuscriptionBody
+	var body createSubscriptionBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		err := api.RequestValidationError(err)
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -37,8 +37,8 @@ func (s *server) createSuscription(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateSuscription,
-		CreateSuscription: &t_api.CreateSuscriptionRequest{
+		Kind: t_api.CreateSubscription,
+		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        body.Id,
 			PromiseId: body.PromiseId,
 			Timeout:   body.Timeout,
@@ -50,9 +50,9 @@ func (s *server) createSuscription(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateSuscription != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateSuscription.Status), gin.H{
-		"callback": res.CreateSuscription.Callback,
-		"promise":  res.CreateSuscription.Promise,
+	util.Assert(res.CreateSubscription != nil, "result must not be nil")
+	c.JSON(s.code(res.CreateSubscription.Status), gin.H{
+		"callback": res.CreateSubscription.Callback,
+		"promise":  res.CreateSubscription.Promise,
 	})
 }

@@ -13,8 +13,8 @@ const (
 	// CALLBACKS
 	CreateCallback
 
-	// SUSCRIPTIONS
-	CreateSuscription
+	// SUBSCRIPTIONS
+	CreateSubscription
 
 	// SCHEDULES
 	ReadSchedule
@@ -52,9 +52,9 @@ func (k Kind) String() string {
 	// CALLBACKS
 	case CreateCallback:
 		return "CreateCallback"
-	// SUSCRIPTIONS
-	case CreateSuscription:
-		return "CreateSuscription"
+	// SUBSCRIPTIONS
+	case CreateSubscription:
+		return "CreateSubscription"
 	// SCHEDULES
 	case ReadSchedule:
 		return "ReadSchedule"
