@@ -40,9 +40,10 @@ paths:
               schema:
                 type: string
                 example: |
-                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/1","complete":"http://localhost:8001/tasks/complete/1/1","heartbeat":"http://localhost:8001/tasks/heartbeat/1/1"},"task":{"id":"1","counter":1}}
-                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/2","complete":"http://localhost:8001/tasks/complete/1/2","heartbeat":"http://localhost:8001/tasks/heartbeat/1/2"},"task":{"id":"1","counter":2}}
-                  data: {"href":{"claim":"http://localhost:8001/tasks/claim/1/3","complete":"http://localhost:8001/tasks/complete/1/3","heartbeat":"http://localhost:8001/tasks/heartbeat/1/3"},"task":{"id":"1","counter":3}}
+                  data: {"type": "invoke", "href":{"claim":"http://localhost:8001/tasks/claim/1/1","complete":"http://localhost:8001/tasks/complete/1/1","heartbeat":"http://localhost:8001/tasks/heartbeat/1/1"},"task":{"id":"1","counter":1}}
+                  data: {"type": "resume", "href":{"claim":"http://localhost:8001/tasks/claim/1/2","complete":"http://localhost:8001/tasks/complete/1/2","heartbeat":"http://localhost:8001/tasks/heartbeat/1/2"},"task":{"id":"1","counter":2}}
+                  data: {"type": "invoke", "href":{"claim":"http://localhost:8001/tasks/claim/1/3","complete":"http://localhost:8001/tasks/complete/1/3","heartbeat":"http://localhost:8001/tasks/heartbeat/1/3"},"task":{"id":"1","counter":3}}
+                  data: {"type": "notify", "promise":{"id":"bah","state":"RESOLVED","param":{},"value":{},"timeout":1737661069533,"createdOn":1737574669536,"completedOn":1737574722732}}
         400:
           description: Invalid request
         405:
