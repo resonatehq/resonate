@@ -245,7 +245,8 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
-		"task": sqe.Submission.Sender.Task,
+		"task":    sqe.Submission.Sender.Task,
+		"promise": sqe.Submission.Sender.Promise,
 		"href": map[string]string{
 			"claim":     sqe.Submission.Sender.ClaimHref,
 			"complete":  sqe.Submission.Sender.CompleteHref,

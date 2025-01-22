@@ -19,4 +19,5 @@ type Type string
 const (
 	Invoke = "invoke"
 	Resume = "resume"
+	Notify = "notify"
 )
