@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/receiver"
 )
 
@@ -244,15 +245,29 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 		return
 	}
 
-	body, err := json.Marshal(map[string]interface{}{
-		"task":    sqe.Submission.Sender.Task,
-		"promise": sqe.Submission.Sender.Promise,
-		"href": map[string]string{
-			"claim":     sqe.Submission.Sender.ClaimHref,
-			"complete":  sqe.Submission.Sender.CompleteHref,
-			"heartbeat": sqe.Submission.Sender.HeartbeatHref,
-		},
-	})
+	var body []byte
+	var err error
+
+	messgType := sqe.Submission.Sender.Task.Mesg.Type
+
+	if messgType == message.Notify {
+		util.Assert(sqe.Submission.Sender.Promise != nil, "promise must not be nil for a notify message")
+		body, err = json.Marshal(map[string]interface{}{
+			"type":    messgType,
+			"promise": sqe.Submission.Sender.Promise,
+		})
+	} else {
+		body, err = json.Marshal(map[string]interface{}{
+			"type": messgType,
+			"task": sqe.Submission.Sender.Task,
+			"href": map[string]string{
+				"claim":     sqe.Submission.Sender.ClaimHref,
+				"complete":  sqe.Submission.Sender.CompleteHref,
+				"heartbeat": sqe.Submission.Sender.HeartbeatHref,
+			},
+		})
+	}
+
 	if err != nil {
 		cqe.Error = err
 		w.aio.EnqueueCQE(cqe)
