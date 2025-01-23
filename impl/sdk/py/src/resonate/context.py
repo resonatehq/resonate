@@ -223,6 +223,15 @@ class Context:
     def detached(
         self,
         id: str,
+        coro: RegisteredFn[P, Any],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> DI: ...
+    @overload
+    def detached(
+        self,
+        id: str,
         coro: Callable[Concatenate[Context, P], Generator[Yieldable, Any, Any]],
         /,
         *args: P.args,
@@ -240,7 +249,7 @@ class Context:
     def detached(
         self,
         id: str,
-        coro: DurableCoro[P, T] | DurableFn[P, T],
+        coro: DurableCoro[P, T] | DurableFn[P, T] | RegisteredFn[P, T],
         /,
         *args: P.args,
         **kwargs: P.kwargs,
@@ -251,4 +260,6 @@ class Context:
         Invoke as a root invocation. Is equivalent to do ``Scheduler.run(...)``
         invoked execution will be retried and managed from the server.
         """
+        if isinstance(coro, RegisteredFn):
+            coro = coro.fn
         return DI(id=id, unit=Invocation(coro, *args, **kwargs))

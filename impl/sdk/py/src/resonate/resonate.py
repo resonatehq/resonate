@@ -153,6 +153,15 @@ class Resonate:
     def run(
         self,
         id: str,
+        func: RegisteredFn[P, T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]: ...
+    @overload
+    def run(
+        self,
+        id: str,
         func: Callable[
             Concatenate[Context, P],
             Generator[Yieldable, Any, T],
@@ -183,7 +192,8 @@ class Resonate:
     def run(
         self,
         id: str,
-        func: Callable[
+        func: RegisteredFn[P, T]
+        | Callable[
             Concatenate[Context, P],
             Generator[Yieldable, Any, T],
         ]
@@ -204,4 +214,6 @@ class Resonate:
     ) -> Handle[T]:
         if isinstance(func, tuple):
             raise NotImplementedError
+        if isinstance(func, RegisteredFn):
+            func = func.fn
         return self._scheduler.run(id, func, *args, **kwargs)
