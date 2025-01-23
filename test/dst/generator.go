@@ -249,16 +249,16 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	}
 }
 
-// NOTIFICATIONS
+// SUBSCRIPTIONS
 
-func (g *Generator) GenerateCreateNotify(r *rand.Rand, t int64) *t_api.Request {
+func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Request {
 	promiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-	id := g.notifyId(r)
+	id := g.subscriptionId(r)
 
 	return &t_api.Request{
-		Kind: t_api.CreateNotify,
-		CreateNotify: &t_api.CreateNotifyRequest{
+		Kind: t_api.CreateSubscription,
+		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        id,
 			PromiseId: promiseId,
 			Timeout:   timeout,
@@ -415,8 +415,8 @@ func (g *Generator) callbackId(r *rand.Rand) string {
 	return "cb" + g.idSet[r.Intn(len(g.idSet))]
 }
 
-func (g *Generator) notifyId(r *rand.Rand) string {
-	return "nt" + g.idSet[r.Intn(len(g.idSet))]
+func (g *Generator) subscriptionId(r *rand.Rand) string {
+	return "sb" + g.idSet[r.Intn(len(g.idSet))]
 }
 
 func (g *Generator) promiseSearch(r *rand.Rand) string {

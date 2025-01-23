@@ -67,8 +67,8 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	// Callbacks API
 	authorized.POST("/callbacks", server.createCallback)
 
-	// Notifications API
-	authorized.POST("/notify", server.createNotify)
+	// Subscriptions API
+	authorized.POST("/subscriptions", server.createSubscription)
 
 	// Schedules API
 	authorized.POST("/schedules", server.createSchedule)

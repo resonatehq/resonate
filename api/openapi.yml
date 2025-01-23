@@ -377,13 +377,13 @@ paths:
         404:
           description: Promise not found
 
-  # Notify
-  /notify:
+  # Subscriptions
+  /subscriptions:
     post:
       tags:
-        - Notify
-      summary: Create a Notification
-      operationId: createNotify
+        - Subscription
+      summary: Create a Subscription
+      operationId: createSubscription
       parameters:
         - in: header
           name: request-id
