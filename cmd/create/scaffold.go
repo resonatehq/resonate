@@ -30,10 +30,10 @@ var (
 		    RepoURL string
 		}
 	*/
-	SDKs = []string{"python", "ts"}
+	sdks = []string{"python", "ts"}
 
-	// Repos
-	Repos = map[string]string{
+	// repos
+	repos = map[string]string{
 		"python": "https://github.com/resonatehq/scaffold-py/archive/refs/heads/main.zip",
 	}
 )
@@ -54,7 +54,7 @@ func scaffold(sdk, name string) error {
 
 // source retrieves the URL for the given SDK.
 func source(sdk string) (string, error) {
-	url, ok := Repos[sdk]
+	url, ok := repos[sdk]
 	if !ok {
 		return "", fmt.Errorf("unsupported sdk: %s", sdk)
 	}

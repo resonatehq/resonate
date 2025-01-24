@@ -53,7 +53,7 @@ func validate(sdk, name string) error {
 	}
 
 	if !isSupported(sdk) {
-		return fmt.Errorf("unsupported sdk type. supported sdks are: %s", strings.Join(SDKs, ", "))
+		return fmt.Errorf("unsupported sdk type. supported sdks are: %s", strings.Join(sdks, ", "))
 	}
 
 	err := checkProjectExists(name)
@@ -65,7 +65,7 @@ func validate(sdk, name string) error {
 }
 
 func isSupported(sdk string) bool {
-	for _, supported := range SDKs {
+	for _, supported := range sdks {
 		if sdk == supported {
 			return true
 		}
