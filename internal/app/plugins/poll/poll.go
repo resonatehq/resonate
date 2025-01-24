@@ -17,6 +17,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 type Config struct {
@@ -302,6 +303,11 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 	conn, ok := w.connections.get(data.Group, data.Id)
 	if !ok {
 		mesg.Done(false, fmt.Errorf("no connection found for group %s", data.Group))
+		return
+	}
+
+	if mesg.Type == message.Notify && conn.id != data.Id {
+		mesg.Done(false, fmt.Errorf("no connection found for group %s and id %s", data.Group, data.Id))
 		return
 	}
 
