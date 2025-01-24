@@ -104,6 +104,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// callbacks
 	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
+	// subscription
+	d.Add(t_api.CreateSubscription, d.generator.GenerateCreateSubscription, d.validator.ValidateCreateSubscription)
+
 	// schedules
 	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
 	d.Add(t_api.SearchSchedules, d.generator.GenerateSearchSchedules, d.validator.ValidateSearchSchedules)
@@ -700,7 +703,7 @@ func partition(req *Req) Partition {
 	switch req.kind {
 	case Op:
 		switch req.req.Kind {
-		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback, t_api.CreateNotify:
+		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback, t_api.CreateSubscription:
 			return Promise
 		case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
 			return Schedule

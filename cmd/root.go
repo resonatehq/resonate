@@ -8,11 +8,11 @@ import (
 	"github.com/resonatehq/resonate/cmd/callbacks"
 	"github.com/resonatehq/resonate/cmd/create"
 	"github.com/resonatehq/resonate/cmd/dst"
-	"github.com/resonatehq/resonate/cmd/notify"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
+	"github.com/resonatehq/resonate/cmd/subscriptions"
 	"github.com/resonatehq/resonate/cmd/tasks"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -44,7 +44,7 @@ func init() {
 	rootCmd.AddCommand(tasks.NewCmd())
 	rootCmd.AddCommand(callbacks.NewCmd())
 	rootCmd.AddCommand(create.NewCmd())
-	rootCmd.AddCommand(notify.NewCmd())
+	rootCmd.AddCommand(subscriptions.NewCmd())
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)

@@ -23,8 +23,8 @@ type Request struct {
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
 
-	// NOTIFY
-	CreateNotify *CreateNotifyRequest
+	// SUBSCRIPTIONS
+	CreateSubscription *CreateSubscriptionRequest
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
@@ -116,17 +116,17 @@ func (r *CreateCallbackRequest) String() string {
 	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.Id, r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
 }
 
-// Notify
+// Subscription
 
-type CreateNotifyRequest struct {
+type CreateSubscriptionRequest struct {
 	Id        string          `json:"id"`
 	PromiseId string          `json:"promiseId"`
 	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv"`
 }
 
-func (r *CreateNotifyRequest) String() string {
-	return fmt.Sprintf("CreateNotify(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
+func (r *CreateSubscriptionRequest) String() string {
+	return fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
 }
 
 // Schedules
@@ -296,9 +296,9 @@ func (r *Request) String() string {
 	case CreateCallback:
 		return r.CreateCallback.String()
 
-	// NOTIFY
-	case CreateNotify:
-		return r.CreateNotify.String()
+	// SUBSCRIPTION
+	case CreateSubscription:
+		return r.CreateSubscription.String()
 
 	// SCHEDULES
 	case ReadSchedule:

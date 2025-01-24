@@ -1,4 +1,4 @@
-package notify
+package subscriptions
 
 import (
 	"github.com/resonatehq/resonate/pkg/client"
@@ -14,9 +14,9 @@ func NewCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "notifications",
-		Aliases: []string{"notifications"},
-		Short:   "Resonate notifications",
+		Use:     "subscriptions",
+		Aliases: []string{"subscriptions"},
+		Short:   "Resonate subscriptions",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
@@ -30,7 +30,7 @@ func NewCmd() *cobra.Command {
 	}
 
 	// Add subcommands
-	cmd.AddCommand(CreateNotifyCmd(c))
+	cmd.AddCommand(CreateSubscriptionCmd(c))
 
 	// Flags
 	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")
