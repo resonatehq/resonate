@@ -23,7 +23,7 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v16
 
       - name: Use Magic Nix Cache
-        uses: DeterminateSystems/magic-nix-cache-action@v8
+        uses: DeterminateSystems/magic-nix-cache-action@v9
 
       - name: Update gomod2nix.toml (if go.mod has changed)
         run: |
