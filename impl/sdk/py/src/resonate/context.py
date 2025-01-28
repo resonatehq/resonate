@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING, Any, Callable, TypeVar, final, overload
 
 from typing_extensions import Concatenate, ParamSpec
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Coroutine, Generator
 
     from resonate.dependencies import Dependencies
-    from resonate.typing import DurableCoro, DurableFn, Yieldable
+    from resonate.typing import Data, DurableCoro, DurableFn, Yieldable
 
 P = ParamSpec("P")
 T = TypeVar("T")
@@ -41,6 +42,11 @@ class Context:
                 tags={"resonate:timeout": "true"}, timeout=now() + (secs * 1_000)
             )
         )
+
+    def promise(
+        self, id: str | None = None, data: Data = None, timeout: int = sys.maxsize
+    ) -> RFI:
+        return self.rfi(DurablePromise(id=id, data=data, timeout=timeout))
 
     @overload
     def rfc(self, cmd: DurablePromise, /) -> RFC: ...

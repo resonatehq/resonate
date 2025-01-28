@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from resonate import DurablePromise, Handle, Resonate
+from resonate import Handle, Resonate
 from resonate.promise import Promise
 from resonate.retry_policy import constant, exponential, linear, never
 from resonate.stores import LocalStore, RemoteStore
@@ -459,7 +459,7 @@ def test_golden_device_rfi_and_lfc_with_decorator() -> None:
         task_source=Poller("http://localhost:8002", group=group),
     )
 
-    @resonate.register
+    @resonate.register()
     def foo(ctx: Context, n: str) -> Generator[Yieldable, Any, str]:
         v: str = yield ctx.lfc(bar, n).options(
             id="bar",
@@ -472,7 +472,7 @@ def test_golden_device_rfi_and_lfc_with_decorator() -> None:
         v: str = yield p
         return v
 
-    @resonate.register
+    @resonate.register()
     def baz(ctx: Context, n: str) -> str:  # noqa: ARG001
         return n
 
@@ -501,9 +501,9 @@ def test_golden_device_rfc() -> None:
         store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
         task_source=Poller("http://localhost:8002", group=group),
     )
-    resonate.register(foo_golden_device_rfc)
+    rf = resonate.register(foo_golden_device_rfc)
     resonate.register(bar_golden_device_rfc)
-    p: Handle[str] = resonate.run(f"{group}-foo", foo_golden_device_rfc, "hi")
+    p: Handle[str] = rf.run(f"{group}-foo", "hi")
     assert isinstance(p, Handle)
     assert p.result() == "hi"
     resonate.stop()
@@ -611,7 +611,7 @@ def test_golden_device_rfc_and_lfc_with_decorator() -> None:
         task_source=Poller("http://localhost:8002", group=group),
     )
 
-    @resonate.register
+    @resonate.register()
     def foo(ctx: Context, n: str) -> Generator[Yieldable, Any, str]:
         v: str = yield ctx.lfc(bar, n).options(
             id="bar",
@@ -623,7 +623,7 @@ def test_golden_device_rfc_and_lfc_with_decorator() -> None:
         v: str = yield ctx.rfc(baz, n).options(id="baz", send_to=poll(group))
         return v
 
-    @resonate.register
+    @resonate.register()
     def baz(ctx: Context, n: str) -> str:  # noqa: ARG001
         return n
 
@@ -686,16 +686,16 @@ def test_retry_policies_local_func(store: LocalStore | RemoteStore) -> None:
 def test_human_in_the_loop() -> None:
     group = "test-human-in-the-loop"
 
-    def _user_manual_completion(id: str) -> DurablePromise:
-        return DurablePromise(id=id)
-
     def human_in_the_loop(ctx: Context) -> Generator[Yieldable, Any, str]:
-        name: str = yield ctx.rfc(
-            _user_manual_completion("test-human-in-loop-question-to-answer-1")
+        p_name: Promise[str] = yield ctx.promise(
+            "test-human-in-loop-question-to-answer-1"
         )
-        age: int = yield ctx.rfc(
-            _user_manual_completion(id="test-human-in-loop-question-to-answer-2")
+        name: str = yield p_name
+
+        p_age: Promise[int] = yield ctx.promise(
+            id="test-human-in-loop-question-to-answer-2"
         )
+        age: int = yield p_age
         return f"Hi {name} with age {age}"
 
     store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
@@ -730,17 +730,19 @@ def test_sleep() -> None:
     group = "test-sleep"
 
     store = RemoteStore(url="http://localhost:8001")
-    s = Resonate(store=store, task_source=Poller("http://localhost:8002", group=group))
+    resonate = Resonate(
+        store=store, task_source=Poller("http://localhost:8002", group=group)
+    )
 
-    @s.register
+    @resonate.register()
     def foo_sleep(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
         yield ctx.sleep(n)
         return n
 
     n = 1
-    p = foo_sleep.run(f"{group}-{n}", n)
+    p: Handle[int] = foo_sleep.run(f"{group}-{n}", n)
     assert p.result() == n
-    s.stop()
+    resonate.stop()
 
 
 @pytest.mark.skipif(
@@ -792,7 +794,7 @@ def test_golden_device_detached_with_registered() -> None:
         task_source=Poller("http://localhost:8002", group=group),
     )
 
-    @resonate.register
+    @resonate.register()
     def foo_golden_device_detached_with_registered(
         ctx: Context, n: str
     ) -> Generator[Yieldable, Any, str]:
@@ -805,11 +807,11 @@ def test_golden_device_detached_with_registered() -> None:
         v: str = yield p
         return v
 
-    @resonate.register
+    @resonate.register()
     def bar_golden_device_detached_with_registered(ctx: Context, n: str) -> str:  # noqa: ARG001
         return n
 
-    @resonate.register
+    @resonate.register()
     def baz_golden_device_detached_with_registered(
         ctx: Context,  # noqa: ARG001
         promise_id: str,
