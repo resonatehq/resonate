@@ -1,4 +1,4 @@
-package create
+package templates
 
 import (
 	"errors"
@@ -9,13 +9,25 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func NewCmd() *cobra.Command {
+func CreateTemplateCmd() *cobra.Command {
 	var (
 		// cmd
-		// TODO - may add the 3rd input as --template or short -t
 		name string // name of the project
 		sdk  string // type of the project
 	)
+
+	// TODO - I think the --sdk will replace by the template type like py, flask, nestjs, expressjs etc.
+	// And more extend to the each template with the multiple types like simple-app gateway-app etc.
+	// NOTE - The name represents the desired project name for a template.
+	exampleCMD := `
+	# Create Resonate project
+	resonate templates create --name my-app --sdk py
+	
+	OR
+
+	# Create Resonate project
+	resonate templates create -n my-app -s py
+	`
 
 	cmd := &cobra.Command{
 		Use:     "create",
@@ -35,7 +47,7 @@ func NewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "Name of the project (required)")
-	cmd.Flags().StringVarP(&sdk, "sdk", "s", "python", "SDK to use (e.g., python, typescript)")
+	cmd.Flags().StringVarP(&sdk, "sdk", "s", "python", "SDK to use (e.g., py, ts)")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("sdk")

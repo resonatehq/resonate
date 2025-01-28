@@ -1,4 +1,4 @@
-package create
+package templates
 
 import (
 	"archive/zip"
@@ -11,30 +11,12 @@ import (
 )
 
 var (
-	exampleCMD = `
-	# Create Resonate project
-	resonate create --name my-python-app --sdk python
-	
-	OR
-
-	# Create Resonate project
-	resonate create -n my-python-app -s python
-	`
-
-	// valiate the user input sdk with the supported list
-	// TODO - may convert to map
-	// TODO - we cal also use the struct which combine the sdk and repo urls
-	/*
-		type SdkRepo struct {
-		    Name    string
-		    RepoURL string
-		}
-	*/
-	sdks = []string{"python", "ts"}
+	// TODO - will remove the repos and sdks and fetch from the templates.json, and comapre with the incoming type by user.
+	sdks = []string{"py", "ts"}
 
 	// repos
 	repos = map[string]string{
-		"python": "https://github.com/resonatehq/scaffold-py/archive/refs/heads/main.zip",
+		"py": "https://github.com/resonatehq/scaffold-py/archive/refs/heads/main.zip",
 	}
 )
 
@@ -85,7 +67,7 @@ func download(url, file string) error {
 	}
 	defer res.Body.Close()
 
-	if err := check(res); err != nil {
+	if err := checkstatus(res); err != nil {
 		return err
 	}
 
@@ -99,10 +81,10 @@ func download(url, file string) error {
 	return err
 }
 
-// check verifies the HTTP response for a successful status.
-func check(res *http.Response) error {
+// checkstatus verifies the HTTP response for a successful status.
+func checkstatus(res *http.Response) error {
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download file: %s", res.Status)
+		return fmt.Errorf("failed to fetch template: %s", res.Status)
 	}
 
 	return nil
