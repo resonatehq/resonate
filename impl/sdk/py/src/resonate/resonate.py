@@ -162,16 +162,6 @@ class Resonate:
         name: str | None = kwargs.get("name")
         version: int = kwargs.get("version", 1)
         retry_policy: RetryPolicy | None = kwargs.get("retry_policy")
-        if args and callable(args[0]):
-            func = args[0]
-            self._registry.add(
-                name or func.__name__,
-                (
-                    func,
-                    Options(version=version, durable=True, retry_policy=retry_policy),
-                ),
-            )
-            return RegisteredFn[P, T](self._scheduler, func)  # type: ignore[arg-type, unused-ignore]
 
         def wrapper(
             func: Callable[Concatenate[Context, P], Any],
@@ -184,6 +174,9 @@ class Resonate:
                 ),
             )
             return RegisteredFn(self._scheduler, func)
+
+        if args and callable(args[0]):
+            return wrapper(args[0])
 
         return wrapper
 
