@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -188,6 +189,21 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", []string{"a", "b", "c"}, "data: ok1"},
 				{"foo", []string{"a", "b", "c"}, "data: ok2"},
 				{"foo", []string{"a", "b", "c"}, "data: ok3"},
+			},
+		},
+		{
+			name: "NotifyMustBeSameGroupAndId",
+			mc:   5,
+			connections: []*Conn{
+				{"foo", "a"},
+			},
+			messages: []*Mesg{
+				{true, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok1")}},
+				{false, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"b"}`), Body: []byte("ok2")}},
+				{false, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+			},
+			expected: []*Resp{
+				{"foo", []string{"a"}, "data: ok1"},
 			},
 		},
 	} {
