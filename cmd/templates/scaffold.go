@@ -10,38 +10,24 @@ import (
 	"strings"
 )
 
-var (
-	// TODO - will remove the repos and sdks and fetch from the templates.json, and comapre with the incoming type by user.
-	sdks = []string{"py", "ts"}
-
-	// repos
-	repos = map[string]string{
-		"py": "https://github.com/resonatehq/scaffold-py/archive/refs/heads/main.zip",
-	}
-)
-
 // scaffold orchestrates the setup of the SDK from source to destination.
 func scaffold(sdk, name string) error {
-	url, err := source(sdk)
+	templates, err := GetTemplates()
 	if err != nil {
 		return err
 	}
 
-	if err := setup(url, name); err != nil {
+	// find the template based on sdk (key)
+	template, exists := templates[sdk]
+	if !exists {
+		return fmt.Errorf("unsupported sdk type. supported sdks are: %v", GetTemplateKeys(templates))
+	}
+
+	if err := setup(template.Href, name); err != nil {
 		return err
 	}
 
 	return nil
-}
-
-// source retrieves the URL for the given SDK.
-func source(sdk string) (string, error) {
-	url, ok := repos[sdk]
-	if !ok {
-		return "", fmt.Errorf("unsupported sdk: %s", sdk)
-	}
-
-	return url, nil
 }
 
 // setup downloads and unzips the SDK to the destination folder.

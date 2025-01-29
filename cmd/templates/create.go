@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -64,26 +63,12 @@ func validate(sdk, name string) error {
 		return errors.New("sdk type is required")
 	}
 
-	if !isSupported(sdk) {
-		return fmt.Errorf("unsupported sdk type. supported sdks are: %s", strings.Join(sdks, ", "))
-	}
-
 	err := checkProjectExists(name)
 	if err != nil {
 		return err
 	}
 
 	return nil
-}
-
-func isSupported(sdk string) bool {
-	for _, supported := range sdks {
-		if sdk == supported {
-			return true
-		}
-	}
-
-	return false
 }
 
 func checkProjectExists(name string) error {
