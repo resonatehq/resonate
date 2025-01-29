@@ -1,6 +1,9 @@
 package aio
 
+import "github.com/resonatehq/resonate/pkg/message"
+
 type Message struct {
+	Type message.Type
 	Data []byte
 	Body []byte
 	Done func(bool, error)
