@@ -10,17 +10,17 @@ import (
 	"strings"
 )
 
-// scaffold orchestrates the setup of the SDK from source to destination.
-func scaffold(sdk, name string) error {
+// scaffold orchestrates the setup of the template from source to destination.
+func scaffold(tmpl, name string) error {
 	templates, err := GetTemplates()
 	if err != nil {
 		return err
 	}
 
-	// find the template based on sdk (key)
-	template, exists := templates[sdk]
+	// find the template based on template (key)
+	template, exists := templates[tmpl]
 	if !exists {
-		return fmt.Errorf("unsupported sdk type. supported sdks are: %v", GetTemplateKeys(templates))
+		return fmt.Errorf("unsupported template type. supported template are: %v", GetTemplateKeys(templates))
 	}
 
 	if err := setup(template.Href, name); err != nil {
@@ -30,7 +30,7 @@ func scaffold(sdk, name string) error {
 	return nil
 }
 
-// setup downloads and unzips the SDK to the destination folder.
+// setup downloads and unzips the Template to the destination folder.
 func setup(url, dest string) error {
 	tmp := dest + ".zip"
 	if err := download(url, tmp); err != nil {
