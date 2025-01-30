@@ -40,6 +40,13 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 
 - **Built on an Open Standard**: Resonate's programming model is built on top of [durable promises](https://github.com/resonatehq/durable-promise-specification), an open standard with an intentionally minimal API surface area.
 
+## Install
+```
+brew install resonatehq/tap/resonate
+```
+
+You can also [download the latest release](https://github.com/resonatehq/resonate/releases/latest).
+
 ## Getting Started
 
 1. [Start building in just 30 seconds](https://docs.resonatehq.io/getting-started/quickstart) with our quickstart guide!
@@ -51,8 +58,9 @@ Resonate's Distributed Async Await is a new programming model that simplifies co
 Resonate provides client SDKs for different programming languages to easily interact with the Resonate server and write elegant distributed async await applications. More are coming soon!
 
 | Type   | Language                                                                                                            | Source Code                                   | Package                                              |
-| ------ | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------- |
-| TS SDK | <img alt="TS SDK" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="50px"/> | https://github.com/resonatehq/resonate-sdk-ts | [NPM](https://www.npmjs.com/package/@resonatehq/sdk) |
+| ------ | :-----------------------------------------------------------------------------------------------------------------: | --------------------------------------------- | ---------------------------------------------------- |
+| py     | <img alt="py sdk" src="https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg" width="40px"/>   | https://github.com/resonatehq/resonate-sdk-py | [pypi](https://pypi.org/project/resonate-sdk/)       |
+| ts     | <img alt="ts sdk" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="40px"/> | https://github.com/resonatehq/resonate-sdk-ts | [npm](https://www.npmjs.com/package/@resonatehq/sdk) |
 
 ## Core Features
 
