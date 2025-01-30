@@ -246,7 +246,7 @@ def test_golden_device_rfi() -> None:
     group = "test-golden-device-rfi"
 
     def foo_golden_device_rfi(ctx: Context, n: str) -> Generator[Yieldable, Any, str]:
-        p: Promise[str] = yield ctx.rfi(bar_golden_device_rfi, n).options(
+        p: Promise[str] = yield ctx.rfi("bar_golden_device_rfi", n).options(
             id="bar", send_to=poll(group)
         )
         assert isinstance(p, Promise)
@@ -281,7 +281,7 @@ def test_factorial_rfi() -> None:
     def factorial_rfi(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
         if n == 0:
             return 1
-        p = yield ctx.rfi(factorial_rfi, n - 1).options(
+        p = yield ctx.rfi("factorial_rfi", n - 1).options(
             id=exec_id(n - 1), send_to=poll(group)
         )
         return n * (yield p)

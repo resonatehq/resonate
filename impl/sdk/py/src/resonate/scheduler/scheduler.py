@@ -422,7 +422,7 @@ class Scheduler(IScheduler):
             assert record.is_root
             assert isinstance(record.invocation, RFI)
             assert record.durable_promise is not None
-            record.invocation = rfi
+            record.overwrite_invocation(rfi)
         else:
             record = Record[Any](
                 id=invoke_msg.root_durable_promise.id,

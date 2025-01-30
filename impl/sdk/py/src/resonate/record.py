@@ -21,6 +21,24 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+def _set_retry_policy(invocation: LFI | RFI) -> retry_policy.RetryPolicy | None:
+    if not isinstance(invocation.unit, Invocation):
+        retry_policy = None
+    elif isinstance(invocation.unit.fn, str):
+        retry_policy = invocation.opts.retry_policy or None
+    elif isgeneratorfunction(invocation.unit.fn):
+        retry_policy = invocation.opts.retry_policy or never()
+    else:
+        assert iscoroutinefunction(invocation.unit.fn) or isfunction(invocation.unit.fn)
+        retry_policy = invocation.opts.retry_policy or exponential(
+            base_delay=1,
+            factor=2,
+            max_retries=-1,
+            max_delay=30,
+        )
+    return retry_policy
+
+
 @final
 class Record(Generic[T]):
     def __init__(
@@ -38,24 +56,7 @@ class Record(Generic[T]):
         self._result: Result[T, Exception] | None = None
         self.children: list[Record[Any]] = []
         self.invocation: LFI | RFI = invocation
-        self.retry_policy: retry_policy.RetryPolicy | None
-        if not isinstance(invocation.unit, Invocation):
-            self.retry_policy = None
-        elif isinstance(invocation.unit.fn, str):
-            self.retry_policy = invocation.opts.retry_policy or None
-        elif isgeneratorfunction(invocation.unit.fn):
-            self.retry_policy = invocation.opts.retry_policy or never()
-        else:
-            assert iscoroutinefunction(invocation.unit.fn) or isfunction(
-                invocation.unit.fn
-            )
-            self.retry_policy = invocation.opts.retry_policy or exponential(
-                base_delay=1,
-                factor=2,
-                max_retries=-1,
-                max_delay=30,
-            )
-
+        self.retry_policy = _set_retry_policy(invocation=invocation)
         self._attempt: int = 1
         self.durable_promise: DurablePromiseRecord | None = None
         self._task: TaskRecord | None = None
@@ -69,6 +70,10 @@ class Record(Generic[T]):
             self.id,
             self.parent.id if self.parent else None,
         )
+
+    def overwrite_invocation(self, invocation: RFI) -> None:
+        self.invocation = invocation
+        self.retry_policy = _set_retry_policy(invocation)
 
     def get_coro(self) -> ResonateCoro[T]:
         assert self._coro
