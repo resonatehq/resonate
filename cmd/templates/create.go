@@ -55,7 +55,7 @@ func validate(template, name string) error {
 		return errors.New("template name is required")
 	}
 
-	err := checkProjectExists(name)
+	err := checkFolderExists(name)
 	if err != nil {
 		return err
 	}
@@ -63,7 +63,7 @@ func validate(template, name string) error {
 	return nil
 }
 
-func checkProjectExists(name string) error {
+func checkFolderExists(name string) error {
 	info, err := os.Stat(name)
 
 	if err != nil {

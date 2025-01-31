@@ -2,8 +2,6 @@ package templates
 
 import (
 	"fmt"
-	"os"
-	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 )
@@ -28,14 +26,7 @@ func ListTemplateCmd() *cobra.Command {
 }
 
 func display(templates Templates) {
-	writer := tabwriter.NewWriter(os.Stdout, 20, 0, 1, ' ', 0)
-
-	fmt.Fprintln(writer, "\n| Templates          | Description                |")
-	fmt.Fprintln(writer, "|--------------------|----------------------------|")
-
 	for name, t := range templates {
-		fmt.Fprintf(writer, "| %-18s | %-26s |\n", name, t.Desc)
+		fmt.Printf("\n%s\n\t%s\n", name, t.Desc)
 	}
-
-	writer.Flush()
 }
