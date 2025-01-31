@@ -15,12 +15,7 @@ func CreateTemplateCmd() *cobra.Command {
 	)
 
 	exampleCMD := `
-	# Create Resonate project
 	resonate templates create --name my-app --template py
-	
-	OR
-
-	# Create Resonate project
 	resonate templates create -n my-app -t py
 	`
 
@@ -37,12 +32,13 @@ func CreateTemplateCmd() *cobra.Command {
 				return err
 			}
 
+			fmt.Printf("\nproject successfully created in folder %s\n", name)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&name, "name", "n", "", "Name of the project (required).")
-	cmd.Flags().StringVarP(&template, "template", "t", "", "Name of the template (required). Run 'resonate templates list' to view available templates.")
+	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
+	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate templates list' to view available templates")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("template")
@@ -52,7 +48,7 @@ func CreateTemplateCmd() *cobra.Command {
 
 func validate(template, name string) error {
 	if name == "" {
-		return errors.New("project name is required")
+		return errors.New("a folder name is required")
 	}
 
 	if template == "" {
@@ -79,7 +75,7 @@ func checkProjectExists(name string) error {
 	}
 
 	if info.IsDir() {
-		return fmt.Errorf("project named '%s' already exists", name)
+		return fmt.Errorf("a folder named '%s' already exists", name)
 	}
 
 	return nil

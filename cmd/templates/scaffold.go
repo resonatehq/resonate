@@ -20,7 +20,7 @@ func scaffold(tmpl, name string) error {
 	// find the template based on template (key)
 	template, exists := templates[tmpl]
 	if !exists {
-		return fmt.Errorf("unsupported template type. supported template are: %v", GetTemplateKeys(templates))
+		return fmt.Errorf("unknown template '%s', available templates are: %v", tmpl, GetTemplateKeys(templates))
 	}
 
 	if err := setup(template.Href, name); err != nil {

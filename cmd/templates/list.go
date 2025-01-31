@@ -9,15 +9,10 @@ import (
 )
 
 func ListTemplateCmd() *cobra.Command {
-	exampleCMD := `
-	# Create Resonate project
-	resonate templates list
-	`
-
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "List the available template projects",
-		Example: exampleCMD,
+		Short:   "List the available templates",
+		Example: "resonate templates list",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			templates, err := GetTemplates()
 			if err != nil {
