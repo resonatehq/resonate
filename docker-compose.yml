@@ -20,6 +20,7 @@ services:
       - ./resonate.yml:/root/resonate.yml
     ports:
       - "8001:8001"
+      - "8002:8002"
       - "50051:50051"
     depends_on:
       - postgres
