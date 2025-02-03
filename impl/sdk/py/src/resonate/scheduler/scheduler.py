@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import sys
 import time
 from functools import partial
@@ -353,7 +352,6 @@ class Scheduler(IScheduler):
             ttl=5 * 1_000,
         )
 
-        
         record.add_durable_promise(durable_promise)
         if durable_promise.is_completed():
             assert task is None
