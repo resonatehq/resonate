@@ -348,11 +348,12 @@ class Scheduler(IScheduler):
                 }
             ),
             timeout=sys.maxsize,
-            tags={"resonate:invoke": json.dumps(self._recv)},
+            tags={"resonate:invoke": self._encoder.encode(self._recv)},
             pid=self._pid,
             ttl=5 * 1_000,
         )
 
+        
         record.add_durable_promise(durable_promise)
         if durable_promise.is_completed():
             assert task is None
