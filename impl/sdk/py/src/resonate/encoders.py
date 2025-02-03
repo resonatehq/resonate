@@ -29,18 +29,6 @@ class Base64Encoder(IEncoder[str, str]):
         return base64.b64decode(data).decode()
 
 
-# Helper method to make Errors serializable
-def _default(data: Any) -> Any:  # noqa: ANN401
-    if isinstance(data, Exception):
-        return {
-            "__type": _classname(data),
-            "attributes": data.__dict__,
-        }
-
-    return data
-
-
-# Helper method to deserialize errors
 def _object_hook(data: dict[str, Any]) -> Any:  # noqa: ANN401
     if "__type" in data:
         error_cls = _import_class_from_qualified_name(data["__type"])
@@ -52,7 +40,12 @@ def _object_hook(data: dict[str, Any]) -> Any:  # noqa: ANN401
 @final
 class JsonEncoder(IEncoder[Any, str]):
     def encode(self, data: Any) -> str:  # noqa: ANN401
-        return json.dumps(data, default=_default)
+        if isinstance(data, Exception):
+            data = {
+                "__type": _classname(data),
+                "attributes": data.__dict__,
+            }
+        return json.dumps(data)
 
     def decode(self, data: str) -> Any:  # noqa: ANN401
         return json.loads(data, object_hook=_object_hook)
