@@ -19,16 +19,16 @@ type (
 
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "templates",
-		Aliases: []string{"templates"},
-		Short:   "Resonate templates",
+		Use:     "project",
+		Aliases: []string{"project"},
+		Short:   "Resonate application node projects",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
 	}
 
 	// Add subcommands
-	cmd.AddCommand(ListTemplateCmd())   // list avaiable templates
+	cmd.AddCommand(ListTemplateCmd())   // list available templates
 	cmd.AddCommand(CreateTemplateCmd()) // create a template project
 
 	return cmd

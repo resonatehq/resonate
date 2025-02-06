@@ -15,13 +15,13 @@ func CreateTemplateCmd() *cobra.Command {
 	)
 
 	exampleCMD := `
-	resonate templates create --name my-app --template py
-	resonate templates create -n my-app -t py
+		resonate project create --name my-app --template py
+		resonate project create -n my-app -t py
 	`
 
 	cmd := &cobra.Command{
 		Use:     "create",
-		Short:   "Create a new Resonate project",
+		Short:   "Create a new resonate application node project",
 		Example: exampleCMD,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := validate(template, name); err != nil {
@@ -38,7 +38,7 @@ func CreateTemplateCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
-	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate templates list' to view available templates")
+	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate project list' to view available project templates")
 
 	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("template")
