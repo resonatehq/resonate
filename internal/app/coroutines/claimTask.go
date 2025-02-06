@@ -16,7 +16,7 @@ import (
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
-	util.Assert(r.ClaimTask.Ttl > 0, "ttl must be greater than 0")
+	util.Assert(r.ClaimTask.Ttl >= 0, "ttl must be equal or greater than 0")
 
 	config, ok := c.Get("config").(*system.Config)
 	if !ok {
