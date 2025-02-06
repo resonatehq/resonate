@@ -191,7 +191,7 @@ type AcquireLockRequest struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
 	ProcessId   string `json:"processId"`
-	Ttl         int64  `json:"ttl"`
+	Ttl         int64  `json:"ttl" binding:"min=0"`
 }
 
 func (r *AcquireLockRequest) String() string {
@@ -226,7 +226,7 @@ func (r *HeartbeatLocksRequest) String() string {
 type CreateTaskRequest struct {
 	PromiseId string `json:"promiseId"`
 	ProcessId string `json:"processId"`
-	Ttl       int    `json:"ttl"`
+	Ttl       int    `json:"ttl" binding:"min=0"`
 	Timeout   int64  `json:"timeout"`
 }
 
@@ -244,7 +244,7 @@ type ClaimTaskRequest struct {
 	Id        string `json:"id"`
 	Counter   int    `json:"counter"`
 	ProcessId string `json:"processId"`
-	Ttl       int    `json:"ttl"`
+	Ttl       int    `json:"ttl" binding:"min=0"`
 }
 
 func (r *ClaimTaskRequest) String() string {

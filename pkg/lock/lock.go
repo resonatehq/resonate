@@ -6,7 +6,7 @@ type Lock struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
 	ProcessId   string `json:"processId"`
-	Ttl         int64  `json:"ttl"`
+	Ttl         int64  `json:"ttl" binding:"min=0"`
 	ExpiresAt   int64  `json:"expiresAt"`
 }
 
