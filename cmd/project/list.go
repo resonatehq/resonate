@@ -1,4 +1,4 @@
-package templates
+package project
 
 import (
 	"fmt"
@@ -6,13 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func ListTemplateCmd() *cobra.Command {
+func ListProjectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "List the available application node projects",
 		Example: "resonate project list",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			templates, err := GetTemplates()
+			templates, err := GetProjects()
 			if err != nil {
 				return err
 			}
@@ -25,7 +25,7 @@ func ListTemplateCmd() *cobra.Command {
 	return cmd
 }
 
-func display(templates Templates) {
+func display(templates Projects) {
 	for name, t := range templates {
 		fmt.Printf("\n%s\n\t%s\n", name, t.Desc)
 	}

@@ -1,4 +1,4 @@
-package templates
+package project
 
 import (
 	"archive/zip"
@@ -10,27 +10,27 @@ import (
 	"strings"
 )
 
-// scaffold orchestrates the setup of the template from source to destination.
+// scaffold orchestrates the setup of the project from source to destination.
 func scaffold(tmpl, name string) error {
-	templates, err := GetTemplates()
+	projects, err := GetProjects()
 	if err != nil {
 		return err
 	}
 
-	// find the template based on template (key)
-	template, exists := templates[tmpl]
+	// find the project based on project (key)
+	project, exists := projects[tmpl]
 	if !exists {
-		return fmt.Errorf("unknown template '%s', available templates are: %v", tmpl, GetTemplateKeys(templates))
+		return fmt.Errorf("unknown project '%s', available projects are: %v", tmpl, GetProjectKeys(projects))
 	}
 
-	if err := setup(template.Href, name); err != nil {
+	if err := setup(project.Href, name); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-// setup downloads and unzips the Template to the destination folder.
+// setup downloads and unzips the project to the destination folder.
 func setup(url, dest string) error {
 	tmp := dest + ".zip"
 	if err := download(url, tmp); err != nil {
@@ -70,7 +70,7 @@ func download(url, file string) error {
 // checkstatus verifies the HTTP response for a successful status.
 func checkstatus(res *http.Response) error {
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to fetch template: %s", res.Status)
+		return fmt.Errorf("failed to fetch project: %s", res.Status)
 	}
 
 	return nil

@@ -1,4 +1,4 @@
-package templates
+package project
 
 import (
 	"encoding/json"
@@ -9,12 +9,12 @@ import (
 )
 
 type (
-	Template struct {
+	Project struct {
 		Href string `json:"href"`
 		Desc string `json:"desc"`
 	}
 
-	Templates map[string]Template
+	Projects map[string]Project
 )
 
 func NewCmd() *cobra.Command {
@@ -28,13 +28,13 @@ func NewCmd() *cobra.Command {
 	}
 
 	// Add subcommands
-	cmd.AddCommand(ListTemplateCmd())   // list available templates
-	cmd.AddCommand(CreateTemplateCmd()) // create a template project
+	cmd.AddCommand(ListProjectCmd())   // list available projects
+	cmd.AddCommand(CreateProjectCmd()) // create a project
 
 	return cmd
 }
 
-func GetTemplates() (Templates, error) {
+func GetProjects() (Projects, error) {
 	const url = "https://raw.githubusercontent.com/resonatehq/templates/refs/heads/main/templates.json"
 
 	res, err := http.Get(url)
@@ -52,27 +52,27 @@ func GetTemplates() (Templates, error) {
 		return nil, err
 	}
 
-	templates, err := parse(body)
+	projects, err := parse(body)
 	if err != nil {
 		return nil, err
 	}
 
-	return templates, nil
+	return projects, nil
 }
 
-func parse(body []byte) (Templates, error) {
-	templates := Templates{}
-	if err := json.Unmarshal(body, &templates); err != nil {
+func parse(body []byte) (Projects, error) {
+	projects := Projects{}
+	if err := json.Unmarshal(body, &projects); err != nil {
 		return nil, err
 	}
 
-	return templates, nil
+	return projects, nil
 }
 
-func GetTemplateKeys(templates Templates) []string {
+func GetProjectKeys(projects Projects) []string {
 	keys := make([]string, 0)
 
-	for name := range templates {
+	for name := range projects {
 		keys = append(keys, name)
 	}
 
