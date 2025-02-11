@@ -2478,4 +2478,142 @@ var TestCases = []*testCase{
 			},
 		},
 	},
+	{
+		Name: "CreatePromiseAndTaskWithTtlZero",
+		Req: &t_api.Request{
+			Kind: t_api.CreatePromiseAndTask,
+			Tags: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
+			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+				Promise: &t_api.CreatePromiseRequest{
+					Id:      "foo",
+					Timeout: 1,
+					Tags:    map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &t_api.CreateTaskRequest{
+					PromiseId: "foo",
+					ProcessId: "bar",
+					Ttl:       0,
+					Timeout:   1,
+				},
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreatePromiseAndTask,
+			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{
+				Status: t_api.StatusCreated,
+				Promise: &promise.Promise{
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
+				},
+				Task: &task.Task{},
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/task",
+				Headers: map[string]string{
+					"Request-Id": "CreatePromiseAndTask",
+				},
+				Body: []byte(`{
+					"promise": {"id": "foo", "timeout": 1, "tags": {"resonate:invoke": "baz"}},
+					"task": {"processId": "bar", "ttl": 0}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreatePromiseAndTaskRequest{
+				Promise: &pb.CreatePromiseRequest{
+					Id:        "foo",
+					Timeout:   1,
+					RequestId: "CreatePromiseAndTask",
+					Tags:      map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &pb.CreatePromiseTaskRequest{
+					ProcessId: "bar",
+					Ttl:       0,
+				},
+			},
+			Res: &pb.CreatePromiseAndTaskResponse{
+				Noop: false,
+				Promise: &pb.Promise{
+					Id:                      "foo",
+					State:                   pb.State_PENDING,
+					IdempotencyKeyForCreate: "",
+					Param:                   &pb.Value{},
+					Value:                   &pb.Value{},
+					Timeout:                 1,
+				},
+			},
+		},
+	},
+	{
+		Name: "CreatePromiseAndTaskWithNegativeTtl",
+		Req: &t_api.Request{
+			Kind: t_api.CreatePromiseAndTask,
+			Tags: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
+			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+				Promise: &t_api.CreatePromiseRequest{
+					Id:      "foo",
+					Timeout: 1,
+					Tags:    map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &t_api.CreateTaskRequest{
+					PromiseId: "foo",
+					ProcessId: "bar",
+					Ttl:       -1,
+					Timeout:   1,
+				},
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreatePromiseAndTask,
+			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{
+				Status: t_api.StatusCreated,
+				Promise: &promise.Promise{
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
+				},
+				Task: &task.Task{},
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/task",
+				Headers: map[string]string{
+					"Request-Id": "CreatePromiseAndTask",
+				},
+				Body: []byte(`{
+					"promise": {"id": "foo", "timeout": 1, "tags": {"resonate:invoke": "baz"}},
+					"task": {"processId": "bar", "ttl": -1}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 400,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreatePromiseAndTaskRequest{
+				Promise: &pb.CreatePromiseRequest{
+					Id:        "foo",
+					Timeout:   1,
+					RequestId: "CreatePromiseAndTask",
+					Tags:      map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &pb.CreatePromiseTaskRequest{
+					ProcessId: "bar",
+					Ttl:       -1,
+				},
+			},
+			Code: codes.InvalidArgument,
+		},
+	},
 }

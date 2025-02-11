@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
@@ -22,6 +23,9 @@ func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.Claim
 	})
 	if err != nil {
 		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+	if r.Ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "The field ttl must be greater than or equal to zero")
 	}
 
 	util.Assert(res.ClaimTask != nil, "result must not be nil")

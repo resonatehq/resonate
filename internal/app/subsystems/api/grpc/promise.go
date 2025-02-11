@@ -112,6 +112,9 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 	if r.Task == nil {
 		return nil, status.Error(codes.InvalidArgument, "The field task is required.")
 	}
+	if r.Task.Ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "The field ttl must be greater than or equal to zero")
+	}
 
 	var idempotencyKey *idempotency.Key
 	if r.Promise.IdempotencyKey != "" {

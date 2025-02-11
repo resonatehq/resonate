@@ -161,7 +161,7 @@ type createPromiseAndTaskBody struct {
 
 type createPromiseTaskBody struct {
 	ProcessId string `json:"processId" binding:"required"`
-	Ttl       int    `json:"ttl"`
+	Ttl       int    `json:"ttl" binding:"min=0"`
 }
 
 func (s *server) createPromiseAndTask(c *gin.Context) {
