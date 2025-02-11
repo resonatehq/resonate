@@ -25,7 +25,7 @@ func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.Claim
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 	if r.Ttl < 0 {
-		return nil, status.Error(codes.InvalidArgument, "The ttl field must be greater or equal than zero")
+		return nil, status.Error(codes.InvalidArgument, "The field ttl must be greater than or equal to zero")
 	}
 
 	util.Assert(res.ClaimTask != nil, "result must not be nil")
