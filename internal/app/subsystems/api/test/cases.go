@@ -2613,17 +2613,7 @@ var TestCases = []*testCase{
 					Ttl:       -1,
 				},
 			},
-			Res: &pb.CreatePromiseAndTaskResponse{
-				Noop: false,
-				Promise: &pb.Promise{
-					Id:                      "foo",
-					State:                   pb.State_PENDING,
-					IdempotencyKeyForCreate: "",
-					Param:                   &pb.Value{},
-					Value:                   &pb.Value{},
-					Timeout:                 1,
-				},
-			},
+			Code: codes.InvalidArgument,
 		},
 	},
 }
