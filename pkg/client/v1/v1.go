@@ -59,7 +59,7 @@ type Lock struct {
 	ExpiresAt   *int64 `json:"expiresAt,omitempty"`
 	ProcessId   string `json:"processId"`
 	ResourceId  string `json:"resourceId"`
-	Ttl         int    `json:"ttl" binding:"min=0"`
+	Ttl         int    `json:"ttl"`
 }
 
 // Mesg defines model for Mesg.
@@ -165,7 +165,7 @@ type AcquireLockJSONBody struct {
 	ExecutionId string `json:"executionId"`
 	ProcessId   string `json:"processId"`
 	ResourceId  string `json:"resourceId"`
-	Ttl         int    `json:"ttl" binding:"min=0"`
+	Ttl         int    `json:"ttl"`
 }
 
 // AcquireLockParams defines parameters for AcquireLock.
@@ -254,7 +254,7 @@ type CreatePromiseAndTaskJSONBody struct {
 	} `json:"promise"`
 	Task struct {
 		ProcessId string `json:"processId"`
-		Ttl       int    `json:"ttl" binding:"min=0"`
+		Ttl       int    `json:"ttl"`
 	} `json:"task"`
 }
 
@@ -378,7 +378,7 @@ type ClaimTaskJSONBody struct {
 	ProcessId string `json:"processId"`
 
 	// Ttl Time to live in milliseconds
-	Ttl int64 `json:"ttl" binding:"min=0"`
+	Ttl int64 `json:"ttl"`
 }
 
 // ClaimTaskParams defines parameters for ClaimTask.
