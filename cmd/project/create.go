@@ -10,13 +10,13 @@ import (
 
 func CreateProjectCmd() *cobra.Command {
 	var (
-		name    string
-		project string
+		name     string
+		template string
 	)
 
 	exampleCMD := `
-		resonate project create --name my-app --project py
-		resonate project create -n my-app -p py
+		resonate project create --name my-app --template py
+		resonate project create -n my-app -t py
 	`
 
 	cmd := &cobra.Command{
@@ -24,11 +24,11 @@ func CreateProjectCmd() *cobra.Command {
 		Short:   "Create a new resonate application node project",
 		Example: exampleCMD,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validate(project, name); err != nil {
+			if err := validate(template, name); err != nil {
 				return err
 			}
 
-			if err := scaffold(project, name); err != nil {
+			if err := scaffold(template, name); err != nil {
 				return err
 			}
 
@@ -38,10 +38,10 @@ func CreateProjectCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
-	cmd.Flags().StringVarP(&project, "project", "p", "", "name of the project, run 'resonate project list' to view available projects")
+	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate project list' to view available templates")
 
 	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("project")
+	_ = cmd.MarkFlagRequired("template")
 
 	return cmd
 }
