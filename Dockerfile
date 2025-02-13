@@ -13,6 +13,7 @@ WORKDIR /app
 COPY --from=builder /app/resonate .
 
 EXPOSE 8001
+EXPOSE 8002
 EXPOSE 50051
 
 ENTRYPOINT ["./resonate"]
