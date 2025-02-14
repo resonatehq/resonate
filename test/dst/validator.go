@@ -64,6 +64,7 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 			if res.ReadPromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(req.ReadPromise.Id, res.ReadPromise.Promise)
+				completeRelatedTasks(model, p.Id, reqTime)
 			} else {
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.ReadPromise.Promise.State, req.ReadPromise.Id)
 			}
@@ -172,6 +173,7 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 			if res.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(req.Id, res.Promise)
+				completeRelatedTasks(model, p.Id, reqTime)
 			} else {
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.Promise.State, req.Id)
 			}
@@ -216,6 +218,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 		// update model state
 		model = model.Copy()
 		model.promises.set(req.CompletePromise.Id, res.CompletePromise.Promise)
+		completeRelatedTasks(model, p.Id, reqTime)
 		return model, nil
 	case t_api.StatusOK:
 		if p == nil {
@@ -229,6 +232,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 			if res.CompletePromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
 				model.promises.set(req.CompletePromise.Id, res.CompletePromise.Promise)
+				completeRelatedTasks(model, p.Id, reqTime)
 			} else {
 				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.CompletePromise.Promise.State, req.CompletePromise.Id)
 			}
@@ -722,5 +726,25 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 		return model, nil
 	default:
 		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatTasks.Status)
+	}
+}
+
+// This function modifies the model in place, make sure you have called
+// model.copy() before calling this function
+func completeRelatedTasks(model *Model, promiseId string, reqTime int64) {
+	new_tasks := []task.Task{}
+	for _, t := range *model.tasks {
+		// In the server we do not complete Claimed tasks when completing a promise.
+		//
+		if t.value.RootPromiseId == promiseId &&
+			(t.value.State != task.Claimed || t.value.ExpiresAt < reqTime) {
+			new_t := *t.value // Make a copy to avoid modifing the model
+			new_t.State = task.Completed
+			new_tasks = append(new_tasks, new_t)
+		}
+	}
+
+	for _, new_t := range new_tasks {
+		model.tasks.set(new_t.Id, &new_t)
 	}
 }
