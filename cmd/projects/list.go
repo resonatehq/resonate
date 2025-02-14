@@ -1,4 +1,4 @@
-package project
+package projects
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 func ListProjectCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
-		Short:   "List the available application node projects",
+		Short:   "List resonate projects",
 		Example: "resonate project list",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			templates, err := GetProjects()
@@ -27,6 +27,6 @@ func ListProjectCmd() *cobra.Command {
 
 func display(templates Projects) {
 	for name, t := range templates {
-		fmt.Printf("\n%s\n\t%s\n", name, t.Desc)
+		fmt.Printf("%s:\n\t%s\n", name, t.Desc)
 	}
 }

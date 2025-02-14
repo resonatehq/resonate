@@ -1,4 +1,4 @@
-package project
+package projects
 
 import (
 	"encoding/json"
@@ -19,16 +19,16 @@ type (
 
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "project",
+		Use:     "projects",
 		Aliases: []string{"project"},
-		Short:   "Resonate application node projects",
+		Short:   "Resonate projects",
 		Run: func(cmd *cobra.Command, args []string) {
 			_ = cmd.Help()
 		},
 	}
 
 	// Add subcommands
-	cmd.AddCommand(ListProjectCmd())   // list available projects
+	cmd.AddCommand(ListProjectCmd())   // list projects
 	cmd.AddCommand(CreateProjectCmd()) // create a project
 
 	return cmd
