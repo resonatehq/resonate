@@ -220,6 +220,7 @@ func RunDSTCmd() *cobra.Command {
 
 	// bind config
 	_ = config.BindDST(cmd)
+	cmd.SilenceUsage = true
 
 	cmd.Flags().SortFlags = false
 

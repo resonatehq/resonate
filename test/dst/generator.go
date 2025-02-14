@@ -121,6 +121,7 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.ReadPromise,
+		Tags: map[string]string{"partitionId": id},
 		ReadPromise: &t_api.ReadPromiseRequest{
 			Id: id,
 		},
@@ -176,6 +177,7 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromise,
+		Tags: map[string]string{"partitionId": id},
 		CreatePromise: &t_api.CreatePromiseRequest{
 			Id:             id,
 			IdempotencyKey: idempotencyKey,
@@ -197,6 +199,7 @@ func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.R
 
 	return &t_api.Request{
 		Kind: t_api.CreatePromiseAndTask,
+		Tags: map[string]string{"partitionId": req.CreatePromise.Id},
 		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
 			Promise: req.CreatePromise,
 			Task: &t_api.CreateTaskRequest{
@@ -219,6 +222,7 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 
 	return &t_api.Request{
 		Kind: t_api.CompletePromise,
+		Tags: map[string]string{"partitionId": id},
 		CompletePromise: &t_api.CompletePromiseRequest{
 			Id:             id,
 			IdempotencyKey: idempotencyKey,
@@ -239,6 +243,7 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 
 	return &t_api.Request{
 		Kind: t_api.CreateCallback,
+		Tags: map[string]string{"partitionId": promiseId},
 		CreateCallback: &t_api.CreateCallbackRequest{
 			Id:            id,
 			PromiseId:     promiseId,
@@ -258,6 +263,7 @@ func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Req
 
 	return &t_api.Request{
 		Kind: t_api.CreateSubscription,
+		Tags: map[string]string{"partitionId": promiseId},
 		CreateSubscription: &t_api.CreateSubscriptionRequest{
 			Id:        id,
 			PromiseId: promiseId,
@@ -274,6 +280,7 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.ReadSchedule,
+		Tags: map[string]string{"partitionId": id},
 		ReadSchedule: &t_api.ReadScheduleRequest{
 			Id: id,
 		},
@@ -313,6 +320,7 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 
 	return &t_api.Request{
 		Kind: t_api.CreateSchedule,
+		Tags: map[string]string{"partitionId": id},
 		CreateSchedule: &t_api.CreateScheduleRequest{
 			Id:             id,
 			Description:    "",
@@ -332,6 +340,7 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 
 	return &t_api.Request{
 		Kind: t_api.DeleteSchedule,
+		Tags: map[string]string{"partitionId": id},
 		DeleteSchedule: &t_api.DeleteScheduleRequest{
 			Id: id,
 		},
@@ -348,6 +357,7 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.AcquireLock,
+		Tags: map[string]string{"partitionId": "___locks___"},
 		AcquireLock: &t_api.AcquireLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
@@ -363,6 +373,7 @@ func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.ReleaseLock,
+		Tags: map[string]string{"partitionId": "___locks___"},
 		ReleaseLock: &t_api.ReleaseLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
@@ -375,6 +386,7 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 
 	return &t_api.Request{
 		Kind: t_api.HeartbeatLocks,
+		Tags: map[string]string{"partitionId": "___locks___"},
 		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 			ProcessId: processId,
 		},
@@ -387,7 +399,7 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.pop(r, t_api.ClaimTask)
 
 	if req != nil {
-		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.ProcessId, req.ClaimTask.Counter)
+		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.ProcessId, req.ClaimTask.Counter, req.Tags)
 	}
 
 	return req
@@ -450,7 +462,7 @@ func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
 	return req
 }
 
-func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) {
+func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, reqTags map[string]string) {
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(3); i++ {
@@ -458,6 +470,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 		case 0:
 			g.AddRequest(&t_api.Request{
 				Kind: t_api.ClaimTask,
+				Tags: reqTags,
 				ClaimTask: &t_api.ClaimTaskRequest{
 					Id:        id,
 					ProcessId: pid,
@@ -468,6 +481,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 		case 1:
 			g.AddRequest(&t_api.Request{
 				Kind: t_api.CompleteTask,
+				Tags: reqTags,
 				CompleteTask: &t_api.CompleteTaskRequest{
 					Id:      id,
 					Counter: counter,
@@ -476,6 +490,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int) 
 		case 2:
 			g.AddRequest(&t_api.Request{
 				Kind: t_api.HeartbeatTasks,
+				Tags: reqTags,
 				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 					ProcessId: pid,
 				},
