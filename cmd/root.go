@@ -7,6 +7,7 @@ import (
 
 	"github.com/resonatehq/resonate/cmd/callbacks"
 	"github.com/resonatehq/resonate/cmd/dst"
+	"github.com/resonatehq/resonate/cmd/project"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
@@ -42,6 +43,7 @@ func init() {
 	rootCmd.AddCommand(quickstart.NewCmd())
 	rootCmd.AddCommand(tasks.NewCmd())
 	rootCmd.AddCommand(callbacks.NewCmd())
+	rootCmd.AddCommand(project.NewCmd())
 	rootCmd.AddCommand(subscriptions.NewCmd())
 
 	// Set default output
