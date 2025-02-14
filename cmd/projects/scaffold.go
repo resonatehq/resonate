@@ -1,4 +1,4 @@
-package project
+package projects
 
 import (
 	"archive/zip"

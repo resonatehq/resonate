@@ -1,7 +1,6 @@
-package project
+package projects
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -15,16 +14,19 @@ func CreateProjectCmd() *cobra.Command {
 	)
 
 	exampleCMD := `
-		resonate project create --name my-app --template py
-		resonate project create -n my-app -t py
-	`
+resonate projects create --template py
+resonate projects create --template py --name my-app`
 
 	cmd := &cobra.Command{
 		Use:     "create",
-		Short:   "Create a new resonate application node project",
+		Short:   "Create a new resonate project",
 		Example: exampleCMD,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validate(template, name); err != nil {
+			if name == "" {
+				name = template
+			}
+
+			if err := validate(name); err != nil {
 				return err
 			}
 
@@ -32,35 +34,21 @@ func CreateProjectCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("\nproject successfully created in folder %s\n", name)
+			cmd.Printf("Template '%s' successfully copied to folder '%s'\n", template, name)
 			return nil
 		},
 	}
 
-	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
 	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate project list' to view available templates")
+	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
 
-	_ = cmd.MarkFlagRequired("name")
 	_ = cmd.MarkFlagRequired("template")
 
 	return cmd
 }
 
-func validate(project, name string) error {
-	if name == "" {
-		return errors.New("a folder name is required")
-	}
-
-	if project == "" {
-		return errors.New("project name is required")
-	}
-
-	err := checkFolderExists(name)
-	if err != nil {
-		return err
-	}
-
-	return nil
+func validate(name string) error {
+	return checkFolderExists(name)
 }
 
 func checkFolderExists(name string) error {
