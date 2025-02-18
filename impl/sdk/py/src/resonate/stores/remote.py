@@ -210,6 +210,56 @@ class RemotePromiseStore(IPromiseStore):
 
 
 @final
+class RemoteSubscriptionStore:
+    def __init__(
+        self,
+        url: str,
+        call: Callable[[requests.Request], requests.Response],
+        encoder: IEncoder[str, str],
+    ) -> None:
+        self._url = url
+        self._call = call
+        self._encoder = encoder
+
+    def create(
+        self, *, id: str, promise_id: str, timeout: int, recv: str | dict[str, Any]
+    ) -> tuple[DurablePromiseRecord, CallbackRecord | None]:
+        res = self._call(
+            requests.Request(
+                method="post",
+                url=f"{self._url}/subscriptions",
+                json={
+                    "id": id,
+                    "promiseId": promise_id,
+                    "timeout": timeout,
+                    "recv": recv,
+                },
+            )
+        )
+        data = res.json()
+        callback_data = data["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
+        )
+
+        data = res.json()
+        callback_data = data["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
+        )
+
+
+@final
 class RemoteCallbackStore:
     def __init__(
         self,
@@ -242,6 +292,16 @@ class RemoteCallbackStore:
                     "recv": recv,
                 },
             )
+        )
+        data = res.json()
+        callback_data = data["callback"]
+        durable_promise = DurablePromiseRecord.decode(
+            data["promise"], encoder=self._encoder
+        )
+        if callback_data is None:
+            return durable_promise, None
+        return durable_promise, CallbackRecord.decode(
+            callback_data, encoder=self._encoder
         )
 
         data = res.json()
@@ -342,6 +402,9 @@ class RemoteStore:
         self.promises = RemotePromiseStore(self.url, self._call, self._encoder)
         self.callbacks = RemoteCallbackStore(self.url, self._call, self._encoder)
         self.tasks = RemoteTaskStore(self.url, self._call, self._encoder)
+        self.subscriptions = RemoteSubscriptionStore(
+            self.url, self._call, self._encoder
+        )
 
     def _call(self, req: requests.Request) -> requests.Response:
         while True:

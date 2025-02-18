@@ -46,14 +46,14 @@ class OpenTelemetryAdapter(IAdapter):
 
     def process_event(self, event: SchedulerEvents) -> None:
         if isinstance(event, PromiseCreated):
-            assert (
-                event.id not in self._spans
-            ), "There shouldn't be never another span with same name."
+            assert event.id not in self._spans, (
+                "There shouldn't be never another span with same name."
+            )
             self._create_span(event.id, event.parent_id, start_time=event.tick)
         elif isinstance(event, PromiseCompleted):
-            assert (
-                event.id in self._spans
-            ), "There should always be an span with that name."
+            assert event.id in self._spans, (
+                "There should always be an span with that name."
+            )
             self._close_span(event.id, end_time=event.tick)
         elif isinstance(event, ExecutionInvoked):
             span = self._get_span(event.id)
@@ -98,15 +98,15 @@ class OpenTelemetryAdapter(IAdapter):
             name=id, context=parent_ctx, start_time=start_time
         )
 
-        assert (
-            id not in self._spans
-        ), "There should not be two spans with the same name at the same time."
+        assert id not in self._spans, (
+            "There should not be two spans with the same name at the same time."
+        )
         self._spans[id] = (new_span, token)
 
     def _close_span(self, id: str, end_time: int) -> None:
-        assert (
-            id in self._spans
-        ), "There should be an span associated with the promise id."
+        assert id in self._spans, (
+            "There should be an span associated with the promise id."
+        )
         span, token = self._spans.pop(id)
         if token:
             context.detach(token=token)

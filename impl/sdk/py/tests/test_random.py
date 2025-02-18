@@ -14,9 +14,9 @@ def test_random_prefix() -> None:
             rand.randint(0, 100) for _ in range(remembered_steps + choices_per_run)
         ]
         global_prefix.extend(rand.export()[remembered_steps:])
-        assert (
-            len(steps_taken_this_run) - len(global_prefix) == 0
-        ), f"Every run must make {choices_per_run} new choices"
+        assert len(steps_taken_this_run) - len(global_prefix) == 0, (
+            f"Every run must make {choices_per_run} new choices"
+        )
 
         steps_taken.extend(steps_taken_this_run[remembered_steps:])
         assert (
@@ -35,9 +35,9 @@ def test_random_prefix_with_floats() -> None:
             rand.random() for _ in range(remembered_steps + choices_per_run)
         ]
         global_prefix.extend(rand.export()[remembered_steps:])
-        assert (
-            len(steps_taken_this_run) - len(global_prefix) == 0
-        ), f"Every run must make {choices_per_run} new choices"
+        assert len(steps_taken_this_run) - len(global_prefix) == 0, (
+            f"Every run must make {choices_per_run} new choices"
+        )
 
         steps_taken.extend(steps_taken_this_run[remembered_steps:])
         assert (

@@ -6,4 +6,4 @@ from resonate.handle import Handle
 from resonate.promise import Promise
 from resonate.resonate import Resonate
 
-__all__ = ["Resonate", "Handle", "DurablePromise", "Promise", "Context"]
+__all__ = ["Context", "DurablePromise", "Handle", "Promise", "Resonate"]

@@ -8,10 +8,10 @@ from typing import Any
 import requests
 
 from resonate import utils
-from resonate.cmd_queue import Claim, CommandQ
-from resonate.encoders import JsonEncoder
+from resonate.cmd_queue import Claim, CommandQ, Notify
+from resonate.encoders import Base64Encoder, JsonEncoder
 from resonate.logging import logger
-from resonate.stores.record import TaskRecord
+from resonate.stores.record import DurablePromiseRecord, TaskRecord
 from resonate.task_sources.traits import ITaskSource
 
 
@@ -53,20 +53,28 @@ class Poller(ITaskSource):
                     for line in res.iter_lines(chunk_size=None, decode_unicode=True):
                         if not line:
                             continue
-
                         stripped = line.strip()
                         if not stripped.startswith("data:"):
                             continue
 
                         info = self._encoder.decode(stripped[5:])
-                        if "task" not in info:
+                        if "task" in info:
+                            task = TaskRecord.decode(
+                                info["task"], encoder=self._encoder
+                            )
+
+                            # enqueue the task
+                            cmd_queue.put(Claim(task))
+                        elif "promise" in info:
+                            record = DurablePromiseRecord.decode(
+                                info["promise"], Base64Encoder()
+                            )
+                            assert record.is_completed()
+                            v = record.get_value(self._encoder)
+                            cmd_queue.put(Notify(record.id, v))
+
+                        else:
                             continue
-
-                        # extract the task
-                        task = TaskRecord.decode(info["task"], encoder=self._encoder)
-
-                        # enqueue the task
-                        cmd_queue.put(Claim(task))
 
             except requests.exceptions.ConnectionError:
                 logger.warning("Connection to poller failed, reconnecting")

@@ -143,13 +143,13 @@ class Record(Generic[T]):
 
     def set_result(self, result: Result[T, Exception], *, deduping: bool) -> None:
         if not deduping:
-            assert not self.should_retry(
-                result
-            ), "Result cannot be set if retry policy allows for another attempt."
+            assert not self.should_retry(result), (
+                "Result cannot be set if retry policy allows for another attempt."
+            )
 
-        assert all(
-            r.done() for r in self.children
-        ), "All children record must be completed."
+        assert all(r.done() for r in self.children), (
+            "All children record must be completed."
+        )
         assert self._result is None
         self._result = result
 
@@ -161,7 +161,7 @@ class Record(Generic[T]):
         return self._result is not None
 
     def next_child_name(self) -> str:
-        return f"{self.id}.{self._num_children+1}"
+        return f"{self.id}.{self._num_children + 1}"
 
     def create_child(
         self,

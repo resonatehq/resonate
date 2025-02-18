@@ -1,0 +1,22 @@
+[lint]
+select = ["ALL"]
+ignore = [
+    "A001",
+    "A002",
+    "A005",
+    "D",
+    "COM812",
+    "ISC001",
+    "S101",
+    "ARG002",
+    "ARG003",
+]
+logger-objects = ["resonate.logging.logger"]
+
+[lint.isort]
+combine-as-imports = true
+required-imports = ["from __future__ import annotations"]
+
+[lint.per-file-ignores]
+"tests/*.py" = ["INP001", "S101", "D"]
+"scripts/*.py" = ["INP001"]

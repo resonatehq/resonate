@@ -123,9 +123,9 @@ class ResonateCoro(Generic[T]):
             if child.done():
                 continue
             return Promise[Any](child.id)
-        assert all(
-            child.done() for child in self._record.children
-        ), "All children promise must have been resolved."
+        assert all(child.done() for child in self._record.children), (
+            "All children promise must have been resolved."
+        )
 
         assert not self._coro_active
         assert self._final_value is not None

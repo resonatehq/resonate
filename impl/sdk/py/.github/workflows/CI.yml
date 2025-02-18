@@ -6,13 +6,13 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - ".github/workflows/CI.yml"
-      - "src/**"
-      - "tests/**"
+      - .github/workflows/CI.yml
+      - src/**
+      - tests/**
 
 env:
-  PYTHONUNBUFFERED: "1"
-  FORCE_COLOR: "1"
+  PYTHONUNBUFFERED: 1
+  FORCE_COLOR: 1
 
 jobs:
   run:
@@ -24,27 +24,28 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - uses: eifinger/setup-rye@v2
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
-          enable-cache: true
-          cache-prefix: '${{ matrix.python-version }}-'
-          version: '0.40.0'
+          version: 0.5.23
 
-      - name: Sync dependencies
-        run: rye pin ${{ matrix.python-version }} && rye sync --no-lock
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{matrix.python-version}}
+
+      - name: Install the cli
+        run: uv sync --dev
 
       - name: Check code
         run: |
-          rye lint
-          rye run check-types
-
-      - name: Check types
-        run: rye run check-types
+          uv run ruff check
+          uv run pyright
 
       - name: Checkout resonate repository
         uses: actions/checkout@v4
@@ -64,4 +65,5 @@ jobs:
         timeout-minutes: 10
         env:
           RESONATE_STORE_URL: http://localhost:8001
-        run: rye test
+          RESONATE_TASKS_URL: http://localhost:8002
+        run: uv run pytest

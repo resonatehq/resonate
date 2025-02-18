@@ -2,9 +2,7 @@
 name = "resonate-sdk"
 version = "0.4.10"
 description = "Distributed Async Await by Resonate HQ, Inc"
-authors = [
-    { name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }
-]
+authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 dependencies = [
     "typing-extensions>=4.12.2",
     "requests",
@@ -13,7 +11,7 @@ dependencies = [
     "opentelemetry-exporter-otlp-proto-http",
 ]
 readme = "README.md"
-requires-python = ">= 3.9"
+requires-python = ">= 3.10"
 license = { text = "Apache-2.0" }
 
 [project.urls]
@@ -25,62 +23,16 @@ Source = "https://github.com/resonatehq/resonate-sdk-py"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.rye]
-managed = true
-dev-dependencies = [
-    "mypy>=1.10.0",
-    "pytest>=8.2.0",
-    "types-requests>=2.32.0.20240712",
-    "ruff>=0.6.3",
-    "pydoctor>=24.11.2",
-    "pydoclint>=0.5.8",
-    "vulture>=2.13",
-]
-
-[tool.rye.scripts]
-check-types = "dmypy run --timeout 60 -- src tests"
-find-deadcode = "vulture src tests"
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/resonate"]
 
-
-[tool.ruff]
-unsafe-fixes = true
-
-[tool.ruff.lint]
-select = ["ALL"]
-ignore = [
-    "A001",
-    "A002",
-    "D",
-    "ANN101",
-    "COM812",
-    "ISC001",
-    "S101",
-    "ARG002",
-    "ARG003",
-]
-logger-objects = ["resonate.logging.logger"]
-
-[tool.ruff.lint.isort]
-combine-as-imports = true
-required-imports = ["from __future__ import annotations"]
-
-[tool.ruff.lint.per-file-ignores]
-"tests/*.py" = ["INP001", "S101", "D"]
-"scripts/*.py" = ["INP001"]
+[dependency-groups]
+dev = ["pyright[nodejs]>=1.1.394", "pytest>=8.3.4", "ruff>=0.9.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 xfail_strict = true
-addopts = [
-    "--import-mode=importlib",
-    "--strict-markers",
-]
+addopts = ["--import-mode=importlib", "--strict-markers"]
 markers = [
     "integration: mark integration tests.",
     "unit: mark unittest.",
@@ -91,20 +43,3 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(message)s (%(filename)s:%(lineno)s)"
 log_cli_date_format = "%Y-%m-%d %H:%M:%S"
-
-[tool.mypy]
-mypy_path = "src"
-plugins = []
-follow_imports = "normal"
-strict_optional = false
-warn_redundant_casts = true
-warn_unused_ignores = true
-disallow_any_generics = true
-check_untyped_defs = true
-warn_unused_configs = true
-disallow_subclassing_any = true
-disallow_incomplete_defs = true
-disallow_untyped_decorators = true
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-explicit_package_bases = true
