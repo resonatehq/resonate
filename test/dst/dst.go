@@ -21,11 +21,11 @@ import (
 )
 
 type DST struct {
-	config           *Config
-	generator        *Generator
-	validator        *Validator
-	bcValidator      *BcValidator
-	partitions       [][]porcupine.Operation // set by Partition in the porcupine model
+	config      *Config
+	generator   *Generator
+	validator   *Validator
+	bcValidator *BcValidator
+	partitions  [][]porcupine.Operation // set by Partition in the porcupine model
 }
 
 type Config struct {
@@ -83,10 +83,10 @@ type Backchannel struct {
 
 func New(r *rand.Rand, config *Config) *DST {
 	return &DST{
-		config:           config,
-		generator:        NewGenerator(r, config),
-		validator:        NewValidator(r, config),
-		bcValidator:      NewBcValidator(r, config),
+		config:      config,
+		generator:   NewGenerator(r, config),
+		validator:   NewValidator(r, config),
+		bcValidator: NewBcValidator(r, config),
 	}
 }
 
@@ -498,66 +498,74 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%s</td>
 						<td align="right">%s</td>
 						<td align="right">%d</td>
+						<td align="right">%d</td>
 					</tr>
-				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt)
+				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt, t.value.Timeout)
 				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<thead>
-							<tr>
-								<td><b>Promises</b></td>
-								<td><b>Tasks</b></td>
-								<td><b>Callbacks</b></td>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>state</b></td>
-												<td><b>ikeyCreate</b></td>
-												<td><b>ikeyComplete</b></td>
-												<td><b>timeout</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>state</b></td>
-												<td><b>rootPromiseId</b></td>
-												<td><b>expiresAt</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>promiseId</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-							</tr>
-						</tbody>
+					  <thead>
+					    <tr>
+					      <td><b>Promises</b></td>
+					      <td><b>Tasks</b></td>
+					    </tr>
+					  </thead>
+					  <tbody>
+					    <!-- First Row: Promises & Tasks -->
+					    <tr>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>ikeyCreate</b></td>
+					              <td><b>ikeyComplete</b></td>
+					              <td><b>timeout</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>rootPromiseId</b></td>
+					              <td><b>expiresAt</b></td>
+					              <td><b>timeout</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					    <!-- Second Row: Callbacks -->
+					    <tr>
+					      <td colspan="2" valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5" style="margin-top: 10px;">
+					          <thead>
+					            <tr>
+					              <td colspan="2"><b>Callbacks</b></td>
+					            </tr>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>promiseId</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					  </tbody>
 					</table>
 				`, promises, tasks, callbacks)
 			case len(*model.schedules) > 0:
