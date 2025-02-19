@@ -21,11 +21,11 @@ import (
 )
 
 type DST struct {
-	config           *Config
-	generator        *Generator
-	validator        *Validator
-	bcValidator      *BcValidator
-	partitions       [][]porcupine.Operation // set by Partition in the porcupine model
+	config      *Config
+	generator   *Generator
+	validator   *Validator
+	bcValidator *BcValidator
+	partitions  [][]porcupine.Operation // set by Partition in the porcupine model
 }
 
 type Config struct {
@@ -83,10 +83,10 @@ type Backchannel struct {
 
 func New(r *rand.Rand, config *Config) *DST {
 	return &DST{
-		config:           config,
-		generator:        NewGenerator(r, config),
-		validator:        NewValidator(r, config),
-		bcValidator:      NewBcValidator(r, config),
+		config:      config,
+		generator:   NewGenerator(r, config),
+		validator:   NewValidator(r, config),
+		bcValidator: NewBcValidator(r, config),
 	}
 }
 
@@ -318,7 +318,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	case porcupine.Illegal:
 		slog.Error("DST is non linearizable, run with -v flag for more information", "v", d.config.Verbose)
 		if d.config.Verbose {
-			d.logNonLinearizable(ops, history)
+			d.logPossibleError(history)
 		}
 	case porcupine.Unknown:
 		slog.Error("DST timed out before linearizability could be determined")
@@ -327,51 +327,69 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	return result == porcupine.Ok
 }
 
-func (d *DST) logNonLinearizable(ops []porcupine.Operation, history porcupine.LinearizationInfo) {
-	// // log the linearizations
-	// linearizations := history.PartialLinearizationsOperations()
-	// util.Assert(len(linearizations) == 4, "linearizations must be equal to the number of partitions")
+func (d *DST) logPossibleError(history porcupine.LinearizationInfo) {
+	// Whats is printed here and whats is visualized in the dst.html diagram might not match.
+	// this is a best effort to preserve the possible validation that failed.
+	fmt.Println("====== Possible errors ======")
 
-	// // check each parition individually
-	// // partitions are in order: promise, schedule, lock
-	// for i, p := range []Partition{Promise, Schedule, Lock} {
-	// 	util.Assert(len(linearizations[i]) > 0, "partition must have at least one linearization")
+	linearizationsPartitions := history.PartialLinearizationsOperations()
 
-	// 	// take the first linearization
-	// 	linearization := linearizations[i][0]
+	// check each parition individually
+	// partitions are in the order they were given to porcupine
+	for i, partiton := range d.partitions {
+		util.Assert(len(linearizationsPartitions[i]) > 0, "partition must have at least one linearization")
 
-	// 	// determine the next operation that breaks linearizability
-	// 	if next, ok := next(linearization, ops, p); ok {
-	// 		// add the next operation to the linearization, so that we can log
-	// 		// the non linearizable path
-	// 		linearization = append(linearization, next)
-	// 	} else {
-	// 		// if no op is found, we can assume the partition is linearizable
-	// 		continue
-	// 	}
+		// take the first (and we assumee, by empiric evidence, only linearization)
+		linearization := linearizationsPartitions[i][0]
 
-	// 	// re run and log operations
-	// 	d.log(linearization)
-	// }
+		// if the linearization includes all the operations in the partiton all good
+		if len(partiton) == len(linearization) {
+			continue
+		}
+
+		op := nextFailure(linearization, partiton)
+		d.logError(linearization, op)
+	}
 }
 
-func (d *DST) log(ops []porcupine.Operation) {
+func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcupine.Operation) {
 	// create a new model
 	model := NewModel()
 
 	// re feed operations through model
-	for i, op := range ops {
+	for _, op := range partialLinearization {
 		req := op.Input.(*Req)
 		res := op.Output.(*Res)
 
 		var err error
 
 		// step through the model (again)
-		model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
-		slog.Info("DST", "t", fmt.Sprintf("%d|%d", req.time, res.time), "id", req.req.Tags["id"], "req", req.req, "res", res.res, "err", err)
-
-		util.Assert(i != len(ops)-1 || err != nil, "the last operation must result in an error")
+		if req.kind == Op {
+			model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		} else {
+			model, err = d.BcStep(model, req.time, res.time, req)
+		}
+		util.Assert(err == nil, "Only the last operation must result in error")
 	}
+
+	req := lastOp.Input.(*Req)
+	res := lastOp.Output.(*Res)
+	var err error
+	if req.kind == Op {
+		model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Tags["id"], req.time, res.time, req.req, res.res)
+	} else {
+		model, err = d.BcStep(model, req.time, res.time, req)
+		var obj any
+		if req.bc.Task != nil {
+			obj = req.bc.Task
+		} else if req.bc.Promise != nil {
+			obj = req.bc.Promise
+		}
+		fmt.Printf("Op(id=backchannel, t=%d|%d), %v\n", req.time, res.time, obj)
+	}
+
+	fmt.Printf("err=%v\n\n", err)
 }
 
 func (d *DST) Model() porcupine.Model {
@@ -469,6 +487,12 @@ func (d *DST) Model() porcupine.Model {
 			case len(*model.promises) > 0 || len(*model.callbacks) > 0 || len(*model.tasks) > 0:
 				var promises string
 				for _, p := range *model.promises {
+					var completedOn string
+					if p.value.CompletedOn == nil {
+						completedOn = "--"
+					} else {
+						completedOn = fmt.Sprintf("%d", *p.value.CompletedOn)
+					}
 					promises = promises + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
@@ -476,8 +500,9 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%s</td>
 						<td align="right">%s</td>
 						<td align="right">%d</td>
+						<td align="right">%s</td>
 					</tr>
-				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout)
+				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout, completedOn)
 				}
 
 				var callbacks string
@@ -498,66 +523,77 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%s</td>
 						<td align="right">%s</td>
 						<td align="right">%d</td>
+						<td align="right">%d</td>
+						<td align="right">%d</td>
 					</tr>
-				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt)
+				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt, t.value.Timeout, *t.value.CreatedOn)
 				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<thead>
-							<tr>
-								<td><b>Promises</b></td>
-								<td><b>Tasks</b></td>
-								<td><b>Callbacks</b></td>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>state</b></td>
-												<td><b>ikeyCreate</b></td>
-												<td><b>ikeyComplete</b></td>
-												<td><b>timeout</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>state</b></td>
-												<td><b>rootPromiseId</b></td>
-												<td><b>expiresAt</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>promiseId</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-							</tr>
-						</tbody>
+					  <thead>
+					    <tr>
+					      <td><b>Promises</b></td>
+					      <td><b>Tasks</b></td>
+					    </tr>
+					  </thead>
+					  <tbody>
+					    <!-- First Row: Promises & Tasks -->
+					    <tr>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>ikeyCreate</b></td>
+					              <td><b>ikeyComplete</b></td>
+					              <td><b>timeout</b></td>
+					              <td><b>completedOn</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>rootPromiseId</b></td>
+					              <td><b>expiresAt</b></td>
+					              <td><b>timeout</b></td>
+					              <td><b>createdOn</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					    <!-- Second Row: Callbacks -->
+					    <tr>
+					      <td colspan="2" valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5" style="margin-top: 10px;">
+					          <thead>
+					            <tr>
+					              <td colspan="2"><b>Callbacks</b></td>
+					            </tr>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>promiseId</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					  </tbody>
 					</table>
 				`, promises, tasks, callbacks)
 			case len(*model.schedules) > 0:
@@ -719,9 +755,9 @@ func partition(req *Req) string {
 	}
 }
 
-// Find the first Operation that is not part of a partial linearization
+// Find the first Operation if any that is not part of a partial linearization
 // by comparing our partition with the linearization
-func next(linearizationOps []porcupine.Operation, partitionOps []porcupine.Operation) (porcupine.Operation, bool) {
+func nextFailure(linearizationOps []porcupine.Operation, partitionOps []porcupine.Operation) porcupine.Operation {
 	// convert to map for quick lookup
 	linearizableMap := map[*Req]bool{}
 	for _, op := range linearizationOps {
@@ -738,8 +774,9 @@ func next(linearizationOps []porcupine.Operation, partitionOps []porcupine.Opera
 
 		// ops are ordered by time, so the first op is not part of the
 		// linearizable path should break the model
-		return op, true
+		return op
 	}
 
-	return porcupine.Operation{}, false
+	util.Assert(false, "There must be an operation not included in the linearization")
+	return porcupine.Operation{}
 }

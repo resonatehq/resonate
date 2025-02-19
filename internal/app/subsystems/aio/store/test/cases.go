@@ -3902,7 +3902,7 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "CompleteTasks_ClaimedTaskNotCompleted",
+		name: "CompleteTasks_ClaimedTaskCompleted",
 		commands: []*t_aio.Command{
 			{
 				Kind: t_aio.CreatePromise,
@@ -3997,7 +3997,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CompleteTasks,
 				CompleteTasks: &t_aio.AlterTasksResult{
-					RowsAffected: 0, // No tasks should be completed
+					RowsAffected: 1,
 				},
 			},
 			{
@@ -4008,7 +4008,7 @@ var TestCases = []*testCase{
 						{
 							Id:            "1",
 							ProcessId:     util.ToPointer("pid"),
-							State:         task.Claimed, // Task should remain in Claimed state
+							State:         task.Completed, // Task should remain in Claimed state
 							RootPromiseId: "root",
 							Recv:          []byte("foo"),
 							Mesg:          []byte(`{"type":"resume","root":"root","leaf":"foo"}`),
@@ -4017,6 +4017,7 @@ var TestCases = []*testCase{
 							Ttl:           1,
 							ExpiresAt:     1,
 							CreatedOn:     util.ToPointer[int64](0),
+							CompletedOn:   util.ToPointer[int64](5),
 						},
 					},
 				},

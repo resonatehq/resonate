@@ -734,12 +734,13 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 func completeRelatedTasks(model *Model, promiseId string, reqTime int64) {
 	new_tasks := []task.Task{}
 	for _, t := range *model.tasks {
-		// In the server we do not complete Claimed tasks when completing a promise.
-		//
-		if t.value.RootPromiseId == promiseId &&
-			(t.value.State != task.Claimed || t.value.ExpiresAt < reqTime) {
+		if t.value.State.In(task.Completed | task.Timedout) {
+			continue
+		}
+		if t.value.RootPromiseId == promiseId {
 			new_t := *t.value // Make a copy to avoid modifing the model
 			new_t.State = task.Completed
+			new_t.CompletedOn = &reqTime
 			new_tasks = append(new_tasks, new_t)
 		}
 	}

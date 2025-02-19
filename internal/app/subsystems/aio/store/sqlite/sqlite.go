@@ -349,7 +349,7 @@ const (
 	SET
 		state = 8, completed_on = ? -- State 8 -> Completed
 	WHERE
-		root_promise_id = ? AND state in (1, 2) -- State in (Init, Enqueued)`
+		root_promise_id = ? AND state in (1, 2, 4) -- State in (Init, Enqueued, Claimed)`
 
 	TASK_HEARTBEAT_STATEMENT = `
 	UPDATE

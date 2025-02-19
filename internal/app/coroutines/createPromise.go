@@ -120,17 +120,18 @@ func createPromiseAndTask(
 			util.Assert(completion.Store.Results[1].Kind == t_aio.CreateTask, "completion must be create task")
 
 			t = &task.Task{
-				Id:        completion.Store.Results[1].CreateTask.LastInsertId,
-				ProcessId: taskCmd.ProcessId,
-				State:     taskCmd.State,
-				Recv:      taskCmd.Recv,
-				Mesg:      taskCmd.Mesg,
-				Timeout:   taskCmd.Timeout,
-				Counter:   1,
-				Attempt:   0,
-				Ttl:       taskCmd.Ttl,
-				ExpiresAt: taskCmd.ExpiresAt,
-				CreatedOn: &taskCmd.CreatedOn,
+				Id:            completion.Store.Results[1].CreateTask.LastInsertId,
+				ProcessId:     taskCmd.ProcessId,
+				RootPromiseId: p.Id,
+				State:         taskCmd.State,
+				Recv:          taskCmd.Recv,
+				Mesg:          taskCmd.Mesg,
+				Timeout:       taskCmd.Timeout,
+				Counter:       1,
+				Attempt:       0,
+				Ttl:           taskCmd.Ttl,
+				ExpiresAt:     taskCmd.ExpiresAt,
+				CreatedOn:     &taskCmd.CreatedOn,
 			}
 		}
 	} else {
