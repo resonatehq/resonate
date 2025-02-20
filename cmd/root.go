@@ -25,7 +25,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
 	Short:   "Resonate: distributed async await",
-	Version: "0.7.2", // This needs to be bumped when new versions are released.
+	Version: "0.7.6", // This needs to be bumped when new versions are released.
 }
 
 func init() {
