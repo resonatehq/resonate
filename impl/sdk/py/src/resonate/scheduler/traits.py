@@ -30,4 +30,15 @@ class IScheduler(ABC):
     ) -> Handle[T]: ...
 
     @abstractmethod
+    def trigger(
+        self,
+        id: str,
+        target: str,
+        func: DurableCoro[P, T] | DurableFn[P, T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]: ...
+
+    @abstractmethod
     def get(self, id: str) -> Handle[Any]: ...

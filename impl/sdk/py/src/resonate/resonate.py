@@ -223,6 +223,52 @@ class Resonate:
             func = func.fn
         return self._scheduler.run(id, func, *args, **kwargs)
 
+    @overload
+    def trigger(
+        self,
+        id: str,
+        target: str,
+        func: RegisteredFn[P, T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]: ...
+    @overload
+    def trigger(
+        self,
+        id: str,
+        target: str,
+        func: Callable[
+            Concatenate[Context, P],
+            Generator[Yieldable, Any, T],
+        ]
+        | Callable[Concatenate[Context, P], T]
+        | Callable[Concatenate[Context, P], Coroutine[Any, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]: ...
+    def trigger(
+        self,
+        id: str,
+        target: str,
+        func: RegisteredFn[P, T]
+        | Callable[
+            Concatenate[Context, P],
+            Generator[Yieldable, Any, T],
+        ]
+        | Callable[Concatenate[Context, P], T]
+        | Callable[Concatenate[Context, P], Coroutine[Any, Any, T]],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]:
+        if isinstance(func, tuple):
+            raise NotImplementedError
+        if isinstance(func, RegisteredFn):
+            func = func.fn
+        return self._scheduler.trigger(id, target, func, *args, **kwargs)
+
     @property
     def promises(self) -> IPromiseStore:
         return self._store.promises

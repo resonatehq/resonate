@@ -38,6 +38,7 @@ from resonate.delay_queue import DelayQueue
 from resonate.encoders import JsonEncoder
 from resonate.handle import Handle
 from resonate.logging import logger
+from resonate.options import Options
 from resonate.processor.processor import Processor
 from resonate.promise import Promise
 from resonate.record import Record
@@ -127,6 +128,47 @@ class Scheduler(IScheduler):
         # If there's already a record with this ID, dedup.
         handle = Handle[T](id)
         self._cmd_queue.put(ForkOrJoin(id, handle, Invocation(func, *args, **kwargs)))
+        return handle
+
+    def trigger(
+        self,
+        id: str,
+        target: str,
+        func: DurableCoro[P, T] | DurableFn[P, T],
+        /,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[T]:
+        assert isinstance(self._store, RemoteStore)
+        # If there's already a record with this ID, dedup.
+        handle = Handle[T](id)
+        data, headers, tags, timeout = self._get_info_from_rfi(
+            RFI(Invocation(func, *args, **kwargs), Options(id=id, send_to=target))
+        )
+
+        promise = self._store.promises.create(
+            id=id,
+            ikey=utils.string_to_uuid(id),
+            strict=False,
+            headers=headers,
+            data=data,
+            timeout=timeout or sys.maxsize,
+            tags=tags,
+        )
+        if promise.is_completed():
+            handle.set_result(promise.get_value(self._encoder))
+            return handle
+        promise, callback = self._store.subscriptions.create(
+            id=f"{self._pid}.{id}",
+            promise_id=id,
+            timeout=sys.maxsize,
+            recv=self._recv,
+        )
+        if promise.is_completed():
+            handle.set_result(promise.get_value(self._encoder))
+            self._cmd_queue.put(Notify(id, promise.get_value(self._encoder)))
+            return handle
+        self._cmd_queue.put(Subscribe(id, handle))
         return handle
 
     @utils.exit_on_exception

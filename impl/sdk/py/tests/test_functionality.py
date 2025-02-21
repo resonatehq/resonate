@@ -826,3 +826,43 @@ def test_golden_device_detached_with_registered() -> None:
     assert isinstance(p, Handle)
     assert p.result() == "hi"
     resonate.stop()
+
+
+@pytest.mark.skipif(
+    os.getenv("RESONATE_STORE_URL") is None, reason="env variable is not set"
+)
+def test_golden_device_rfi_trigger() -> None:
+    group = "test-golden-device-rfi-trigger"
+    other_group = f"{group}-other"
+
+    def foo_golden_device_rfi(ctx: Context, n: str) -> Generator[Yieldable, Any, str]:
+        p: Promise[str] = yield ctx.rfi("bar_golden_device_rfi", n).options(
+            id="bar", send_to=poll(other_group)
+        )
+        assert isinstance(p, Promise)
+        v: str = yield p
+        assert isinstance(v, str)
+        return v
+
+    def bar_golden_device_rfi(ctx: Context, n: str) -> str:  # noqa: ARG001
+        return n
+
+    resonate = Resonate(
+        store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
+        task_source=Poller("http://localhost:8002", group=group),
+    )
+    other_resonate = Resonate(
+        store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
+        task_source=Poller("http://localhost:8002", group=other_group),
+    )
+    resonate.register(foo_golden_device_rfi)
+    other_resonate.register(foo_golden_device_rfi)
+    other_resonate.register(bar_golden_device_rfi)
+
+    p: Handle[str] = resonate.trigger(
+        f"{group}-foo", poll(other_group), foo_golden_device_rfi, "hi"
+    )
+    assert isinstance(p, Handle)
+    assert p.result() == "hi"
+    resonate.stop()
+    other_resonate.stop()
