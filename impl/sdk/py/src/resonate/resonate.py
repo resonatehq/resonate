@@ -96,7 +96,7 @@ class Resonate:
         """
         self._scheduler.stop()
 
-    def set_dependency(self, key: str, obj: Any) -> None:  # noqa: ANN401
+    def set_dependency(self, key: str, obj: Any) -> None:
         """
         Sets a dependency to be used by the Application Node.
 
@@ -228,6 +228,16 @@ class Resonate:
         self,
         id: str,
         target: str,
+        func: str,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Handle[Any]: ...
+    @overload
+    def trigger(
+        self,
+        id: str,
+        target: str,
         func: RegisteredFn[P, T],
         /,
         *args: P.args,
@@ -258,7 +268,8 @@ class Resonate:
             Generator[Yieldable, Any, T],
         ]
         | Callable[Concatenate[Context, P], T]
-        | Callable[Concatenate[Context, P], Coroutine[Any, Any, T]],
+        | Callable[Concatenate[Context, P], Coroutine[Any, Any, T]]
+        | str,
         /,
         *args: P.args,
         **kwargs: P.kwargs,

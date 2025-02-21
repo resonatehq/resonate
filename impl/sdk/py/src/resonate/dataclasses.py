@@ -142,8 +142,8 @@ class Invocation(Generic[T]):
         self,
         fn: str,
         /,
-        *args: Any,  # noqa: ANN401
-        **kwargs: Any,  # noqa: ANN401
+        *args: Any,
+        **kwargs: Any,
     ) -> None: ...
     @overload
     def __init__(

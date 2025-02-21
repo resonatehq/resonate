@@ -23,7 +23,7 @@ def string_to_uuid(string: str) -> str:
 
 def exit_on_exception(func: F) -> F:
     @wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
             return func(*args, **kwargs)
         except Exception:

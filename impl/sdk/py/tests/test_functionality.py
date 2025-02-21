@@ -855,12 +855,11 @@ def test_golden_device_rfi_trigger() -> None:
         store=RemoteStore(url=os.environ["RESONATE_STORE_URL"]),
         task_source=Poller("http://localhost:8002", group=other_group),
     )
-    resonate.register(foo_golden_device_rfi)
     other_resonate.register(foo_golden_device_rfi)
     other_resonate.register(bar_golden_device_rfi)
 
     p: Handle[str] = resonate.trigger(
-        f"{group}-foo", poll(other_group), foo_golden_device_rfi, "hi"
+        f"{group}-foo", poll(other_group), "foo_golden_device_rfi", "hi"
     )
     assert isinstance(p, Handle)
     assert p.result() == "hi"

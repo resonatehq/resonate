@@ -33,7 +33,7 @@ class Context:
     ) -> None:
         self._deps = deps
 
-    def get_dependency(self, key: str) -> Any:  # noqa: ANN401
+    def get_dependency(self, key: str) -> Any:
         return self._deps.get(key)
 
     def sleep(self, secs: int) -> RFC:
@@ -59,7 +59,7 @@ class Context:
         **kwargs: P.kwargs,
     ) -> RFC: ...
     @overload
-    def rfc(self, func: str, /, *args: Any, **kwargs: Any) -> RFC: ...  # noqa: ANN401
+    def rfc(self, func: str, /, *args: Any, **kwargs: Any) -> RFC: ...
     @overload
     def rfc(
         self,
@@ -109,7 +109,7 @@ class Context:
         **kwargs: P.kwargs,
     ) -> RFI: ...
     @overload
-    def rfi(self, func: str, /, *args: Any, **kwargs: Any) -> RFI: ...  # noqa: ANN401
+    def rfi(self, func: str, /, *args: Any, **kwargs: Any) -> RFI: ...
     @overload
     def rfi(
         self,

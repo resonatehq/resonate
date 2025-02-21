@@ -34,7 +34,7 @@ class IScheduler(ABC):
         self,
         id: str,
         target: str,
-        func: DurableCoro[P, T] | DurableFn[P, T],
+        func: DurableCoro[P, T] | DurableFn[P, T] | str,
         /,
         *args: P.args,
         **kwargs: P.kwargs,

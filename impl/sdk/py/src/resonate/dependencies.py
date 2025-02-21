@@ -9,11 +9,11 @@ from typing import Any, final
 class Dependencies:
     deps: dict[str, Any] = field(default_factory=dict)
 
-    def set(self, key: str, obj: Any) -> None:  # noqa: ANN401
+    def set(self, key: str, obj: Any) -> None:
         assert not self._exists(key), f"There's already a dependency under name `{key}`"
         self.deps[key] = obj
 
-    def get(self, key: str) -> Any:  # noqa: ANN401
+    def get(self, key: str) -> Any:
         return self.deps[key]
 
     def _exists(self, key: str) -> bool:

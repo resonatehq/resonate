@@ -16,7 +16,7 @@ def test_base64_encoder(data: str) -> None:
 
 
 @pytest.mark.parametrize("data", [1, {"value": 3}, {"number": "1", "text": 312}])
-def test_json_encoder(data: Any) -> None:  # noqa: ANN401
+def test_json_encoder(data: Any) -> None:
     encoder = JsonEncoder()
     encoded = encoder.encode(data=data)
     assert data == encoder.decode(encoded)

@@ -29,7 +29,7 @@ class Base64Encoder(IEncoder[str, str]):
         return base64.b64decode(data).decode()
 
 
-def _object_hook(data: dict[str, Any]) -> Any:  # noqa: ANN401
+def _object_hook(data: dict[str, Any]) -> Any:
     if "__type" in data:
         error_cls = _import_class_from_qualified_name(data["__type"])
         return error_cls(**data["attributes"])
@@ -39,7 +39,7 @@ def _object_hook(data: dict[str, Any]) -> Any:  # noqa: ANN401
 
 @final
 class JsonEncoder(IEncoder[Any, str]):
-    def encode(self, data: Any) -> str:  # noqa: ANN401
+    def encode(self, data: Any) -> str:
         if isinstance(data, Exception):
             data = {
                 "__type": _classname(data),
@@ -47,7 +47,7 @@ class JsonEncoder(IEncoder[Any, str]):
             }
         return json.dumps(data)
 
-    def decode(self, data: str) -> Any:  # noqa: ANN401
+    def decode(self, data: str) -> Any:
         return json.loads(data, object_hook=_object_hook)
 
 
@@ -60,7 +60,7 @@ def _classname(obj: object) -> str:
     return name
 
 
-def _import_class_from_qualified_name(qualified_name: str) -> Any:  # noqa: ANN401
+def _import_class_from_qualified_name(qualified_name: str) -> Any:
     module_name, class_name = qualified_name.rsplit(".", 1)
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
