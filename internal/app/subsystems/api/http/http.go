@@ -129,7 +129,7 @@ type server struct {
 }
 
 func (s *server) code(status t_api.StatusCode) int {
-	return int(status) / 10
+	return int(status) / 100
 }
 
 func (s *server) log(c *gin.Context) {

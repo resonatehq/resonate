@@ -9,38 +9,38 @@ type StatusCode int
 
 const (
 	// Application level status (2000-4999)
-	StatusOK        StatusCode = 2000
-	StatusCreated   StatusCode = 2010
-	StatusNoContent StatusCode = 2040
+	StatusOK        StatusCode = 20000
+	StatusCreated   StatusCode = 20100
+	StatusNoContent StatusCode = 20400
 
-	StatusFieldValidationError   StatusCode = 4000
-	StatusPromiseAlreadyResolved StatusCode = 4030
-	StatusPromiseAlreadyRejected StatusCode = 4031
-	StatusPromiseAlreadyCanceled StatusCode = 4032
-	StatusPromiseAlreadyTimedout StatusCode = 4033
-	StatusLockAlreadyAcquired    StatusCode = 4034
-	StatusTaskAlreadyClaimed     StatusCode = 4035
-	StatusTaskAlreadyCompleted   StatusCode = 4036
-	StatusTaskInvalidCounter     StatusCode = 4037
-	StatusTaskInvalidState       StatusCode = 4038
-	StatusPromiseNotFound        StatusCode = 4040
-	StatusScheduleNotFound       StatusCode = 4041
-	StatusLockNotFound           StatusCode = 4042
-	StatusTaskNotFound           StatusCode = 4043
-	StatusPromiseRecvNotFound    StatusCode = 4044
-	StatusPromiseAlreadyExists   StatusCode = 4090
-	StatusScheduleAlreadyExists  StatusCode = 4091
+	StatusFieldValidationError   StatusCode = 40000
+	StatusPromiseAlreadyResolved StatusCode = 40300
+	StatusPromiseAlreadyRejected StatusCode = 40301
+	StatusPromiseAlreadyCanceled StatusCode = 40302
+	StatusPromiseAlreadyTimedout StatusCode = 40303
+	StatusLockAlreadyAcquired    StatusCode = 40304
+	StatusTaskAlreadyClaimed     StatusCode = 40305
+	StatusTaskAlreadyCompleted   StatusCode = 40306
+	StatusTaskInvalidCounter     StatusCode = 40307
+	StatusTaskInvalidState       StatusCode = 40308
+	StatusPromiseNotFound        StatusCode = 40400
+	StatusScheduleNotFound       StatusCode = 40401
+	StatusLockNotFound           StatusCode = 40402
+	StatusTaskNotFound           StatusCode = 40403
+	StatusPromiseRecvNotFound    StatusCode = 40404
+	StatusPromiseAlreadyExists   StatusCode = 40900
+	StatusScheduleAlreadyExists  StatusCode = 40901
 
-	// Platform level status (5000-5999)
-	StatusInternalServerError    StatusCode = 5000
-	StatusAIOEchoError           StatusCode = 5001
-	StatusAIOMatchError          StatusCode = 5002
-	StatusAIOQueueError          StatusCode = 5003
-	StatusAIOStoreError          StatusCode = 5004
-	StatusSystemShuttingDown     StatusCode = 5030
-	StatusAPISubmissionQueueFull StatusCode = 5031
-	StatusAIOSubmissionQueueFull StatusCode = 5032
-	StatusSchedulerQueueFull     StatusCode = 5033
+	// Platform level status (50000-59909)
+	StatusInternalServerError    StatusCode = 50000
+	StatusAIOEchoError           StatusCode = 50001
+	StatusAIOMatchError          StatusCode = 50002
+	StatusAIOQueueError          StatusCode = 50003
+	StatusAIOStoreError          StatusCode = 50004
+	StatusSystemShuttingDown     StatusCode = 50300
+	StatusAPISubmissionQueueFull StatusCode = 50301
+	StatusAIOSubmissionQueueFull StatusCode = 50302
+	StatusSchedulerQueueFull     StatusCode = 50303
 )
 
 // String returns the string representation of the status code.
@@ -102,5 +102,5 @@ func (s StatusCode) String() string {
 }
 
 func (s StatusCode) IsSuccessful() bool {
-	return s >= 2000 && s < 3000
+	return s >= 20000 && s < 30000
 }
