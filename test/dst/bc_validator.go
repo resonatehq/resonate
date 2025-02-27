@@ -78,9 +78,9 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 		completedOn := reqT.CompletedOn
 		if p != nil &&
 			p.State != promise.Pending {
-			if reqT.Mesg.Type == message.Invoke && *p.CompletedOn < *reqT.CreatedOn {
+			if reqT.Mesg.Type == message.Invoke && *p.CompletedOn <= *reqT.CreatedOn {
 				return model, fmt.Errorf("Invocation for a promise that is alredy completed.")
-			} else if *p.CompletedOn >= *reqT.CreatedOn {
+			} else if *p.CompletedOn > *reqT.CreatedOn {
 				state = task.Completed
 				completedOn = util.ToPointer[int64](*p.CompletedOn)
 			}

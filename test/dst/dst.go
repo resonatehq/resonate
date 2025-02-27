@@ -187,44 +187,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Input:    &Req{Op, reqTime, req, nil},
 						Output:   &Res{Op, resTime, res, err},
 					})
-
-					// Warning:
-					// A CreatePromiseAndTask request applies to two partitions, the
-					// promise partition and the task partition. Merging the
-					// partitions results in long checking time, so as a workaround
-					// we create an independent CreatePromise request. The mapping
-					// of requests to partitions is as follows:
-					// CreatePromise        -> p partition
-					// CreatePromiseAndTask -> t partition
-					if req.Kind == t_api.CreatePromiseAndTask {
-						j++
-
-						req = &t_api.Request{
-							Kind:          t_api.CreatePromise,
-							Tags:          req.Tags,
-							CreatePromise: req.CreatePromiseAndTask.Promise,
-						}
-
-						if res != nil {
-							res = &t_api.Response{
-								Kind: t_api.CreatePromise,
-								Tags: res.Tags,
-								CreatePromise: &t_api.CreatePromiseResponse{
-									Status:  res.CreatePromiseAndTask.Status,
-									Promise: res.CreatePromiseAndTask.Promise,
-								},
-							}
-						}
-
-						ops = append(ops, porcupine.Operation{
-							ClientId: int(j % d.config.MaxReqsPerTick),
-							Call:     reqTime,
-							Return:   resTime,
-							Input:    &Req{Op, reqTime, req, nil},
-							Output:   &Res{Op, resTime, res, err},
-						})
-					}
-
 					j++
 				},
 			})
