@@ -128,12 +128,6 @@ func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime i
 }
 
 func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	// Do NOT validate the create promise, as a workaround we create a
-	// "duplicate" CreatePromise request and map the requests as
-	// follows:
-	// CreatePromise        -> p partition
-	// CreatePromiseAndTask -> t partition
-
 	switch res.CreatePromiseAndTask.Status {
 	case t_api.StatusCreated:
 		if model.tasks.get(res.CreatePromiseAndTask.Task.Id) != nil {
@@ -144,7 +138,12 @@ func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, re
 		model.tasks.set(res.CreatePromiseAndTask.Task.Id, res.CreatePromiseAndTask.Task)
 	}
 
-	return model, nil
+	promiseRes := &t_api.CreatePromiseResponse{
+		Status:  res.CreatePromiseAndTask.Status,
+		Promise: res.CreatePromiseAndTask.Promise,
+	}
+
+	return v.validateCreatePromise(model, reqTime, resTime, req.CreatePromiseAndTask.Promise, promiseRes)
 }
 
 func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.CreatePromiseRequest, res *t_api.CreatePromiseResponse) (*Model, error) {
