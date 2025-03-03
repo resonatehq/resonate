@@ -365,6 +365,7 @@ type ReadEnqueueableTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
+	Id        string
 	Recv      []byte
 	Mesg      *message.Mesg
 	Timeout   int64
@@ -412,7 +413,6 @@ type QueryTasksResult struct {
 
 type AlterTasksResult struct {
 	RowsAffected int64
-	LastInsertId string
 }
 
 // Lock commands

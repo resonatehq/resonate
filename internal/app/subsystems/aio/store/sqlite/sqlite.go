@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -88,7 +87,8 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id              INTEGER PRIMARY KEY AUTOINCREMENT,
+		id              TEXT UNIQUE,
+		sort_id         INTEGER PRIMARY KEY AUTOINCREMENT,
 		process_id      TEXT,
 		state           INTEGER DEFAULT 1,
 		root_promise_id TEXT,
@@ -286,7 +286,7 @@ const (
 	FROM tasks
 	WHERE
 		state & ? != 0 AND (expires_at <= ? OR timeout <= ?)
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT ?`
 
 	TASK_SELECT_ENQUEUEABLE_STATEMENT = `
@@ -314,20 +314,21 @@ const (
 		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
 	GROUP BY root_promise_id
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT ?`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
+		(id, recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		(?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO NOTHING`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, root_promise_id, created_on)
+		(id, recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, root_promise_id, ?
+		id, recv, mesg, timeout, root_promise_id, ?
 	FROM
 		callbacks
 	WHERE
@@ -1586,7 +1587,7 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 		return nil, store.StoreErr(err)
 	}
 
-	res, err := stmt.Exec(cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	res, err := stmt.Exec(cmd.Id, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
@@ -1596,21 +1597,10 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 		return nil, store.StoreErr(err)
 	}
 
-	lastInsertId, err := res.LastInsertId()
-	if err != nil {
-		return nil, store.StoreErr(err)
-	}
-
-	var lastInsertIdStr string
-	if rowsAffected != 0 {
-		lastInsertIdStr = strconv.FormatInt(lastInsertId, 10)
-	}
-
 	return &t_aio.Result{
 		Kind: t_aio.CreateTask,
 		CreateTask: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertIdStr,
 		},
 	}, nil
 }

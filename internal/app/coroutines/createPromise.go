@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -24,6 +25,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	util.Assert(r.CreatePromiseAndTask.Promise.Timeout == r.CreatePromiseAndTask.Task.Timeout, "timeouts must match")
 
 	return createPromiseAndTask(c, r, r.CreatePromiseAndTask.Promise, &t_aio.CreateTaskCommand{
+		Id:        invokeTaskId(r.CreatePromiseAndTask.Task.PromiseId),
 		Recv:      nil,
 		Mesg:      &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
 		Timeout:   r.CreatePromiseAndTask.Task.Timeout,
@@ -120,7 +122,7 @@ func createPromiseAndTask(
 			util.Assert(completion.Store.Results[1].Kind == t_aio.CreateTask, "completion must be create task")
 
 			t = &task.Task{
-				Id:            completion.Store.Results[1].CreateTask.LastInsertId,
+				Id:            taskCmd.Id,
 				ProcessId:     taskCmd.ProcessId,
 				RootPromiseId: p.Id,
 				State:         taskCmd.State,
@@ -245,6 +247,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 				taskCmd.Recv = completion.Router.Recv
 			} else {
 				taskCmd = &t_aio.CreateTaskCommand{
+					Id:        invokeTaskId(promiseCmd.Id),
 					Recv:      completion.Router.Recv,
 					Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 					Timeout:   promiseCmd.Timeout,
@@ -286,4 +289,8 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 
 		return completion, nil
 	}
+}
+
+func invokeTaskId(promiseId string) string {
+	return fmt.Sprintf("__invoke:%s", promiseId)
 }

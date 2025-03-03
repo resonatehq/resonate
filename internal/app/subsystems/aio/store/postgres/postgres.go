@@ -91,7 +91,8 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id              SERIAL PRIMARY KEY,
+		id              TEXT,
+		sort_id         SERIAL,
 		process_id      TEXT,
 		state           INTEGER DEFAULT 1,
 		root_promise_id TEXT,
@@ -103,7 +104,8 @@ const (
 		ttl             INTEGER DEFAULT 0,
 		expires_at      BIGINT DEFAULT 0,
 		created_on      BIGINT,
-		completed_on    BIGINT
+		completed_on    BIGINT,
+		PRIMARY KEY(id)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
@@ -297,7 +299,7 @@ const (
 	FROM tasks
 	WHERE
 		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT $3`
 
 	TASK_SELECT_ENQUEUEABLE_STATEMENT = `
@@ -324,21 +326,21 @@ const (
 		WHERE t2.root_promise_id = t1.root_promise_id
 		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT $1`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
+		(id, recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	RETURNING id`
+		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	ON CONFLICT(id) DO NOTHING`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, root_promise_id, created_on)
+		(id, recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, root_promise_id, $1
+		id, recv, mesg, timeout, root_promise_id, $1
 	FROM
 		callbacks
 	WHERE
@@ -1597,7 +1599,7 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 
 	var lastInsertId string
 	rowsAffected := int64(1)
-	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Id, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
 
 	if err := row.Scan(&lastInsertId); err != nil {
 		if err == sql.ErrNoRows {
@@ -1611,7 +1613,6 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 		Kind: t_aio.CreateTask,
 		CreateTask: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
 		},
 	}, nil
 }
