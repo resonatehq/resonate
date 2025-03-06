@@ -681,7 +681,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		model = model.Copy()
 		model.tasks.set(req.CompleteTask.Id, res.CompleteTask.Task)
 		return model, nil
-	case t_api.StatusTaskAlreadyCompleted:
+	case t_api.StatusOK:
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
@@ -700,7 +700,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 					IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
 					Tags:                      p.Tags,
 					CreatedOn:                 p.CreatedOn,
-					CompletedOn:               &reqTime,
+					CompletedOn:               util.ToPointer(p.Timeout),
 					SortId:                    p.SortId,
 				}
 				model.promises.set(p.Id, &newP)
