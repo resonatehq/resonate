@@ -82,7 +82,7 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 				return model, fmt.Errorf("Invocation for a promise that is alredy completed.")
 			} else if *p.CompletedOn > *reqT.CreatedOn {
 				state = task.Completed
-				completedOn = util.ToPointer[int64](*p.CompletedOn)
+				completedOn = util.ToPointer(*p.CompletedOn)
 			}
 		}
 

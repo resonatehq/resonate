@@ -33,6 +33,7 @@ type Config struct {
 	Timeout            time.Duration
 	VisualizationPath  string
 	Verbose            bool
+	PrintOps           bool
 	TimeElapsedPerTick int64
 	TimeoutTicks       int64
 	ReqsPerTick        func() int
@@ -156,8 +157,10 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						resTime = resTime - 1 // subtract 1 to ensure tick timeframes don't overlap
 					}
 
-					// log
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
+					if d.config.PrintOps {
+						// log
+						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
+					}
 
 					// extract cursors for subsequent requests
 					if err == nil {

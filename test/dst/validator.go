@@ -323,11 +323,12 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		if resTime >= p.Timeout {
 			model = model.Copy()
 			model.promises.set(p.Id, res.CreateCallback.Promise)
+			completeRelatedTasks(model, p.Id, reqTime)
 			return model, nil
 		}
 
 		// otherwise verify the callback was created previously
-		callbackId := fmt.Sprintf("%s.%s", p.Id, req.CreateCallback.Id)
+		callbackId := fmt.Sprintf("__resume:%s:%s", req.CreateCallback.RootPromiseId, req.CreateCallback.PromiseId)
 		if model.callbacks.get(callbackId) == nil {
 			return model, fmt.Errorf("callback '%s' must exist", callbackId)
 		}
@@ -388,7 +389,7 @@ func (v *Validator) ValidateCreateSubscription(model *Model, reqTime int64, resT
 		}
 
 		// otherwise verify the subscription was created previously
-		subscriptionId := fmt.Sprintf("%s.%s", p.Id, req.CreateSubscription.Id)
+		subscriptionId := fmt.Sprintf("__notify:%s:%s", p.Id, req.CreateSubscription.Id)
 		if model.callbacks.get(subscriptionId) == nil {
 			return model, fmt.Errorf("subscription '%s' must exist", subscriptionId)
 		}
@@ -619,7 +620,29 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 			return model, fmt.Errorf("task '%s' does not exist", req.ClaimTask.Id)
 		}
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			return model, fmt.Errorf("task '%s' not completed", req.ClaimTask.Id)
+			// This could happen if the promise timetout
+			p := model.promises.get(t.RootPromiseId)
+
+			if !promise.GetTimedoutState(p).In(promise.Pending) && resTime >= p.Timeout {
+				model = model.Copy()
+				newP := promise.Promise{
+					Id:                        p.Id,
+					State:                     promise.GetTimedoutState(p),
+					Param:                     p.Param,
+					Value:                     p.Value,
+					Timeout:                   p.Timeout,
+					IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+					IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
+					Tags:                      p.Tags,
+					CreatedOn:                 p.CreatedOn,
+					CompletedOn:               &reqTime,
+					SortId:                    p.SortId,
+				}
+				model.promises.set(p.Id, &newP)
+				completeRelatedTasks(model, p.Id, reqTime)
+			} else {
+				return model, fmt.Errorf("task '%s' state not completed", req.ClaimTask.Id)
+			}
 		}
 		return model, nil
 	case t_api.StatusTaskInvalidCounter:
@@ -663,7 +686,28 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			return model, fmt.Errorf("task '%s' state not completed", req.CompleteTask.Id)
+			// This could happen if the promise timetout
+			p := model.promises.get(t.RootPromiseId)
+			if !promise.GetTimedoutState(p).In(promise.Pending) && resTime >= p.Timeout {
+				model = model.Copy()
+				newP := promise.Promise{
+					Id:                        p.Id,
+					State:                     promise.GetTimedoutState(p),
+					Param:                     p.Param,
+					Value:                     p.Value,
+					Timeout:                   p.Timeout,
+					IdempotencyKeyForCreate:   p.IdempotencyKeyForCreate,
+					IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
+					Tags:                      p.Tags,
+					CreatedOn:                 p.CreatedOn,
+					CompletedOn:               &reqTime,
+					SortId:                    p.SortId,
+				}
+				model.promises.set(p.Id, &newP)
+				completeRelatedTasks(model, p.Id, reqTime)
+			} else {
+				return model, fmt.Errorf("task '%s' state not completed", req.CompleteTask.Id)
+			}
 		}
 		return model, nil
 	case t_api.StatusTaskInvalidCounter:
@@ -732,11 +776,13 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 // model.copy() before calling this function
 func completeRelatedTasks(model *Model, promiseId string, reqTime int64) {
 	new_tasks := []task.Task{}
+	rp := model.promises.get(promiseId)
 	for _, t := range *model.tasks {
 		if t.value.State.In(task.Completed | task.Timedout) {
 			continue
 		}
-		if t.value.RootPromiseId == promiseId {
+		// A task created after the promise was completed (resumes) must not be completed
+		if t.value.RootPromiseId == promiseId && *t.value.CreatedOn < *rp.CompletedOn {
 			new_t := *t.value // Make a copy to avoid modifing the model
 			new_t.State = task.Completed
 			new_t.CompletedOn = &reqTime
