@@ -635,7 +635,7 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 					IdempotencyKeyForComplete: p.IdempotencyKeyForComplete,
 					Tags:                      p.Tags,
 					CreatedOn:                 p.CreatedOn,
-					CompletedOn:               &reqTime,
+					CompletedOn:               util.ToPointer(p.Timeout),
 					SortId:                    p.SortId,
 				}
 				model.promises.set(p.Id, &newP)
@@ -774,18 +774,19 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 
 // This function modifies the model in place, make sure you have called
 // model.copy() before calling this function
-func completeRelatedTasks(model *Model, promiseId string, reqTime int64) {
+func completeRelatedTasks(model *Model, promiseId string, _ int64) {
 	new_tasks := []task.Task{}
 	rp := model.promises.get(promiseId)
+	rpCompletedOn := util.SafeDeref(rp.CompletedOn)
 	for _, t := range *model.tasks {
 		if t.value.State.In(task.Completed | task.Timedout) {
 			continue
 		}
 		// A task created after the promise was completed (resumes) must not be completed
-		if t.value.RootPromiseId == promiseId && *t.value.CreatedOn < *rp.CompletedOn {
+		if t.value.RootPromiseId == promiseId && *t.value.CreatedOn < rpCompletedOn {
 			new_t := *t.value // Make a copy to avoid modifing the model
 			new_t.State = task.Completed
-			new_t.CompletedOn = &reqTime
+			new_t.CompletedOn = &rpCompletedOn
 			new_tasks = append(new_tasks, new_t)
 		}
 	}
