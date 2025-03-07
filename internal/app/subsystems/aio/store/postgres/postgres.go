@@ -814,6 +814,18 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
 				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, command.HeartbeatTasks)
 
+			case t_aio.CreatePromiseAndTask:
+				if promiseInsertStmt == nil {
+					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseInsertStmt.Close()
+				}
+
+				util.Assert(command.CreatePromiseAndTask != nil, "createPromiseAndTask command must bot be nil")
+				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, command.CreatePromiseAndTask)
+
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
 			}
@@ -1027,6 +1039,34 @@ func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		Kind: t_aio.CreatePromise,
 		CreatePromise: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.Result, error) {
+	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
+	if err != nil {
+		return nil, err
+	}
+
+	// Couldn't create a promise
+	if promiseResult.CreatePromise.RowsAffected == 0 {
+		return &t_aio.Result{
+			Kind:                 t_aio.CreatePromiseAndTask,
+			CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{},
+		}, nil
+	}
+
+	taskResult, err := w.createTask(tx, cmd.TaskCommand)
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
+			PromiseRowsAffected: promiseResult.CreatePromise.RowsAffected,
+			TaskRowsAffected:    taskResult.CreateTask.RowsAffected,
 		},
 	}, nil
 }
