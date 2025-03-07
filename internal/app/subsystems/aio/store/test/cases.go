@@ -4183,7 +4183,7 @@ var TestCases = []*testCase{
 						{
 							Id:            "foo.1",
 							ProcessId:     util.ToPointer("pid"),
-							State:         task.Completed, // Task should remain in Claimed state
+							State:         task.Completed,
 							RootPromiseId: "root",
 							Recv:          []byte("foo"),
 							Mesg:          []byte(`{"type":"resume","root":"root","leaf":"foo"}`),
