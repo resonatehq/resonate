@@ -47,7 +47,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		}
 
 		if t.State == task.Completed || t.State == task.Timedout {
-			status = t_api.StatusTaskAlreadyCompleted
+			status = t_api.StatusOK
 		} else if t.State == task.Init || t.State == task.Enqueued {
 			status = t_api.StatusTaskInvalidState
 		} else if t.Counter != r.CompleteTask.Counter {

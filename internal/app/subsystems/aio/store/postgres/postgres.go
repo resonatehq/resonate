@@ -91,7 +91,8 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
 
 	CREATE TABLE IF NOT EXISTS tasks (
-		id              SERIAL PRIMARY KEY,
+		id              TEXT,
+		sort_id         SERIAL,
 		process_id      TEXT,
 		state           INTEGER DEFAULT 1,
 		root_promise_id TEXT,
@@ -103,7 +104,8 @@ const (
 		ttl             INTEGER DEFAULT 0,
 		expires_at      BIGINT DEFAULT 0,
 		created_on      BIGINT,
-		completed_on    BIGINT
+		completed_on    BIGINT,
+		PRIMARY KEY(id)
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
@@ -297,7 +299,7 @@ const (
 	FROM tasks
 	WHERE
 		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT $3`
 
 	TASK_SELECT_ENQUEUEABLE_STATEMENT = `
@@ -324,21 +326,21 @@ const (
 		WHERE t2.root_promise_id = t1.root_promise_id
 		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
-	ORDER BY root_promise_id, id
+	ORDER BY root_promise_id, sort_id ASC
 	LIMIT $1`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
+		(id, recv, mesg, timeout, process_id, state, root_promise_id, ttl, expires_at, created_on)
 	VALUES
-		($1, $2, $3, $4, $5, $6, $7, $8, $9)
-	RETURNING id`
+		($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	ON CONFLICT(id) DO NOTHING`
 
 	TASK_INSERT_ALL_STATEMENT = `
 	INSERT INTO tasks
-		(recv, mesg, timeout, root_promise_id, created_on)
+		(id, recv, mesg, timeout, root_promise_id, created_on)
 	SELECT
-		recv, mesg, timeout, root_promise_id, $1
+		id, recv, mesg, timeout, root_promise_id, $1
 	FROM
 		callbacks
 	WHERE
@@ -360,7 +362,7 @@ const (
 	SET
 		state = 8, completed_on = $1 -- State = 8 -> Completed
 	WHERE
-		root_promise_id = $2 AND state in (1, 2) -- State in (Init, Enqueued)`
+		root_promise_id = $2 AND state in (1, 2, 4) -- State in (Init, Enqueued, Claimed)`
 
 	TASK_HEARTBEAT_STATEMENT = `
 	UPDATE
@@ -589,6 +591,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var lockHeartbeatStmt *sql.Stmt
 	var lockTimeoutStmt *sql.Stmt
 	var tasksInsertStmt *sql.Stmt
+	var taskInsertStmt *sql.Stmt
 	var taskUpdateStmt *sql.Stmt
 	var tasksCompleteStmt *sql.Stmt
 	var taskHeartbeatStmt *sql.Stmt
@@ -765,8 +768,16 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
 				results[i][j], err = w.readEnqueueableTasks(tx, command.ReadEnquableTasks)
 			case t_aio.CreateTask:
+				if taskInsertStmt == nil {
+					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskInsertStmt.Close()
+				}
+
 				util.Assert(command.CreateTask != nil, "command must not be nil")
-				results[i][j], err = w.createTask(tx, command.CreateTask)
+				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
 			case t_aio.CreateTasks:
 				if tasksInsertStmt == nil {
 					tasksInsertStmt, err = tx.Prepare(TASK_INSERT_ALL_STATEMENT)
@@ -811,6 +822,26 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 
 				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
 				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, command.HeartbeatTasks)
+
+			case t_aio.CreatePromiseAndTask:
+				if promiseInsertStmt == nil {
+					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer promiseInsertStmt.Close()
+				}
+
+				if taskInsertStmt == nil {
+					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+					defer taskInsertStmt.Close()
+				}
+
+				util.Assert(command.CreatePromiseAndTask != nil, "createPromiseAndTask command must bot be nil")
+				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, command.CreatePromiseAndTask)
 
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
@@ -995,7 +1026,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 	}, nil
 }
 
-func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Param.Headers != nil, "param headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "param data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -1025,6 +1056,34 @@ func (w *PostgresStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 		Kind: t_aio.CreatePromise,
 		CreatePromise: &t_aio.AlterPromisesResult{
 			RowsAffected: rowsAffected,
+		},
+	}, nil
+}
+
+func (w *PostgresStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, taskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.Result, error) {
+	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
+	if err != nil {
+		return nil, err
+	}
+
+	// Couldn't create a promise
+	if promiseResult.CreatePromise.RowsAffected == 0 {
+		return &t_aio.Result{
+			Kind:                 t_aio.CreatePromiseAndTask,
+			CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{},
+		}, nil
+	}
+
+	taskResult, err := w.createTask(tx, taskStmt, cmd.TaskCommand)
+	if err != nil {
+		return nil, err
+	}
+
+	return &t_aio.Result{
+		Kind: t_aio.CreatePromiseAndTask,
+		CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
+			PromiseRowsAffected: promiseResult.CreatePromise.RowsAffected,
+			TaskRowsAffected:    taskResult.CreateTask.RowsAffected,
 		},
 	}, nil
 }
@@ -1584,7 +1643,7 @@ func (w *PostgresStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEn
 	}, nil
 }
 
-func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+func (w *PostgresStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
 	util.Assert(cmd.State.In(task.Init|task.Claimed), "state must be init or claimed")
@@ -1595,23 +1654,21 @@ func (w *PostgresStoreWorker) createTask(tx *sql.Tx, cmd *t_aio.CreateTaskComman
 		return nil, store.StoreErr(err)
 	}
 
-	var lastInsertId string
-	rowsAffected := int64(1)
-	row := tx.QueryRow(TASK_INSERT_STATEMENT, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	// insert
+	res, err := stmt.Exec(cmd.Id, cmd.Recv, mesg, cmd.Timeout, cmd.ProcessId, cmd.State, cmd.Mesg.Root, cmd.Ttl, cmd.ExpiresAt, cmd.CreatedOn)
+	if err != nil {
+		return nil, err
+	}
 
-	if err := row.Scan(&lastInsertId); err != nil {
-		if err == sql.ErrNoRows {
-			rowsAffected = 0
-		} else {
-			return nil, store.StoreErr(err)
-		}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
 	}
 
 	return &t_aio.Result{
 		Kind: t_aio.CreateTask,
 		CreateTask: &t_aio.AlterTasksResult{
 			RowsAffected: rowsAffected,
-			LastInsertId: lastInsertId,
 		},
 	}, nil
 }

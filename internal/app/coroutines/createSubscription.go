@@ -66,7 +66,7 @@ func CreateSubscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion,
 
 			createdOn := c.Time()
 
-			callbackId := fmt.Sprintf("%s.%s", r.CreateSubscription.PromiseId, r.CreateSubscription.Id)
+			callbackId := subscriptionId(r.CreateSubscription.PromiseId, r.CreateSubscription.Id)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -137,4 +137,8 @@ func CreateSubscription(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion,
 
 	util.Assert(res != nil, "response must not be nil")
 	return res, nil
+}
+
+func subscriptionId(promiseId, customId string) string {
+	return fmt.Sprintf("__notify:%s:%s", promiseId, customId)
 }

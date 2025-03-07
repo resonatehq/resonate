@@ -66,7 +66,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			createdOn := c.Time()
 
-			callbackId := fmt.Sprintf("%s.%s", r.CreateCallback.PromiseId, r.CreateCallback.Id)
+			cbId := callbackId(r.CreateCallback.RootPromiseId, r.CreateCallback.PromiseId)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
 				Tags: r.Tags,
@@ -76,7 +76,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
-									Id:        callbackId,
+									Id:        cbId,
 									PromiseId: r.CreateCallback.PromiseId,
 									Recv:      r.CreateCallback.Recv,
 									Mesg:      mesg,
@@ -104,7 +104,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			if result.RowsAffected == 1 {
 				status = t_api.StatusCreated
 				cb = &callback.Callback{
-					Id:        callbackId,
+					Id:        cbId,
 					PromiseId: r.CreateCallback.PromiseId,
 					Recv:      r.CreateCallback.Recv,
 					Mesg:      mesg,
@@ -137,4 +137,8 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	util.Assert(res != nil, "response must not be nil")
 	return res, nil
+}
+
+func callbackId(rootPromiseId, promiseId string) string {
+	return fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId)
 }

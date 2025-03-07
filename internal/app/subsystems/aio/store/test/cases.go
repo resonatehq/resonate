@@ -2849,11 +2849,187 @@ var TestCases = []*testCase{
 
 	// TASKS
 	{
+		name: "CreatePromiseAndTask",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromiseAndTask,
+				CreatePromiseAndTask: &t_aio.CreatePromiseAndTaskCommand{
+					PromiseCommand: &t_aio.CreatePromiseCommand{
+						Id:      "foo",
+						Timeout: 1,
+						Param: promise.Value{
+							Headers: map[string]string{},
+							Data:    []byte{},
+						},
+						Tags:      map[string]string{},
+						CreatedOn: 1,
+					},
+					TaskCommand: &t_aio.CreateTaskCommand{
+						Id:        "__invoke:foo",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						ProcessId: util.ToPointer("pid"),
+						State:     task.Claimed,
+						CreatedOn: 1,
+						Ttl:       2,
+						ExpiresAt: 2,
+						Timeout:   3,
+					},
+				},
+			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
+					Id: "foo",
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "__invoke:foo",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromiseAndTask,
+				CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
+					PromiseRowsAffected: 1,
+					TaskRowsAffected:    1,
+				},
+			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					Records: []*promise.PromiseRecord{{
+						Id:           "foo",
+						State:        1,
+						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
+						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    util.ToPointer(int64(1)),
+					}},
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 1,
+					Records: []*task.TaskRecord{
+						{
+							Id:            "__invoke:foo",
+							ProcessId:     util.ToPointer("pid"),
+							State:         task.Claimed,
+							RootPromiseId: "foo",
+							Recv:          []byte("foo"),
+							Mesg:          []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
+							Attempt:       0,
+							Counter:       1,
+							CreatedOn:     util.ToPointer[int64](1),
+							Ttl:           2,
+							ExpiresAt:     2,
+							Timeout:       3,
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "CreatePromiseAndTask_PromiseAlreadyExists",
+		commands: []*t_aio.Command{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.CreatePromiseCommand{
+					Id:        "foo",
+					Timeout:   1,
+					Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
+					Tags:      map[string]string{},
+					CreatedOn: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromiseAndTask,
+				CreatePromiseAndTask: &t_aio.CreatePromiseAndTaskCommand{
+					PromiseCommand: &t_aio.CreatePromiseCommand{
+						Id:        "foo",
+						Timeout:   1,
+						Param:     promise.Value{Headers: map[string]string{}, Data: []byte{}},
+						Tags:      map[string]string{},
+						CreatedOn: 1,
+					},
+					TaskCommand: &t_aio.CreateTaskCommand{
+						Id:        "__invoke:foo",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						ProcessId: util.ToPointer("pid"),
+						State:     task.Claimed,
+						CreatedOn: 1,
+						Ttl:       2,
+						ExpiresAt: 2,
+						Timeout:   3,
+					},
+				},
+			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.ReadPromiseCommand{
+					Id: "foo",
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.ReadTaskCommand{
+					Id: "__invoke:foo",
+				},
+			},
+		},
+		expected: []*t_aio.Result{
+			{
+				Kind: t_aio.CreatePromise,
+				CreatePromise: &t_aio.AlterPromisesResult{
+					RowsAffected: 1,
+				},
+			},
+			{
+				Kind: t_aio.CreatePromiseAndTask,
+				CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
+					PromiseRowsAffected: 0,
+					TaskRowsAffected:    0,
+				},
+			},
+			{
+				Kind: t_aio.ReadPromise,
+				ReadPromise: &t_aio.QueryPromisesResult{
+					RowsReturned: 1,
+					Records: []*promise.PromiseRecord{{
+						Id:           "foo",
+						State:        1,
+						ParamHeaders: []byte("{}"),
+						ParamData:    []byte{},
+						Timeout:      1,
+						Tags:         []byte("{}"),
+						CreatedOn:    util.ToPointer(int64(1)),
+					}},
+				},
+			},
+			{
+				Kind: t_aio.ReadTask,
+				ReadTask: &t_aio.QueryTasksResult{
+					RowsReturned: 0,
+				},
+			},
+		},
+	},
+	{
 		name: "CreateTask",
 		commands: []*t_aio.Command{
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
+					Id:        "1",
 					Recv:      []byte("foo"),
 					Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
 					Timeout:   1,
@@ -2864,6 +3040,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.CreateTaskCommand{
+					Id:        "2",
 					Recv:      []byte("bar"),
 					Mesg:      &message.Mesg{Type: message.Invoke, Root: "bar", Leaf: "bar"},
 					Timeout:   2,
@@ -2884,14 +3061,12 @@ var TestCases = []*testCase{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.AlterTasksResult{
 					RowsAffected: 1,
-					LastInsertId: "1",
 				},
 			},
 			{
 				Kind: t_aio.CreateTask,
 				CreateTask: &t_aio.AlterTasksResult{
 					RowsAffected: 1,
-					LastInsertId: "2",
 				},
 			},
 			{
@@ -3013,7 +3188,7 @@ var TestCases = []*testCase{
 					RowsReturned: 3,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "2",
+							Id:            "foo.2",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "bar",
@@ -3022,7 +3197,7 @@ var TestCases = []*testCase{
 							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:            "3",
+							Id:            "foo.3",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "baz",
@@ -3031,7 +3206,7 @@ var TestCases = []*testCase{
 							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "foo",
@@ -3138,7 +3313,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Enqueued,
 					Counter:        2,
@@ -3159,7 +3334,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "5",
+					Id:             "pbar.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Enqueued,
 					Counter:        2,
@@ -3245,7 +3420,7 @@ var TestCases = []*testCase{
 					RowsReturned: 2,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "foo",
@@ -3254,7 +3429,7 @@ var TestCases = []*testCase{
 							CreatedOn:     util.ToPointer[int64](0),
 						},
 						{
-							Id:            "4",
+							Id:            "pbar.1",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "pbar",
@@ -3277,7 +3452,7 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "4",
+							Id:            "pbar.1",
 							Counter:       1,
 							State:         task.Init,
 							RootPromiseId: "pbar",
@@ -3331,7 +3506,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Enqueued,
 					Counter:        2,
@@ -3346,7 +3521,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Claimed,
 					Counter:        3,
@@ -3361,7 +3536,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Claimed,
 					Counter:        4,
@@ -3376,7 +3551,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Completed,
 					Counter:        5,
@@ -3391,7 +3566,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Completed,
 					Counter:        6,
@@ -3406,7 +3581,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.ReadTask,
 				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "1",
+					Id: "foo.1",
 				},
 			},
 		},
@@ -3465,7 +3640,7 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							ProcessId:     util.ToPointer("pid"),
 							State:         task.Completed,
 							RootPromiseId: "foo",
@@ -3688,13 +3863,13 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.ReadTask,
 				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "1",
+					Id: "foo.1",
 				},
 			},
 			{
 				Kind: t_aio.ReadTask,
 				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "2",
+					Id: "bar.1",
 				},
 			},
 		},
@@ -3759,7 +3934,7 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							State:         task.Completed,
 							RootPromiseId: "root1",
 							Recv:          []byte("foo"),
@@ -3780,7 +3955,7 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "2",
+							Id:            "bar.1",
 							State:         task.Init,
 							RootPromiseId: "root2",
 							Recv:          []byte("bar"),
@@ -3902,7 +4077,7 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "CompleteTasks_ClaimedTaskNotCompleted",
+		name: "CompleteTasks_ClaimedTaskCompleted",
 		commands: []*t_aio.Command{
 			{
 				Kind: t_aio.CreatePromise,
@@ -3938,7 +4113,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Claimed, // Set task to Claimed state
 					Counter:        2,
@@ -3959,7 +4134,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.ReadTask,
 				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "1",
+					Id: "foo.1",
 				},
 			},
 		},
@@ -3997,7 +4172,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.CompleteTasks,
 				CompleteTasks: &t_aio.AlterTasksResult{
-					RowsAffected: 0, // No tasks should be completed
+					RowsAffected: 1,
 				},
 			},
 			{
@@ -4006,9 +4181,9 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							ProcessId:     util.ToPointer("pid"),
-							State:         task.Claimed, // Task should remain in Claimed state
+							State:         task.Completed,
 							RootPromiseId: "root",
 							Recv:          []byte("foo"),
 							Mesg:          []byte(`{"type":"resume","root":"root","leaf":"foo"}`),
@@ -4017,6 +4192,7 @@ var TestCases = []*testCase{
 							Ttl:           1,
 							ExpiresAt:     1,
 							CreatedOn:     util.ToPointer[int64](0),
+							CompletedOn:   util.ToPointer[int64](5),
 						},
 					},
 				},
@@ -4060,7 +4236,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("pid"),
 					State:          task.Timedout, // Set task to Timeout state
 					Counter:        2,
@@ -4081,7 +4257,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.ReadTask,
 				ReadTask: &t_aio.ReadTaskCommand{
-					Id: "1",
+					Id: "foo.1",
 				},
 			},
 		},
@@ -4128,7 +4304,7 @@ var TestCases = []*testCase{
 					RowsReturned: 1,
 					Records: []*task.TaskRecord{
 						{
-							Id:            "1",
+							Id:            "foo.1",
 							ProcessId:     util.ToPointer("pid"),
 							State:         task.Timedout, // Task should remain in Timeout state
 							RootPromiseId: "root",
@@ -4192,7 +4368,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "1",
+					Id:             "foo.1",
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
@@ -4202,7 +4378,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "2",
+					Id:             "foo.2",
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Claimed,
 					CurrentStates:  []task.State{task.Init},
@@ -4212,7 +4388,7 @@ var TestCases = []*testCase{
 			{
 				Kind: t_aio.UpdateTask,
 				UpdateTask: &t_aio.UpdateTaskCommand{
-					Id:             "3",
+					Id:             "foo.3",
 					ProcessId:      util.ToPointer("bar"),
 					State:          task.Completed,
 					CurrentStates:  []task.State{task.Init},

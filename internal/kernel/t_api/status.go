@@ -76,6 +76,8 @@ func (s StatusCode) String() string {
 		return "The specified lock was not found"
 	case StatusTaskNotFound:
 		return "The specified task was not found"
+	case StatusPromiseRecvNotFound:
+		return "The specified recv couldn't be found"
 	case StatusPromiseAlreadyExists:
 		return "The specified promise already exists"
 	case StatusScheduleAlreadyExists:
