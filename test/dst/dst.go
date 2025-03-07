@@ -341,10 +341,10 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 	res := lastOp.Output.(*Res)
 	var err error
 	if req.kind == Op {
-		model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
 		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Tags["id"], req.time, res.time, req.req, res.res)
 	} else {
-		model, err = d.BcStep(model, req.time, res.time, req)
+		_, err = d.BcStep(model, req.time, res.time, req)
 		var obj any
 		if req.bc.Task != nil {
 			obj = req.bc.Task
@@ -439,7 +439,7 @@ func (d *DST) Model() porcupine.Model {
 				} else if req.bc.Promise != nil {
 					return fmt.Sprintf("Backchannel | %s", req.bc.Promise)
 				} else {
-					return fmt.Sprintf("Backchannel | unknown(possible error)")
+					return "Backchannel | unknown(possible error)"
 				}
 			default:
 				panic(fmt.Sprintf("unknown request kind: %d", req.kind))
