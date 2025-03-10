@@ -686,7 +686,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 			return model, fmt.Errorf("task '%s' does not exist", req.CompleteTask.Id)
 		}
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
-			// This could happen if the promise timetout
+			// This could happen if the promise timedout
 			p := model.promises.get(t.RootPromiseId)
 			if !promise.GetTimedoutState(p).In(promise.Pending) && resTime >= p.Timeout {
 				model = model.Copy()
