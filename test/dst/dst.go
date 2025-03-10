@@ -216,7 +216,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 				// The ProcessId is always the taskId, which means each task
 				// is always claimed by a different process, which means
-				// that when hearthbeating there will always be a single task at
+				// that when heartbeating there will always be a single task at
 				// most when heartbeating
 
 				// add claim req to generator
