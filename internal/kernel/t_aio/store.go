@@ -42,6 +42,7 @@ const (
 	CompleteTasks
 	UpdateTask
 	HeartbeatTasks
+	CreatePromiseAndTask
 
 	// LOCKS
 	ReadLock
@@ -99,6 +100,9 @@ func (k StoreKind) String() string {
 		return "UpdateTask"
 	case HeartbeatTasks:
 		return "HeartbeatTasks"
+	case CreatePromiseAndTask:
+		return "CreatePromiseAndTask"
+
 	// LOCKS
 	case ReadLock:
 		return "ReadLock"
@@ -159,14 +163,15 @@ type Command struct {
 	DeleteSchedule  *DeleteScheduleCommand
 
 	// TASKS
-	ReadTask          *ReadTaskCommand
-	ReadTasks         *ReadTasksCommand
-	ReadEnquableTasks *ReadEnqueueableTasksCommand
-	CreateTask        *CreateTaskCommand
-	CreateTasks       *CreateTasksCommand
-	CompleteTasks     *CompleteTasksCommand
-	UpdateTask        *UpdateTaskCommand
-	HeartbeatTasks    *HeartbeatTasksCommand
+	ReadTask             *ReadTaskCommand
+	ReadTasks            *ReadTasksCommand
+	ReadEnquableTasks    *ReadEnqueueableTasksCommand
+	CreateTask           *CreateTaskCommand
+	CreateTasks          *CreateTasksCommand
+	CompleteTasks        *CompleteTasksCommand
+	UpdateTask           *UpdateTaskCommand
+	HeartbeatTasks       *HeartbeatTasksCommand
+	CreatePromiseAndTask *CreatePromiseAndTaskCommand
 
 	// LOCKS
 	ReadLock       *ReadLockCommand
@@ -211,6 +216,7 @@ type Result struct {
 	CompleteTasks        *AlterTasksResult
 	UpdateTask           *AlterTasksResult
 	HeartbeatTasks       *AlterTasksResult
+	CreatePromiseAndTask *AlterPromiseAndTaskResult
 
 	// LOCKS
 	ReadLock       *QueryLocksResult
@@ -365,6 +371,7 @@ type ReadEnqueueableTasksCommand struct {
 }
 
 type CreateTaskCommand struct {
+	Id        string
 	Recv      []byte
 	Mesg      *message.Mesg
 	Timeout   int64
@@ -403,6 +410,11 @@ type HeartbeatTasksCommand struct {
 	Time      int64
 }
 
+type CreatePromiseAndTaskCommand struct {
+	PromiseCommand *CreatePromiseCommand
+	TaskCommand    *CreateTaskCommand
+}
+
 // Task results
 
 type QueryTasksResult struct {
@@ -412,7 +424,11 @@ type QueryTasksResult struct {
 
 type AlterTasksResult struct {
 	RowsAffected int64
-	LastInsertId string
+}
+
+type AlterPromiseAndTaskResult struct {
+	PromiseRowsAffected int64
+	TaskRowsAffected    int64
 }
 
 // Lock commands

@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -24,6 +25,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	util.Assert(r.CreatePromiseAndTask.Promise.Timeout == r.CreatePromiseAndTask.Task.Timeout, "timeouts must match")
 
 	return createPromiseAndTask(c, r, r.CreatePromiseAndTask.Promise, &t_aio.CreateTaskCommand{
+		Id:        invokeTaskId(r.CreatePromiseAndTask.Task.PromiseId),
 		Recv:      nil,
 		Mesg:      &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
 		Timeout:   r.CreatePromiseAndTask.Task.Timeout,
@@ -93,8 +95,14 @@ func createPromiseAndTask(
 		if err != nil {
 			return nil, err
 		}
+		var promiseRowsAffected int64
+		if taskCmd == nil {
+			promiseRowsAffected = completion.Store.Results[0].CreatePromise.RowsAffected
+		} else {
+			promiseRowsAffected = completion.Store.Results[0].CreatePromiseAndTask.PromiseRowsAffected
+		}
 
-		if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
+		if promiseRowsAffected == 0 {
 			// It's possible that the promise was created by another coroutine
 			// while we were creating. In that case, we should just retry.
 			return createPromiseAndTask(c, r, createPromiseReq, taskCmd)
@@ -117,20 +125,21 @@ func createPromiseAndTask(
 		switch r.Kind {
 		case t_api.CreatePromiseAndTask:
 			util.Assert(taskCmd != nil, "create task cmd must not be nil")
-			util.Assert(completion.Store.Results[1].Kind == t_aio.CreateTask, "completion must be create task")
+			util.Assert(completion.Store.Results[0].Kind == t_aio.CreatePromiseAndTask, "completion must be createPromiseAndTask")
 
 			t = &task.Task{
-				Id:        completion.Store.Results[1].CreateTask.LastInsertId,
-				ProcessId: taskCmd.ProcessId,
-				State:     taskCmd.State,
-				Recv:      taskCmd.Recv,
-				Mesg:      taskCmd.Mesg,
-				Timeout:   taskCmd.Timeout,
-				Counter:   1,
-				Attempt:   0,
-				Ttl:       taskCmd.Ttl,
-				ExpiresAt: taskCmd.ExpiresAt,
-				CreatedOn: &taskCmd.CreatedOn,
+				Id:            taskCmd.Id,
+				ProcessId:     taskCmd.ProcessId,
+				RootPromiseId: p.Id,
+				State:         taskCmd.State,
+				Recv:          taskCmd.Recv,
+				Mesg:          taskCmd.Mesg,
+				Timeout:       taskCmd.Timeout,
+				Counter:       1,
+				Attempt:       0,
+				Ttl:           taskCmd.Ttl,
+				ExpiresAt:     taskCmd.ExpiresAt,
+				CreatedOn:     &taskCmd.CreatedOn,
 			}
 		}
 	} else {
@@ -203,12 +212,26 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 		promiseCmd.Tags = map[string]string{}
 	}
 
+	isCreatePromiseAndTask := taskCmd != nil
+
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, *t_aio.Completion]) (*t_aio.Completion, error) {
-		// add create promise command
-		commands := []*t_aio.Command{{
-			Kind:          t_aio.CreatePromise,
-			CreatePromise: promiseCmd,
-		}}
+		commands := []*t_aio.Command{}
+
+		// Combine both commands if taskCmd is not null otherwise add just the CreatePromiseCmd
+		if isCreatePromiseAndTask {
+			commands = append(commands, &t_aio.Command{
+				Kind: t_aio.CreatePromiseAndTask,
+				CreatePromiseAndTask: &t_aio.CreatePromiseAndTaskCommand{
+					PromiseCommand: promiseCmd,
+					TaskCommand:    taskCmd,
+				},
+			})
+		} else {
+			commands = append(commands, &t_aio.Command{
+				Kind:          t_aio.CreatePromise,
+				CreatePromise: promiseCmd,
+			})
+		}
 
 		// check router to see if a task needs to be created
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -231,8 +254,8 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 			slog.Warn("failed to match promise", "cmd", promiseCmd, "err", err)
 		}
 
-		if taskCmd != nil && (err != nil || !completion.Router.Matched) {
-			slog.Error("failed to match promise when creating a task", "cmd", promiseCmd)
+		if isCreatePromiseAndTask && (err != nil || !completion.Router.Matched) {
+			slog.Error("failed to match promise with router when creating a task", "cmd", promiseCmd)
 			return nil, t_api.NewError(t_api.StatusPromiseRecvNotFound, err)
 		}
 
@@ -240,10 +263,12 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 			util.Assert(completion.Router.Recv != nil, "recv must not be nil")
 
 			// If there is a taskCmd just update the Recv otherwise create a tasks for the match
-			if taskCmd != nil {
+			if isCreatePromiseAndTask {
+				// Note: we are mutating the taskCmd that is already merged with the createPromiseCmd
 				taskCmd.Recv = completion.Router.Recv
 			} else {
 				taskCmd = &t_aio.CreateTaskCommand{
+					Id:        invokeTaskId(promiseCmd.Id),
 					Recv:      completion.Router.Recv,
 					Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 					Timeout:   promiseCmd.Timeout,
@@ -251,13 +276,14 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 					CreatedOn: promiseCmd.CreatedOn,
 				}
 
+				// add create task command if matched
+				commands = append(commands, &t_aio.Command{
+					Kind:       t_aio.CreateTask,
+					CreateTask: taskCmd,
+				})
+
 			}
 
-			// add create task command if matched
-			commands = append(commands, &t_aio.Command{
-				Kind:       t_aio.CreateTask,
-				CreateTask: taskCmd,
-			})
 		}
 
 		// add additional commands
@@ -281,8 +307,21 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
-		util.Assert(completion.Store.Results[0].CreatePromise.RowsAffected == 0 || completion.Store.Results[0].CreatePromise.RowsAffected == 1, "result must return 0 or 1 rows")
+		if isCreatePromiseAndTask {
+			promiseAndTaskResult := completion.Store.Results[0].CreatePromiseAndTask
+			util.Assert(promiseAndTaskResult.PromiseRowsAffected == 0 || promiseAndTaskResult.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
+			if promiseAndTaskResult.PromiseRowsAffected == 0 {
+				util.Assert(promiseAndTaskResult.TaskRowsAffected == 0, "If not promise was created a task must have not been created")
+			}
+		} else {
+			createPromiseResult := completion.Store.Results[0].CreatePromise
+			util.Assert(createPromiseResult.RowsAffected == 0 || createPromiseResult.RowsAffected == 1, "CreatePromise result must return 0 or 1 rows")
+		}
 
 		return completion, nil
 	}
+}
+
+func invokeTaskId(promiseId string) string {
+	return fmt.Sprintf("__invoke:%s", promiseId)
 }

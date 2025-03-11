@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sort"
 	"strconv"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
@@ -23,6 +25,7 @@ type DST struct {
 	generator   *Generator
 	validator   *Validator
 	bcValidator *BcValidator
+	partitions  [][]porcupine.Operation // set by Partition in the porcupine model
 }
 
 type Config struct {
@@ -30,6 +33,7 @@ type Config struct {
 	Timeout            time.Duration
 	VisualizationPath  string
 	Verbose            bool
+	PrintOps           bool
 	TimeElapsedPerTick int64
 	TimeoutTicks       int64
 	ReqsPerTick        func() int
@@ -52,13 +56,6 @@ const (
 
 type Partition int
 
-const (
-	Promise Partition = iota
-	Schedule
-	Lock
-	Task
-)
-
 type Req struct {
 	kind Kind
 	time int64
@@ -73,8 +70,16 @@ type Res struct {
 	err  error
 }
 
+type BcKind int
+
+const (
+	Task BcKind = iota
+	Notify
+)
+
 type Backchannel struct {
-	Task *task.Task
+	Task    *task.Task
+	Promise *promise.Promise
 }
 
 func New(r *rand.Rand, config *Config) *DST {
@@ -96,7 +101,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// promises
 	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
-	d.Add(t_api.SearchPromises, d.generator.GenerateSearchPromises, d.validator.ValidateSearchPromises)
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
@@ -109,7 +113,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// schedules
 	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
-	d.Add(t_api.SearchSchedules, d.generator.GenerateSearchSchedules, d.validator.ValidateSearchSchedules)
 	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
 	d.Add(t_api.DeleteSchedule, d.generator.GenerateDeleteSchedule, d.validator.ValidateDeleteSchedule)
 
@@ -125,6 +128,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// backchannel validators
 	d.bcValidator.AddBcValidator(ValidateTasksWithSameRootPromiseId)
+	d.bcValidator.AddBcValidator(ValidateNotify)
 
 	// porcupine ops
 	var ops []porcupine.Operation
@@ -139,10 +143,11 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			req := req
 			reqTime := time
 
-			req.Tags = map[string]string{
-				"id":   id,
-				"name": req.Kind.String(),
+			if req.Tags == nil {
+				req.Tags = make(map[string]string)
 			}
+			req.Tags["id"] = id
+			req.Tags["name"] = req.Kind.String()
 
 			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
@@ -152,8 +157,10 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						resTime = resTime - 1 // subtract 1 to ensure tick timeframes don't overlap
 					}
 
-					// log
-					slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
+					if d.config.PrintOps {
+						// log
+						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
+					}
 
 					// extract cursors for subsequent requests
 					if err == nil {
@@ -183,44 +190,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Input:    &Req{Op, reqTime, req, nil},
 						Output:   &Res{Op, resTime, res, err},
 					})
-
-					// Warning:
-					// A CreatePromiseAndTask request applies to two partitions, the
-					// promise partition and the task partition. Merging the
-					// partitions results in long checking time, so as a workaround
-					// we create an independent CreatePromise request. The mapping
-					// of requests to partitions is as follows:
-					// CreatePromise        -> p partition
-					// CreatePromiseAndTask -> t partition
-					if req.Kind == t_api.CreatePromiseAndTask {
-						j++
-
-						req = &t_api.Request{
-							Kind:          t_api.CreatePromise,
-							Tags:          req.Tags,
-							CreatePromise: req.CreatePromiseAndTask.Promise,
-						}
-
-						if res != nil {
-							res = &t_api.Response{
-								Kind: t_api.CreatePromise,
-								Tags: res.Tags,
-								CreatePromise: &t_api.CreatePromiseResponse{
-									Status:  res.CreatePromiseAndTask.Status,
-									Promise: res.CreatePromiseAndTask.Promise,
-								},
-							}
-						}
-
-						ops = append(ops, porcupine.Operation{
-							ClientId: int(j % d.config.MaxReqsPerTick),
-							Call:     reqTime,
-							Return:   resTime,
-							Input:    &Req{Op, reqTime, req, nil},
-							Output:   &Res{Op, resTime, res, err},
-						})
-					}
-
 					j++
 				},
 			})
@@ -245,9 +214,15 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 				// our model has been updated via the backchannel
 				counter := obj.Counter - r.Intn(2)
 
+				// The ProcessId is always the taskId, which means each task
+				// is always claimed by a different process, which means
+				// that when heartbeating there will always be a single task at
+				// most when heartbeating
+
 				// add claim req to generator
 				d.generator.AddRequest(&t_api.Request{
 					Kind: t_api.ClaimTask,
+					Tags: map[string]string{"partitionId": obj.RootPromiseId},
 					ClaimTask: &t_api.ClaimTaskRequest{
 						Id:        obj.Id,
 						Counter:   counter,
@@ -255,6 +230,10 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Ttl:       RangeIntn(r, 1000, 5000),
 					},
 				})
+			case *promise.Promise:
+				bc = &Backchannel{
+					Promise: obj,
+				}
 			default:
 				panic("invalid backchannel type")
 			}
@@ -304,7 +283,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	case porcupine.Illegal:
 		slog.Error("DST is non linearizable, run with -v flag for more information", "v", d.config.Verbose)
 		if d.config.Verbose {
-			d.logNonLinearizable(ops, history)
+			d.logPossibleError(history)
 		}
 	case porcupine.Unknown:
 		slog.Error("DST timed out before linearizability could be determined")
@@ -313,51 +292,69 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	return result == porcupine.Ok
 }
 
-func (d *DST) logNonLinearizable(ops []porcupine.Operation, history porcupine.LinearizationInfo) {
-	// log the linearizations
-	linearizations := history.PartialLinearizationsOperations()
-	util.Assert(len(linearizations) == 4, "linearizations must be equal to the number of partitions")
+func (d *DST) logPossibleError(history porcupine.LinearizationInfo) {
+	// Whats is printed here and whats is visualized in the dst.html diagram might not match.
+	// this is a best effort to preserve the possible validation that failed.
+	fmt.Println("====== Possible errors ======")
+
+	linearizationsPartitions := history.PartialLinearizationsOperations()
 
 	// check each parition individually
-	// partitions are in order: promise, schedule, lock
-	for i, p := range []Partition{Promise, Schedule, Lock} {
-		util.Assert(len(linearizations[i]) > 0, "partition must have at least one linearization")
+	// partitions are in the order they were given to porcupine
+	for i, partiton := range d.partitions {
+		util.Assert(len(linearizationsPartitions[i]) > 0, "partition must have at least one linearization")
 
-		// take the first linearization
-		linearization := linearizations[i][0]
+		// take the first (and we assumee, by empiric evidence, only linearization)
+		linearization := linearizationsPartitions[i][0]
 
-		// determine the next operation that breaks linearizability
-		if next, ok := next(linearization, ops, p); ok {
-			// add the next operation to the linearization, so that we can log
-			// the non linearizable path
-			linearization = append(linearization, next)
-		} else {
-			// if no op is found, we can assume the partition is linearizable
+		// if the linearization includes all the operations in the partiton all good
+		if len(partiton) == len(linearization) {
 			continue
 		}
 
-		// re run and log operations
-		d.log(linearization)
+		op := nextFailure(linearization, partiton)
+		d.logError(linearization, op)
 	}
 }
 
-func (d *DST) log(ops []porcupine.Operation) {
+func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcupine.Operation) {
 	// create a new model
 	model := NewModel()
 
 	// re feed operations through model
-	for i, op := range ops {
+	for _, op := range partialLinearization {
 		req := op.Input.(*Req)
 		res := op.Output.(*Res)
 
 		var err error
 
 		// step through the model (again)
-		model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
-		slog.Info("DST", "t", fmt.Sprintf("%d|%d", req.time, res.time), "id", req.req.Tags["id"], "req", req.req, "res", res.res, "err", err)
-
-		util.Assert(i != len(ops)-1 || err != nil, "the last operation must result in an error")
+		if req.kind == Op {
+			model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		} else {
+			model, err = d.BcStep(model, req.time, res.time, req)
+		}
+		util.Assert(err == nil, "Only the last operation must result in error")
 	}
+
+	req := lastOp.Input.(*Req)
+	res := lastOp.Output.(*Res)
+	var err error
+	if req.kind == Op {
+		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
+		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Tags["id"], req.time, res.time, req.req, res.res)
+	} else {
+		_, err = d.BcStep(model, req.time, res.time, req)
+		var obj any
+		if req.bc.Task != nil {
+			obj = req.bc.Task
+		} else if req.bc.Promise != nil {
+			obj = req.bc.Promise
+		}
+		fmt.Printf("Op(id=backchannel, t=%d|%d), %v\n", req.time, res.time, obj)
+	}
+
+	fmt.Printf("err=%v\n\n", err)
 }
 
 func (d *DST) Model() porcupine.Model {
@@ -366,29 +363,28 @@ func (d *DST) Model() porcupine.Model {
 			return NewModel()
 		},
 		Partition: func(history []porcupine.Operation) [][]porcupine.Operation {
-			p := []porcupine.Operation{}
-			s := []porcupine.Operation{}
-			l := []porcupine.Operation{}
-			t := []porcupine.Operation{}
+			partitions := make(map[string][]porcupine.Operation)
 
 			for _, op := range history {
 				req := op.Input.(*Req)
-
-				switch partition(req) {
-				case Promise:
-					p = append(p, op)
-				case Schedule:
-					s = append(s, op)
-				case Lock:
-					l = append(l, op)
-					// TODO(avillega): Temporaly disable validations over tasks
-					// TODO(avillega): Add validations over notify tasks. this will require to have the task and promise accesible in the same partition.
-					// case Task:
-					// 	t = append(t, op)
-				}
+				partitionKey := partition(req)
+				partitions[partitionKey] = append(partitions[partitionKey], op)
 			}
 
-			return [][]porcupine.Operation{p, s, l, t}
+			// Get sorted keys to iterate over the partitions in a deterministic way
+			keys := make([]string, 0, len(partitions))
+			for k := range partitions {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+
+			var result [][]porcupine.Operation
+			for _, key := range keys {
+				result = append(result, partitions[key])
+			}
+
+			d.partitions = result
+			return result
 		},
 		Step: func(state, input, output interface{}) (bool, interface{}) {
 			model := state.(*Model)
@@ -405,13 +401,11 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return true, updatedModel
 			case Bc:
-				// TODO(avillega): Temporaly disable validations over tasks
-				// updatedModel, err := d.BcStep(model, req)
-				// if err != nil {
-				// 	fmt.Println(err.Error())
-				// 	return false, model
-				// }
-				return true, model
+				updatedModel, err := d.BcStep(model, req.time, res.time, req)
+				if err != nil {
+					return false, model
+				}
+				return true, updatedModel
 			default:
 				panic(fmt.Sprintf("unknown request kind: %d", req.kind))
 			}
@@ -440,7 +434,13 @@ func (d *DST) Model() porcupine.Model {
 
 				return fmt.Sprintf("%s | %s → %d", req.req.Tags["id"], req.req, status)
 			case Bc:
-				return fmt.Sprintf("Backchannel | %s", req.bc.Task)
+				if req.bc.Task != nil {
+					return fmt.Sprintf("Backchannel | %s", req.bc.Task)
+				} else if req.bc.Promise != nil {
+					return fmt.Sprintf("Backchannel | %s", req.bc.Promise)
+				} else {
+					return "Backchannel | unknown(possible error)"
+				}
 			default:
 				panic(fmt.Sprintf("unknown request kind: %d", req.kind))
 			}
@@ -449,9 +449,15 @@ func (d *DST) Model() porcupine.Model {
 			model := state.(*Model)
 
 			switch {
-			case len(*model.promises) > 0 || len(*model.callbacks) > 0:
+			case len(*model.promises) > 0 || len(*model.callbacks) > 0 || len(*model.tasks) > 0:
 				var promises string
 				for _, p := range *model.promises {
+					var completedOn string
+					if p.value.CompletedOn == nil {
+						completedOn = "--"
+					} else {
+						completedOn = fmt.Sprintf("%d", *p.value.CompletedOn)
+					}
 					promises = promises + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
@@ -459,8 +465,9 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%s</td>
 						<td align="right">%s</td>
 						<td align="right">%d</td>
+						<td align="right">%s</td>
 					</tr>
-				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout)
+				`, p.value.Id, p.value.State, p.value.IdempotencyKeyForCreate, p.value.IdempotencyKeyForComplete, p.value.Timeout, completedOn)
 				}
 
 				var callbacks string
@@ -473,49 +480,87 @@ func (d *DST) Model() porcupine.Model {
 				`, c.value.Id, c.value.PromiseId)
 				}
 
+				var tasks string
+				for _, t := range *model.tasks {
+					tasks = tasks + fmt.Sprintf(`
+					<tr>
+						<td align="right">%s</td>
+						<td align="right">%s</td>
+						<td align="right">%s</td>
+						<td align="right">%d</td>
+						<td align="right">%d</td>
+						<td align="right">%d</td>
+					</tr>
+				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt, t.value.Timeout, *t.value.CreatedOn)
+				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<thead>
-							<tr>
-								<td><b>Promises</b></td>
-								<td><b>Callbacks</b></td>
-							</tr>
-						</thead>
-						<tbody>
-							<tr>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>state</b></td>
-												<td><b>ikeyCreate</b></td>
-												<td><b>ikeyComplete</b></td>
-												<td><b>timeout</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-								<td valign="top">
-									<table border="1" cellspacing="0" cellpadding="5">
-										<thead>
-											<tr>
-												<td><b>id</b></td>
-												<td><b>promiseId</b></td>
-											</tr>
-										</thead>
-										<tbody>
-											%s
-										</tbody>
-									</table>
-								</td>
-							</tr>
-						</tbody>
+					  <thead>
+					    <tr>
+					      <td><b>Promises</b></td>
+					      <td><b>Tasks</b></td>
+					    </tr>
+					  </thead>
+					  <tbody>
+					    <!-- First Row: Promises & Tasks -->
+					    <tr>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>ikeyCreate</b></td>
+					              <td><b>ikeyComplete</b></td>
+					              <td><b>timeout</b></td>
+					              <td><b>completedOn</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					      <td valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5">
+					          <thead>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>state</b></td>
+					              <td><b>rootPromiseId</b></td>
+					              <td><b>expiresAt</b></td>
+					              <td><b>timeout</b></td>
+					              <td><b>createdOn</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					    <!-- Second Row: Callbacks -->
+					    <tr>
+					      <td colspan="2" valign="top">
+					        <table border="1" cellspacing="0" cellpadding="5" style="margin-top: 10px;">
+					          <thead>
+					            <tr>
+					              <td colspan="2"><b>Callbacks</b></td>
+					            </tr>
+					            <tr>
+					              <td><b>id</b></td>
+					              <td><b>promiseId</b></td>
+					            </tr>
+					          </thead>
+					          <tbody>
+					            %s
+					          </tbody>
+					        </table>
+					      </td>
+					    </tr>
+					  </tbody>
 					</table>
-				`, promises, callbacks)
+				`, promises, tasks, callbacks)
 			case len(*model.schedules) > 0:
 				var schedules string
 				for _, s := range *model.schedules {
@@ -594,51 +639,6 @@ func (d *DST) Model() porcupine.Model {
 						</tbody>
 					</table>
 				`, locks)
-			case len(*model.tasks) > 0:
-				var tasks string
-				for _, t := range *model.tasks {
-					tasks = tasks + fmt.Sprintf(`
-						<tr>
-							<td align="right">%s</td>
-							<td align="right">%s</td>
-							<td>%s</td>
-							<td align="right">%d</td>
-							<td align="right">%d</td>
-							<td align="right">%d</td>
-						</tr>
-					`, t.value.Id, util.SafeDeref(t.value.ProcessId), t.value.State, t.value.Counter, t.value.ExpiresAt, t.value.Timeout)
-				}
-
-				return fmt.Sprintf(`
-						<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-							<thead>
-								<tr>
-									<td><b>Tasks</b></td>
-								</tr>
-							</thead>
-							<tbody>
-								<tr>
-									<td valign="top">
-										<table border="1" cellspacing="0" cellpadding="5">
-											<thead>
-												<tr>
-													<td><b>id</b></td>
-													<td><b>processId</b></td>
-													<td><b>state</b></td>
-													<td><b>counter</b></td>
-													<td><b>expiresAt</b></td>
-													<td><b>timeout</b></td>
-												</tr>
-											</thead>
-											<tbody>
-												%s
-											</tbody>
-										</table>
-									</td>
-								</tr>
-							</tbody>
-						</table>
-					`, tasks)
 			default:
 				return ""
 			}
@@ -672,13 +672,13 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 	return d.validator.Validate(model, reqTime, resTime, req, res)
 }
 
-func (d *DST) BcStep(model *Model, req *Req) (*Model, error) {
+func (d *DST) BcStep(model *Model, reqTime int64, resTime int64, req *Req) (*Model, error) {
 	util.Assert(req.kind == Bc, "Backchannel step can only be taken if req is of kind Bc")
-	if req.bc.Task == nil {
+	if req.bc.Task == nil && req.bc.Promise == nil {
 		return model, nil
 	}
 
-	return d.bcValidator.Validate(model, req)
+	return d.bcValidator.Validate(model, reqTime, resTime, req)
 }
 
 func (d *DST) Time(t int64) int64 {
@@ -699,52 +699,49 @@ func (d *DST) String() string {
 
 // Helper functions
 
-func partition(req *Req) Partition {
+func partition(req *Req) string {
 	switch req.kind {
 	case Op:
-		switch req.req.Kind {
-		case t_api.ReadPromise, t_api.SearchPromises, t_api.CreatePromise, t_api.CompletePromise, t_api.CreateCallback, t_api.CreateSubscription:
-			return Promise
-		case t_api.ReadSchedule, t_api.SearchSchedules, t_api.CreateSchedule, t_api.DeleteSchedule:
-			return Schedule
-		case t_api.AcquireLock, t_api.ReleaseLock, t_api.HeartbeatLocks:
-			return Lock
-		case t_api.ClaimTask, t_api.CompleteTask, t_api.HeartbeatTasks, t_api.CreatePromiseAndTask:
-			return Task
-		default:
-			panic(fmt.Sprintf("unknown request kind: %s", req.req.Kind))
+		partition, exists := req.req.Tags["partitionId"]
+		if !exists {
+			panic(fmt.Sprintf("Missing partitionId for request %v", req.req))
 		}
+		return partition
 	case Bc:
-		return Task
+		if req.bc.Task != nil {
+			return req.bc.Task.RootPromiseId
+		} else if req.bc.Promise != nil {
+			return req.bc.Promise.Id
+		} else {
+			panic("unknown backchannel type")
+		}
 	default:
 		panic(fmt.Sprintf("unknown request kind: %d", req.kind))
 	}
 }
 
-func next(linearizable []porcupine.Operation, ops []porcupine.Operation, p Partition) (porcupine.Operation, bool) {
+// Find the first Operation if any that is not part of a partial linearization
+// by comparing our partition with the linearization
+func nextFailure(linearizationOps []porcupine.Operation, partitionOps []porcupine.Operation) porcupine.Operation {
 	// convert to map for quick lookup
-	linearizableMap := map[porcupine.Operation]bool{}
-	for _, op := range linearizable {
-		linearizableMap[op] = true
+	linearizableMap := map[*Req]bool{}
+	for _, op := range linearizationOps {
+		req := op.Input.(*Req)
+		linearizableMap[req] = true
 	}
 
-	for _, op := range ops {
+	for _, op := range partitionOps {
 		req := op.Input.(*Req)
-
-		// if req is part of a different partition, skip
-		if partition(req) != p {
-			continue
-		}
-
 		// if req is part of the linearizable path, skip
-		if _, ok := linearizableMap[op]; ok {
+		if _, ok := linearizableMap[req]; ok {
 			continue
 		}
 
 		// ops are ordered by time, so the first op is not part of the
 		// linearizable path should break the model
-		return op, true
+		return op
 	}
 
-	return porcupine.Operation{}, false
+	util.Assert(false, "There must be an operation not included in the linearization")
+	return porcupine.Operation{}
 }

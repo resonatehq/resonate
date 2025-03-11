@@ -6,6 +6,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Config
@@ -52,8 +53,17 @@ func (s *SenderDST) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Completion])
 	for i, sqe := range sqes {
 		var completion *t_aio.SenderCompletion
 
+		mesgType := sqe.Submission.Sender.Task.Mesg.Type
+
+		var obj any
+		if mesgType == message.Notify {
+			obj = sqe.Submission.Sender.Promise
+		} else {
+			obj = sqe.Submission.Sender.Task
+		}
+
 		select {
-		case s.backchannel <- sqe.Submission.Sender.Task:
+		case s.backchannel <- obj:
 			completion = &t_aio.SenderCompletion{
 				Success: s.r.Float64() < s.config.P,
 			}
