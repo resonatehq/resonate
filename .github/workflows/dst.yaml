@@ -10,7 +10,7 @@ on:
         description: "ticks"
         type: number
   schedule:
-    - cron: "0 * * * *" # every hour
+    - cron: "*/20 * * * *" # every 20 mins
 
 permissions:
   contents: read
