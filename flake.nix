@@ -46,7 +46,7 @@
           # Pinned packages available in the environment
           packages = with pkgs; [
             # Go
-            go_1_21
+            go_1_23
             gotools # goimports, godoc, etc.
             golangci-lint # Go linter
 
