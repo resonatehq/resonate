@@ -111,7 +111,7 @@
         };
 
         # Test harness (TODO: make this a flake as well)
-        durable-promise-test-harness = pkgs.buildGo121Module rec {
+        durable-promise-test-harness = pkgs.buildGo123Module rec {
           name = "durable-promise-test-harness";
           src = pkgs.fetchFromGitHub {
             owner = "resonatehq";
