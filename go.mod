@@ -2,8 +2,6 @@ module github.com/resonatehq/resonate
 
 go 1.23.0
 
-toolchain go1.23.7
-
 require (
 	github.com/anishathalye/porcupine v1.0.0
 	github.com/gin-gonic/gin v1.10.0
