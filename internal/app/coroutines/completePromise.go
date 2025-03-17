@@ -166,7 +166,7 @@ func completePromise(tags map[string]string, cmd *t_aio.UpdatePromiseCommand, ad
 				Kind: t_aio.CreateTasks,
 				CreateTasks: &t_aio.CreateTasksCommand{
 					PromiseId: cmd.Id,
-					CreatedOn: cmd.CompletedOn,
+					CreatedOn: c.Time(),
 				},
 			},
 			{

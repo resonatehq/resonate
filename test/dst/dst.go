@@ -482,6 +482,12 @@ func (d *DST) Model() porcupine.Model {
 
 				var tasks string
 				for _, t := range *model.tasks {
+					var completedOn string
+					if t.value.CompletedOn == nil {
+						completedOn = "--"
+					} else {
+						completedOn = fmt.Sprintf("%d", *t.value.CompletedOn)
+					}
 					tasks = tasks + fmt.Sprintf(`
 					<tr>
 						<td align="right">%s</td>
@@ -490,8 +496,9 @@ func (d *DST) Model() porcupine.Model {
 						<td align="right">%d</td>
 						<td align="right">%d</td>
 						<td align="right">%d</td>
+						<td align="right">%s</td>
 					</tr>
-				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt, t.value.Timeout, *t.value.CreatedOn)
+				`, t.value.Id, t.value.State, t.value.RootPromiseId, t.value.ExpiresAt, t.value.Timeout, *t.value.CreatedOn, completedOn)
 				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
@@ -526,6 +533,7 @@ func (d *DST) Model() porcupine.Model {
 										<td><b>expiresAt</b></td>
 										<td><b>timeout</b></td>
 										<td><b>createdOn</b></td>
+										<td><b>completedOn</b></td>
 									</tr>
 								</thead>
 								<tbody>
