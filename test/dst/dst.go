@@ -495,7 +495,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-						<!-- First Row: Promises & Tasks -->
+						<!-- First Row: Promises-->
 						<tr>
 							<strong><br />Promises</strong>
 							<table border="1" cellspacing="0" cellpadding="5">
