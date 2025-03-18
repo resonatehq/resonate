@@ -495,70 +495,59 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return fmt.Sprintf(`
 					<table border="0" cellspacing="0" cellpadding="5" style="background-color: white;">
-					  <thead>
-					    <tr>
-					      <td><b>Promises</b></td>
-					      <td><b>Tasks</b></td>
-					    </tr>
-					  </thead>
-					  <tbody>
-					    <!-- First Row: Promises & Tasks -->
-					    <tr>
-					      <td valign="top">
-					        <table border="1" cellspacing="0" cellpadding="5">
-					          <thead>
-					            <tr>
-					              <td><b>id</b></td>
-					              <td><b>state</b></td>
-					              <td><b>ikeyCreate</b></td>
-					              <td><b>ikeyComplete</b></td>
-					              <td><b>timeout</b></td>
-					              <td><b>completedOn</b></td>
-					            </tr>
-					          </thead>
-					          <tbody>
-					            %s
-					          </tbody>
-					        </table>
-					      </td>
-					      <td valign="top">
-					        <table border="1" cellspacing="0" cellpadding="5">
-					          <thead>
-					            <tr>
-					              <td><b>id</b></td>
-					              <td><b>state</b></td>
-					              <td><b>rootPromiseId</b></td>
-					              <td><b>expiresAt</b></td>
-					              <td><b>timeout</b></td>
-					              <td><b>createdOn</b></td>
-					            </tr>
-					          </thead>
-					          <tbody>
-					            %s
-					          </tbody>
-					        </table>
-					      </td>
-					    </tr>
-					    <!-- Second Row: Callbacks -->
-					    <tr>
-					      <td colspan="2" valign="top">
-					        <table border="1" cellspacing="0" cellpadding="5" style="margin-top: 10px;">
-					          <thead>
-					            <tr>
-					              <td colspan="2"><b>Callbacks</b></td>
-					            </tr>
-					            <tr>
-					              <td><b>id</b></td>
-					              <td><b>promiseId</b></td>
-					            </tr>
-					          </thead>
-					          <tbody>
-					            %s
-					          </tbody>
-					        </table>
-					      </td>
-					    </tr>
-					  </tbody>
+						<!-- First Row: Promises & Tasks -->
+						<tr>
+							<strong><br />Promises</strong>
+							<table border="1" cellspacing="0" cellpadding="5">
+								<thead>
+									<tr>
+										<td><b>id</b></td>
+										<td><b>state</b></td>
+										<td><b>ikeyCreate</b></td>
+										<td><b>ikeyComplete</b></td>
+										<td><b>timeout</b></td>
+										<td><b>completedOn</b></td>
+									</tr>
+								</thead>
+								<tbody>
+									%s
+								</tbody>
+							</table>
+						</tr>
+						<!-- Second Row: Tasks -->
+						<tr>
+							<strong><br />Tasks</strong>
+							<table border="1" cellspacing="0" cellpadding="5">
+								<thead>
+									<tr>
+										<td><b>id</b></td>
+										<td><b>state</b></td>
+										<td><b>rootPromiseId</b></td>
+										<td><b>expiresAt</b></td>
+										<td><b>timeout</b></td>
+										<td><b>createdOn</b></td>
+									</tr>
+								</thead>
+								<tbody>
+									%s
+								</tbody>
+							</table>
+						</tr>
+						<!-- Third Row: Callbacks -->
+						<tr>
+							<strong><br />Callbacks</strong>
+							<table border="1" cellspacing="0" cellpadding="5">
+								<thead>
+									<tr>
+										<td><b>id</b></td>
+										<td><b>promiseId</b></td>
+									</tr>
+								</thead>
+								<tbody>
+									%s
+								</tbody>
+							</table>
+						</tr>
 					</table>
 				`, promises, tasks, callbacks)
 			case len(*model.schedules) > 0:
