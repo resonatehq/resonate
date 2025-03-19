@@ -1025,8 +1025,11 @@ func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.St
 	// Couldn't create a promise
 	if promiseResult.CreatePromise.RowsAffected == 0 {
 		return &t_aio.Result{
-			Kind:                 t_aio.CreatePromiseAndTask,
-			CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{},
+			Kind: t_aio.CreatePromiseAndTask,
+			CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
+				PromiseRowsAffected: 0,
+				TaskRowsAffected:    0,
+			},
 		}, nil
 	}
 
