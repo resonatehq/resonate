@@ -30,15 +30,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Download and test GHCR image
+        env:
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ inputs.tag }}
         run: |
           # Login to GHCR
-          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
 
           # Pull the test image
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"${TAG}"
 
           # Run the test image
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.tag }} dst run
+          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"${TAG}" dst run
 
   verify-github-release:
     runs-on: ${{ matrix.systems.runner }}
@@ -57,9 +60,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Download and test GH release
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
         run: |
           # Download the release artifact
-          curl -o resonate.tar.gz -L -O "https://github.com/${{ github.repository }}/releases/download/${{ inputs.tag }}/${{ matrix.systems.file }}"
+          curl -o resonate.tar.gz -L -O "https://github.com/${REPO}/releases/download/${TAG}/${{ matrix.systems.file }}"
 
           # Extract the artifact
           tar -xzf resonate.tar.gz

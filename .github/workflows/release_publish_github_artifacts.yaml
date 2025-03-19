@@ -72,9 +72,10 @@ jobs:
       - name: Upload binary
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
-          gh release upload ${{ inputs.tag }} "${TARBALL}" --clobber
-          gh release upload ${{ inputs.tag }} "${TARBALL_CHECKSUM}" --clobber
+          gh release upload "${TAG}" "${TARBALL}" --clobber
+          gh release upload "${TAG}" "${TARBALL_CHECKSUM}" --clobber
