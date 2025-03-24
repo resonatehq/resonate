@@ -16,6 +16,16 @@ import (
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	var res *t_api.Response
 
+	if r.CreateCallback.PromiseId == r.CreateCallback.RootPromiseId {
+		return &t_api.Response{
+			Kind: t_api.CreateCallback,
+			Tags: r.Tags,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusCallbackInvalidPromise,
+			},
+		}, nil
+	}
+
 	// read the promise to see if it exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,

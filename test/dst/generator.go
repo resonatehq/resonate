@@ -360,7 +360,7 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.AcquireLock,
-		Tags: map[string]string{"partitionId": "___locks___"},
+		Tags: map[string]string{"partitionId": resourceId},
 		AcquireLock: &t_api.AcquireLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
@@ -376,7 +376,7 @@ func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
 
 	return &t_api.Request{
 		Kind: t_api.ReleaseLock,
-		Tags: map[string]string{"partitionId": "___locks___"},
+		Tags: map[string]string{"partitionId": resourceId},
 		ReleaseLock: &t_api.ReleaseLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
@@ -389,7 +389,7 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 
 	return &t_api.Request{
 		Kind: t_api.HeartbeatLocks,
-		Tags: map[string]string{"partitionId": "___locks___"},
+		Tags: map[string]string{"partitionId": processId},
 		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
 			ProcessId: processId,
 		},
