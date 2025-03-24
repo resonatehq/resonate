@@ -14,6 +14,7 @@ const (
 	StatusNoContent StatusCode = 20400
 
 	StatusFieldValidationError   StatusCode = 40000
+	StatusCallbackInvalidPromise StatusCode = 40001
 	StatusPromiseAlreadyResolved StatusCode = 40300
 	StatusPromiseAlreadyRejected StatusCode = 40301
 	StatusPromiseAlreadyCanceled StatusCode = 40302
