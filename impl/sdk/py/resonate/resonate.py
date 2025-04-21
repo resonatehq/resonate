@@ -146,7 +146,6 @@ class Resonate:
 
         if args and callable(args[0]):
             return wrapper(args[0])
-
         return wrapper
 
     @overload
@@ -167,7 +166,8 @@ class Resonate:
                 name = func
                 func, version = self._registry.get(func, self._opts.version)
             case Callable():
-                name, version = self._registry.get(func.func if isinstance(func, Function) else func, self._opts.version)
+                func = func.func if isinstance(func, Function) else func
+                name, version = self._registry.get(func, self._opts.version)
 
         fp, fv = Future[DurablePromise](), Future[R]()
         self._bridge.invoke(Invoke(id, name, func, args, kwargs, self._opts.merge(version=version)), futures=(fp, fv))
