@@ -1,0 +1,68 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - README.md
+
+jobs:
+  run:
+    name: On ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }} with python version ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest]
+        python-version: [3.13]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.5.23
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{matrix.python-version}}
+
+      - name: Install
+        run: uv sync --dev
+
+      - name: Check linting
+        run: uv run ruff check
+
+      - name: Check types
+        run: uv run pyright
+
+      - name: Checkout resonate repository
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/resonate
+          path: server
+
+      - name: Build resonate
+        run: go build -o resonate
+        working-directory: server
+
+      - name: Start resonate server
+        run: ./resonate serve --system-signal-timeout 0.1s &
+        working-directory: server
+
+      - name: Run tests
+        env:
+          RESONATE_STORE_URL: http://localhost:8001
+          RESONATE_MSG_SRC_URL: http://localhost:8002
+        run: uv run pytest tests

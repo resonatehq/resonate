@@ -1,0 +1,44 @@
+line-length = 200
+
+[lint]
+ignore = [
+    "A001",
+    "A002",
+    "A005",
+    "A006",
+    "ANN401",
+    "ARG001",
+    "ARG002",
+    "BLE001",
+    "C901",
+    "COM812",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D105",
+    "D107",
+    "D203",
+    "D211",
+    "D213",
+    "E501",
+    "ERA001",
+    "FBT001",
+    "FIX002",
+    "INP001",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR2004",
+    "S101",
+    "S311",
+    "TD003",
+]
+select = ["ALL"]
+logger-objects = ["resonate.logging.logger"]
+
+[lint.isort]
+combine-as-imports = true
+required-imports = ["from __future__ import annotations"]
