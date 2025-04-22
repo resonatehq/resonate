@@ -100,6 +100,10 @@ def sleep(ctx: Context) -> Generator[Yieldable, Any, int]:
     return 1
 
 
+def add_one(ctx: Context, n: int) -> int:
+    return n + 1
+
+
 def get_stores_config() -> list[tuple[Store, MessageSource]]:
     local_store = LocalStore()
     local_message_source = local_store.as_msg_source()
@@ -127,6 +131,7 @@ def resonate_instance(request: pytest.FixtureRequest) -> Generator[Resonate, Non
     resonate.register(fib_rfi)
     resonate.register(fib_rfc)
     resonate.register(sleep)
+    resonate.register(add_one)
     resonate.start()
     yield resonate
     resonate.stop()
@@ -205,3 +210,9 @@ def test_basic_retries() -> None:
     assert delta < 4.0  # This is kind of arbitrary, if it is failing feel free to increase the number
 
     resonate.stop()
+
+
+def test_listen(resonate_instance: Resonate) -> None:
+    timestamp = int(time.time())
+    handle = resonate_instance.rpc(f"add_one_{timestamp}", "add_one", 42)
+    assert handle.result() == 43

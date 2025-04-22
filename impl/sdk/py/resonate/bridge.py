@@ -13,6 +13,7 @@ from resonate.models.commands import (
     CreateCallbackRes,
     CreatePromiseReq,
     CreatePromiseRes,
+    CreateSubscriptionReq,
     Delayed,
     Function,
     Invoke,
@@ -88,23 +89,41 @@ class Bridge:
         self._delay_thread = threading.Thread(target=self._process_delayed_events, name="delay_thread", daemon=True)
 
     def invoke(self, cmd: Invoke, futures: tuple[Future, Future]) -> DurablePromise:
-        # TODO(avillega): Handle the case where func is None which means an rpc
         assert cmd.opts.version is not None, "Version must be set"
-        assert cmd.opts.version > 0, "Version must be greater than zero"
+        assert cmd.opts.version >= 0, "Version must be greater than or equal to zero"
 
-        promise, task = self._store.promises.create_with_task(
-            id=cmd.id,
-            ikey=cmd.id,
-            timeout=cmd.opts.timeout,
-            pid=self._pid,
-            ttl=self._ttl * 1000,
-            data={"func": cmd.name, "args": cmd.args, "kwargs": cmd.kwargs, "version": cmd.opts.version},
-            tags={
-                **cmd.opts.tags,
-                "resonate:invoke": cmd.opts.send_to,
-                "resonate:scope": "global",
-            },
-        )
+        promise: DurablePromise
+        task: Task | None = None
+
+        if cmd.func is None:
+            # RPC case
+
+            promise = self._store.promises.create(
+                id=cmd.id,
+                ikey=cmd.id,
+                timeout=cmd.opts.timeout,
+                data={"func": cmd.name, "args": cmd.args, "kwargs": cmd.kwargs, "version": cmd.opts.version},
+                tags={
+                    **cmd.opts.tags,
+                    "resonate:invoke": cmd.opts.send_to,
+                    "resonate:scope": "global",
+                },
+            )
+        else:
+            # Invocation case
+            promise, task = self._store.promises.create_with_task(
+                id=cmd.id,
+                ikey=cmd.id,
+                timeout=cmd.opts.timeout,
+                pid=self._pid,
+                ttl=self._ttl * 1000,
+                data={"func": cmd.name, "args": cmd.args, "kwargs": cmd.kwargs, "version": cmd.opts.version},
+                tags={
+                    **cmd.opts.tags,
+                    "resonate:invoke": cmd.opts.send_to,
+                    "resonate:scope": "global",
+                },
+            )
 
         futures[0].set_result(promise)
 
@@ -177,24 +196,42 @@ class Bridge:
 
                 case Done(reqs):
                     task = self._promise_id_to_task.get(cid, None)
-                    got_resume = False
-                    for req in reqs:
-                        assert isinstance(req, Network)
-                        assert isinstance(req.req, CreateCallbackReq)
+                    match reqs:
+                        case [Network(_, cid, CreateSubscriptionReq(id, promise_id, timeout, recv))]:
+                            # Current implementation returns a single CreateSubscriptionReq in the list
+                            # if we get more than one element they are all CreateCallbackReq
 
-                        res_cmd = self._handle_network_request(req.id, req.cid, req.req)
-                        if isinstance(res_cmd, Resume):
-                            # if we get a resume here we can bail the rest of the callback requests
-                            # and continue with the rest of the work in the cq.
-                            self._cq.put_nowait(res_cmd)
-                            got_resume = True
-                            break
+                            durable_promise, callback = self._store.promises.subscribe(
+                                id=id,
+                                promise_id=promise_id,
+                                timeout=timeout,
+                                recv=recv,
+                            )
+                            assert durable_promise.id == cid
+                            assert durable_promise.completed or callback
 
-                    if got_resume:
-                        continue
+                            if durable_promise.completed:
+                                self._cq.put_nowait(Notify(cid, durable_promise))
 
-                    if task is not None:
-                        self._store.tasks.complete(id=task.id, counter=task.counter)
+                        case _:
+                            got_resume = False
+                            for req in reqs:
+                                assert isinstance(req, Network)
+                                assert isinstance(req.req, CreateCallbackReq)
+
+                                res_cmd = self._handle_network_request(req.id, req.cid, req.req)
+                                if isinstance(res_cmd, Resume):
+                                    # if we get a resume here we can bail the rest of the callback requests
+                                    # and continue with the rest of the work in the cq.
+                                    self._cq.put_nowait(res_cmd)
+                                    got_resume = True
+                                    break
+
+                            if got_resume:
+                                continue
+
+                            if task is not None:
+                                self._store.tasks.complete(id=task.id, counter=task.counter)
 
     def _process_msgs(self) -> None:
         def _invoke(root: DurablePromise) -> Invoke:
