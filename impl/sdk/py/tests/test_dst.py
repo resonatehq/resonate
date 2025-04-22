@@ -148,8 +148,8 @@ def fib_rfc(ctx: Context, n: int) -> Generator[Any, Any, int]:
     return v1 + v2
 
 
-def test_dst(seed: str, steps: int = 10000) -> None:
-    logger.info("DST(seed=%s)", seed)
+def test_dst(seed: str, steps: int) -> None:
+    logger.info("DST(seed=%s, steps=%s)", seed, steps)
 
     # seed the random number generator
     r = random.Random(seed)
@@ -179,7 +179,6 @@ def test_dst(seed: str, steps: int = 10000) -> None:
     sim = Simulator(r)
 
     servers = [Server(r, "server", "server")]
-    # workers = [Worker(r, f"default/{n}", "default", registry=registry, store=servers[0].store) for n in range(3)]
     workers = [Worker(r, f"default/{n}", "default", registry=registry, store=servers[0].store, drop_at=r.randint(0, steps) * 1000) for n in range(3)]
 
     for s in servers:

@@ -13,6 +13,7 @@ def pytest_configure() -> None:
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--seed", action="store")
+    parser.addoption("--steps", action="store")
 
 
 @pytest.fixture
@@ -23,3 +24,15 @@ def seed(request: pytest.FixtureRequest) -> str:
         return str(random.randint(0, sys.maxsize))
 
     return seed
+
+@pytest.fixture
+def steps(request: pytest.FixtureRequest) -> int:
+    steps = request.config.getoption("--steps")
+
+    if isinstance(steps, str):
+        try:
+            return int(steps)
+        except ValueError:
+            pass
+
+    return 10000

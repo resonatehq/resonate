@@ -4,35 +4,83 @@ permissions:
   contents: read
 
 on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "seed"
+        type: number
+      steps:
+        description: "ticks"
+        type: number
   schedule:
     - cron: "*/20 * * * *" # every 20 mins
 
 jobs:
-  run:
-    name: On ${{ startsWith(matrix.os, 'macos-') && 'macOS' || startsWith(matrix.os, 'windows-') && 'Windows' || 'Linux' }} with python version ${{ matrix.python-version }}
+  values:
+      runs-on: ubuntu-22.04
+      steps:
+        - id: seed
+          name: Set random seed
+          run: echo seed=$RANDOM >> $GITHUB_OUTPUT
+      outputs:
+        seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+        ticks: ${{ inputs.steps || 10000 }}
+
+  dst:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    needs: [values]
+    timeout-minutes: 15
+
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-latest]
-        python-version: [3.13]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        run: [1, 2]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
-        with:
-          version: 0.5.23
 
-      - name: Set up Python
+      - name: Set up python
         uses: actions/setup-python@v5
         with:
           python-version: ${{matrix.python-version}}
 
-      - name: Install
+      - name: Install resonate
         run: uv sync --dev
 
-      - name: Run dst
-        run: uv run pytest tests/test_dst.py
+      - name: Run dst (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.ticks }})
+        run: uv run pytest -s --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} tests/test_dst.py 2> logs.txt
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python-version }}-logs-${{ matrix.run }}
+          path: logs.txt
+
+  diff:
+    runs-on: ubuntu-22.04
+    needs: [values, dst]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Download logs from run 1
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python-version }}-logs-1
+          path: logs-1.txt
+      - name: Download logs from run 2
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix.python-version }}-logs-2
+          path: logs-2.txt
+      - name: Diff
+        run: diff logs-1.txt logs-2.txt
