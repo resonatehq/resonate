@@ -61,6 +61,8 @@ class Resonate:
         self.unicast = unicast or f"poll://default/{self._pid}"
         self.anycast = anycast or f"poll://default/{self._pid}"
 
+        self._started = False
+
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
 
@@ -88,9 +90,11 @@ class Resonate:
         )
 
     def start(self) -> None:
-        self._bridge.start()
+        if not self._started:
+            self._bridge.start()
 
     def stop(self) -> None:
+        self._started = False
         self._bridge.stop()
 
     def options(
@@ -161,6 +165,7 @@ class Resonate:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
+        self.start()
         match func:
             case str():
                 name = func
@@ -188,6 +193,7 @@ class Resonate:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
+        self.start()
         match func:
             case str():
                 name, version = func, self._registry.latest(func)
@@ -204,6 +210,7 @@ class Resonate:
         return Handle(fv)
 
     def get(self, id: str) -> Handle[Any]:
+        self.start()
         fp, fv = Future[DurablePromise](), Future[Any]()
         self._bridge.listen(Listen(id), futures=(fp, fv))
 

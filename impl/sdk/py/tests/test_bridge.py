@@ -104,6 +104,11 @@ def add_one(ctx: Context, n: int) -> int:
     return n + 1
 
 
+def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
+    v = yield ctx.rfc("add_one", n)
+    return v
+
+
 def get_stores_config() -> list[tuple[Store, MessageSource]]:
     local_store = LocalStore()
     local_message_source = local_store.as_msg_source()
@@ -132,21 +137,28 @@ def resonate_instance(request: pytest.FixtureRequest) -> Generator[Resonate, Non
     resonate.register(fib_rfc)
     resonate.register(sleep)
     resonate.register(add_one)
+    resonate.register(rfi_add_one_by_name)
     resonate.start()
     yield resonate
     resonate.stop()
 
 
-def test_basic_lfi_bridge(resonate_instance: Resonate) -> None:
+def test_basic_lfi(resonate_instance: Resonate) -> None:
     timestamp = int(time.time())
     handle = resonate_instance.run(f"foo-lfi-{timestamp}", foo_lfi)
     assert handle.result() == "baz"
 
 
-def test_basic_rfi_bridge(resonate_instance: Resonate) -> None:
+def test_basic_rfi(resonate_instance: Resonate) -> None:
     timestamp = int(time.time())
     handle = resonate_instance.run(f"foo-rfi-{timestamp}", foo_rfi)
     assert handle.result() == "baz"
+
+
+def test_rfi_by_name(resonate_instance: Resonate) -> None:
+    timestamp = int(time.time())
+    handle = resonate_instance.rpc(f"add_one_by_name_rfi-{timestamp}", "rfi_add_one_by_name", 42)
+    assert handle.result() == 43
 
 
 def test_fib_lfi(resonate_instance: Resonate) -> None:
@@ -216,3 +228,21 @@ def test_listen(resonate_instance: Resonate) -> None:
     timestamp = int(time.time())
     handle = resonate_instance.rpc(f"add_one_{timestamp}", "add_one", 42)
     assert handle.result() == 43
+
+
+def test_implicit_resonate_start() -> None:
+    resonate = Resonate()
+
+    def f(ctx: Context, n: int) -> Generator[Any, Any, int]:
+        if n == 0:
+            return 1
+
+        v = yield ctx.rfc(f, n - 1)
+        return v + n
+
+    r = resonate.register(f)
+
+    timestamp = int(time.time())
+    handle = r.run(f"r-implicit-start-{timestamp}", 1)
+    result = handle.result()
+    assert result == 2
