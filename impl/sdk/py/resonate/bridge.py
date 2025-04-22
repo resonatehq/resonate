@@ -90,7 +90,7 @@ class Bridge:
 
     def invoke(self, cmd: Invoke, futures: tuple[Future, Future]) -> DurablePromise:
         assert cmd.opts.version is not None, "Version must be set"
-        assert cmd.opts.version >= 0, "Version must be greater than or equal to zero"
+        assert cmd.opts.version > 0, "Version must be greater than zero"
 
         promise: DurablePromise
         task: Task | None = None

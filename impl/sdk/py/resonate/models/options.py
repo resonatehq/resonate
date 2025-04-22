@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-from typing_extensions import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 from resonate.errors import ResonateValidationError
 from resonate.models.retry_policies import Never
