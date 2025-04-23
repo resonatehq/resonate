@@ -8,11 +8,6 @@ class ResonateError(Exception):
         super().__init__(msg, code)
 
 
-class UnknownError(ResonateError):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg, 0)
-
-
 class ResonateStoreError(ResonateError):
     def __init__(
         self,

@@ -5,8 +5,6 @@ from typing import overload
 
 from resonate.errors import ResonateValidationError
 
-# Registry
-
 
 class Registry:
     def __init__(self) -> None:

@@ -4,21 +4,22 @@ import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, final
 
+from resonate.clocks.wall import WallClock
 from resonate.encoders.base64 import Base64Encoder
 from resonate.encoders.chain import ChainEncoder
 from resonate.encoders.json import JsonEncoder
 from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
-from resonate.models.clock import Clock, WallClock
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.message import InvokeMesg, Mesg, NotifyMesg, ResumeMesg, TaskMesg
-from resonate.models.routers import Router, TagRouter
 from resonate.models.task import Task
+from resonate.routers.tag import TagRouter
 
 if TYPE_CHECKING:
+    from resonate.models.clock import Clock
     from resonate.models.encoder import Encoder
-    from resonate.models.enqueueable import Enqueueable
-    from resonate.models.message_source import MessageSource
+    from resonate.models.message_source import MessageQ, MessageSource
+    from resonate.models.router import Router
 
 
 class LocalStore:
@@ -770,7 +771,7 @@ class _LocalMessageSource:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-    def start(self, cq: Enqueueable[Mesg], pid: str) -> None:
+    def start(self, cq: MessageQ, pid: str) -> None:
         if self._thread is not None:
             return
 
@@ -790,7 +791,7 @@ class _LocalMessageSource:
             self._thread = None
             self._stop_event.clear()
 
-    def _loop(self, cq: Enqueueable[Mesg]) -> None:
+    def _loop(self, cq: MessageQ) -> None:
         while not self._stop_event.is_set():
             msgs = self._store.step()
             for _, msg in msgs:

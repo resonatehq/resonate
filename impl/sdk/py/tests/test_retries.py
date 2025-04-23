@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from resonate.dependencies import Dependencies
 from resonate.models.commands import Delayed, Function, Invoke, Network, RejectPromiseReq, ResolvePromiseReq, Retry, Return
-from resonate.models.options import Options
 from resonate.models.result import Ko, Ok
-from resonate.models.retry_policies import Constant, Exponential, Linear, Never, RetryPolicy
+from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Context
+from resonate.retry_policies import Constant, Exponential, Linear, Never
 from resonate.scheduler import Scheduler
+
+if TYPE_CHECKING:
+    from resonate.models.retry_policy import RetryPolicy
 
 
 def foo(ctx: Context):  # noqa: ANN201

@@ -13,7 +13,8 @@ class DelayQ[T]:
     def get(self, time: float) -> tuple[list[T], float]:
         items: list[T] = []
         while self._delayed and self._delayed[0][0] <= time:
-            items.append(heapq.heappop(self._delayed)[-1])
+            _, item = heapq.heappop(self._delayed)
+            items.append(item)
 
         next_time = self._delayed[0][0] if self._delayed else 0
         return items, next_time

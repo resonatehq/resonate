@@ -25,6 +25,7 @@ def seed(request: pytest.FixtureRequest) -> str:
 
     return seed
 
+
 @pytest.fixture
 def steps(request: pytest.FixtureRequest) -> int:
     steps = request.config.getoption("--steps")

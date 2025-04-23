@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from resonate.models.options import Options
+from resonate.options import Options
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from resonate.models.durable_promise import DurablePromise
     from resonate.models.result import Result
     from resonate.models.task import Task
+
 
 # Commands
 

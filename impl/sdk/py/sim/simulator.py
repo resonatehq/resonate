@@ -4,6 +4,7 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 from resonate import Context
+from resonate.clocks.step import StepClock
 from resonate.dependencies import Dependencies
 from resonate.errors import ResonateStoreError
 from resonate.models.commands import (
@@ -38,9 +39,9 @@ from resonate.models.commands import (
     Return,
 )
 from resonate.models.durable_promise import DurablePromise
-from resonate.models.options import Options
 from resonate.models.result import Ko, Ok, Result
 from resonate.models.task import Task
+from resonate.options import Options
 from resonate.scheduler import Done, More, Scheduler
 from resonate.stores.local import LocalStore
 
@@ -65,18 +66,6 @@ class Message:
 
     def __repr__(self) -> str:
         return f"Message(from={self.send}, to={self.recv}, payload={self.data}, time={self.time})"
-
-
-class StepClock:
-    def __init__(self) -> None:
-        self._time = 0
-
-    def time(self) -> int:
-        return self._time
-
-    def set_time(self, time: int) -> None:
-        assert time >= self._time, "The arrow of time only flows forward."
-        self._time = time
 
 
 class Simulator:

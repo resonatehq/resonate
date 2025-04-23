@@ -6,16 +6,16 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from resonate.models import retry_policies
+from resonate.message_sources.poller import Poller
 from resonate.resonate import Resonate
+from resonate.retry_policies import Constant
 from resonate.stores.local import LocalStore
 from resonate.stores.remote import RemoteStore
-from resonate.task_sources.poller import Poller
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate.models.context import Yieldable
+    from resonate.coroutine import Yieldable
     from resonate.models.message_source import MessageSource
     from resonate.models.store import Store
     from resonate.resonate import Context
@@ -109,10 +109,9 @@ def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
     return v
 
 
-def get_stores_config() -> list[tuple[Store, MessageSource]]:
+def get_stores_config() -> list[tuple[Store, MessageSource | None]]:
     local_store = LocalStore()
-    local_message_source = local_store.as_msg_source()
-    stores: list[tuple[Store, MessageSource]] = [(local_store, local_message_source)]
+    stores: list[tuple[Store, MessageSource | None]] = [(local_store, None)]
 
     if "RESONATE_STORE_URL" in os.environ and "RESONATE_MSG_SRC_URL" in os.environ:
         remote_store = RemoteStore(url=os.environ["RESONATE_STORE_URL"])
@@ -208,7 +207,7 @@ def test_basic_retries() -> None:
             return n
         raise RuntimeError
 
-    f = resonate.register(retriable, retry_policy=retry_policies.Constant(delay=1, max_retries=3))
+    f = resonate.register(retriable, retry_policy=Constant(delay=1, max_retries=3))
     resonate.start()
 
     start_time = time.time()

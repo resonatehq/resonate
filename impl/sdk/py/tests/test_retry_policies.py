@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
-from resonate.models.retry_policies import Constant, Exponential, Linear, Never, RetryPolicy
+from resonate.retry_policies import Constant, Exponential, Linear, Never
+
+if TYPE_CHECKING:
+    from resonate.models.retry_policy import RetryPolicy
 
 
 @pytest.mark.parametrize(

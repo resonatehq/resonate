@@ -12,14 +12,16 @@ from resonate.dependencies import Dependencies
 from resonate.errors import ResonateValidationError
 from resonate.models.commands import Invoke, Listen
 from resonate.models.handle import Handle
-from resonate.models.options import Options
-from resonate.models.retry_policies import Constant, Exponential, Linear, Never, RetryPolicy
+from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Function
+from resonate.retry_policies import Constant, Exponential, Linear, Never
 from resonate.scheduler import Info
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+    from resonate.models.retry_policy import RetryPolicy
 
 
 def foo(ctx: Context, a: int, b: int) -> int: ...

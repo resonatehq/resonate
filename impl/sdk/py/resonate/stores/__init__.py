@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resonate.stores.local import LocalStore
-from resonate.stores.remote import RemoteStore
+from .local import LocalStore
+from .remote import RemoteStore
 
 __all__ = ["LocalStore", "RemoteStore"]

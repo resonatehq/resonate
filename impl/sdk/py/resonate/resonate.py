@@ -8,32 +8,27 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Concatenate, overload
 
 from resonate.bridge import Bridge
+from resonate.conventions.default import Default
+from resonate.conventions.sleep import Sleep
+from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
-from resonate.encoders.base64 import Base64Encoder
-from resonate.encoders.chain import ChainEncoder
-from resonate.encoders.json import JsonEncoder
+from resonate.message_sources.poller import Poller
 from resonate.models.commands import Invoke, Listen
-from resonate.models.context import (
-    LFC,
-    LFI,
-    RFC,
-    RFI,
-    Info,
-)
-from resonate.models.conventions import DefaultConvention, SleepConvention
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.handle import Handle
-from resonate.models.options import Options
-from resonate.models.retry_policies import Exponential, Never
+from resonate.options import Options
 from resonate.registry import Registry
+from resonate.retry_policies import Exponential, Never
 from resonate.stores.local import LocalStore
+from resonate.stores.remote import RemoteStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from resonate.models.context import Info
     from resonate.models.encoder import Encoder
     from resonate.models.message_source import MessageSource
-    from resonate.models.retry_policies import RetryPolicy
+    from resonate.models.retry_policy import RetryPolicy
     from resonate.models.store import Store
 
 
@@ -41,52 +36,44 @@ class Resonate:
     def __init__(
         self,
         *,
-        store: Store | None = None,
-        message_source: MessageSource | None = None,
+        url: str | None = None,
         pid: str | None = None,
         ttl: int = 10,
         opts: Options | None = None,
         anycast: str | None = None,
         unicast: str | None = None,
+        store: Store | None = None,
+        message_source: MessageSource | None = None,
         encoder: Encoder[Any, str | None] | None = None,
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
     ) -> None:
-        # Assertion to enforce mutual inclusion/exclusion of store and message_source
-        assert (store is None) == (message_source is None), "store and message_source must both be None or both be not None"
+        self._started = False
 
         self._pid = pid or uuid.uuid4().hex
         self._opts = opts or Options()
 
-        self.unicast = unicast or f"poll://default/{self._pid}"
-        self.anycast = anycast or f"poll://default/{self._pid}"
-
-        self._started = False
-
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
 
-        _store: Store
-        _msg_src: MessageSource
+        store = store or LocalStore() if url is None else RemoteStore(url)
+        assert not isinstance(store, LocalStore) or message_source is None
 
-        if store is None:
-            _store = LocalStore(ChainEncoder(JsonEncoder(), Base64Encoder()))
-            _msg_src = _store.as_msg_source()
-        else:
-            assert store is not None
-            assert message_source is not None
-            _store = store
-            _msg_src = message_source
+        message_source = message_source or store.as_msg_source() if isinstance(store, LocalStore) else Poller()
+
+        # TODO(dfarr): grab default addresses from message source
+        self._unicast = unicast or f"poll://default/{self._pid}"
+        self._anycast = anycast or f"poll://default/{self._pid}"
 
         self._bridge = Bridge(
             ctx=lambda id, info: Context(id, info, self._opts, self._registry, self._dependencies),
-            store=_store,
-            message_source=_msg_src,
-            registry=self._registry,
             pid=self._pid,
             ttl=ttl,
-            anycast=self.anycast,
-            unicast=self.unicast,
+            anycast=self._anycast,
+            unicast=self._unicast,
+            store=store,
+            message_source=message_source,
+            registry=self._registry,
         )
 
     def start(self) -> None:
@@ -150,6 +137,7 @@ class Resonate:
 
         if args and callable(args[0]):
             return wrapper(args[0])
+
         return wrapper
 
     @overload
@@ -273,7 +261,7 @@ class Context:
     def rfi(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFI:
         self._counter += 1
         func, version, versions = self._rfi_func(func)
-        return RFI(f"{self.id}.{self._counter}", DefaultConvention(func, args, kwargs, versions, self._registry, Options(version=version, timeout=self._opts.timeout)))
+        return RFI(f"{self.id}.{self._counter}", Default(func, args, kwargs, versions, self._registry, Options(version=version, timeout=self._opts.timeout)))
 
     @overload
     def rfc[**P, R](self, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> RFC: ...
@@ -284,7 +272,7 @@ class Context:
     def rfc(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFC:
         self._counter += 1
         func, version, versions = self._rfi_func(func)
-        return RFC(f"{self.id}.{self._counter}", DefaultConvention(func, args, kwargs, versions, self._registry, Options(version=version, timeout=self._opts.timeout)))
+        return RFC(f"{self.id}.{self._counter}", Default(func, args, kwargs, versions, self._registry, Options(version=version, timeout=self._opts.timeout)))
 
     @overload
     def detached[**P, R](self, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> RFI: ...
@@ -295,11 +283,11 @@ class Context:
     def detached(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFI:
         self._counter += 1
         func, version, versions = self._rfi_func(func)
-        return RFI(f"{self.id}.{self._counter}", DefaultConvention(func, args, kwargs, versions, self._registry, Options(version=version)), mode="detached")
+        return RFI(f"{self.id}.{self._counter}", Default(func, args, kwargs, versions, self._registry, Options(version=version)), mode="detached")
 
     def sleep(self, secs: int) -> RFC:
         self._counter += 1
-        return RFC(f"{self.id}.{self._counter}", SleepConvention(secs))
+        return RFC(f"{self.id}.{self._counter}", Sleep(secs))
 
     def _lfi_func(self, f: str | Callable) -> tuple[Callable, int, dict[int, Callable] | None]:
         match f:

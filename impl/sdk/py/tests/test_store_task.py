@@ -10,9 +10,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from resonate.errors import ResonateStoreError
+from resonate.message_sources.poller import Poller
 from resonate.stores.local import LocalStore
 from resonate.stores.remote import RemoteStore
-from resonate.task_sources.poller import Poller
 
 if TYPE_CHECKING:
     from collections.abc import Generator

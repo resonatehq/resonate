@@ -5,7 +5,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
-from resonate.delay_queue import DelayQ
+from resonate.delay_q import DelayQ
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -30,9 +30,9 @@ from resonate.models.commands import (
     Return,
 )
 from resonate.models.durable_promise import DurablePromise
-from resonate.models.options import Options
 from resonate.models.result import Ko, Ok, Result
 from resonate.models.task import Task
+from resonate.options import Options
 from resonate.scheduler import Done, Info, More, Scheduler
 
 if TYPE_CHECKING:

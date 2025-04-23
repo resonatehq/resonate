@@ -13,8 +13,8 @@ from resonate.models.message import InvokeMesg, NotifyMesg, ResumeMesg
 
 if TYPE_CHECKING:
     from resonate.models.encoder import Encoder
-    from resonate.models.enqueueable import Enqueueable
     from resonate.models.message import Mesg
+    from resonate.models.message_source import MessageQ
 
 
 class Poller:
@@ -31,7 +31,7 @@ class Poller:
         self._thread: Thread | None = None
         self._timeout = timeout
 
-    def start(self, cq: Enqueueable[Mesg], pid: str) -> None:
+    def start(self, cq: MessageQ, pid: str) -> None:
         if self._thread is not None:
             return
 
@@ -52,7 +52,7 @@ class Poller:
     def url(self, pid: str) -> str:
         return f"{self._url}/{self.group}/{pid}"
 
-    def loop(self, cq: Enqueueable[Mesg], pid: str) -> None:
+    def loop(self, cq: MessageQ, pid: str) -> None:
         while True:
             try:
                 url = self.url(pid)
@@ -76,7 +76,7 @@ class Poller:
                 logger.warning("Unexpected error in poller loop for group %s: %s", self.group, e)
                 break
 
-    def step(self, cq: Enqueueable[Mesg], pid: str) -> None:
+    def step(self, cq: MessageQ, pid: str) -> None:
         with requests.get(self.url(pid), stream=True, timeout=self._timeout) as res:
             for line in res.iter_lines(chunk_size=None, decode_unicode=True):
                 assert isinstance(line, str), "line must be a string"

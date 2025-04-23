@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from resonate.delay_queue import DelayQ
+from resonate.delay_q import DelayQ
 
 
 def test_delay_queue() -> None:

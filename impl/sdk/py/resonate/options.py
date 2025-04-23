@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict
 
 from resonate.errors import ResonateValidationError
-from resonate.models.retry_policies import Never
+from resonate.retry_policies.never import Never
 
 if TYPE_CHECKING:
-    from resonate.models.retry_policies import RetryPolicy
+    from resonate.models.retry_policy import RetryPolicy
 
 
 @dataclass(frozen=True)

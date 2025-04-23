@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Final, Literal
 
+from resonate.coroutine import AWT, LFI, RFI, TRM, Coroutine
 from resonate.graph import Graph, Node
 from resonate.logging import logger
 from resonate.models.commands import (
@@ -31,39 +32,17 @@ from resonate.models.commands import (
     Retry,
     Return,
 )
-from resonate.models.context import (
-    AWT,
-    LFC,
-    LFI,
-    RFC,
-    RFI,
-    Context,
-    Yieldable,
-)
-from resonate.models.options import Options
-from resonate.models.promise import Promise
 from resonate.models.result import Ko, Ok, Result
+from resonate.options import Options
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable
     from concurrent.futures import Future
 
+    from resonate.models.context import Context
     from resonate.models.durable_promise import DurablePromise
 
 
-class Info:
-    def __init__(self) -> None:
-        self._attempt = 1
-
-    @property
-    def attempt(self) -> int:
-        return self._attempt
-
-    def increment_attempt(self) -> None:
-        self._attempt += 1
-
-
-# Scheduler
 class Scheduler:
     def __init__(
         self,
@@ -102,9 +81,17 @@ class Scheduler:
         return computation.eval()
 
 
-#####################################################################
-## Here We Go
-#####################################################################
+class Info:
+    def __init__(self) -> None:
+        self._attempt = 1
+
+    @property
+    def attempt(self) -> int:
+        return self._attempt
+
+    def increment_attempt(self) -> None:
+        self._attempt += 1
+
 
 type State = Enabled[Running[Init | Lfnc | Coro]] | Enabled[Suspended[Init | Rfnc | Coro]] | Enabled[Completed[Lfnc | Rfnc | Coro]] | Blocked[Running[Init | Lfnc | Coro]]
 
@@ -830,99 +817,3 @@ History:
             "\n  ".join(f"{'  ' * level}{node}" for node, level in self.graph.traverse_with_level()),
             "\n  ".join(str(event) for event in self.history) if self.history else "None",
         )
-
-
-# Coroutine
-
-
-@dataclass
-class TRM:
-    id: str
-    result: Result
-
-
-class Coroutine:
-    def __init__(self, id: str, cid: str, gen: Generator[Yieldable, Any, Any]) -> None:
-        self.id = id
-        self.cid = cid
-        self.gen = gen
-
-        self.done = False
-        self.skip = False
-        self.next: type[None | AWT] | tuple[type[Result], ...] = type(None)
-        self.unyielded: list[AWT | TRM] = []
-
-    def __repr__(self) -> str:
-        return f"Coroutine(done={self.done})"
-
-    def send(self, value: None | AWT | Result) -> LFI | RFI | AWT | TRM:
-        assert self.done or isinstance(value, self.next), "AWT must follow LFI/RFI. Value must follow AWT."
-        assert not self.skip or isinstance(value, AWT), "If skipped, value must be an AWT."
-
-        if self.done:
-            # When done, yield all unyielded values to enforce structured concurrency, the final
-            # value must be a TRM.
-
-            match self.unyielded:
-                case []:
-                    raise StopIteration
-                case [trm]:
-                    assert isinstance(trm, TRM), "Last unyielded value must be a TRM."
-                    self.unyielded = []
-                    return trm
-                case [head, *tail]:
-                    self.unyielded = tail
-                    return head
-        try:
-            match value, self.skip:
-                case None, _:
-                    yielded = next(self.gen)
-                case Ok(v), _:
-                    yielded = self.gen.send(v)
-                case Ko(e), _:
-                    yielded = self.gen.throw(e)
-                case awt, True:
-                    # When skipped, pretend as if the generator yielded a promise
-                    self.skip = False
-                    yielded = Promise(awt.id, self.cid)
-                case awt, False:
-                    yielded = self.gen.send(Promise(awt.id, self.cid))
-
-            match yielded:
-                case LFI(id) | RFI(id, mode="attached"):
-                    # LFIs and attached RFIs require an AWT
-                    self.next = AWT
-                    self.unyielded.append(AWT(id))
-                    command = yielded
-                case LFC(id, func, args, kwargs, opts):
-                    # LFCs can be converted to an LFI+AWT
-                    self.next = AWT
-                    self.skip = True
-                    command = LFI(id, func, args, kwargs, opts)
-                case RFC(id, convention):
-                    # RFCs can be converted to an RFI+AWT
-                    self.next = AWT
-                    self.skip = True
-                    command = RFI(id, convention)
-                case Promise(id):
-                    # When a promise is yielded we can remove it from unyielded
-                    self.next = (Ok, Ko)
-                    self.unyielded = [y for y in self.unyielded if y.id != id]
-                    command = AWT(id)
-                case _:
-                    assert isinstance(yielded, RFI), "Yielded must be an RFI."
-                    assert yielded.mode == "detached", "RFI must be detached."
-                    self.next = AWT
-                    command = yielded
-
-        except StopIteration as e:
-            self.done = True
-            self.unyielded.append(TRM(self.id, Ok(e.value)))
-            return self.unyielded.pop(0)
-        except Exception as e:
-            self.done = True
-            self.unyielded.append(TRM(self.id, Ko(e)))
-            return self.unyielded.pop(0)
-        else:
-            assert not isinstance(yielded, Promise) or yielded.cid == self.cid, "If promise, cids must match."
-            return command
