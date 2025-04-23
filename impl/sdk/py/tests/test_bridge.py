@@ -162,7 +162,7 @@ def test_hitl(resonate_instance: Resonate, id: str | None) -> None:
     timestamp = int(time.time())
     handle = resonate_instance.run(f"hitl-{timestamp}", hitl, id)
     time.sleep(1)
-    resonate_instance.store.promises.resolve(id=id or f"hitl-{timestamp}.1", data=1)
+    resonate_instance.promises.resolve(id=id or f"hitl-{timestamp}.1", data=1)
     assert handle.result() == 1
 
 

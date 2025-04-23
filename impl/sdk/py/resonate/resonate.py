@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from resonate.models.encoder import Encoder
     from resonate.models.message_source import MessageSource
     from resonate.models.retry_policy import RetryPolicy
-    from resonate.models.store import Store
+    from resonate.models.store import PromiseStore, Store
 
 
 class Resonate:
@@ -57,10 +57,10 @@ class Resonate:
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
 
-        self.store = store or LocalStore() if url is None else RemoteStore(url)
-        assert not isinstance(self.store, LocalStore) or message_source is None
+        self._store = store or LocalStore() if url is None else RemoteStore(url)
+        assert not isinstance(self._store, LocalStore) or message_source is None
 
-        message_source = message_source or self.store.as_msg_source() if isinstance(self.store, LocalStore) else Poller()
+        message_source = message_source or self._store.as_msg_source() if isinstance(self._store, LocalStore) else Poller()
 
         # TODO(dfarr): grab default addresses from message source
         self._unicast = unicast or f"poll://default/{self._pid}"
@@ -72,7 +72,7 @@ class Resonate:
             ttl=ttl,
             anycast=self._anycast,
             unicast=self._unicast,
-            store=self.store,
+            store=self._store,
             message_source=message_source,
             registry=self._registry,
         )
@@ -208,6 +208,10 @@ class Resonate:
 
     def set_dependency(self, name: str, obj: Any) -> None:
         self._dependencies.add(name, obj)
+
+    @property
+    def promises(self) -> PromiseStore:
+        return self._store.promises
 
 
 # Context
