@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -48,7 +48,7 @@ jobs:
               --timeout=3m
 
   test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
       TEST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
@@ -99,7 +99,7 @@ jobs:
           path: test/dst/dst*.html
 
   linearizability:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -130,7 +130,7 @@ jobs:
           path: test/results/
 
   scan:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [lint, test, linearizability]
     env:
       SEMGREP_RULES: "auto semgrep.yml"

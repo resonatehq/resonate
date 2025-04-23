@@ -22,11 +22,11 @@ jobs:
           - os: linux
             arch: x86_64
             arch_grep: x86-64
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - os: linux
             arch: aarch64
             arch_grep: aarch64
-            runner: ubuntu-22.04-arm64
+            runner: ubuntu-24.04-arm
           - os: darwin
             arch: x86_64
             arch_grep: x86_64

@@ -18,27 +18,36 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Restore resonate binary from cache
+        uses: actions/cache/restore@v4
+        id: cache  # Unique identifier to reference the cache step's output
+        with:
+          path: resonate  # Path to the binary you want to cache
+          key: resonate-${{ github.sha }}  # Cache key tied to the commit SHA
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@v16
 
       - name: Build resonate binary
+        if: steps.cache.outputs.cache-hit != 'true'  # Only run if cache missed
         run: |
           nix build ".#resonate"
           cp ./result/bin/resonate resonate
 
-      - name: Cache resonate binary
+      - name: Save resonate binary to cache
+        if: steps.cache.outputs.cache-hit != 'true'  # Only save if cache was missed
         uses: actions/cache/save@v4
         with:
           path: resonate
           key: resonate-${{ github.sha }}
 
   values:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - id: seed
         name: Set random seed
@@ -48,9 +57,12 @@ jobs:
       ticks: ${{ inputs.ticks || 1000 }}
 
   dst:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build, values]
-    timeout-minutes: 150
+    # DST runs every 20 minutes, if something takes more than 15 mins it is
+    # possible not going to finish anyway. The build can take about 5 mins
+    # give or take, so this time accounts for that.
+    timeout-minutes: 15
 
     strategy:
       fail-fast: false
@@ -127,7 +139,7 @@ jobs:
           path: dst.html
 
   diff:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     needs: [build, values, dst]
 
     strategy:
