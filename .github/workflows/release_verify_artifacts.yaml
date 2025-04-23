@@ -25,7 +25,7 @@ env:
 
 jobs:
   verify-github-image:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -49,9 +49,9 @@ jobs:
       matrix:
         systems:
           - file: resonate_linux_x86_64.tar.gz
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - file: resonate_linux_aarch64.tar.gz
-            runner: ubuntu-22.04-arm64
+            runner: ubuntu-24.04-arm
           - file: resonate_darwin_x86_64.tar.gz
             runner: macos-13
           - file: resonate_darwin_aarch64.tar.gz
