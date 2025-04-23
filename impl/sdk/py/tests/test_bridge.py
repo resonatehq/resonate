@@ -104,6 +104,10 @@ def add_one(ctx: Context, n: int) -> int:
     return n + 1
 
 
+def get_dependency(ctx: Context) -> int:
+    return ctx.get_dependency("foo") + 1
+
+
 def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
     v = yield ctx.rfc("add_one", n)
     return v
@@ -137,9 +141,17 @@ def resonate_instance(request: pytest.FixtureRequest) -> Generator[Resonate, Non
     resonate.register(sleep)
     resonate.register(add_one)
     resonate.register(rfi_add_one_by_name)
+    resonate.register(get_dependency)
     resonate.start()
     yield resonate
     resonate.stop()
+
+
+def test_get_dependency(resonate_instance: Resonate) -> None:
+    timestamp = int(time.time())
+    resonate_instance.set_dependency("foo", 1)
+    handle = resonate_instance.run(f"get-dependency-{timestamp}", get_dependency)
+    assert handle.result() == 2
 
 
 def test_basic_lfi(resonate_instance: Resonate) -> None:

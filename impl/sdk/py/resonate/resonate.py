@@ -205,6 +205,9 @@ class Resonate:
         fp.result()
         return Handle(fv)
 
+    def set_dependency(self, name: str, obj: Any) -> None:
+        self._dependencies.add(name, obj)
+
 
 # Context
 class Context:
@@ -219,10 +222,6 @@ class Context:
     @property
     def id(self) -> str:
         return self._id
-
-    @property
-    def deps(self) -> Dependencies:
-        return self._dependencies
 
     @property
     def info(self) -> Info:
@@ -288,6 +287,9 @@ class Context:
     def sleep(self, secs: int) -> RFC:
         self._counter += 1
         return RFC(f"{self.id}.{self._counter}", Sleep(secs))
+
+    def get_dependency(self, name: str) -> Any:
+        return self._dependencies.get(name)
 
     def _lfi_func(self, f: str | Callable) -> tuple[Callable, int, dict[int, Callable] | None]:
         match f:
