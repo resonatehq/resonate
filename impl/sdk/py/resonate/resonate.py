@@ -8,6 +8,7 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Concatenate, overload
 
 from resonate.bridge import Bridge
+from resonate.conventions.base import Base
 from resonate.conventions.default import Default
 from resonate.conventions.sleep import Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI
@@ -56,10 +57,10 @@ class Resonate:
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
 
-        store = store or LocalStore() if url is None else RemoteStore(url)
-        assert not isinstance(store, LocalStore) or message_source is None
+        self.store = store or LocalStore() if url is None else RemoteStore(url)
+        assert not isinstance(self.store, LocalStore) or message_source is None
 
-        message_source = message_source or store.as_msg_source() if isinstance(store, LocalStore) else Poller()
+        message_source = message_source or self.store.as_msg_source() if isinstance(self.store, LocalStore) else Poller()
 
         # TODO(dfarr): grab default addresses from message source
         self._unicast = unicast or f"poll://default/{self._pid}"
@@ -71,7 +72,7 @@ class Resonate:
             ttl=ttl,
             anycast=self._anycast,
             unicast=self._unicast,
-            store=store,
+            store=self.store,
             message_source=message_source,
             registry=self._registry,
         )
@@ -287,6 +288,10 @@ class Context:
     def sleep(self, secs: int) -> RFC:
         self._counter += 1
         return RFC(f"{self.id}.{self._counter}", Sleep(secs))
+
+    def promise(self, data: Any = None, headers: dict[str, str] | None = None) -> RFI:
+        self._counter += 1
+        return RFI(f"{self.id}.{self._counter}", Base(data, headers))
 
     def get_dependency(self, name: str) -> Any:
         return self._dependencies.get(name)

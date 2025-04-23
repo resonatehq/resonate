@@ -382,5 +382,5 @@ def test_propagation(timeout: int, func: Callable, version: int, send_to: str | 
             assert cmd.convention.opts.timeout == timeout
 
         cmd = cmd.options(timeout=timeout - 1)
-        assert cmd.convention.opts.timeout == timeout - 1
+        assert cmd.convention.timeout == timeout - 1
         assert cmd.options(send_to=send_to).convention.opts.send_to == send_to if send_to is not None else default_opts.send_to

@@ -10,7 +10,7 @@ from resonate.options import Options
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
-    from resonate.models.conventions import Convention
+    from resonate.models.convention import Convention
     from resonate.models.retry_policy import RetryPolicy
 
 

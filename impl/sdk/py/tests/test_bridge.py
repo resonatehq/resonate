@@ -113,6 +113,15 @@ def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
     return v
 
 
+def hitl(ctx: Context, id: str | None) -> Generator[Yieldable, Any, int]:
+    if id:
+        p = yield ctx.promise().options(id=id)
+    else:
+        p = yield ctx.promise()
+    v = yield p
+    return v
+
+
 def get_stores_config() -> list[tuple[Store, MessageSource | None]]:
     local_store = LocalStore()
     stores: list[tuple[Store, MessageSource | None]] = [(local_store, None)]
@@ -142,9 +151,19 @@ def resonate_instance(request: pytest.FixtureRequest) -> Generator[Resonate, Non
     resonate.register(add_one)
     resonate.register(rfi_add_one_by_name)
     resonate.register(get_dependency)
+    resonate.register(hitl)
     resonate.start()
     yield resonate
     resonate.stop()
+
+
+@pytest.mark.parametrize("id", ["foo", None])
+def test_hitl(resonate_instance: Resonate, id: str | None) -> None:
+    timestamp = int(time.time())
+    handle = resonate_instance.run(f"hitl-{timestamp}", hitl, id)
+    time.sleep(1)
+    resonate_instance.store.promises.resolve(id=id or f"hitl-{timestamp}.1", data=1)
+    assert handle.result() == 1
 
 
 def test_get_dependency(resonate_instance: Resonate) -> None:

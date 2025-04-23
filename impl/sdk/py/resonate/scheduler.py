@@ -699,8 +699,7 @@ class Computation:
                         return []
 
                     case RFI(id, convention), Enabled(Suspended(Init(next=None))):
-                        data, tags, timeout, headers = convention.format()
-                        next = Rfnc(id=id, timeout=timeout, ikey=id, data=data, tags=tags, headers=headers)
+                        next = Rfnc(id=id, timeout=convention.timeout, ikey=id, data=convention.data, tags=convention.tags, headers=convention.headers)
 
                         node.add_edge(child)
                         node.add_edge(child, "waiting[p]")
