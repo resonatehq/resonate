@@ -21,14 +21,20 @@ if TYPE_CHECKING:
 class RemoteStore:
     def __init__(
         self,
-        url: str | None = None,
+        host: str | None = None,
+        port: str | None = None,
         encoder: Encoder[Any, str | None] | None = None,
     ) -> None:
-        self.url = url or os.getenv("RESONATE_STORE_URL", "http://localhost:8001")
+        self.host = host or os.getenv("RESONATE_HOST_STORE", os.getenv("RESONATE_HOST", "http://localhost"))
+        self.port = port or os.getenv("RESONATE_PORT_STORE", "8001")
         self.encoder = encoder or ChainEncoder(
             JsonEncoder(),
             Base64Encoder(),
         )
+
+    @property
+    def url(self) -> str:
+        return f"{self.host}:{self.port}"
 
     @property
     def promises(self) -> RemotePromiseStore:

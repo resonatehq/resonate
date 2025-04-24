@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import sys
+from typing import TYPE_CHECKING
 
 import pytest
+
+from resonate.message_sources.poller import Poller
+from resonate.stores.local import LocalStore
+from resonate.stores.remote import RemoteStore
+
+if TYPE_CHECKING:
+    from resonate.models.message_source import MessageSource
+    from resonate.models.store import Store
 
 
 def pytest_configure() -> None:
@@ -14,6 +24,9 @@ def pytest_configure() -> None:
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--seed", action="store")
     parser.addoption("--steps", action="store")
+
+
+# DST fixtures
 
 
 @pytest.fixture
@@ -37,3 +50,23 @@ def steps(request: pytest.FixtureRequest) -> int:
             pass
 
     return 10000
+
+
+# Store fixtures
+
+
+@pytest.fixture(
+    scope="module",
+    params=[LocalStore, RemoteStore] if "RESONATE_HOST" in os.environ else [LocalStore],
+)
+def store(request: pytest.FixtureRequest) -> Store:
+    return request.param()
+
+
+@pytest.fixture(scope="module")
+def message_source(store: Store) -> MessageSource:
+    match store:
+        case LocalStore():
+            return store.message_source(group="default", id="test")
+        case _:
+            return Poller(group="default", id="test", timeout=3)

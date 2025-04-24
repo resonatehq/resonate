@@ -21,14 +21,13 @@ from resonate.models.handle import Handle
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.retry_policies import Exponential, Never
-from resonate.stores.local import LocalStore
+from resonate.stores.local import LocalStore, _LocalMessageSource
 from resonate.stores.remote import RemoteStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
     from resonate.models.context import Info
-    from resonate.models.encoder import Encoder
     from resonate.models.message_source import MessageSource
     from resonate.models.retry_policy import RetryPolicy
     from resonate.models.store import PromiseStore, Store
@@ -38,44 +37,95 @@ class Resonate:
     def __init__(
         self,
         *,
-        url: str | None = None,
         pid: str | None = None,
         ttl: int = 10,
-        anycast: str | None = None,
-        unicast: str | None = None,
-        store: Store | None = None,
-        message_source: MessageSource | None = None,
-        encoder: Encoder[Any, str | None] | None = None,
+        group: str = "default",
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
+        store: Store | None = None,
+        message_source: MessageSource | None = None,
     ) -> None:
+        # enforce mutual inclusion/exclusion of store and message source
+        assert (store is None) == (message_source is None), "store and message source must both be set or both be unset"
+        assert not isinstance(store, LocalStore) or isinstance(message_source, _LocalMessageSource), "message source must be local message source"
+        assert not isinstance(store, RemoteStore) or not isinstance(message_source, _LocalMessageSource), "message source must not be local message source"
+
         self._started = False
 
         self._pid = pid or uuid.uuid4().hex
+        self._ttl = ttl
+        self._group = group
         self._opts = Options()
-
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
 
-        self._store = store or LocalStore() if url is None else RemoteStore(url)
-        assert not isinstance(self._store, LocalStore) or message_source is None
-
-        message_source = message_source or self._store.as_msg_source() if isinstance(self._store, LocalStore) else Poller()
-
-        # TODO(dfarr): grab default addresses from message source
-        self._unicast = unicast or f"poll://default/{self._pid}"
-        self._anycast = anycast or f"poll://default/{self._pid}"
+        if store and message_source:
+            self._store = store
+            self._message_source = message_source
+        else:
+            self._store = LocalStore()
+            self._message_source = self._store.message_source(self._group, self._pid)
 
         self._bridge = Bridge(
             ctx=lambda id, info: Context(id, info, self._opts, self._registry, self._dependencies),
             pid=self._pid,
             ttl=ttl,
-            anycast=self._anycast,
-            unicast=self._unicast,
-            store=self._store,
-            message_source=message_source,
+            anycast=self._message_source.anycast,
+            unicast=self._message_source.unicast,
             registry=self._registry,
+            store=self._store,
+            message_source=self._message_source,
         )
+
+    @classmethod
+    def local(
+        cls,
+        pid: str | None = None,
+        ttl: int = 10,
+        group: str = "default",
+        registry: Registry | None = None,
+        dependencies: Dependencies | None = None,
+    ) -> Resonate:
+        pid = pid or uuid.uuid4().hex
+        store = LocalStore()
+
+        return cls(
+            pid=pid,
+            ttl=ttl,
+            group=group,
+            registry=registry,
+            dependencies=dependencies,
+            store=store,
+            message_source=store.message_source(group=group, id=pid),
+        )
+
+    @classmethod
+    def remote(
+        cls,
+        host: str | None = None,
+        store_port: str | None = None,
+        message_source_port: str | None = None,
+        pid: str | None = None,
+        ttl: int = 10,
+        group: str = "default",
+        registry: Registry | None = None,
+        dependencies: Dependencies | None = None,
+    ) -> Resonate:
+        pid = pid or uuid.uuid4().hex
+
+        return cls(
+            pid=pid,
+            ttl=ttl,
+            group=group,
+            registry=registry,
+            dependencies=dependencies,
+            store=RemoteStore(host=host, port=store_port),
+            message_source=Poller(group=group, id=pid, host=host, port=message_source_port),
+        )
+
+    @property
+    def promises(self) -> PromiseStore:
+        return self._store.promises
 
     def start(self) -> None:
         if not self._started:
@@ -197,38 +247,7 @@ class Resonate:
     def set_dependency(self, name: str, obj: Any) -> None:
         self._dependencies.add(name, obj)
 
-    @property
-    def promises(self) -> PromiseStore:
-        return self._store.promises
 
-
-class Random:
-    def __init__(self, ctx: Context) -> None:
-        self.ctx = ctx
-
-    def random(self) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).random())
-
-    def betavariate(self, alpha: float, beta: float) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).betavariate(alpha, beta))
-
-    def randrange(self, start: int, stop: int | None = None, step: int = 1) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randrange(start, stop, step))
-
-    def randint(self, a: int, b: int) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randint(a, b))
-
-    def getrandbits(self, k: int) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).getrandbits(k))
-
-    def triangular(self, low: float = 0, high: float = 1, mode: float | None = None) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).triangular(low, high, mode))
-
-    def expovariate(self, lambd: float = 1) -> LFC:
-        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).expovariate(lambd))
-
-
-# Context
 class Context:
     def __init__(self, id: str, info: Info, opts: Options, registry: Registry, dependencies: Dependencies) -> None:
         self._id = id
@@ -334,7 +353,30 @@ class Context:
                 return *self._registry.get(f), self._registry.all(f)
 
 
-# Function
+class Random:
+    def __init__(self, ctx: Context) -> None:
+        self.ctx = ctx
+
+    def random(self) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).random())
+
+    def betavariate(self, alpha: float, beta: float) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).betavariate(alpha, beta))
+
+    def randrange(self, start: int, stop: int | None = None, step: int = 1) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randrange(start, stop, step))
+
+    def randint(self, a: int, b: int) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randint(a, b))
+
+    def getrandbits(self, k: int) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).getrandbits(k))
+
+    def triangular(self, low: float = 0, high: float = 1, mode: float | None = None) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).triangular(low, high, mode))
+
+    def expovariate(self, lambd: float = 1) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).expovariate(lambd))
 
 
 class Function[**P, R]:

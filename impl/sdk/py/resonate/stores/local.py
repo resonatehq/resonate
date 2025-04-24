@@ -24,18 +24,22 @@ if TYPE_CHECKING:
 
 class LocalStore:
     def __init__(self, encoder: Encoder[Any, str | None] | None = None, clock: Clock | None = None) -> None:
-        self.encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
-
         self._promises: dict[str, DurablePromiseRecord] = {}
         self._tasks: dict[str, TaskRecord] = {}
         self._routers: list[Router] = [TagRouter()]
+
+        self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
         self._clock = clock or WallClock()
+
+    @property
+    def encoder(self) -> Encoder[Any, str | None]:
+        return self._encoder
 
     @property
     def promises(self) -> LocalPromiseStore:
         return LocalPromiseStore(
             self,
-            self.encoder,
+            self._encoder,
             self._promises,
             self._tasks,
             self._routers,
@@ -46,7 +50,7 @@ class LocalStore:
     def tasks(self) -> LocalTaskStore:
         return LocalTaskStore(
             self,
-            self.encoder,
+            self._encoder,
             self._promises,
             self._tasks,
             self._clock,
@@ -55,8 +59,8 @@ class LocalStore:
     def add_router(self, router: Router) -> None:
         self._routers.append(router)
 
-    def as_msg_source(self) -> MessageSource:
-        return _LocalMessageSource(self)
+    def message_source(self, group: str, id: str) -> MessageSource:
+        return _LocalMessageSource(group, id, self)
 
     def step(self) -> list[tuple[str, Mesg]]:
         messages: list[tuple[str, Mesg]] = []
@@ -776,19 +780,29 @@ def ikey_match(left: str | None, right: str | None) -> bool:
 
 
 class _LocalMessageSource:
-    def __init__(self, local_store: LocalStore) -> None:
-        self._store = local_store
+    def __init__(self, group: str, id: str, store: LocalStore) -> None:
+        self._group = group
+        self._id = id
+        self._store = store
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-    def start(self, cq: MessageQ, pid: str) -> None:
+    @property
+    def unicast(self) -> str:
+        return f"poll://{self._group}/{self._id}"
+
+    @property
+    def anycast(self) -> str:
+        return f"poll://{self._group}/{self._id}"
+
+    def start(self, mq: MessageQ) -> None:
         if self._thread is not None:
             return
 
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._loop,
-            args=(cq,),
+            args=(mq,),
             name="local_msg_source",
             daemon=True,
         )
@@ -801,9 +815,11 @@ class _LocalMessageSource:
             self._thread = None
             self._stop_event.clear()
 
-    def _loop(self, cq: MessageQ) -> None:
+    def _loop(self, mq: MessageQ) -> None:
         while not self._stop_event.is_set():
-            msgs = self._store.step()
-            for _, msg in msgs:
-                cq.enqueue(msg)
+            for msg in self.step():
+                mq.enqueue(msg)
             self._stop_event.wait(0.1)
+
+    def step(self) -> list[Mesg]:
+        return [m for _, m in self._store.step()]

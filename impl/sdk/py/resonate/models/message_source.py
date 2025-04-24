@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from resonate.models.message import Mesg
 
 
 class MessageSource(Protocol):
-    def start(self, cq: MessageQ, pid: str) -> None: ...
+    def __init__(self, group: str, id: str, *args: Any, **kwargs: Any) -> None: ...
+
+    @property
+    def unicast(self) -> str: ...
+    @property
+    def anycast(self) -> str: ...
+
+    def start(self, mq: MessageQ) -> None: ...
     def stop(self) -> None: ...
+    def step(self) -> list[Mesg]: ...
 
 
 class MessageQ(Protocol):

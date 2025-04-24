@@ -142,7 +142,7 @@ class Bridge:
 
     def start(self) -> None:
         if not self._messages_thread.is_alive():
-            self._message_src.start(MesgQueueAdapter(self._mq), self._pid)
+            self._message_src.start(MesgQueueAdapter(self._mq))
             self._messages_thread.start()
 
         if not self._bridge_thread.is_alive():
