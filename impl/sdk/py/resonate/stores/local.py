@@ -113,6 +113,16 @@ class LocalPromiseStore:
         self._routers = routers
         self._clock = clock
 
+    def get(self, *, id: str) -> DurablePromise:
+        record = self._promises.get(id)
+        if record is None:
+            msg = "Not found"
+            raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+        return DurablePromise.from_dict(
+            self._store,
+            record.to_dict(),
+        )
+
     def create(
         self,
         *,

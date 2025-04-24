@@ -50,6 +50,17 @@ class RemotePromiseStore:
             headers["idempotency-Key"] = ikey
         return headers
 
+    def get(self, *, id: str) -> DurablePromise:
+        req = Request(
+            method="post",
+            url=f"{self._store.url}/promises/{id}",
+        )
+        res = _call(req.prepare()).json()
+        return DurablePromise.from_dict(
+            self._store,
+            res,
+        )
+
     def create(
         self,
         *,

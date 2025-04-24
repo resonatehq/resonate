@@ -21,6 +21,7 @@ class Store(Protocol):
 
 
 class PromiseStore(Protocol):
+    def get(self, *, id: str) -> DurablePromise: ...
     def create(
         self,
         *,

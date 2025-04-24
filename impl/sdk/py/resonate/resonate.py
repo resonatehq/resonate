@@ -41,7 +41,6 @@ class Resonate:
         url: str | None = None,
         pid: str | None = None,
         ttl: int = 10,
-        opts: Options | None = None,
         anycast: str | None = None,
         unicast: str | None = None,
         store: Store | None = None,
@@ -53,7 +52,7 @@ class Resonate:
         self._started = False
 
         self._pid = pid or uuid.uuid4().hex
-        self._opts = opts or Options()
+        self._opts = Options()
 
         self._registry = registry or Registry()
         self._dependencies = dependencies or Dependencies()
