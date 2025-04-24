@@ -122,6 +122,10 @@ def hitl(ctx: Context, id: str | None) -> Generator[Yieldable, Any, int]:
     return v
 
 
+def random_generation(ctx: Context) -> Generator[Yieldable, Any, float]:
+    return (yield ctx.random(0, 10))
+
+
 def get_stores_config() -> list[tuple[Store, MessageSource | None]]:
     local_store = LocalStore()
     stores: list[tuple[Store, MessageSource | None]] = [(local_store, None)]
@@ -152,9 +156,17 @@ def resonate_instance(request: pytest.FixtureRequest) -> Generator[Resonate, Non
     resonate.register(rfi_add_one_by_name)
     resonate.register(get_dependency)
     resonate.register(hitl)
+    resonate.register(random_generation)
     resonate.start()
     yield resonate
     resonate.stop()
+
+
+def test_random_generation(resonate_instance: Resonate) -> None:
+    timestamp = int(time.time())
+    handle = resonate_instance.run(f"random-gen-{timestamp}", random_generation)
+    v = handle.result()
+    assert v == resonate_instance.run(f"random-gen-{timestamp}", random_generation).result()
 
 
 @pytest.mark.parametrize("id", ["foo", None])

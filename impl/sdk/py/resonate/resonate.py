@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import random
 import uuid
 from collections.abc import Callable
 from concurrent.futures import Future
@@ -296,6 +297,9 @@ class Context:
     def promise(self, data: Any = None, headers: dict[str, str] | None = None) -> RFI:
         self._counter += 1
         return RFI(f"{self.id}.{self._counter}", Base(data, headers))
+
+    def random(self, a: float, b: float) -> LFC:
+        return self.lfc(lambda _, a, b: random.randint(a, b), a, b)
 
     def get_dependency(self, name: str) -> Any:
         return self._dependencies.get(name)
