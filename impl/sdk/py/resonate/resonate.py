@@ -298,7 +298,7 @@ class Context:
         self._counter += 1
         return RFI(f"{self.id}.{self._counter}", Base(data, headers))
 
-    def random(self, a: float, b: float) -> LFC:
+    def random(self, a: int, b: int) -> LFC:
         return self.lfc(lambda _, a, b: random.randint(a, b), a, b)
 
     def get_dependency(self, name: str) -> Any:
