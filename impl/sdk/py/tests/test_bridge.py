@@ -8,7 +8,7 @@ import pytest
 
 from resonate.message_sources.poller import Poller
 from resonate.resonate import Resonate
-from resonate.retry_policies import Constant
+from resonate.retry_policies.constant import Constant
 from resonate.stores.local import LocalStore
 from resonate.stores.remote import RemoteStore
 
@@ -241,20 +241,16 @@ def test_basic_retries() -> None:
     # Use a different instance that only do local store
     resonate = Resonate()
 
-    n = 0
-
     def retriable(ctx: Context) -> int:
-        nonlocal n
-        n += 1
-        if n == 4:
-            return n
+        if ctx.info.attempt == 4:
+            return ctx.info.attempt
         raise RuntimeError
 
-    f = resonate.register(retriable, retry_policy=Constant(delay=1, max_retries=3))
+    f = resonate.register(retriable)
     resonate.start()
 
     start_time = time.time()
-    handle = f.run(f"retriable-{int(start_time)}")
+    handle = f.options(retry_policy=Constant(delay=1, max_retries=3)).run(f"retriable-{int(start_time)}")
     result = handle.result()
     end_time = time.time()
 

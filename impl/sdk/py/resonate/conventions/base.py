@@ -21,4 +21,4 @@ class Base:
         return self.opts.timeout
 
     def options(self, send_to: str | None, tags: dict[str, str] | None, timeout: int | None, version: int | None) -> None:
-        self.opts.merge(timeout=timeout, tags=tags)
+        self.opts = self.opts.merge(timeout=timeout, tags=tags)

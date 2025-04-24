@@ -162,11 +162,12 @@ def test_run(
     assert cmd_invoke(bridge) == invoke_with_opts
 
     version = (version or 1) + 1
-    f2 = resonate.register(func, name=name, send_to=send_to, version=version, timeout=timeout, tags=tags)
+
+    f2 = resonate.register(func, name=name, version=version)
     opts = opts.merge(version=version)
     invoke_with_opts.opts = opts
 
-    f2.run("f", *args, **kwargs)
+    f2.options(timeout=timeout, tags=tags, send_to=send_to).run("f", *args, **kwargs)
     assert cmd_invoke(bridge) == invoke_with_opts
 
     f2.options(**opts.to_dict()).run("f", *args, **kwargs)
@@ -240,10 +241,10 @@ def test_rpc(
     assert cmd_invoke(bridge) == invoke_with_opts
 
     version = (version or 1) + 1
-    f2 = resonate.register(func, name=name, send_to=send_to, version=version, timeout=timeout, tags=tags)
+    f2 = resonate.register(func, name=name, version=version)
     invoke_with_opts.opts = invoke_with_opts.opts.merge(version=version)
 
-    f2.rpc("f", *args, **kwargs)
+    f2.options(send_to=send_to, timeout=timeout, tags=tags).rpc("f", *args, **kwargs)
     assert cmd_invoke(bridge) == invoke_with_opts
 
     f2.options(**opts.to_dict()).rpc("f", *args, **kwargs)
@@ -291,9 +292,9 @@ def test_type_annotations() -> None:
 @pytest.mark.parametrize(
     ("func", "kwargs"),
     [
-        (lambda x: x, {"name": "foo", "timeout": 1, "version": -1}),
-        (lambda x: x, {"name": "foo", "timeout": -1, "version": 1}),
-        (lambda x: x, {"timeout": 1, "version": 1}),
+        (lambda x: x, {"name": "foo", "version": -1}),
+        (lambda x: x, {"name": "foo", "version": 1}),
+        (lambda x: x, {"version": 1}),
         (foo, {"version": 1}),
         (foo, {"version": 2}),
         (bar, {"version": 1}),
