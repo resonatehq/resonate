@@ -105,7 +105,9 @@ def add_one(ctx: Context, n: int) -> int:
 
 
 def get_dependency(ctx: Context) -> int:
-    return ctx.get_dependency("foo") + 1
+    dep = ctx.get_dependency("foo")
+    assert dep is not None
+    return dep + 1
 
 
 def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
@@ -123,7 +125,7 @@ def hitl(ctx: Context, id: str | None) -> Generator[Yieldable, Any, int]:
 
 
 def random_generation(ctx: Context) -> Generator[Yieldable, Any, float]:
-    return (yield ctx.random(0, 10))
+    return (yield ctx.random.randint(0, 10))
 
 
 def get_stores_config() -> list[tuple[Store, MessageSource | None]]:

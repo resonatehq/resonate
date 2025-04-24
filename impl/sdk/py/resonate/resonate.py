@@ -202,6 +202,32 @@ class Resonate:
         return self._store.promises
 
 
+class Random:
+    def __init__(self, ctx: Context) -> None:
+        self.ctx = ctx
+
+    def random(self) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).random())
+
+    def betavariate(self, alpha: float, beta: float) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).betavariate(alpha, beta))
+
+    def randrange(self, start: int, stop: int | None = None, step: int = 1) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randrange(start, stop, step))
+
+    def randint(self, a: int, b: int) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).randint(a, b))
+
+    def getrandbits(self, k: int) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).getrandbits(k))
+
+    def triangular(self, low: float = 0, high: float = 1, mode: float | None = None) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).triangular(low, high, mode))
+
+    def expovariate(self, lambd: float = 1) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:random", random).expovariate(lambd))
+
+
 # Context
 class Context:
     def __init__(self, id: str, info: Info, opts: Options, registry: Registry, dependencies: Dependencies) -> None:
@@ -211,6 +237,7 @@ class Context:
         self._registry = registry
         self._dependencies = dependencies
         self._counter = 0
+        self._random = Random(self)
 
     @property
     def id(self) -> str:
@@ -219,6 +246,10 @@ class Context:
     @property
     def info(self) -> Info:
         return self._info
+
+    @property
+    def random(self) -> Random:
+        return self._random
 
     @overload
     def lfi[**P, R](self, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> LFI: ...
@@ -285,11 +316,8 @@ class Context:
         self._counter += 1
         return RFI(f"{self.id}.{self._counter}", Base(data, headers))
 
-    def random(self, a: int, b: int) -> LFC:
-        return self.lfc(lambda _, a, b: random.randint(a, b), a, b)
-
-    def get_dependency(self, name: str) -> Any:
-        return self._dependencies.get(name)
+    def get_dependency[T](self, key: str, default: T = None) -> Any | T:
+        return self._dependencies.get(key, default)
 
     def _lfi_func(self, f: str | Callable) -> tuple[Callable, int, dict[int, Callable] | None]:
         match f:

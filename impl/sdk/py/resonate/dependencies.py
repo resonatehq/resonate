@@ -10,5 +10,5 @@ class Dependencies:
     def add(self, key: str, obj: Any) -> None:
         self._deps[key] = obj
 
-    def get(self, key: str) -> Any:
-        return self._deps[key]
+    def get[T](self, key: str, default: T) -> Any | T:
+        return self._deps.get(key, default)
