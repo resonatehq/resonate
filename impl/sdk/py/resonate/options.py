@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict
 
 from resonate.errors import ResonateValidationError
-from resonate.retry_policies.never import Never
+from resonate.retry_policies import Never
 
 if TYPE_CHECKING:
     from resonate.models.retry_policy import RetryPolicy

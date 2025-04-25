@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from resonate.resonate import Resonate
-from resonate.retry_policies.constant import Constant
+from resonate.retry_policies import Constant
 
 if TYPE_CHECKING:
     from collections.abc import Generator

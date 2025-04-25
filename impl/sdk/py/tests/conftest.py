@@ -8,9 +8,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from resonate.message_sources.poller import Poller
-from resonate.stores.local import LocalStore
-from resonate.stores.remote import RemoteStore
+from resonate.message_sources import Poller
+from resonate.stores import LocalStore, RemoteStore
 
 if TYPE_CHECKING:
     from resonate.models.message_source import MessageSource

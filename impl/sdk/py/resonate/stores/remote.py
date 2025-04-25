@@ -6,9 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from requests import PreparedRequest, Request, Response, Session
 
-from resonate.encoders.base64 import Base64Encoder
-from resonate.encoders.chain import ChainEncoder
-from resonate.encoders.json import JsonEncoder
+from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
 from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise

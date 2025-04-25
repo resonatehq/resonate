@@ -4,9 +4,7 @@ from typing import Any
 
 import pytest
 
-from resonate.encoders.base64 import Base64Encoder
-from resonate.encoders.chain import ChainEncoder
-from resonate.encoders.json import JsonEncoder
+from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
 
 
 @pytest.mark.parametrize(

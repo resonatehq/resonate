@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
-from resonate.encoders.json import JsonEncoder
+from resonate.encoders import JsonEncoder
 from resonate.logging import logger
 from resonate.models.message import InvokeMesg, NotifyMesg, ResumeMesg
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from resonate.stores.local import ResonateStoreError
+from resonate.errors import ResonateStoreError
 
 if TYPE_CHECKING:
     from resonate.models.store import Store

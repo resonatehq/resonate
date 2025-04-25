@@ -9,20 +9,17 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Concatenate, overload
 
 from resonate.bridge import Bridge
-from resonate.conventions.base import Base
-from resonate.conventions.default import Default
-from resonate.conventions.sleep import Sleep
+from resonate.conventions import Base, Default, Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
-from resonate.message_sources.poller import Poller
+from resonate.message_sources import LocalMessageSource, Poller
 from resonate.models.commands import Invoke, Listen
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.handle import Handle
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.retry_policies import Exponential, Never
-from resonate.stores.local import LocalStore, _LocalMessageSource
-from resonate.stores.remote import RemoteStore
+from resonate.stores import LocalStore, RemoteStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -47,8 +44,8 @@ class Resonate:
     ) -> None:
         # enforce mutual inclusion/exclusion of store and message source
         assert (store is None) == (message_source is None), "store and message source must both be set or both be unset"
-        assert not isinstance(store, LocalStore) or isinstance(message_source, _LocalMessageSource), "message source must be local message source"
-        assert not isinstance(store, RemoteStore) or not isinstance(message_source, _LocalMessageSource), "message source must not be local message source"
+        assert not isinstance(store, LocalStore) or isinstance(message_source, LocalMessageSource), "message source must be local message source"
+        assert not isinstance(store, RemoteStore) or not isinstance(message_source, LocalMessageSource), "message source must not be local message source"
 
         self._started = False
 

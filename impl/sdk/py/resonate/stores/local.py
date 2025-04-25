@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, final
 
-from resonate.clocks.wall import WallClock
-from resonate.encoders.base64 import Base64Encoder
-from resonate.encoders.chain import ChainEncoder
-from resonate.encoders.json import JsonEncoder
+from resonate.clocks import WallClock
+from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
 from resonate.errors import ResonateStoreError
+from resonate.message_sources import LocalMessageSource
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.message import InvokeMesg, Mesg, NotifyMesg, ResumeMesg, TaskMesg
 from resonate.models.task import Task
-from resonate.routers.tag import TagRouter
+from resonate.routers import TagRouter
 
 if TYPE_CHECKING:
     from resonate.models.clock import Clock
     from resonate.models.encoder import Encoder
-    from resonate.models.message_source import MessageQ, MessageSource
+    from resonate.models.message_source import MessageSource
     from resonate.models.router import Router
 
 
@@ -60,7 +58,7 @@ class LocalStore:
         self._routers.append(router)
 
     def message_source(self, group: str, id: str) -> MessageSource:
-        return _LocalMessageSource(group, id, self)
+        return LocalMessageSource(group, id, self)
 
     def step(self) -> list[tuple[str, Mesg]]:
         messages: list[tuple[str, Mesg]] = []
@@ -777,49 +775,3 @@ class TaskRecord:
 
 def ikey_match(left: str | None, right: str | None) -> bool:
     return left is not None and right is not None and left == right
-
-
-class _LocalMessageSource:
-    def __init__(self, group: str, id: str, store: LocalStore) -> None:
-        self._group = group
-        self._id = id
-        self._store = store
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
-
-    @property
-    def unicast(self) -> str:
-        return f"poll://{self._group}/{self._id}"
-
-    @property
-    def anycast(self) -> str:
-        return f"poll://{self._group}/{self._id}"
-
-    def start(self, mq: MessageQ) -> None:
-        if self._thread is not None:
-            return
-
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._loop,
-            args=(mq,),
-            name="local_msg_source",
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        if self._thread is not None:
-            self._stop_event.set()
-            self._thread.join()
-            self._thread = None
-            self._stop_event.clear()
-
-    def _loop(self, mq: MessageQ) -> None:
-        while not self._stop_event.is_set():
-            for msg in self.step():
-                mq.enqueue(msg)
-            self._stop_event.wait(0.1)
-
-    def step(self) -> list[Mesg]:
-        return [m for _, m in self._store.step()]

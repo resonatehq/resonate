@@ -4,7 +4,7 @@ import urllib.parse
 from typing import TYPE_CHECKING, Any
 
 from resonate import Context
-from resonate.clocks.step import StepClock
+from resonate.clocks import StepClock
 from resonate.dependencies import Dependencies
 from resonate.errors import ResonateStoreError
 from resonate.models.commands import (
@@ -43,7 +43,7 @@ from resonate.models.result import Ko, Ok, Result
 from resonate.models.task import Task
 from resonate.options import Options
 from resonate.scheduler import Done, More, Scheduler
-from resonate.stores.local import LocalStore
+from resonate.stores import LocalStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -6,7 +6,7 @@ from concurrent.futures import Future
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Protocol
 
-from resonate.conventions.sleep import Sleep
+from resonate.conventions import Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.models.commands import (
     CancelPromiseReq,
@@ -31,7 +31,7 @@ from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Default
 from resonate.scheduler import Scheduler
-from resonate.stores.local import LocalStore
+from resonate.stores import LocalStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable
