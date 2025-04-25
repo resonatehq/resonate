@@ -28,45 +28,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
+      - name: install uv
         uses: astral-sh/setup-uv@v5
         with:
           version: 0.5.23
 
-      - name: Set up python
+      - name: set up python
         uses: actions/setup-python@v5
         with:
           python-version: ${{matrix.python-version}}
 
-      - name: Install
+      - name: install
         run: uv sync --dev
 
-      - name: Check linting
+      - name: check linting
         run: uv run ruff check
 
-      - name: Check types
+      - name: check types
         run: uv run pyright
 
-      - name: Set up go
+      - name: set up go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23.0'
+          go-version: "1.23.0"
 
-      - name: Checkout resonate repository
+      - name: checkout resonate repository
         uses: actions/checkout@v4
         with:
           repository: resonatehq/resonate
           path: server
 
-      - name: Build resonate
+      - name: build resonate
         run: go build -o resonate
         working-directory: server
 
-      - name: Start resonate server
+      - name: start resonate server
         run: ./resonate serve --system-signal-timeout 0.1s &
         working-directory: server
 
-      - name: Run tests
+      - name: run tests
         env:
           RESONATE_HOST: http://localhost
         run: uv run pytest tests

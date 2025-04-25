@@ -1,0 +1,33 @@
+name: cd
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  run:
+    name: release
+
+    permissions:
+      id-token: write
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.5.23
+
+      - name: set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: build library
+        run: uv build
+
+      - name: push build artifacts to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.12.3

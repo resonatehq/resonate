@@ -5,9 +5,12 @@ description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
 requires-python = ">=3.12"
-dependencies = [
-    "requests>=2.32.3",
-]
+dependencies = ["requests>=2.32.3"]
+
+[project.urls]
+Documentation = "https://github.com/resonatehq/resonate-sdk-py#readme"
+Issues = "https://github.com/resonatehq/resonate-sdk-py/issues"
+Source = "https://github.com/resonatehq/resonate-sdk-py"
 
 [build-system]
 requires = ["hatchling"]
