@@ -611,6 +611,9 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
 			// This could happen if the promise timetout
 			p := model.promises.get(t.RootPromiseId)
+			if p == nil {
+				return model, nil
+			}
 
 			if !promise.GetTimedoutState(p).In(promise.Pending) && resTime >= p.Timeout {
 				model = model.Copy()
@@ -677,6 +680,10 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		if !t.State.In(task.Completed|task.Timedout) && t.Timeout >= resTime {
 			// This could happen if the promise timedout
 			p := model.promises.get(t.RootPromiseId)
+			if p == nil {
+				return model, nil
+			}
+
 			if !promise.GetTimedoutState(p).In(promise.Pending) && resTime >= p.Timeout {
 				model = model.Copy()
 				newP := promise.Promise{
