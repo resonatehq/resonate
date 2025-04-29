@@ -13,6 +13,7 @@ class ResonateStoreError(ResonateError):
         self,
         msg: str,
         code: Literal[
+            "UNKNOWN",
             "STORE_UNAUTHORIZED",
             "STORE_PAYLOAD",
             "STORE_FORBIDDEN",
@@ -23,6 +24,8 @@ class ResonateStoreError(ResonateError):
         ],
     ) -> None:
         match code:
+            case "UNKNOWN":
+                num_code = 0
             case "STORE_UNAUTHORIZED":
                 num_code = 41
             case "STORE_PAYLOAD":

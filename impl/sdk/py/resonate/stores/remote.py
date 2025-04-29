@@ -4,6 +4,7 @@ import os
 import time
 from typing import TYPE_CHECKING, Any
 
+import requests
 from requests import PreparedRequest, Request, Response, Session
 
 from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
@@ -11,9 +12,11 @@ from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.task import Task
+from resonate.retry_policies.constant import Constant
 
 if TYPE_CHECKING:
     from resonate.models.encoder import Encoder
+    from resonate.models.retry_policy import RetryPolicy
 
 
 class RemoteStore:
@@ -22,6 +25,7 @@ class RemoteStore:
         host: str | None = None,
         port: str | None = None,
         encoder: Encoder[Any, str | None] | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self.host = host or os.getenv("RESONATE_HOST_STORE", os.getenv("RESONATE_HOST", "http://localhost"))
         self.port = port or os.getenv("RESONATE_PORT_STORE", "8001")
@@ -29,6 +33,7 @@ class RemoteStore:
             JsonEncoder(),
             Base64Encoder(),
         )
+        self.retry_policy = retry_policy or Constant(delay=1, max_retries=3)
 
     @property
     def url(self) -> str:
@@ -42,10 +47,59 @@ class RemoteStore:
     def tasks(self) -> RemoteTaskStore:
         return RemoteTaskStore(self, self.encoder)
 
+    def call(self, req: PreparedRequest) -> Response:
+        attempt = 0
+        with Session() as s:
+            while True:
+                try:
+                    res = s.send(req, timeout=10)
+                    if res.ok:
+                        return res
+
+                    match res.status_code:
+                        case _status_codes.BAD_REQUEST:
+                            msg = "Invalid Request"
+                            raise ResonateStoreError(msg, "STORE_PAYLOAD")
+                        case _status_codes.UNAUTHORIZED:
+                            msg = "Unauthorized request"
+                            raise ResonateStoreError(msg, "STORE_UNAUTHORIZED")
+                        case _status_codes.FORBIDDEN:
+                            msg = "Forbidden request"
+                            raise ResonateStoreError(msg, "STORE_FORBIDDEN")
+                        case _status_codes.NOT_FOUND:
+                            msg = "Not found"
+                            raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+                        case _status_codes.CONFLICT:
+                            msg = "Already exists"
+                            raise ResonateStoreError(msg, "STORE_ALREADY_EXISTS")
+                        case _status_codes.SERVER_ERROR:
+                            attempt += 1
+
+                            delay = self.retry_policy.next(attempt)
+                            if delay is None:
+                                msg = f"Unexpected error on the server {res.status_code} {res.reason}"
+                                raise ResonateStoreError(msg, "UNKNOWN")
+
+                            time.sleep(delay)
+                            continue
+
+                        case _:
+                            msg = f"Unknow error {res.status_code} {res.reason}"
+                            raise ResonateStoreError(msg, "UNKNOWN")
+
+                except requests.exceptions.RequestException:
+                    attempt += 1
+
+                    delay = self.retry_policy.next(attempt)
+                    if delay is None:
+                        raise
+
+                    time.sleep(delay)
+
 
 class RemotePromiseStore:
     def __init__(self, store: RemoteStore, encoder: Encoder[Any, str | None]) -> None:
-        self._store = store
+        self.store = store
         self.encoder = encoder
 
     def _headers(self, *, strict: bool, ikey: str | None) -> dict[str, str]:
@@ -57,11 +111,11 @@ class RemotePromiseStore:
     def get(self, *, id: str) -> DurablePromise:
         req = Request(
             method="post",
-            url=f"{self._store.url}/promises/{id}",
+            url=f"{self.store.url}/promises/{id}",
         )
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res,
         )
 
@@ -78,7 +132,7 @@ class RemotePromiseStore:
     ) -> DurablePromise:
         req = Request(
             method="post",
-            url=f"{self._store.url}/promises",
+            url=f"{self.store.url}/promises",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "id": id,
@@ -91,10 +145,10 @@ class RemotePromiseStore:
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res,
         )
 
@@ -113,7 +167,7 @@ class RemotePromiseStore:
     ) -> tuple[DurablePromise, Task | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/promises/task",
+            url=f"{self.store.url}/promises/task",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "promise": {
@@ -131,14 +185,14 @@ class RemotePromiseStore:
                 },
             },
         )
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         promise = DurablePromise.from_dict(
-            self._store,
+            self.store,
             res["promise"],
         )
         task_dict = res.get("task")
-        task = Task.from_dict(self._store, task_dict) if task_dict is not None else None
+        task = Task.from_dict(self.store, task_dict) if task_dict is not None else None
         return promise, task
 
     def resolve(
@@ -152,7 +206,7 @@ class RemotePromiseStore:
     ) -> DurablePromise:
         req = Request(
             method="patch",
-            url=f"{self._store.url}/promises/{id}",
+            url=f"{self.store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "RESOLVED",
@@ -163,10 +217,10 @@ class RemotePromiseStore:
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res,
         )
 
@@ -181,7 +235,7 @@ class RemotePromiseStore:
     ) -> DurablePromise:
         req = Request(
             method="patch",
-            url=f"{self._store.url}/promises/{id}",
+            url=f"{self.store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "REJECTED",
@@ -192,10 +246,10 @@ class RemotePromiseStore:
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res,
         )
 
@@ -210,7 +264,7 @@ class RemotePromiseStore:
     ) -> DurablePromise:
         req = Request(
             method="patch",
-            url=f"{self._store.url}/promises/{id}",
+            url=f"{self.store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "REJECTED_CANCELED",
@@ -221,10 +275,10 @@ class RemotePromiseStore:
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res,
         )
 
@@ -239,7 +293,7 @@ class RemotePromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/callbacks",
+            url=f"{self.store.url}/callbacks",
             json={
                 "id": id,
                 "promiseId": promise_id,
@@ -248,12 +302,12 @@ class RemotePromiseStore:
                 "recv": recv,
             },
         )
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         callback_dict = res.get("callback", None)
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res["promise"],
         ), Callback.from_dict(callback_dict) if callback_dict is not None else None
 
@@ -267,7 +321,7 @@ class RemotePromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/subscriptions",
+            url=f"{self.store.url}/subscriptions",
             json={
                 "id": id,
                 "promiseId": promise_id,
@@ -275,18 +329,18 @@ class RemotePromiseStore:
                 "recv": recv,
             },
         )
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
         callback_dict = res.get("callback", None)
 
         return DurablePromise.from_dict(
-            self._store,
+            self.store,
             res["promise"],
         ), Callback.from_dict(callback_dict) if callback_dict is not None else None
 
 
 class RemoteTaskStore:
     def __init__(self, store: RemoteStore, encoder: Encoder[Any, str | None]) -> None:
-        self._store = store
+        self.store = store
         self.encoder = encoder
 
     def claim(
@@ -299,7 +353,7 @@ class RemoteTaskStore:
     ) -> tuple[DurablePromise, DurablePromise | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/tasks/claim",
+            url=f"{self.store.url}/tasks/claim",
             json={
                 "id": id,
                 "counter": counter,
@@ -308,19 +362,19 @@ class RemoteTaskStore:
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         promises_dict = res["promises"]
         root_dict = promises_dict["root"]["data"]
         root = DurablePromise.from_dict(
-            self._store,
+            self.store,
             root_dict,
         )
 
         leaf_dict = promises_dict.get("leaf", {}).get("data", None)
         leaf = (
             DurablePromise.from_dict(
-                self._store,
+                self.store,
                 leaf_dict,
             )
             if leaf_dict
@@ -332,13 +386,13 @@ class RemoteTaskStore:
     def complete(self, *, id: str, counter: int) -> bool:
         req = Request(
             method="post",
-            url=f"{self._store.url}/tasks/complete",
+            url=f"{self.store.url}/tasks/complete",
             json={
                 "id": id,
                 "counter": counter,
             },
         )
-        _call(req.prepare())
+        self.store.call(req.prepare())
         return True
 
     def heartbeat(
@@ -348,13 +402,13 @@ class RemoteTaskStore:
     ) -> int:
         req = Request(
             method="post",
-            url=f"{self._store.url}/tasks/heartbeat",
+            url=f"{self.store.url}/tasks/heartbeat",
             json={
                 "processId": pid,
             },
         )
 
-        res = _call(req.prepare()).json()
+        res = self.store.call(req.prepare()).json()
 
         return res["tasksAffected"]
 
@@ -365,28 +419,4 @@ class _status_codes:  # noqa: N801
     FORBIDDEN = 403
     NOT_FOUND = 404
     CONFLICT = 409
-
-
-def _call(req: PreparedRequest) -> Response:
-    with Session() as s:
-        while True:
-            res = s.send(req, timeout=10)
-            if res.ok:
-                return res
-            if res.status_code == _status_codes.BAD_REQUEST:
-                msg = "Invalid Request"
-                raise ResonateStoreError(msg, "STORE_PAYLOAD")
-            if res.status_code == _status_codes.UNAUTHORIZED:
-                msg = "Unauthorized request"
-                raise ResonateStoreError(msg, "STORE_UNAUTHORIZED")
-            if res.status_code == _status_codes.FORBIDDEN:
-                msg = "Forbidden request"
-                raise ResonateStoreError(msg, "STORE_FORBIDDEN")
-            if res.status_code == _status_codes.NOT_FOUND:
-                msg = "Not found"
-                raise ResonateStoreError(msg, "STORE_NOT_FOUND")
-            if res.status_code == _status_codes.CONFLICT:
-                msg = "Already exists"
-                raise ResonateStoreError(msg, "STORE_ALREADY_EXISTS")
-        time.sleep(1)
-    raise NotImplementedError
+    SERVER_ERROR = 500
