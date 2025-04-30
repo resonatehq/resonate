@@ -236,6 +236,7 @@ class Context:
         self._registry = registry
         self._dependencies = dependencies
         self._random = Random(self)
+        self._time = Time(self)
         self._counter = 0
 
     @property
@@ -312,7 +313,7 @@ class Context:
 
     def sleep(self, secs: int) -> RFC:
         self._counter += 1
-        return RFC(Sleep(f"{self.id}.{self._counter}", int((time.time() + secs) * 1000)))
+        return RFC(Sleep(f"{self.id}.{self._counter}", int((self.get_dependency("resonate:time", time).time() + secs) * 1000)))
 
     def promise(
         self,
@@ -331,6 +332,17 @@ class Context:
         timeout = timeout or self._opts.timeout
         tags = tags or self._opts.tags
         return RFI(Base(id, ikey(id) if callable(ikey) else ikey, headers, data, timeout, tags))
+
+
+class Time:
+    def __init__(self, ctx: Context) -> None:
+        self.ctx = ctx
+
+    def time(self) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:time", time).time())
+
+    def strftime(self, format: str) -> LFC:
+        return self.ctx.lfc(lambda _: self.ctx.get_dependency("resonate:time", time).strftime(format))
 
 
 class Random:
