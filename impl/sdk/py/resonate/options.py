@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypedDict
+from inspect import isgeneratorfunction
+from typing import TYPE_CHECKING
 
 from resonate.errors import ResonateValidationError
-from resonate.retry_policies import Never
+from resonate.retry_policies import Exponential, Never
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from resonate.models.retry_policy import RetryPolicy
 
 
 @dataclass(frozen=True)
 class Options:
     durable: bool = True
-    retry_policy: RetryPolicy = field(default_factory=Never)
+    id: str | None = None
+    idempotency_key: str | Callable[[str], str] | None = lambda id: id
+    retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] = lambda f: Never() if isgeneratorfunction(f) else Exponential()
     send_to: str = "poll://default"
     tags: dict[str, str] = field(default_factory=dict)
     timeout: int = sys.maxsize
@@ -32,7 +37,9 @@ class Options:
         self,
         *,
         durable: bool | None = None,
-        retry_policy: RetryPolicy | None = None,
+        id: str | None = None,
+        idempotency_key: str | Callable[[str], str] | None = None,
+        retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         send_to: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
@@ -47,26 +54,11 @@ class Options:
 
         return Options(
             durable=durable if durable is not None else self.durable,
+            id=id if id is not None else self.id,
+            idempotency_key=idempotency_key if idempotency_key is not None else self.idempotency_key,
             retry_policy=retry_policy if retry_policy is not None else self.retry_policy,
             send_to=send_to if send_to is not None else self.send_to,
             tags=tags if tags is not None else self.tags,
             timeout=timeout if timeout is not None else self.timeout,
             version=version if version is not None else self.version,
         )
-
-    def to_dict(self) -> DictOptions:
-        return DictOptions(
-            retry_policy=self.retry_policy,
-            send_to=self.send_to,
-            tags=self.tags,
-            timeout=self.timeout,
-            version=self.version,
-        )
-
-
-class DictOptions(TypedDict):
-    retry_policy: RetryPolicy
-    send_to: str
-    tags: dict[str, str]
-    timeout: int
-    version: int

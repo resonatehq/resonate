@@ -1,16 +1,24 @@
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from resonate.options import Options
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass
 class Sleep:
-    secs: int
-    opts: Options = field(default_factory=Options)
+    id: str
+    timeout: int
+
+    @property
+    def idempotency_key(self) -> str:
+        return self.id
+
+    @property
+    def headers(self) -> dict[str, str] | None:
+        return None
 
     @property
     def data(self) -> Any:
@@ -20,13 +28,14 @@ class Sleep:
     def tags(self) -> dict[str, str]:
         return {"resonate:timeout": "true"}
 
-    @property
-    def timeout(self) -> int:
-        return int((time.time() + self.secs) * 1000)
-
-    @property
-    def headers(self) -> dict[str, str] | None:
-        return None
-
-    def options(self, send_to: str | None, tags: dict[str, str] | None, timeout: int | None, version: int | None) -> None:
-        return
+    def options(
+        self,
+        id: str | None = None,
+        idempotency_key: str | Callable[[str], str] | None = None,
+        send_to: str | None = None,
+        tags: dict[str, str] | None = None,
+        timeout: int | None = None,
+        version: int | None = None,
+    ) -> Sleep:
+        self.id = id or self.id
+        return self

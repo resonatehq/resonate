@@ -46,7 +46,7 @@ def scheduler() -> Scheduler:
     ],
 )
 def test_function_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -> None:
-    next = scheduler.step(Invoke("foo", "foo", foo, opts=Options(retry_policy=retry_policy)))
+    next = scheduler.step(Invoke("foo", foo, opts=Options(retry_policy=retry_policy)))
     assert len(next.reqs) == 1
     req = next.reqs[0]
     assert isinstance(req, Function)
@@ -67,7 +67,7 @@ def test_function_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) ->
     ],
 )
 def test_function_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retries: int) -> None:
-    next = scheduler.step(Invoke("foo", "foo", foo, opts=Options(retry_policy=retry_policy)))
+    next = scheduler.step(Invoke("foo", foo, opts=Options(retry_policy=retry_policy)))
     assert len(next.reqs) == 1
     req = next.reqs[0]
     assert isinstance(req, Function)
@@ -95,7 +95,7 @@ def test_function_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retr
     ],
 )
 def test_generator_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -> None:
-    next = scheduler.step(Invoke("foo", "foo", bar_ok, opts=Options(retry_policy=retry_policy)))
+    next = scheduler.step(Invoke("foo", bar_ok, opts=Options(retry_policy=retry_policy)))
     assert len(next.reqs) == 1
     req = next.reqs[0]
     assert isinstance(req, Network)
@@ -112,7 +112,7 @@ def test_generator_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -
     ],
 )
 def test_generator_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retries: int) -> None:
-    next = scheduler.step(Invoke("foo", "foo", bar_ko, opts=Options(retry_policy=retry_policy)))
+    next = scheduler.step(Invoke("foo", bar_ko, opts=Options(retry_policy=retry_policy)))
     assert len(next.reqs) == 1
     req = next.reqs[0]
     for _ in range(retries):

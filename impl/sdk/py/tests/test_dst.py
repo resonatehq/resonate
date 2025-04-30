@@ -195,41 +195,41 @@ def test_dst(seed: str, steps: int) -> None:
             case 0:
                 sim.send_msg("sim://any@default", Listen(str(n)))
             case 1:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo", foo))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo))
             case 2:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar", bar))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar))
             case 3:
-                sim.send_msg("sim://any@default", Invoke(str(n), "baz", baz))
+                sim.send_msg("sim://any@default", Invoke(str(n), baz))
             case 4:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo_lfi", foo_lfi))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo_lfi))
             case 5:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar_lfi", bar_lfi))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar_lfi))
             case 6:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo_lfc", foo_lfc))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo_lfc))
             case 7:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar_lfc", bar_lfc))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar_lfc))
             case 8:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo_rfi", foo_rfi))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo_rfi))
             case 9:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar_rfi", bar_rfi))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar_rfi))
             case 10:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo_rfc", foo_rfc))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo_rfc))
             case 11:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar_rfc", bar_rfc))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar_rfc))
             case 12:
-                sim.send_msg("sim://any@default", Invoke(str(n), "foo_detached", foo_detached))
+                sim.send_msg("sim://any@default", Invoke(str(n), foo_detached))
             case 13:
-                sim.send_msg("sim://any@default", Invoke(str(n), "bar_detached", bar_detached))
+                sim.send_msg("sim://any@default", Invoke(str(n), bar_detached))
             case 14:
-                sim.send_msg("sim://any@default", Invoke(str(n), "structured_concurrency", structured_concurrency))
+                sim.send_msg("sim://any@default", Invoke(str(n), structured_concurrency))
             case 15:
-                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", "fib_lfi", fib_lfi, (n,)))
+                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", fib_lfi, (n,)))
             case 16:
-                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", "fib_lfc", fib_lfc, (n,)))
+                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", fib_lfc, (n,)))
             case 17:
-                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", "fib_rfi", fib_rfi, (n,)))
+                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", fib_rfi, (n,)))
             case 18:
-                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", "fib_rfc", fib_rfc, (n,)))
+                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", fib_rfc, (n,)))
 
         # step
         sim.step()

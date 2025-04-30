@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from resonate.errors import ResonateValidationError
 from resonate.models.result import Ko, Ok, Result
 from resonate.options import Options
 
@@ -16,38 +15,30 @@ if TYPE_CHECKING:
 
 @dataclass
 class LFX:
-    id: str
+    conv: Convention
     func: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options = field(default_factory=Options)
-    versions: dict[int, Callable] | None = None
 
-    def __post_init__(self) -> None:
-        # Initially, timeout is set to the parent context timeout. This is the upper bound for the timeout.
-        self._max_timeout = self.opts.timeout
+    @property
+    def id(self) -> str:
+        return self.conv.id
 
     def options(
         self,
         *,
-        id: str | None = None,
         durable: bool | None = None,
-        retry_policy: RetryPolicy | None = None,
+        id: str | None = None,
+        idempotency_key: str | Callable[[str], str] | None = None,
+        retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Self:
-        if version is not None and self.versions is not None:
-            if version not in self.versions:
-                msg = f"version={version} not found."
-                raise ResonateValidationError(msg)
-            self.func = self.versions[version]
-
-        if timeout is not None:
-            timeout = min(self._max_timeout, timeout)
-
-        self.id = id or self.id
-        self.opts = self.opts.merge(timeout=timeout, version=version, tags=tags, retry_policy=retry_policy, durable=durable)
+        # Note: we deliberately ignore the version for LFX
+        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, tags=tags, timeout=timeout)
+        self.opts = self.opts.merge(durable=durable, retry_policy=retry_policy)
         return self
 
 
@@ -63,21 +54,23 @@ class LFC(LFX):
 
 @dataclass
 class RFX:
-    id: str
-    convention: Convention
+    conv: Convention
+
+    @property
+    def id(self) -> str:
+        return self.conv.id
 
     def options(
         self,
         *,
         id: str | None = None,
+        idempotency_key: str | Callable[[str], str] | None = None,
         send_to: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Self:
-        self.id = id or self.id
-        self.convention.options(send_to=send_to, tags=tags, timeout=timeout, version=version)
-
+        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, send_to=send_to, tags=tags, timeout=timeout, version=version)
         return self
 
 
@@ -159,21 +152,21 @@ class Coroutine:
                     yielded = self.gen.send(Promise(awt.id, self.cid))
 
             match yielded:
-                case LFI(id) | RFI(id, mode="attached"):
+                case LFI(conv) | RFI(conv, mode="attached"):
                     # LFIs and attached RFIs require an AWT
                     self.next = AWT
-                    self.unyielded.append(AWT(id))
+                    self.unyielded.append(AWT(conv.id))
                     command = yielded
-                case LFC(id, func, args, kwargs, opts):
+                case LFC(conv, func, args, kwargs, opts):
                     # LFCs can be converted to an LFI+AWT
                     self.next = AWT
                     self.skip = True
-                    command = LFI(id, func, args, kwargs, opts)
-                case RFC(id, convention):
+                    command = LFI(conv, func, args, kwargs, opts)
+                case RFC(conv):
                     # RFCs can be converted to an RFI+AWT
                     self.next = AWT
                     self.skip = True
-                    command = RFI(id, convention)
+                    command = RFI(conv)
                 case Promise(id):
                     # When a promise is yielded we can remove it from unyielded
                     self.next = (Ok, Ko)

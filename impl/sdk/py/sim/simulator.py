@@ -388,7 +388,7 @@ class Worker(Component):
             case Listen(id):
                 self.commands.append(Listen(id))
 
-            case Invoke(id, func, _, args, kwargs, opts):
+            case Invoke(id, func, args, kwargs, opts):
                 self.send_req(
                     "sim://uni@server",
                     CreatePromiseWithTaskReq(
@@ -397,7 +397,7 @@ class Worker(Component):
                         self.scheduler.pid,
                         self.r.randint(0, 30000),
                         ikey=id,
-                        data={"func": func, "args": args, "kwargs": kwargs},
+                        data={"func": func.__name__, "args": args, "kwargs": kwargs},
                         tags={"resonate:invoke": f"sim://any@{self.any}", "resonate:scope": "global"},
                     ),
                     lambda res: self.__invoke(res.data.get("data")),
@@ -518,8 +518,7 @@ class Worker(Component):
         self.commands.append(
             Invoke(
                 res.promise.id,
-                res.promise.param.data["func"],
-                self.registry.get(res.promise.param.data["func"])[0],
+                self.registry.get(res.promise.param.data["func"])[1],
                 res.promise.param.data["args"],
                 res.promise.param.data["kwargs"],
             )
@@ -539,8 +538,7 @@ class Worker(Component):
                 self.commands.append(
                     Invoke(
                         res.root.id,
-                        res.root.param.data["func"],
-                        self.registry.get(res.root.param.data["func"])[0],
+                        self.registry.get(res.root.param.data["func"])[1],
                         res.root.param.data["args"],
                         res.root.param.data["kwargs"],
                     )
@@ -570,8 +568,7 @@ class Worker(Component):
                         promise=res.leaf,
                         invoke=Invoke(
                             res.root.id,
-                            res.root.param.data["func"],
-                            self.registry.get(res.root.param.data["func"])[0],
+                            self.registry.get(res.root.param.data["func"])[1],
                             res.root.param.data["args"],
                             res.root.param.data["kwargs"],
                         ),

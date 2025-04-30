@@ -1,24 +1,33 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
-from resonate.options import Options
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @dataclass
 class Base:
-    data: Any
+    id: str
+    idempotency_key: str | None
     headers: dict[str, str] | None
-    opts: Options = field(default_factory=Options)
+    data: Any
+    timeout: int
+    tags: dict[str, str] | None
 
-    @property
-    def tags(self) -> dict[str, str]:
-        return self.opts.tags
+    def options(
+        self,
+        id: str | None = None,
+        idempotency_key: str | Callable[[str], str] | None = None,
+        send_to: str | None = None,
+        tags: dict[str, str] | None = None,
+        timeout: int | None = None,
+        version: int | None = None,
+    ) -> Base:
+        self.id = id or self.id
+        self.idempotency_key = idempotency_key(self.id) if callable(idempotency_key) else (idempotency_key or self.idempotency_key)
+        self.timeout = timeout or self.timeout
+        self.tags = tags or self.tags
 
-    @property
-    def timeout(self) -> int:
-        return self.opts.timeout
-
-    def options(self, send_to: str | None, tags: dict[str, str] | None, timeout: int | None, version: int | None) -> None:
-        self.opts = self.opts.merge(timeout=timeout, tags=tags)
+        return self

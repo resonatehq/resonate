@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, assert_type
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock
 
 import pytest
 
 from resonate import Context, Resonate
+from resonate.conventions import Remote
 from resonate.dependencies import Dependencies
 from resonate.errors import ResonateValidationError
-from resonate.models.commands import Invoke, Listen
+from resonate.models.commands import Command, Invoke, Listen
 from resonate.models.handle import Handle
 from resonate.options import Options
 from resonate.registry import Registry
@@ -35,42 +37,30 @@ def baz(ctx: Context, a: int, b: int) -> Generator[Any, Any, int]:
 
 
 @pytest.fixture
-def bridge() -> Generator[MagicMock, None, None]:
-    def side_effect(*args: Any, **kwargs: Any) -> None:
-        if futures := kwargs.get("futures"):
-            futures[0].set_result(None)  # Unblock future
-
-    with patch("resonate.resonate.Bridge") as mock_bridge_cls:
-        mock_bridge = mock_bridge_cls.return_value
-        mock_bridge.invoke.side_effect = side_effect
-        mock_bridge.listen.side_effect = side_effect
-        yield mock_bridge
+def resonate() -> Resonate:
+    resonate = Resonate()
+    resonate._started = True  # noqa: SLF001
+    return resonate
 
 
 @pytest.fixture
 def registry() -> Registry:
     registry = Registry()
     registry.add(foo, "foo", version=1)
-    registry.add(foo, "foo", version=2)
-    registry.add(bar, "bar", version=1)
+    registry.add(bar, "bar", version=2)
+    registry.add(baz, "baz", version=3)
     return registry
 
 
 # Helper functions
 
 
-def cmd_invoke(mock_bridge: MagicMock) -> None:
-    mock_bridge.invoke.assert_called_once()
-    args, _ = mock_bridge.invoke.call_args
-    mock_bridge.invoke.reset_mock()
-    return args[0]
+def cmd(resonate: Resonate) -> Command:
+    item = resonate._bridge._cq.get_nowait()  # noqa: SLF001
+    assert isinstance(item, tuple)
 
-
-def cmd_listen(mock_bridge: MagicMock) -> None:
-    mock_bridge.listen.assert_called_once()
-    args, _ = mock_bridge.listen.call_args
-    mock_bridge.listen.reset_mock()
-    return args[0]
+    cmd, _ = item
+    return cmd
 
 
 # Tests
@@ -78,28 +68,52 @@ def cmd_listen(mock_bridge: MagicMock) -> None:
 
 @pytest.mark.parametrize("func", [foo, bar, baz, lambda x: x])
 @pytest.mark.parametrize("name", ["foo", "bar", "baz", None])
-def test_register(func: Callable, name: str | None) -> None:
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_register(func: Callable, name: str | None, version: int) -> None:
     # skip lambda functions without name, validation tests will cover this
     if func.__name__ == "<lambda>" and name is None:
         return
 
     registry = Registry()
     resonate = Resonate(registry=registry)
+    resonate.register(func, name=name, version=version)
 
-    resonate.register(func, name=name)
-    assert registry.get(name or func.__name__) == (func, 1)
-    assert registry.get(func) == (name or func.__name__, 1)
-
-    resonate.register(func, name=name, version=2)
-    assert registry.get(name or func.__name__) == (func, 2)
-    assert registry.get(func) == (name or func.__name__, 2)
+    for v in (0, version):
+        assert registry.get(name or func.__name__, v) == registry.get(func, v) == (name or func.__name__, func, version)
 
 
+@pytest.mark.parametrize(
+    ("func", "kwargs"),
+    [
+        (lambda x: x, {"name": "foo"}),
+        (lambda x: x, {"name": "foo", "version": 1}),
+        (lambda x: x, {"name": "foo", "version": 0}),
+        (lambda x: x, {"name": "bar", "version": 2}),
+        (lambda x: x, {"name": "bar", "version": 0}),
+        (lambda x: x, {"name": "baz", "version": 3}),
+        (lambda x: x, {"name": "baz", "version": 0}),
+        (lambda x: x, {}),
+        (lambda x: x, {"version": 1}),
+        (foo, {"name": "bar"}),
+        (bar, {"name": "baz"}),
+        (baz, {"name": "foo"}),
+    ],
+)
+def test_register_validations(registry: Registry, func: Callable, kwargs: dict) -> None:
+    resonate = Resonate(registry=registry)
+    with pytest.raises(ResonateValidationError):
+        resonate.register(func, **kwargs)
+
+    with pytest.raises(ResonateValidationError):
+        resonate.register(**kwargs)(func)
+
+
+@pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("retry_policy", [Constant(), Linear(), Exponential()])
 @pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
-@pytest.mark.parametrize("version", [1, 2, 3, None])
-@pytest.mark.parametrize("timeout", [3, 2, 1, None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"2": "foo"}, {"a": "foo"}, None])
-@pytest.mark.parametrize("retry_policy", [Never(), Constant(delay=1, max_retries=1), Linear(delay=1, max_retries=1), Exponential(delay=0.4, factor=2, max_delay=3, max_retries=1)])
+@pytest.mark.parametrize("timeout", [3, 2, 1, None])
+@pytest.mark.parametrize("version", [1, 2, 3, None])
 @pytest.mark.parametrize(
     ("func", "name", "args", "kwargs"),
     [
@@ -112,73 +126,120 @@ def test_register(func: Callable, name: str | None) -> None:
     ],
 )
 def test_run(
-    bridge: MagicMock,
+    resonate: Resonate,
+    idempotency_key: str | None,
+    retry_policy: RetryPolicy | None,
     send_to: str | None,
-    version: int | None,
-    timeout: int | None,
     tags: dict[str, str] | None,
-    retry_policy: RetryPolicy,
+    timeout: int | None,
+    version: int | None,
     func: Callable,
     name: str,
     args: tuple,
     kwargs: dict,
 ) -> None:
-    registry = Registry()
-    resonate = Resonate(registry=registry)
+    f = resonate.register(func, name=name, version=version or 1)
 
-    f1 = resonate.register(func, name=name, version=version or 1)
+    opts = {
+        "idempotency_key": idempotency_key,
+        "retry_policy": retry_policy,
+        "send_to": send_to,
+        "tags": tags,
+        "timeout": timeout,
+        "version": version,
+    }
 
-    opts = Options(version=1)
-    if send_to is not None:
-        opts = opts.merge(send_to=send_to)
-    if version is not None:
-        opts = opts.merge(version=version)
-    if timeout is not None:
-        opts = opts.merge(timeout=timeout)
-    if tags is not None:
-        opts = opts.merge(tags=tags)
+    default_opts = Options(version=version or 1)
+    default_conv = Remote("f", name, args, kwargs, default_opts)
 
-    opts.merge(retry_policy=retry_policy)
+    updated_opts = Options(version=version or 1).merge(**opts)
+    updated_conv = Remote("f", name, args, kwargs, updated_opts)
 
-    invoke = Invoke(id="f", name=name, func=func, args=args, kwargs=kwargs, opts=Options(version=version or 1))
-    invoke_with_opts = Invoke(id="f", name=name, func=func, args=args, kwargs=kwargs, opts=opts)
+    assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
+    assert updated_opts.send_to == (send_to or default_opts.send_to)
+    assert updated_opts.version == (version or default_opts.version)
+    assert updated_opts.timeout == (timeout or default_opts.timeout)
+    assert updated_opts.tags == (tags or default_opts.tags)
 
-    resonate.run("f", func, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
+    def invoke(id: str) -> Invoke:
+        return Invoke(id=id, func=func, args=args, kwargs=kwargs, opts=default_opts)
 
-    resonate.run("f", name, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
+    def invoke_with_opts(id: str) -> Invoke:
+        return Invoke(id=id, func=func, args=args, kwargs=kwargs, opts=updated_opts)
 
-    resonate.options(**opts.to_dict()).run("f", func, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    resonate.run("f1", func, *args, **kwargs)
+    assert cmd(resonate) == invoke("f1")
 
-    resonate.options(**opts.to_dict()).run("f", name, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    promise = resonate.promises.get(id="f1")
+    assert promise.id == "f1"
+    assert promise.ikey_for_create == "f1"
+    assert promise.param.headers == {}  # TODO(dfarr): this should be None
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_opts.timeout
+    assert promise.tags == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
 
-    f1.run("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
+    resonate.run("f2", name, *args, **kwargs)
+    assert cmd(resonate) == invoke("f2")
 
-    f1.options(**opts.to_dict()).run("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    promise = resonate.promises.get(id="f2")
+    assert promise.id == "f2"
+    assert promise.ikey_for_create == "f2"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
 
-    version = (version or 1) + 1
+    resonate.options(**opts).run("f3", func, *args, **kwargs)
+    assert cmd(resonate) == invoke_with_opts("f3")
 
-    f2 = resonate.register(func, name=name, version=version)
-    opts = opts.merge(version=version)
-    invoke_with_opts.opts = opts
+    promise = resonate.promises.get(id="f3")
+    assert promise.id == "f3"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
 
-    f2.options(timeout=timeout, tags=tags, send_to=send_to).run("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    resonate.options(**opts).run("f4", name, *args, **kwargs)
+    assert cmd(resonate) == invoke_with_opts("f4")
 
-    f2.options(**opts.to_dict()).run("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    promise = resonate.promises.get(id="f4")
+    assert promise.id == "f4"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+
+    f.run("f5", *args, **kwargs)
+    assert cmd(resonate) == invoke("f5")
+
+    promise = resonate.promises.get(id="f5")
+    assert promise.id == "f5"
+    assert promise.ikey_for_create == "f5"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+
+    f.options(**opts).run("f6", *args, **kwargs)
+    assert cmd(resonate) == invoke_with_opts("f6")
+
+    promise = resonate.promises.get(id="f6")
+    assert promise.id == "f6"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
 
 
+@pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("version", [1, 2, 3, None])
 @pytest.mark.parametrize("timeout", [3, 2, 1, None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"2": "foo"}, {"a": "foo"}, None])
-@pytest.mark.parametrize("retry_policy", [Never(), Constant(delay=1, max_retries=1), Linear(delay=1, max_retries=1), Exponential(delay=0.4, factor=2, max_delay=3, max_retries=1)])
+@pytest.mark.parametrize("retry_policy", [Constant(), Linear(), Exponential()])
 @pytest.mark.parametrize(
     ("func", "name", "args", "kwargs"),
     [
@@ -191,75 +252,149 @@ def test_run(
     ],
 )
 def test_rpc(
-    bridge: MagicMock,
+    resonate: Resonate,
+    idempotency_key: str | None,
+    retry_policy: RetryPolicy | None,
     send_to: str | None,
-    version: int | None,
-    timeout: int | None,
     tags: dict[str, str] | None,
-    retry_policy: RetryPolicy,
+    timeout: int | None,
+    version: int | None,
     func: Callable,
     name: str,
     args: tuple,
     kwargs: dict,
 ) -> None:
-    registry = Registry()
+    f = resonate.register(func, name=name, version=version or 1)
+
+    opts = {
+        "idempotency_key": idempotency_key,
+        "retry_policy": retry_policy,
+        "send_to": send_to,
+        "tags": tags,
+        "timeout": timeout,
+        "version": version,
+    }
+
+    default_opts = Options(version=version or 1)
+    default_conv = Remote("f", name, args, kwargs, default_opts)
+
+    updated_opts = Options(version=version or 1).merge(**opts)
+    updated_conv = Remote("f", name, args, kwargs, updated_opts)
+
+    assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
+    assert updated_opts.send_to == (send_to or default_opts.send_to)
+    assert updated_opts.version == (version or default_opts.version)
+    assert updated_opts.timeout == (timeout or default_opts.timeout)
+    assert updated_opts.tags == (tags or default_opts.tags)
+
+    resonate.rpc("f1", func, *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f1")
+
+    promise = resonate.promises.get(id="f1")
+    assert promise.id == "f1"
+    assert promise.ikey_for_create == "f1"
+    assert promise.param.headers == {}  # TODO(dfarr): this should be None
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_opts.timeout
+    assert promise.tags == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+
+    resonate.rpc("f2", name, *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f2")
+
+    promise = resonate.promises.get(id="f2")
+    assert promise.id == "f2"
+    assert promise.ikey_for_create == "f2"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+
+    resonate.options(**opts).rpc("f3", func, *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f3")
+
+    promise = resonate.promises.get(id="f3")
+    assert promise.id == "f3"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+
+    resonate.options(**opts).rpc("f4", name, *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f4")
+
+    promise = resonate.promises.get(id="f4")
+    assert promise.id == "f4"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+
+    f.rpc("f5", *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f5")
+
+    promise = resonate.promises.get(id="f5")
+    assert promise.id == "f5"
+    assert promise.ikey_for_create == "f5"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+
+    f.options(**opts).rpc("f6", *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f6")
+
+    promise = resonate.promises.get(id="f6")
+    assert promise.id == "f6"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
+    assert promise.param.headers == {}
+    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+
+
+@pytest.mark.parametrize(
+    ("func", "kwargs"),
+    [
+        (foo, {"version": 2}),
+        (bar, {"version": 3}),
+        (baz, {"version": 1}),
+        ("foo", {"version": 2}),
+        ("bar", {"version": 3}),
+        ("baz", {"version": 1}),
+    ],
+)
+def test_run_validations(registry: Registry, func: Callable | str, kwargs: dict) -> None:
     resonate = Resonate(registry=registry)
 
-    f1 = resonate.register(func, name=name, version=version or 1)
+    with pytest.raises(ResonateValidationError):
+        resonate.options(**kwargs).run("f", func)
 
-    opts = Options(version=1)
-    if send_to is not None:
-        opts = opts.merge(send_to=send_to)
-    if version is not None:
-        opts = opts.merge(version=version)
-    if timeout is not None:
-        opts = opts.merge(timeout=timeout)
-    if tags is not None:
-        opts = opts.merge(tags=tags)
 
-    opts.merge(retry_policy=retry_policy)
+@pytest.mark.parametrize(
+    ("func", "kwargs"),
+    [
+        (foo, {"version": 2}),
+        (bar, {"version": 3}),
+        (baz, {"version": 1}),
+    ],
+)
+def test_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict) -> None:
+    resonate = Resonate(registry=registry)
 
-    invoke = Invoke(id="f", name=name, func=None, args=args, kwargs=kwargs, opts=Options(version=version or 1))
-    invoke_with_opts = Invoke(id="f", name=name, func=None, args=args, kwargs=kwargs, opts=opts)
-
-    resonate.rpc("f", func, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
-
-    resonate.rpc("f", name, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
-
-    resonate.options(**opts.to_dict()).rpc("f", func, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
-
-    resonate.options(**opts.to_dict()).rpc("f", name, *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
-
-    f1.rpc("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke
-
-    f1.options(**opts.to_dict()).rpc("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
-
-    version = (version or 1) + 1
-    f2 = resonate.register(func, name=name, version=version)
-    invoke_with_opts.opts = invoke_with_opts.opts.merge(version=version)
-
-    f2.options(send_to=send_to, timeout=timeout, tags=tags).rpc("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
-
-    f2.options(**opts.to_dict()).rpc("f", *args, **kwargs)
-    assert cmd_invoke(bridge) == invoke_with_opts
+    with pytest.raises(ResonateValidationError):
+        resonate.options(**kwargs).rpc("f", func)
 
 
 @pytest.mark.parametrize("id", ["foo", "bar", "baz"])
-def test_get(bridge: MagicMock, id: str) -> None:
-    resonate = Resonate()
+def test_get(resonate: Resonate, id: str) -> None:
     resonate.get(id)
-    assert cmd_listen(bridge) == Listen(id=id)
+    assert cmd(resonate) == Listen(id=id)
 
 
 def test_type_annotations() -> None:
-    # The following are "tests", if there is an issue it will be found by pright, at runtime
+    # The following are "tests", if there is an issue it will be found by pyright, at runtime
     # assert_type is effectively a noop.
 
     resonate = Resonate()
@@ -289,99 +424,79 @@ def test_type_annotations() -> None:
     assert_type(f.rpc, Callable[[str, int, str], Handle[int | str]])
 
 
-@pytest.mark.parametrize(
-    ("func", "kwargs"),
-    [
-        (lambda x: x, {"name": "foo", "version": -1}),
-        (lambda x: x, {"name": "foo", "version": 1}),
-        (lambda x: x, {"version": 1}),
-        (foo, {"version": 1}),
-        (foo, {"version": 2}),
-        (bar, {"version": 1}),
-        (foo, {"name": "bar"}),
-        (bar, {"name": "foo"}),
-    ],
-)
-def test_register_validations(registry: Registry, func: Callable, kwargs: dict) -> None:
-    resonate = Resonate(registry=registry)
-    with pytest.raises(ResonateValidationError):
-        resonate.register(func, **kwargs)
-
-    with pytest.raises(ResonateValidationError):
-        resonate.register(**kwargs)(func)
-
-
-@pytest.mark.parametrize(
-    ("func", "kwargs"),
-    [
-        (foo, {"version": 3}),
-        (bar, {"version": 2}),
-        (baz, {}),
-        ("foo", {"version": 3}),
-        ("bar", {"version": 2}),
-        ("baz", {}),
-    ],
-)
-def test_run_and_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict) -> None:
-    resonate = Resonate(registry=registry)
-
-    with pytest.raises(ResonateValidationError):
-        resonate.options(**kwargs).run("f", func)
-
-    if callable(func):
-        with pytest.raises(ResonateValidationError):
-            resonate.options(**kwargs).rpc("f", func)
-
-
-@pytest.mark.parametrize(
-    "timeout",
-    [1, 2, 3],
-)
-@pytest.mark.parametrize("func", [foo, bar, baz])
-@pytest.mark.parametrize("version", [1, 2, 3, 20])
+@pytest.mark.parametrize("funcs", [(foo, bar), (bar, baz), (baz, foo)])
+@pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
 @pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
-@pytest.mark.parametrize("retry_policy", [Never(), Constant(1, 1), None])
-def test_propagation(timeout: int, func: Callable, version: int, send_to: str | None, retry_policy: RetryPolicy | None) -> None:
+@pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
+@pytest.mark.parametrize("timeout", [1, 2, 3, 101, 102, 103, None])
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | None, send_to: str | None, tags: dict[str, str] | None, timeout: int | None, version: int) -> None:
+    f1, f2 = funcs
+
     registry = Registry()
-    registry.add(func, "func", version)
+    registry.add(f1, "func", version)
+    registry.add(f2, "func", version + 1)
 
-    default_opts = Options()
-    opts = Options(timeout=timeout).merge(send_to=send_to, version=version, retry_policy=retry_policy)
-    ctx = Context("foo", Info(), opts, registry, Dependencies())
+    opts = Options(timeout=100)
+    ctx = Context("f", Mock(spec=Info), opts, registry, Dependencies())
 
-    for f in (ctx.lfi, ctx.lfc):
-        cmd = f(func, 1, 2)
-        assert cmd.opts.version == version
-        assert cmd.opts.tags == default_opts.tags
-        assert cmd.opts.send_to == default_opts.send_to
-        assert cmd.opts.retry_policy == Never() if isgeneratorfunction(func) else Exponential()
+    counter = 0
 
-        if f == ctx.detached:
-            assert cmd.opts.timeout == default_opts.timeout
-        else:
-            assert cmd.opts.timeout == timeout
-            cmd = cmd.options(timeout=timeout + 1)
-            assert cmd.opts.timeout == timeout
+    for f, v in ((f1, version), (f2, version + 1)):
+        for lf in (ctx.lfi, ctx.lfc):
+            counter += 1
 
-        cmd = cmd.options(timeout=timeout - 1)
-        assert cmd.opts.timeout == timeout - 1
+            cmd = lf(f, 1, 2)
+            assert cmd.id == cmd.conv.id == f"f.{counter}"
+            assert cmd.func == f
+            assert cmd.args == (1, 2)
+            assert cmd.kwargs == {}
+            assert cmd.opts.version == v
+            assert cmd.opts.tags == opts.tags
+            assert callable(cmd.opts.retry_policy)
+            assert isinstance(cmd.opts.retry_policy(f1), Never if isgeneratorfunction(f1) else Exponential)
+            assert cmd.conv.idempotency_key == cmd.id
+            assert cmd.conv.headers is None
+            assert cmd.conv.data is None
+            assert cmd.conv.timeout == opts.timeout
+            assert cmd.conv.tags == {**opts.tags, "resonate:scope": "local"}
+            assert cmd.opts.version == v
 
-        assert cmd.options(retry_policy=retry_policy).opts.retry_policy == retry_policy if retry_policy is not None else Never() if isgeneratorfunction(func) else Exponential()
+            # update the command
+            cmd = cmd.options(tags=tags, timeout=timeout, version=version + 1, retry_policy=retry_policy)
 
-    for f in (ctx.rfi, ctx.rfc, ctx.detached):
-        cmd = f(func, 1, 2)
-        assert cmd.convention.opts.version == version
-        assert cmd.convention.opts.tags == default_opts.tags
-        assert cmd.convention.opts.send_to == default_opts.send_to
-        assert cmd.convention.opts.retry_policy == Never()
+            # version is a noop for lfx
+            assert cmd.opts.version == v
 
-        if f == ctx.detached:
-            assert cmd.convention.opts.timeout == default_opts.timeout
-        else:
-            assert cmd.convention.opts.timeout == timeout
-            cmd = cmd.options(timeout=timeout + 1)
-            assert cmd.convention.opts.timeout == timeout
+            if timeout:
+                assert cmd.conv.timeout == min(100, timeout)
+            if retry_policy:
+                assert isinstance(cmd.opts.retry_policy, retry_policy.__class__)
+            if tags:
+                assert cmd.conv.tags
+                assert all(k in cmd.conv.tags and cmd.conv.tags[k] == v for k, v in tags.items())
 
-        cmd = cmd.options(timeout=timeout - 1)
-        assert cmd.convention.timeout == timeout - 1
-        assert cmd.options(send_to=send_to).convention.opts.send_to == send_to if send_to is not None else default_opts.send_to
+        for rf in (ctx.rfi, ctx.rfc, ctx.detached):
+            counter += 1
+
+            cmd = rf(f, 1, 2)
+            assert cmd.id == cmd.conv.id == f"f.{counter}"
+            assert cmd.conv.idempotency_key == cmd.id
+            assert cmd.conv.headers is None
+            assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
+            assert cmd.conv.timeout == sys.maxsize if rf == ctx.detached else opts.timeout
+            assert cmd.conv.tags == {**opts.tags, "resonate:scope": "global", "resonate:invoke": opts.send_to}
+
+            cmd = cmd.options(tags=tags, timeout=timeout, version=version, send_to=send_to)
+
+            # version is applicable for rfx
+            assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": version}
+
+            if timeout:
+                assert cmd.conv.timeout == timeout if rf == ctx.detached else min(100, timeout)
+            if send_to:
+                assert cmd.conv.tags
+                assert cmd.conv.tags["resonate:invoke"] == send_to
+            if tags:
+                assert cmd.conv.tags
+                assert all(k in cmd.conv.tags and cmd.conv.tags[k] == v for k, v in tags.items())

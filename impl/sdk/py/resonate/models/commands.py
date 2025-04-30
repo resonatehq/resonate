@@ -22,8 +22,7 @@ type Command = Invoke | Resume | Return | Receive | Retry | Listen | Notify
 @dataclass
 class Invoke:
     id: str
-    name: str
-    func: Callable[..., Any] | None = field(repr=False)
+    func: Callable[..., Any] = field(repr=False)
     args: tuple[Any, ...] = field(default_factory=tuple)
     kwargs: dict[str, Any] = field(default_factory=dict)
     opts: Options = field(default_factory=Options)

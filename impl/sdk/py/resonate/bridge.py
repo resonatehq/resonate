@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from concurrent.futures import Future
 
     from resonate.models.commands import Command
+    from resonate.models.convention import Convention
     from resonate.models.message import Mesg
     from resonate.models.message_source import MessageSource
     from resonate.models.store import Store
@@ -62,7 +63,7 @@ class Bridge:
         self._store = store
         self._message_src = message_source
         self._registry = registry
-        self._cq: queue.Queue[Command | tuple[Command, tuple[Future, Future]] | None] = queue.Queue()
+        self._cq: queue.Queue[Command | tuple[Command, Future] | None] = queue.Queue()
         self._mq: queue.Queue[Mesg | None] = queue.Queue()
         self._unicast = unicast
         self._anycast = unicast
@@ -88,57 +89,57 @@ class Bridge:
         self._delay_condition = threading.Condition()
         self._delay_thread = threading.Thread(target=self._process_delayed_events, name="delay_thread", daemon=True)
 
-    def invoke(self, cmd: Invoke, futures: tuple[Future, Future]) -> DurablePromise:
-        assert cmd.opts.version is not None, "Version must be set"
-        assert cmd.opts.version > 0, "Version must be greater than zero"
+    def run(self, conv: Convention, func: Callable, args: tuple, kwargs: dict, opts: Options, future: Future) -> DurablePromise:
+        promise, task = self._store.promises.create_with_task(
+            id=conv.id,
+            ikey=conv.idempotency_key,
+            timeout=conv.timeout,
+            headers=conv.headers,
+            data=conv.data,
+            tags=conv.tags,
+            pid=self._pid,
+            ttl=self._ttl * 1000,
+        )
 
-        promise: DurablePromise
-        task: Task | None = None
-
-        if cmd.func is None:
-            # RPC case
-
-            promise = self._store.promises.create(
-                id=cmd.id,
-                ikey=cmd.id,
-                timeout=cmd.opts.timeout,
-                data={"func": cmd.name, "args": cmd.args, "kwargs": cmd.kwargs, "version": cmd.opts.version},
-                tags={
-                    **cmd.opts.tags,
-                    "resonate:invoke": cmd.opts.send_to,
-                    "resonate:scope": "global",
-                },
-            )
-        else:
-            # Invocation case
-            promise, task = self._store.promises.create_with_task(
-                id=cmd.id,
-                ikey=cmd.id,
-                timeout=cmd.opts.timeout,
-                pid=self._pid,
-                ttl=self._ttl * 1000,
-                data={"func": cmd.name, "args": cmd.args, "kwargs": cmd.kwargs, "version": cmd.opts.version},
-                tags={
-                    **cmd.opts.tags,
-                    "resonate:invoke": cmd.opts.send_to,
-                    "resonate:scope": "global",
-                },
-            )
-
-        futures[0].set_result(promise)
-
-        # TODO(avillega): What happens if promise is completed?
-        if task is not None:
+        if promise.completed:
+            assert not task
+            match promise.result:
+                case Ok(v):
+                    future.set_result(v)
+                case Ko(e):
+                    future.set_exception(e)
+        elif task is not None:
             self._promise_id_to_task[promise.id] = task
             self.start_heartbeat()
-            self._cq.put_nowait((cmd, futures))
+            self._cq.put_nowait((Invoke(conv.id, func, args, kwargs, opts), future))
         else:
-            self._cq.put_nowait((Listen(promise.id), futures))
+            self._cq.put_nowait((Listen(promise.id), future))
 
         return promise
 
-    def listen(self, cmd: Listen, futures: tuple[Future, Future]) -> None:
-        self._cq.put_nowait((cmd, futures))
+    def rpc(self, conv: Convention, future: Future) -> DurablePromise:
+        promise = self._store.promises.create(
+            id=conv.id,
+            ikey=conv.idempotency_key,
+            timeout=conv.timeout,
+            headers=conv.headers,
+            data=conv.data,
+            tags=conv.tags,
+        )
+
+        if promise.completed:
+            match promise.result:
+                case Ok(v):
+                    future.set_result(v)
+                case Ko(e):
+                    future.set_exception(e)
+        else:
+            self._cq.put_nowait((Listen(promise.id), future))
+
+        return promise
+
+    def get(self, id: str, future: Future) -> None:
+        self._cq.put_nowait((Listen(id), future))
 
     def start(self) -> None:
         if not self._messages_thread.is_alive():
@@ -175,9 +176,9 @@ class Bridge:
                 case None:
                     # None signals to stop processing
                     return
-                case (cmd, futures):
+                case (cmd, future):
                     cid = cmd.cid
-                    action = self._scheduler.step(cmd, futures)
+                    action = self._scheduler.step(cmd, future)
                 case cmd:
                     cid = cmd.cid
                     action = self._scheduler.step(cmd)
@@ -235,14 +236,20 @@ class Bridge:
 
     def _process_msgs(self) -> None:
         def _invoke(root: DurablePromise) -> Invoke:
-            version = root.param.data.get("version")
+            assert "func" in root.param.data
+            assert "version" in root.param.data
+
+            f, v = root.param.data["func"], root.param.data["version"]
+            assert isinstance(f, str)
+            assert isinstance(v, int)
+
+            _, func, version = self._registry.get(f, v)
             return Invoke(
                 root.id,
-                root.param.data["func"],
-                self._registry.get(root.param.data["func"])[0],
-                root.param.data["args"],
-                root.param.data["kwargs"],
-                Options().merge(version=version),
+                func,
+                root.param.data.get("args", ()),
+                root.param.data.get("kwargs", {}),
+                Options(version=version),
             )
 
         while True:

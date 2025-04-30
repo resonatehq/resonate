@@ -14,12 +14,6 @@ class Task:
     counter: int
     store: Store = field(repr=False)
 
-    _completed: bool = field(default=False, init=False)
-
-    @property
-    def completed(self) -> bool:
-        return self._completed
-
     def claim(self, pid: str, ttl: int) -> tuple[DurablePromise, DurablePromise | None]:
         return self.store.tasks.claim(id=self.id, counter=self.counter, pid=pid, ttl=ttl)
 
