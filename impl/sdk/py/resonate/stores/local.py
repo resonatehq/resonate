@@ -438,8 +438,8 @@ class LocalPromiseStore:
                 msg = "Not found"
                 raise ResonateStoreError(msg, "STORE_NOT_FOUND")
 
-            case _:
-                msg = "Forbidden request"
+            case record, to, strict:
+                msg = f"Forbidden request, can not do {record} to {to} when strict {strict}"
                 raise ResonateStoreError(msg, "STORE_FORBIDDEN")
 
 

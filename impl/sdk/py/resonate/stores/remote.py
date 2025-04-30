@@ -56,35 +56,40 @@ class RemoteStore:
                     if res.ok:
                         return res
 
+                    try:
+                        data = res.json()
+                    except Exception:
+                        data = res.text
+
                     match res.status_code:
                         case _status_codes.BAD_REQUEST:
-                            msg = "Invalid Request"
+                            msg = f"Invalid Request: {data}"
                             raise ResonateStoreError(msg, "STORE_PAYLOAD")
                         case _status_codes.UNAUTHORIZED:
-                            msg = "Unauthorized request"
+                            msg = f"Unauthorized request: {data}"
                             raise ResonateStoreError(msg, "STORE_UNAUTHORIZED")
                         case _status_codes.FORBIDDEN:
-                            msg = "Forbidden request"
+                            msg = f"Forbidden request: {data}"
                             raise ResonateStoreError(msg, "STORE_FORBIDDEN")
                         case _status_codes.NOT_FOUND:
-                            msg = "Not found"
+                            msg = f"Not found: {data}"
                             raise ResonateStoreError(msg, "STORE_NOT_FOUND")
                         case _status_codes.CONFLICT:
-                            msg = "Already exists"
+                            msg = f"Already exists: {data}"
                             raise ResonateStoreError(msg, "STORE_ALREADY_EXISTS")
                         case _status_codes.SERVER_ERROR:
                             attempt += 1
 
                             delay = self.retry_policy.next(attempt)
                             if delay is None:
-                                msg = f"Unexpected error on the server {res.status_code} {res.reason}"
+                                msg = f"Unexpected error on the server {res.status_code} {res.reason}: {data}"
                                 raise ResonateStoreError(msg, "UNKNOWN")
 
                             time.sleep(delay)
                             continue
 
                         case _:
-                            msg = f"Unknow error {res.status_code} {res.reason}"
+                            msg = f"Unknow error {res.status_code} {res.reason}: {data}"
                             raise ResonateStoreError(msg, "UNKNOWN")
 
                 except requests.exceptions.RequestException:
@@ -110,7 +115,7 @@ class RemotePromiseStore:
 
     def get(self, *, id: str) -> DurablePromise:
         req = Request(
-            method="post",
+            method="get",
             url=f"{self.store.url}/promises/{id}",
         )
         res = self.store.call(req.prepare()).json()

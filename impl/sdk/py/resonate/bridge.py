@@ -138,8 +138,15 @@ class Bridge:
 
         return promise
 
-    def get(self, id: str, future: Future) -> None:
+    def get(self, id: str, future: Future) -> DurablePromise:
+        durable_promise = self._store.promises.get(id=id)
+
+        if durable_promise.completed:
+            future.set_result(durable_promise.value.data)
+            return durable_promise
+
         self._cq.put_nowait((Listen(id), future))
+        return durable_promise
 
     def start(self) -> None:
         if not self._messages_thread.is_alive():

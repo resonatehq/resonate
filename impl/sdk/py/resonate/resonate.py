@@ -218,7 +218,6 @@ class Resonate:
 
     def get(self, id: str) -> Handle[Any]:
         self.start()
-
         future = Future()
         self._bridge.get(id, future)
 

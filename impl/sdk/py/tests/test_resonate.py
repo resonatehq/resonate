@@ -389,6 +389,7 @@ def test_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict)
 
 @pytest.mark.parametrize("id", ["foo", "bar", "baz"])
 def test_get(resonate: Resonate, id: str) -> None:
+    resonate.promises.create(id=id, timeout=sys.maxsize)
     resonate.get(id)
     assert cmd(resonate) == Listen(id=id)
 
