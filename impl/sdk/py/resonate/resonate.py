@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import random
+import sys
 import time
 import uuid
 from concurrent.futures import Future
@@ -59,7 +60,7 @@ class Resonate:
             self._message_source = self._store.message_source(self._group, self._pid)
 
         self._bridge = Bridge(
-            ctx=lambda id, info: Context(id, info, self._opts, self._registry, self._dependencies),
+            ctx=lambda id, info: Context(id, info, self._registry, self._dependencies),
             pid=self._pid,
             ttl=ttl,
             anycast=self._message_source.anycast,
@@ -228,10 +229,9 @@ class Resonate:
 
 
 class Context:
-    def __init__(self, id: str, info: Info, opts: Options, registry: Registry, dependencies: Dependencies) -> None:
+    def __init__(self, id: str, info: Info, registry: Registry, dependencies: Dependencies) -> None:
         self._id = id
         self._info = info
-        self._opts = opts
         self._registry = registry
         self._dependencies = dependencies
         self._random = Random(self)
@@ -259,7 +259,7 @@ class Context:
     def lfi[**P, R](self, func: Callable[Concatenate[Context, P], R], *args: P.args, **kwargs: P.kwargs) -> LFI: ...
     def lfi(self, func: Callable, *args: Any, **kwargs: Any) -> LFI:
         self._counter += 1
-        opts = Options(timeout=self._opts.timeout, version=self._registry.latest(func))
+        opts = Options(version=self._registry.latest(func))
         return LFI(Local(f"{self.id}.{self._counter}", opts), func, args, kwargs, opts)
 
     @overload
@@ -268,7 +268,7 @@ class Context:
     def lfc[**P, R](self, func: Callable[Concatenate[Context, P], R], *args: P.args, **kwargs: P.kwargs) -> LFC: ...
     def lfc(self, func: Callable, *args: Any, **kwargs: Any) -> LFC:
         self._counter += 1
-        opts = Options(timeout=self._opts.timeout, version=self._registry.latest(func))
+        opts = Options(version=self._registry.latest(func))
         return LFC(Local(f"{self.id}.{self._counter}", opts), func, args, kwargs, opts)
 
     @overload
@@ -278,11 +278,9 @@ class Context:
     @overload
     def rfi(self, func: str, *args: Any, **kwargs: Any) -> RFI: ...
     def rfi(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFI:
-        assert self._opts.version == 0
-
         self._counter += 1
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
-        return RFI(Remote(f"{self.id}.{self._counter}", name, args, kwargs, Options(timeout=self._opts.timeout, version=version)))
+        return RFI(Remote(f"{self.id}.{self._counter}", name, args, kwargs, Options(version=version)))
 
     @overload
     def rfc[**P, R](self, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> RFC: ...
@@ -291,11 +289,9 @@ class Context:
     @overload
     def rfc(self, func: str, *args: Any, **kwargs: Any) -> RFC: ...
     def rfc(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFC:
-        assert self._opts.version == 0
-
         self._counter += 1
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
-        return RFC(Remote(f"{self.id}.{self._counter}", name, args, kwargs, Options(timeout=self._opts.timeout, version=version)))
+        return RFC(Remote(f"{self.id}.{self._counter}", name, args, kwargs, Options(version=version)))
 
     @overload
     def detached[**P, R](self, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> RFI: ...
@@ -304,8 +300,6 @@ class Context:
     @overload
     def detached(self, func: str, *args: Any, **kwargs: Any) -> RFI: ...
     def detached(self, func: Callable | str, *args: Any, **kwargs: Any) -> RFI:
-        assert self._opts.version == 0
-
         self._counter += 1
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFI(Remote(f"{self.id}.{self._counter}", name, args, kwargs, Options(version=version)), mode="detached")
@@ -318,19 +312,24 @@ class Context:
         self,
         *,
         id: str | None = None,
+        timeout: int | None = None,
         idempotency_key: str | None = None,
         headers: dict[str, str] | None = None,
         data: Any = None,
-        timeout: int | None = None,
         tags: dict[str, str] | None = None,
     ) -> RFI:
         self._counter += 1
 
-        id = id or self._opts.id or f"{self.id}.{self._counter}"
-        ikey = idempotency_key or self._opts.idempotency_key
-        timeout = timeout or self._opts.timeout
-        tags = tags or self._opts.tags
-        return RFI(Base(id, ikey(id) if callable(ikey) else ikey, headers, data, timeout, tags))
+        return RFI(
+            Base(
+                f"{self.id}.{self._counter}",
+                timeout or sys.maxsize,
+                idempotency_key,
+                headers,
+                data,
+                tags,
+            ),
+        )
 
 
 class Time:

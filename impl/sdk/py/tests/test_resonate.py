@@ -162,10 +162,12 @@ def test_run(
     assert updated_opts.tags == (tags or default_opts.tags)
 
     def invoke(id: str) -> Invoke:
-        return Invoke(id=id, func=func, args=args, kwargs=kwargs, opts=default_opts)
+        conv = Remote(id, name, args, kwargs, default_opts)
+        return Invoke(id, conv, func, args, kwargs, default_opts, resonate.promises.get(id=id))
 
     def invoke_with_opts(id: str) -> Invoke:
-        return Invoke(id=id, func=func, args=args, kwargs=kwargs, opts=updated_opts)
+        conv = Remote(id, name, args, kwargs, updated_opts)
+        return Invoke(id, conv, func, args, kwargs, updated_opts, resonate.promises.get(id=id))
 
     resonate.run("f1", func, *args, **kwargs)
     assert cmd(resonate) == invoke("f1")
@@ -438,9 +440,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
     registry.add(f1, "func", version)
     registry.add(f2, "func", version + 1)
 
-    opts = Options(timeout=100)
-    ctx = Context("f", Mock(spec=Info), opts, registry, Dependencies())
-
+    ctx = Context("f", Mock(spec=Info), registry, Dependencies())
     counter = 0
 
     for f, v in ((f1, version), (f2, version + 1)):
@@ -453,14 +453,14 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.args == (1, 2)
             assert cmd.kwargs == {}
             assert cmd.opts.version == v
-            assert cmd.opts.tags == opts.tags
+            assert cmd.opts.tags == {}
             assert callable(cmd.opts.retry_policy)
             assert isinstance(cmd.opts.retry_policy(f1), Never if isgeneratorfunction(f1) else Exponential)
             assert cmd.conv.idempotency_key == cmd.id
             assert cmd.conv.headers is None
             assert cmd.conv.data is None
-            assert cmd.conv.timeout == opts.timeout
-            assert cmd.conv.tags == {**opts.tags, "resonate:scope": "local"}
+            assert cmd.conv.timeout == sys.maxsize
+            assert cmd.conv.tags == {"resonate:scope": "local"}
             assert cmd.opts.version == v
 
             # update the command
@@ -470,7 +470,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.opts.version == v
 
             if timeout:
-                assert cmd.conv.timeout == min(100, timeout)
+                assert cmd.conv.timeout == timeout
             if retry_policy:
                 assert isinstance(cmd.opts.retry_policy, retry_policy.__class__)
             if tags:
@@ -485,8 +485,8 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.idempotency_key == cmd.id
             assert cmd.conv.headers is None
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
-            assert cmd.conv.timeout == sys.maxsize if rf == ctx.detached else opts.timeout
-            assert cmd.conv.tags == {**opts.tags, "resonate:scope": "global", "resonate:invoke": opts.send_to}
+            assert cmd.conv.timeout == sys.maxsize if rf == ctx.detached else sys.maxsize
+            assert cmd.conv.tags == {"resonate:scope": "global", "resonate:invoke": "poll://default"}
 
             cmd = cmd.options(tags=tags, timeout=timeout, version=version, send_to=send_to)
 
@@ -494,7 +494,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": version}
 
             if timeout:
-                assert cmd.conv.timeout == timeout if rf == ctx.detached else min(100, timeout)
+                assert cmd.conv.timeout == timeout
             if send_to:
                 assert cmd.conv.tags
                 assert cmd.conv.tags["resonate:invoke"] == send_to

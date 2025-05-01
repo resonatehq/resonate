@@ -6,7 +6,7 @@ from concurrent.futures import Future
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Protocol
 
-from resonate.conventions import Local
+from resonate.conventions import Base, Local
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.models.commands import (
     CancelPromiseReq,
@@ -27,6 +27,7 @@ from resonate.models.commands import (
     Resume,
 )
 from resonate.models.task import Task
+from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Remote
 from resonate.scheduler import Scheduler
@@ -185,14 +186,20 @@ class ResonateRunner:
         time = 0
         future = Future[R]()
 
-        self.store.promises.create_with_task(
-            id=id,
-            timeout=sys.maxsize,
+        conv = Remote(id, func.__name__, args, kwargs)
+
+        promise, _ = self.store.promises.create_with_task(
+            id=conv.id,
+            ikey=conv.idempotency_key,
+            timeout=conv.timeout,
+            headers=conv.headers,
+            data=conv.data,
+            tags=conv.tags,
             pid=self.scheduler.pid,
             ttl=sys.maxsize,
         )
 
-        cmds.append(Invoke(id, func, args, kwargs))
+        cmds.append(Invoke(id, conv, func, args, kwargs, promise=promise))
 
         while cmds:
             time += 1
@@ -279,12 +286,24 @@ class ResonateRunner:
                         assert root.pending
                         assert not leaf
 
+                        _, func, version = self.registry.get(root.param.data["func"])
+
                         cmds.append(
                             Invoke(
                                 root.id,
-                                self.registry.get(root.param.data["func"])[1],
+                                Base(
+                                    root.id,
+                                    root.timeout,
+                                    root.ikey_for_create,
+                                    root.param.headers,
+                                    root.param.data,
+                                    root.tags,
+                                ),
+                                func,
                                 root.param.data["args"],
                                 root.param.data["kwargs"],
+                                Options(version=version),
+                                root,
                             )
                         )
 

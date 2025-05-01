@@ -10,11 +10,11 @@ if TYPE_CHECKING:
 @dataclass
 class Base:
     id: str
-    idempotency_key: str | None
-    headers: dict[str, str] | None
-    data: Any
     timeout: int
-    tags: dict[str, str] | None
+    idempotency_key: str | None = None
+    headers: dict[str, str] | None = None
+    data: Any = None
+    tags: dict[str, str] | None = None
 
     def options(
         self,

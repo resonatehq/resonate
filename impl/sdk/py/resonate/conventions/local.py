@@ -12,11 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class Local:
     id: str
-    opts: Options = field(default_factory=Options)
-
-    def __post_init__(self) -> None:
-        # Initially, timeout is set to the parent context timeout. This is the upper bound for the timeout.
-        self._max_timeout = self.opts.timeout
+    opts: Options = field(default_factory=Options, repr=False)
 
     @property
     def idempotency_key(self) -> str | None:
@@ -32,7 +28,7 @@ class Local:
 
     @property
     def timeout(self) -> int:
-        return min(self.opts.timeout, self._max_timeout)
+        return self.opts.timeout
 
     @property
     def tags(self) -> dict[str, str]:

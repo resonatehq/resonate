@@ -5,6 +5,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any
 
+from resonate.conventions import Base
 from resonate.delay_q import DelayQ
 from resonate.models.commands import (
     CancelPromiseReq,
@@ -111,7 +112,7 @@ class Bridge:
         elif task is not None:
             self._promise_id_to_task[promise.id] = task
             self.start_heartbeat()
-            self._cq.put_nowait((Invoke(conv.id, func, args, kwargs, opts), future))
+            self._cq.put_nowait((Invoke(conv.id, conv, func, args, kwargs, opts, promise), future))
         else:
             self._cq.put_nowait((Listen(promise.id), future))
 
@@ -253,10 +254,19 @@ class Bridge:
             _, func, version = self._registry.get(f, v)
             return Invoke(
                 root.id,
+                Base(
+                    root.id,
+                    root.timeout,
+                    root.ikey_for_create,
+                    root.param.headers,
+                    root.param.data,
+                    root.tags,
+                ),
                 func,
                 root.param.data.get("args", ()),
                 root.param.data.get("kwargs", {}),
                 Options(version=version),
+                root,
             )
 
         while True:

@@ -12,7 +12,7 @@ from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.task import Task
-from resonate.retry_policies.constant import Constant
+from resonate.retry_policies import Constant
 
 if TYPE_CHECKING:
     from resonate.models.encoder import Encoder

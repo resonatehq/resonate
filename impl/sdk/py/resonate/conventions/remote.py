@@ -13,13 +13,9 @@ if TYPE_CHECKING:
 class Remote:
     id: str
     name: str
-    args: tuple[Any, ...]
-    kwargs: dict[str, Any]
-    opts: Options = field(default_factory=Options)
-
-    def __post_init__(self) -> None:
-        # Initially, timeout is set to the parent context timeout. This is the upper bound for the timeout.
-        self._max_timeout = self.opts.timeout
+    args: tuple[Any, ...] = field(default_factory=tuple)
+    kwargs: dict[str, Any] = field(default_factory=dict)
+    opts: Options = field(default_factory=Options, repr=False)
 
     @property
     def idempotency_key(self) -> str | None:
@@ -35,7 +31,7 @@ class Remote:
 
     @property
     def timeout(self) -> int:
-        return min(self.opts.timeout, self._max_timeout)
+        return self.opts.timeout
 
     @property
     def tags(self) -> dict[str, str]:

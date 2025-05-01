@@ -3,12 +3,13 @@ from __future__ import annotations
 import sys
 import threading
 import time
+import uuid
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from resonate.resonate import Resonate
-from resonate.retry_policies import Constant
+from resonate.retry_policies import Constant, Never
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -126,6 +127,22 @@ def random_generation(ctx: Context) -> Generator[Yieldable, Any, float]:
     return (yield ctx.random.randint(0, 10))
 
 
+def info1(ctx: Context, idempotency_key: str, tags: dict[str, str], version: int) -> None:
+    assert ctx.info.attempt == 1
+    assert ctx.info.idempotency_key == idempotency_key
+    assert ctx.info.tags == tags
+    assert ctx.info.version == version
+
+
+def info2(ctx: Context, *args: Any, **kwargs: Any) -> Generator[Yieldable, Any, None]:
+    info1(ctx, *args, **kwargs)
+    yield ctx.lfc(info1, f"{ctx.id}.1", {"resonate:scope": "local"}, 1)
+    yield ctx.rfc(info1, f"{ctx.id}.2", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 1)
+    yield (yield ctx.lfi(info1, f"{ctx.id}.3", {"resonate:scope": "local"}, 1))
+    yield (yield ctx.rfi(info1, f"{ctx.id}.4", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 1))
+    yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 1))
+
+
 @pytest.fixture(scope="module")
 def resonate_instance(store: Store, message_source: MessageSource) -> Generator[Resonate, None, None]:
     resonate = Resonate(store=store, message_source=message_source)
@@ -144,6 +161,8 @@ def resonate_instance(store: Store, message_source: MessageSource) -> Generator[
     resonate.register(get_dependency)
     resonate.register(hitl)
     resonate.register(random_generation)
+    resonate.register(info1, name="info", version=1)
+    resonate.register(info2, name="info", version=2)
     resonate.start()
     yield resonate
     resonate.stop()
@@ -275,6 +294,35 @@ def test_implicit_resonate_start() -> None:
     handle = r.run(f"r-implicit-start-{timestamp}", 1)
     result = handle.result()
     assert result == 2
+
+
+@pytest.mark.parametrize("idempotency_key", ["foo", None])
+@pytest.mark.parametrize("send_to", ["foo", None])
+@pytest.mark.parametrize("tags", [{"foo": "bar"}, None])
+# @pytest.mark.parametrize("timeout", [1000, 2000])
+@pytest.mark.parametrize("version", [1, 2])
+def test_info(
+    resonate_instance: Resonate,
+    idempotency_key: str | None,
+    send_to: str | None,
+    tags: dict[str, str] | None,
+    # timeout: int,
+    version: int,
+) -> None:
+    id = f"info-{uuid.uuid4()}"
+
+    resonate = resonate_instance.options(
+        idempotency_key=idempotency_key,
+        retry_policy=Never(),
+        send_to=send_to,
+        tags=tags,
+        # timeout=timeout,
+        version=version,
+    )
+
+    handle = resonate.run(id, "info", idempotency_key or id, {**(tags or {}), "resonate:scope": "global", "resonate:invoke": send_to or "poll://default"}, version)
+
+    handle.result()
 
 
 def test_resonate_get(resonate_instance: Resonate) -> None:

@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Final, Literal
 
-from resonate.conventions import Local
-from resonate.conventions.base import Base
+from resonate.conventions import Base
 from resonate.coroutine import AWT, LFI, RFI, TRM, Coroutine
 from resonate.graph import Graph, Node
 from resonate.logging import logger
@@ -94,15 +93,16 @@ class Info:
 
     @property
     def idempotency_key(self) -> str | None:
-        return self._func.conv.idempotency_key
+        # promise takes precedence over conv, conv is needed in case of non durable
+        return self._func.promise.ikey_for_create if self._func.promise else self._func.conv.idempotency_key
 
     @property
     def tags(self) -> dict[str, str] | None:
-        return self._func.conv.tags
+        return self._func.promise.tags if self._func.promise else self._func.conv.tags
 
     @property
     def timeout(self) -> int:
-        return self._func.conv.timeout
+        return self._func.promise.timeout if self._func.promise else self._func.conv.timeout
 
     @property
     def version(self) -> int:
@@ -279,16 +279,19 @@ class Lfnc:
     opts: Options
 
     attempt: int = 1
+    promise: DurablePromise | None = None
     suspends: list[Node[State]] = field(default_factory=list)
     result: Result | None = None
 
     def __post_init__(self) -> None:
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
-    def map(self, *, attempt: int | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Lfnc:
+    def map(self, *, attempt: int | None = None, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Lfnc:
         if attempt:
             assert attempt == self.attempt + 1, "Attempt must be monotonically incremented."
             self.attempt = attempt
+        if promise:
+            self.promise = promise
         if suspends:
             self.suspends.append(suspends)
         if result:
@@ -305,10 +308,13 @@ class Rfnc:
     id: str
     conv: Convention
 
+    promise: DurablePromise | None = None
     suspends: list[Node[State]] = field(default_factory=list)
     result: Result | None = None
 
-    def map(self, *, suspends: Node[State] | None = None, result: Result | None = None) -> Rfnc:
+    def map(self, *, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Rfnc:
+        if promise:
+            self.promise = promise
         if suspends:
             self.suspends.append(suspends)
         if result:
@@ -336,6 +342,7 @@ class Coro:
     next: None | AWT | Result = None
 
     attempt: int = 1
+    promise: DurablePromise | None = None
     suspends: list[Node[State]] = field(default_factory=list)
     result: Result | None = None
 
@@ -344,7 +351,7 @@ class Coro:
         self.coro = Coroutine(self.id, self.cid, self.func(self._ctx, *self.args, **self.kwargs))
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
-    def map(self, *, attempt: int | None = None, next: AWT | Result | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Coro:
+    def map(self, *, attempt: int | None = None, next: AWT | Result | None = None, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Coro:
         if attempt:
             assert attempt == self.attempt + 1, "Attempt must be monotonically incremented."
             self.next = None
@@ -352,6 +359,8 @@ class Coro:
             self.attempt = attempt
         if next:
             self.next = next
+        if promise:
+            self.promise = promise
         if suspends:
             self.suspends.append(suspends)
         if result:
@@ -416,13 +425,13 @@ class Computation:
     def apply(self, cmd: Command) -> None:
         self.history.append(cmd)
         match cmd, self.graph.root.value.func:
-            case Invoke(id, func, args, kwargs, opts), Init(next=None):
-                conv = Local(id, opts)
+            case Invoke(id, conv, func, args, kwargs, opts, promise), Init(next=None):
+                assert id == conv.id == (promise.id if promise else id), "Id must match convention and promise id."
 
                 if isgeneratorfunction(func):
-                    self.graph.root.transition(Enabled(Running(Coro(id, conv, func, args, kwargs, opts, self.id, self.ctx))))
+                    self.graph.root.transition(Enabled(Running(Coro(id, conv, func, args, kwargs, opts, self.id, self.ctx, promise=promise))))
                 else:
-                    self.graph.root.transition(Enabled(Running(Lfnc(id, conv, func, args, kwargs, opts))))
+                    self.graph.root.transition(Enabled(Running(Lfnc(id, conv, func, args, kwargs, opts, promise=promise))))
 
             case Invoke(), _:
                 # first invoke "wins", computation will be joined
@@ -496,7 +505,7 @@ class Computation:
         match node.value, promise:
             case Blocked(Running(Init(Lfnc() | Coro() as next, suspends))), promise if promise.pending:
                 assert not next.suspends, "Suspends must be initially empty."
-                node.transition(Enabled(Running(next)))
+                node.transition(Enabled(Running(next.map(promise=promise))))
 
                 # unblock waiting[p]
                 self._unblock(suspends, AWT(next.id))
@@ -504,7 +513,7 @@ class Computation:
             case Blocked(Running(Init(Rfnc() as next, suspends))), promise if promise.pending:
                 assert not next.suspends, "Next suspends must be initially empty."
                 assert promise.tags.get("resonate:scope") != "local", "Scope must not be local."
-                node.transition(Enabled(Suspended(next)))
+                node.transition(Enabled(Suspended(next.map(promise=promise))))
 
                 # unblock waiting[p]
                 self._unblock(suspends, AWT(next.id))
@@ -512,7 +521,7 @@ class Computation:
             case Blocked(Running(Init(next, suspends))), promise if promise.completed:
                 assert next, "Next must be set."
                 assert not next.suspends, "Suspends must be initially empty."
-                node.transition(Enabled(Completed(next.map(result=promise.result))))
+                node.transition(Enabled(Completed(next.map(promise=promise, result=promise.result))))
 
                 # unblock waiting[p]
                 self._unblock(suspends, AWT(next.id))
@@ -549,12 +558,13 @@ class Computation:
                                 promise.id,
                                 Base(
                                     promise.id,
+                                    promise.timeout,
                                     promise.ikey_for_create,
                                     promise.param.headers,
                                     promise.param.data,
-                                    promise.timeout,
                                     promise.tags,
                                 ),
+                                promise=promise,
                                 result=promise.result,
                             )
                         )

@@ -4,7 +4,9 @@ import logging
 import random
 from typing import TYPE_CHECKING, Any
 
+from resonate.conventions import Remote
 from resonate.models.commands import Invoke, Listen
+from resonate.options import Options
 from resonate.registry import Registry
 from sim.simulator import Server, Simulator, Worker
 
@@ -195,41 +197,77 @@ def test_dst(seed: str, steps: int) -> None:
             case 0:
                 sim.send_msg("sim://any@default", Listen(str(n)))
             case 1:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo, opts=opts))
             case 2:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar, opts=opts))
             case 3:
-                sim.send_msg("sim://any@default", Invoke(str(n), baz))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, baz, opts=opts))
             case 4:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo_lfi))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo_lfi", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo_lfi, opts=opts))
             case 5:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar_lfi))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar_lfi", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar_lfi, opts=opts))
             case 6:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo_lfc))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo_lfc", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo_lfc, opts=opts))
             case 7:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar_lfc))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar_lfc", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar_lfc, opts=opts))
             case 8:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo_rfi))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo_rfi", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo_rfi, opts=opts))
             case 9:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar_rfi))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar_rfi", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar_rfi, opts=opts))
             case 10:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo_rfc))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo_rfc", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo_rfc, opts=opts))
             case 11:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar_rfc))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar_rfc", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar_rfc, opts=opts))
             case 12:
-                sim.send_msg("sim://any@default", Invoke(str(n), foo_detached))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "foo_detached", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, foo_detached, opts=opts))
             case 13:
-                sim.send_msg("sim://any@default", Invoke(str(n), bar_detached))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "bar_detached", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, bar_detached, opts=opts))
             case 14:
-                sim.send_msg("sim://any@default", Invoke(str(n), structured_concurrency))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(str(n), "structured_concurrency", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, structured_concurrency, opts=opts))
             case 15:
-                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", fib_lfi, (n,)))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_lfi, (n,), opts=opts))
             case 16:
-                sim.send_msg("sim://any@default", Invoke(f"fibl-{n}", fib_lfc, (n,)))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_lfc, (n,), opts=opts))
             case 17:
-                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", fib_rfi, (n,)))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_rfi, (n,), opts=opts))
             case 18:
-                sim.send_msg("sim://any@default", Invoke(f"fibr-{n}", fib_rfc, (n,)))
+                opts = Options(send_to="sim://any@default")
+                conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_rfc, (n,), opts=opts))
 
         # step
         sim.step()

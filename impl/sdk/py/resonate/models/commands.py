@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from resonate.models.callback import Callback
+    from resonate.models.convention import Convention
     from resonate.models.durable_promise import DurablePromise
     from resonate.models.result import Result
     from resonate.models.task import Task
@@ -22,10 +23,12 @@ type Command = Invoke | Resume | Return | Receive | Retry | Listen | Notify
 @dataclass
 class Invoke:
     id: str
+    conv: Convention
     func: Callable[..., Any] = field(repr=False)
     args: tuple[Any, ...] = field(default_factory=tuple)
     kwargs: dict[str, Any] = field(default_factory=dict)
-    opts: Options = field(default_factory=Options)
+    opts: Options = field(default_factory=Options, repr=False)
+    promise: DurablePromise | None = None
 
     @property
     def cid(self) -> str:

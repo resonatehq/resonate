@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from resonate import Context
 from resonate.clocks import StepClock
+from resonate.conventions import Base
 from resonate.dependencies import Dependencies
 from resonate.errors import ResonateStoreError
 from resonate.models.commands import (
@@ -377,7 +378,7 @@ class Worker(Component):
         self.last_heartbeat = 0
 
         self.scheduler = Scheduler(
-            lambda id, info: Context(id, info, Options(), self.registry, self.dependencies),
+            lambda id, info: Context(id, info, self.registry, self.dependencies),
             pid=self.uni,
             unicast=f"sim://uni@{self.uni}",
             anycast=f"sim://any@{self.uni}",  # this looks silly, but this is right
@@ -388,17 +389,20 @@ class Worker(Component):
             case Listen(id):
                 self.commands.append(Listen(id))
 
-            case Invoke(id, func, args, kwargs, opts):
+            case Invoke(id, conv):
+                assert id == conv.id
+
                 self.send_req(
                     "sim://uni@server",
                     CreatePromiseWithTaskReq(
-                        id,
-                        opts.timeout,
-                        self.scheduler.pid,
-                        self.r.randint(0, 30000),
-                        ikey=id,
-                        data={"func": func.__name__, "args": args, "kwargs": kwargs},
-                        tags={"resonate:invoke": f"sim://any@{self.any}", "resonate:scope": "global"},
+                        id=id,
+                        timeout=conv.timeout,
+                        ikey=conv.idempotency_key,
+                        headers=conv.headers,
+                        data=conv.data,
+                        tags=conv.tags,
+                        pid=self.scheduler.pid,
+                        ttl=self.r.randint(0, 30000),
                     ),
                     lambda res: self.__invoke(res.data.get("data")),
                 )
@@ -513,14 +517,25 @@ class Worker(Component):
         if not res.task:
             return
 
+        _, func, version = self.registry.get(res.promise.param.data["func"])
         self.tasks[res.promise.id] = res.task
 
         self.commands.append(
             Invoke(
                 res.promise.id,
-                self.registry.get(res.promise.param.data["func"])[1],
+                Base(
+                    res.promise.id,
+                    res.promise.timeout,
+                    res.promise.ikey_for_create,
+                    res.promise.param.headers,
+                    res.promise.param.data,
+                    res.promise.tags,
+                ),
+                func,
                 res.promise.param.data["args"],
                 res.promise.param.data["kwargs"],
+                Options(version=version),
+                res.promise,
             )
         )
 
@@ -533,14 +548,25 @@ class Worker(Component):
                 assert "args" in res.root.param.data, "Root param must have args."
                 assert "kwargs" in res.root.param.data, "Root param must have kwargs."
 
+                _, func, version = self.registry.get(res.root.param.data["func"])
                 self.tasks[res.root.id] = res.task
 
                 self.commands.append(
                     Invoke(
                         res.root.id,
-                        self.registry.get(res.root.param.data["func"])[1],
+                        Base(
+                            res.root.id,
+                            res.root.timeout,
+                            res.root.ikey_for_create,
+                            res.root.param.headers,
+                            res.root.param.data,
+                            res.root.tags,
+                        ),
+                        func,
                         res.root.param.data["args"],
                         res.root.param.data["kwargs"],
+                        Options(version=version),
+                        res.root,
                     )
                 )
 
@@ -559,6 +585,7 @@ class Worker(Component):
                 assert "args" in res.leaf.param.data, "Leaf param must have args."
                 assert "kwargs" in res.leaf.param.data, "Leaf param must have kwargs."
 
+                _, func, version = self.registry.get(res.root.param.data["func"])
                 self.tasks[res.root.id] = res.task
 
                 self.commands.append(
@@ -568,9 +595,19 @@ class Worker(Component):
                         promise=res.leaf,
                         invoke=Invoke(
                             res.root.id,
-                            self.registry.get(res.root.param.data["func"])[1],
+                            Base(
+                                res.root.id,
+                                res.root.timeout,
+                                res.root.ikey_for_create,
+                                res.root.param.headers,
+                                res.root.param.data,
+                                res.root.tags,
+                            ),
+                            func,
                             res.root.param.data["args"],
                             res.root.param.data["kwargs"],
+                            Options(version=version),
+                            res.root,
                         ),
                     )
                 )
