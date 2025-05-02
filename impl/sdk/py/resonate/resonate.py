@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import copy
+import functools
 import random
 import sys
 import time
 import uuid
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Concatenate, overload
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, TypeVarTuple, overload
 
 from resonate.bridge import Bridge
 from resonate.conventions import Base, Local, Remote, Sleep
@@ -146,6 +147,15 @@ class Resonate:
     @overload
     def register[**P, R](
         self,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R]],
+        /,
+        *,
+        name: str | None = None,
+        version: int = 1,
+    ) -> Function[P, R]: ...
+    @overload
+    def register[**P, R](
+        self,
         func: Callable[Concatenate[Context, P], R],
         /,
         *,
@@ -158,22 +168,26 @@ class Resonate:
         *,
         name: str | None = None,
         version: int = 1,
-    ) -> Callable[[Callable], Function[P, Any]]: ...
+    ) -> Callable[[Callable[Concatenate[Context, P], Generator[Any, Any, R] | R]], Function[P, R]]: ...
     def register[**P, R](
         self,
-        *args: Callable | None,
+        *args: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | None,
         name: str | None = None,
         version: int = 1,
-    ) -> Callable[[Callable], Function[P, R]] | Function[P, R]:
-        def wrapper(func: Callable) -> Function[P, R]:
-            self._registry.add(func.func if isinstance(func, Function) else func, name or func.__name__, version)
+    ) -> Function[P, R] | Callable[[Callable[Concatenate[Context, P], Generator[Any, Any, R] | R]], Function[P, R]]:
+        def wrapper(func: Callable[..., Any]) -> Function[P, R]:
+            self._registry.add(func, name or func.__name__, version)
             return Function(self, name or func.__name__, func, self._opts.merge(version=version))
 
-        if args and callable(args[0]):
+        if args and args[0] is not None:
             return wrapper(args[0])
 
         return wrapper
 
+    @overload
+    def run[**P, R](self, id: str, func: Function[P, Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
+    @overload
+    def run[**P, R](self, id: str, func: Function[P, R], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
     @overload
     def run[**P, R](self, id: str, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
     @overload
@@ -183,7 +197,7 @@ class Resonate:
     def run[**P, R](
         self,
         id: str,
-        func: Callable[Concatenate[Context, P], Generator[Any, Any, R]] | Callable[Concatenate[Context, P], R] | str,
+        func: Function[P, Generator[Any, Any, R]] | Function[P, R] | Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
@@ -197,6 +211,10 @@ class Resonate:
         return Handle(future)
 
     @overload
+    def rpc[**P, R](self, id: str, func: Function[P, Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
+    @overload
+    def rpc[**P, R](self, id: str, func: Function[P, R], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
+    @overload
     def rpc[**P, R](self, id: str, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
     @overload
     def rpc[**P, R](self, id: str, func: Callable[Concatenate[Context, P], R], *args: P.args, **kwargs: P.kwargs) -> Handle[R]: ...
@@ -205,7 +223,7 @@ class Resonate:
     def rpc[**P, R](
         self,
         id: str,
-        func: Callable[Concatenate[Context, P], Generator[Any, Any, R]] | Callable[Concatenate[Context, P], R] | str,
+        func: Function[P, Generator[Any, Any, R]] | Function[P, R] | Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
@@ -370,11 +388,24 @@ class Random:
 
 
 class Function[**P, R]:
+    __name__: str
+    __type_params__: tuple[TypeVar | ParamSpec | TypeVarTuple, ...] = ()
+
     @overload
     def __init__(self, resonate: Resonate, name: str, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]], opts: Options) -> None: ...
     @overload
     def __init__(self, resonate: Resonate, name: str, func: Callable[Concatenate[Context, P], R], opts: Options) -> None: ...
-    def __init__(self, resonate: Resonate, name: str, func: Callable[Concatenate[Context, P], Generator[Any, Any, R]] | Callable[Concatenate[Context, P], R], opts: Options) -> None:
+    def __init__(self, resonate: Resonate, name: str, func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R], opts: Options) -> None:
+        # updates the following attributes:
+        # __module__
+        # __name__
+        # __qualname__
+        # __doc__
+        # __annotations__
+        # __type_params__
+        # __dict__
+        functools.update_wrapper(self, func)
+
         self._resonate = resonate
         self._name = name
         self._func = func
@@ -388,12 +419,20 @@ class Function[**P, R]:
     def func(self) -> Callable:
         return self._func
 
-    @property
-    def __name__(self) -> str:
-        return self._name
-
     def __call__(self, ctx: Context, *args: P.args, **kwargs: P.kwargs) -> Generator[Any, Any, R] | R:
         return self._func(ctx, *args, **kwargs)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Function):
+            return self._func == other._func
+        if callable(other):
+            return self._func == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        # Helpful for ensuring proper registry lookups, a function and an instance of Function
+        # that wraps the same function has the same identity.
+        return self._func.__hash__()
 
     def options(
         self,

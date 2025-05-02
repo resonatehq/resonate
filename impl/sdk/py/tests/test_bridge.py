@@ -321,7 +321,6 @@ def test_info(
     )
 
     handle = resonate.run(id, "info", idempotency_key or id, {**(tags or {}), "resonate:scope": "global", "resonate:invoke": send_to or "poll://default"}, version)
-
     handle.result()
 
 
