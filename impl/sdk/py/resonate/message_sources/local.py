@@ -3,6 +3,8 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING
 
+from resonate.utils import exit_on_exception
+
 if TYPE_CHECKING:
     from resonate.models.message import Mesg
     from resonate.models.message_source import MessageQ
@@ -45,6 +47,7 @@ class LocalMessageSource:
             self._thread = None
             self._stop_event.clear()
 
+    @exit_on_exception
     def _loop(self, mq: MessageQ) -> None:
         while not self._stop_event.is_set():
             for msg in self.step():

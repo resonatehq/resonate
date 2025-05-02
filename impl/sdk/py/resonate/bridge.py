@@ -35,6 +35,7 @@ from resonate.models.result import Ko, Ok, Result
 from resonate.models.task import Task
 from resonate.options import Options
 from resonate.scheduler import Done, Info, More, Scheduler
+from resonate.utils import exit_on_exception
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -176,6 +177,7 @@ class Bridge:
         if self._heartbeat_thread.is_alive():
             self._heartbeat_thread.join()
 
+    @exit_on_exception
     def _process_cq(self) -> None:
         while True:
             item = self._cq.get()
@@ -242,6 +244,7 @@ class Bridge:
                             if task is not None:
                                 self._store.tasks.complete(id=task.id, counter=task.counter)
 
+    @exit_on_exception
     def _process_msgs(self) -> None:
         def _invoke(root: DurablePromise) -> Invoke:
             assert "func" in root.param.data
@@ -301,6 +304,7 @@ class Bridge:
                     durable_promise = DurablePromise.from_dict(self._store, _promise)
                     self._cq.put_nowait(Notify(durable_promise.id, durable_promise))
 
+    @exit_on_exception
     def _process_delayed_events(self) -> None:
         while not self._shutdown.is_set():
             with self._delay_condition:
@@ -337,6 +341,7 @@ class Bridge:
     def start_heartbeat(self) -> None:
         self._heartbeat_active.set()
 
+    @exit_on_exception
     def _heartbeat(self) -> None:
         while not self._shutdown.is_set():
             # If this timeout don't execute the heartbeat

@@ -10,6 +10,7 @@ import requests
 from resonate.encoders import JsonEncoder
 from resonate.logging import logger
 from resonate.models.message import InvokeMesg, NotifyMesg, ResumeMesg
+from resonate.utils import exit_on_exception
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -69,6 +70,7 @@ class Poller:
         # value, which is not the default. This is still useful for tests.
         self._shutdown = True
 
+    @exit_on_exception
     def loop(self, mq: MessageQ) -> None:
         while True:
             if self._shutdown:
@@ -91,7 +93,7 @@ class Poller:
                 continue
             except Exception as e:
                 logger.warning("Unexpected error in poller loop for group %s: %s", self._group, e)
-                break
+                raise
 
     def step(self) -> list[Mesg]:
         with requests.get(self.url, stream=True, timeout=self._timeout) as res:
