@@ -94,8 +94,8 @@ def fib_rfc(ctx: Context, n: int) -> Generator[Any, Any, int]:
     return v1 + v2
 
 
-def sleep(ctx: Context) -> Generator[Yieldable, Any, int]:
-    yield ctx.sleep(0)
+def sleep(ctx: Context, n: int) -> Generator[Yieldable, Any, int]:
+    yield ctx.sleep(n)
     return 1
 
 
@@ -243,7 +243,15 @@ def test_fib_rfc(resonate_instance: Resonate) -> None:
 
 def test_sleep(resonate_instance: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate_instance.run(f"sleep-{timestamp}", sleep)
+    handle = resonate_instance.run(f"sleep-{timestamp}", sleep, 0)
+    assert handle.result() == 1
+
+
+def test_handle_timeout(resonate_instance: Resonate) -> None:
+    timestamp = int(time.time())
+    handle = resonate_instance.run(f"handle-timeout-{timestamp}", sleep, 1)
+    with pytest.raises(TimeoutError):
+        handle.result(timeout=0.1)
     assert handle.result() == 1
 
 

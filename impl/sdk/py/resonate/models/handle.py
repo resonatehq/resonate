@@ -13,5 +13,5 @@ class Handle[T]:
     def done(self) -> bool:
         return self._f.done()
 
-    def result(self) -> T:
-        return self._f.result()
+    def result(self, timeout: float | None = None) -> T:
+        return self._f.result(timeout)
