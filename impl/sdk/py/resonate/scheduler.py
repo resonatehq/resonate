@@ -699,16 +699,25 @@ class Computation:
                         return [
                             Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                         ]
+                    case Ok(v), _, False:
+                        node.transition(Enabled(Completed(f.map(result=result))))
+                        self._unblock(suspends, result)
+                        return []
                     case Ko(v), None, True:
                         node.transition(Blocked(Running(f)))
                         return [
                             Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
                         ]
-                    case Ok(v), _, False:
+                    case Ko(v), delay, True if type(v) in opts.non_retryable_exceptions:
+                        node.transition(Blocked(Running(f)))
+                        return [
+                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
+                        ]
+                    case Ko(v), None, False:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
-                    case Ko(v), None, False:
+                    case Ko(v), delay, False if type(v) in opts.non_retryable_exceptions:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
@@ -786,22 +795,32 @@ class Computation:
 
                     case TRM(id, result), _:
                         assert id == node.id, "Id must match node id."
+
                         match result, c.retry_policy.next(attempt), opts.durable:
                             case Ok(v), _, True:
                                 node.transition(Blocked(Running(c)))
                                 return [
                                     Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                                 ]
+                            case Ok(v), _, False:
+                                node.transition(Enabled(Completed(c.map(result=result))))
+                                self._unblock(c.suspends, result)
+                                return []
                             case Ko(v), None, True:
                                 node.transition(Blocked(Running(c)))
                                 return [
                                     Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
                                 ]
-                            case Ok(v), _, False:
+                            case Ko(v), delay, True if type(v) in opts.non_retryable_exceptions:
+                                node.transition(Blocked(Running(c)))
+                                return [
+                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
+                                ]
+                            case Ko(v), None, False:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
-                            case Ko(v), None, False:
+                            case Ko(v), delay, False if type(v) in opts.non_retryable_exceptions:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
