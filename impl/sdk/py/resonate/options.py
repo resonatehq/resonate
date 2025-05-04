@@ -21,7 +21,7 @@ class Options:
     idempotency_key: str | Callable[[str], str] | None = lambda id: id
     non_retryable_exceptions: tuple[type[Exception], ...] = ()
     retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] = lambda f: Never() if isgeneratorfunction(f) else Exponential()
-    send_to: str = "poll://default"
+    target: str = "poll://default"
     tags: dict[str, str] = field(default_factory=dict)
     timeout: int = sys.maxsize
     version: int = 0
@@ -42,7 +42,7 @@ class Options:
         idempotency_key: str | Callable[[str], str] | None = None,
         non_retryable_exceptions: tuple[type[Exception], ...] | None = None,
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
-        send_to: str | None = None,
+        target: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,
@@ -60,7 +60,7 @@ class Options:
             idempotency_key=idempotency_key if idempotency_key is not None else self.idempotency_key,
             non_retryable_exceptions=non_retryable_exceptions if non_retryable_exceptions is not None else self.non_retryable_exceptions,
             retry_policy=retry_policy if retry_policy is not None else self.retry_policy,
-            send_to=send_to if send_to is not None else self.send_to,
+            target=target if target is not None else self.target,
             tags=tags if tags is not None else self.tags,
             timeout=timeout if timeout is not None else self.timeout,
             version=version if version is not None else self.version,

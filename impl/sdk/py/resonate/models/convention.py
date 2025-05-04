@@ -24,7 +24,7 @@ class Convention(Protocol):
         self,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        send_to: str | None = None,
+        target: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,

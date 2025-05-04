@@ -66,12 +66,12 @@ class RFX:
         *,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        send_to: str | None = None,
+        target: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Self:
-        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, send_to=send_to, tags=tags, timeout=timeout, version=version)
+        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, target=target, tags=tags, timeout=timeout, version=version)
         return self
 
 

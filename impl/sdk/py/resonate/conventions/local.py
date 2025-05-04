@@ -38,13 +38,13 @@ class Local:
         self,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        send_to: str | None = None,
+        target: str | None = None,
         tags: dict[str, str] | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Local:
         self.id = id or self.id
 
-        # delibrately ignore send_to and version
+        # delibrately ignore target and version
         self.opts = self.opts.merge(id=id, idempotency_key=idempotency_key, tags=tags, timeout=timeout)
         return self

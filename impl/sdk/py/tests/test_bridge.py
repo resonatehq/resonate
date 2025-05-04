@@ -305,14 +305,14 @@ def test_implicit_resonate_start() -> None:
 
 
 @pytest.mark.parametrize("idempotency_key", ["foo", None])
-@pytest.mark.parametrize("send_to", ["foo", None])
+@pytest.mark.parametrize("target", ["foo", None])
 @pytest.mark.parametrize("tags", [{"foo": "bar"}, None])
 # @pytest.mark.parametrize("timeout", [1000, 2000])
 @pytest.mark.parametrize("version", [1, 2])
 def test_info(
     resonate_instance: Resonate,
     idempotency_key: str | None,
-    send_to: str | None,
+    target: str | None,
     tags: dict[str, str] | None,
     # timeout: int,
     version: int,
@@ -322,13 +322,13 @@ def test_info(
     resonate = resonate_instance.options(
         idempotency_key=idempotency_key,
         retry_policy=Never(),
-        send_to=send_to,
+        target=target,
         tags=tags,
         # timeout=timeout,
         version=version,
     )
 
-    handle = resonate.run(id, "info", idempotency_key or id, {**(tags or {}), "resonate:scope": "global", "resonate:invoke": send_to or "poll://default"}, version)
+    handle = resonate.run(id, "info", idempotency_key or id, {**(tags or {}), "resonate:scope": "global", "resonate:invoke": target or "poll://default"}, version)
     handle.result()
 
 

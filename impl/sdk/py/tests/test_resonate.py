@@ -109,7 +109,7 @@ def test_register_validations(registry: Registry, func: Callable, kwargs: dict) 
 
 @pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("retry_policy", [Constant(), Linear(), Exponential()])
-@pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"2": "foo"}, {"a": "foo"}, None])
 @pytest.mark.parametrize("timeout", [3, 2, 1, None])
 @pytest.mark.parametrize("version", [1, 2, 3, None])
@@ -128,7 +128,7 @@ def test_run(
     resonate: Resonate,
     idempotency_key: str | None,
     retry_policy: RetryPolicy | None,
-    send_to: str | None,
+    target: str | None,
     tags: dict[str, str] | None,
     timeout: int | None,
     version: int | None,
@@ -142,7 +142,7 @@ def test_run(
     opts = {
         "idempotency_key": idempotency_key,
         "retry_policy": retry_policy,
-        "send_to": send_to,
+        "target": target,
         "tags": tags,
         "timeout": timeout,
         "version": version,
@@ -155,7 +155,7 @@ def test_run(
     updated_conv = Remote("f", name, args, kwargs, updated_opts)
 
     assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
-    assert updated_opts.send_to == (send_to or default_opts.send_to)
+    assert updated_opts.target == (target or default_opts.target)
     assert updated_opts.version == (version or default_opts.version)
     assert updated_opts.timeout == (timeout or default_opts.timeout)
     assert updated_opts.tags == (tags or default_opts.tags)
@@ -177,7 +177,7 @@ def test_run(
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_opts.timeout
-    assert promise.tags == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.run("f2", name, *args, **kwargs)
     assert cmd(resonate) == invoke("f2")
@@ -188,7 +188,7 @@ def test_run(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_conv.timeout == default_opts.timeout
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f3", func, *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f3")
@@ -199,7 +199,7 @@ def test_run(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f4", name, *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f4")
@@ -210,7 +210,7 @@ def test_run(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_conv.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.run("f5", *args, **kwargs)
     assert cmd(resonate) == invoke("f5")
@@ -221,7 +221,7 @@ def test_run(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_conv.timeout == default_opts.timeout
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).run("f6", *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f6")
@@ -232,11 +232,11 @@ def test_run(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_conv.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
 @pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
-@pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("version", [1, 2, 3, None])
 @pytest.mark.parametrize("timeout", [3, 2, 1, None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"2": "foo"}, {"a": "foo"}, None])
@@ -256,7 +256,7 @@ def test_rpc(
     resonate: Resonate,
     idempotency_key: str | None,
     retry_policy: RetryPolicy | None,
-    send_to: str | None,
+    target: str | None,
     tags: dict[str, str] | None,
     timeout: int | None,
     version: int | None,
@@ -270,7 +270,7 @@ def test_rpc(
     opts = {
         "idempotency_key": idempotency_key,
         "retry_policy": retry_policy,
-        "send_to": send_to,
+        "target": target,
         "tags": tags,
         "timeout": timeout,
         "version": version,
@@ -283,7 +283,7 @@ def test_rpc(
     updated_conv = Remote("f", name, args, kwargs, updated_opts)
 
     assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
-    assert updated_opts.send_to == (send_to or default_opts.send_to)
+    assert updated_opts.target == (target or default_opts.target)
     assert updated_opts.version == (version or default_opts.version)
     assert updated_opts.timeout == (timeout or default_opts.timeout)
     assert updated_opts.tags == (tags or default_opts.tags)
@@ -297,7 +297,7 @@ def test_rpc(
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_opts.timeout
-    assert promise.tags == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.rpc("f2", name, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f2")
@@ -308,7 +308,7 @@ def test_rpc(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_conv.timeout == default_opts.timeout
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f3", func, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f3")
@@ -319,7 +319,7 @@ def test_rpc(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f4", name, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f4")
@@ -330,7 +330,7 @@ def test_rpc(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_conv.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.rpc("f5", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f5")
@@ -341,7 +341,7 @@ def test_rpc(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == default_conv.timeout == default_opts.timeout
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).rpc("f6", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f6")
@@ -352,7 +352,7 @@ def test_rpc(
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
     assert promise.timeout == updated_conv.timeout == updated_opts.timeout
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.send_to, "resonate:scope": "global"}
+    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
 @pytest.mark.parametrize(
@@ -515,11 +515,11 @@ def test_context_type_annotations() -> None:
 
 @pytest.mark.parametrize("funcs", [(foo, bar), (bar, baz), (baz, foo)])
 @pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
-@pytest.mark.parametrize("send_to", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
 @pytest.mark.parametrize("timeout", [1, 2, 3, 101, 102, 103, None])
 @pytest.mark.parametrize("version", [1, 2, 3])
-def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | None, send_to: str | None, tags: dict[str, str] | None, timeout: int | None, version: int) -> None:
+def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | None, target: str | None, tags: dict[str, str] | None, timeout: int | None, version: int) -> None:
     f1, f2 = funcs
 
     registry = Registry()
@@ -574,16 +574,16 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.timeout == sys.maxsize if rf == ctx.detached else sys.maxsize
             assert cmd.conv.tags == {"resonate:scope": "global", "resonate:invoke": "poll://default"}
 
-            cmd = cmd.options(tags=tags, timeout=timeout, version=version, send_to=send_to)
+            cmd = cmd.options(tags=tags, timeout=timeout, version=version, target=target)
 
             # version is applicable for rfx
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": version}
 
             if timeout:
                 assert cmd.conv.timeout == timeout
-            if send_to:
+            if target:
                 assert cmd.conv.tags
-                assert cmd.conv.tags["resonate:invoke"] == send_to
+                assert cmd.conv.tags["resonate:invoke"] == target
             if tags:
                 assert cmd.conv.tags
                 assert all(k in cmd.conv.tags and cmd.conv.tags[k] == v for k, v in tags.items())
