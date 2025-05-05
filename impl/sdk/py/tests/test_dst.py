@@ -5,6 +5,7 @@ import random
 from typing import TYPE_CHECKING, Any
 
 from resonate.conventions import Remote
+from resonate.dependencies import Dependencies
 from resonate.models.commands import Invoke, Listen
 from resonate.options import Options
 from resonate.registry import Registry
@@ -104,6 +105,71 @@ def structured_concurrency(ctx: Context) -> Generator:
     yield ctx.lfi(baz)
 
 
+def fail_25(ctx: Context) -> None:
+    r = ctx.get_dependency("resonate:random")
+    assert isinstance(r, random.Random)
+
+    if r.random() < 0.25:
+        msg = "Failing 25% of the time"
+        raise RuntimeError(msg)
+
+
+def fail_50(ctx: Context) -> None:
+    r = ctx.get_dependency("resonate:random")
+    assert isinstance(r, random.Random)
+
+    if r.random() < 0.50:
+        msg = "Failing 50% of the time"
+        raise RuntimeError(msg)
+
+
+def fail_75(ctx: Context) -> None:
+    r = ctx.get_dependency("resonate:random")
+    assert isinstance(r, random.Random)
+
+    if r.random() < 0.75:
+        msg = "Failing 75% of the time"
+        raise RuntimeError(msg)
+
+
+def fail_99(ctx: Context) -> None:
+    r = ctx.get_dependency("resonate:random")
+    assert isinstance(r, random.Random)
+
+    if r.random() < 0.99:
+        msg = "Failing 99% of the time"
+        raise RuntimeError(msg)
+
+
+def fib(ctx: Context, n: int) -> Generator[Any, Any, int]:
+    if n <= 1:
+        return n
+
+    ps = []
+    vs = []
+    for i in range(1, 3):
+        match (yield ctx.random.randint(0, 3).options(id=f"fib:{n - i}")):
+            case 0:
+                p = yield ctx.lfi(fib, n - i).options(id=f"fib-{n - i}")
+                ps.append(p)
+            case 1:
+                p = yield ctx.rfi(fib, n - i).options(id=f"fib-{n - i}", target="sim://any@default")
+                ps.append(p)
+            case 2:
+                v = yield ctx.lfc(fib, n - i).options(id=f"fib-{n - i}")
+                vs.append(v)
+            case 3:
+                v = yield ctx.rfc(fib, n - i).options(id=f"fib-{n - i}", target="sim://any@default")
+                vs.append(v)
+
+    for p in ps:
+        v = yield p
+        vs.append(v)
+
+    assert len(vs) == 2
+    return sum(vs)
+
+
 def fib_lfi(ctx: Context, n: int) -> Generator[Any, Any, int]:
     if n <= 1:
         return n
@@ -172,16 +238,25 @@ def test_dst(seed: str, steps: int) -> None:
     registry.add(foo_detached, "foo_detached")
     registry.add(bar_detached, "bar_detached")
     registry.add(structured_concurrency, "structured_concurrency")
+    registry.add(fail_25, "fail_25")
+    registry.add(fail_50, "fail_50")
+    registry.add(fail_75, "fail_75")
+    registry.add(fail_99, "fail_99")
+    registry.add(fib, "fib")
     registry.add(fib_lfi, "fib_lfi")
     registry.add(fib_lfc, "fib_lfc")
     registry.add(fib_rfi, "fib_rfi")
     registry.add(fib_rfc, "fib_rfc")
 
+    # create dependencies
+    dependencies = Dependencies()
+    dependencies.add("resonate:random", r)
+
     # create a simulator
     sim = Simulator(r)
 
     servers = [Server(r, "server", "server")]
-    workers = [Worker(r, f"default/{n}", "default", registry=registry, store=servers[0].store, drop_at=r.randint(0, steps) * 1000) for n in range(3)]
+    workers = [Worker(r, f"default/{n}", "default", registry=registry, dependencies=dependencies, store=servers[0].store, drop_at=r.randint(0, steps) * 1000) for n in range(3)]
 
     for s in servers:
         sim.add_component(s)
@@ -193,7 +268,7 @@ def test_dst(seed: str, steps: int) -> None:
         n = r.randint(0, 99)
 
         # generate commands
-        match r.randint(0, 18):
+        match r.randint(0, 23):
             case 0:
                 sim.send_msg("sim://any@default", Listen(str(n)))
             case 1:
@@ -254,17 +329,37 @@ def test_dst(seed: str, steps: int) -> None:
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, structured_concurrency, opts=opts))
             case 15:
                 opts = Options(target="sim://any@default")
+                conv = Remote(str(n), "fail_25", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fail_25, opts=opts))
+            case 16:
+                opts = Options(target="sim://any@default")
+                conv = Remote(str(n), "fail_50", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fail_50, opts=opts))
+            case 17:
+                opts = Options(target="sim://any@default")
+                conv = Remote(str(n), "fail_75", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fail_75, opts=opts))
+            case 18:
+                opts = Options(target="sim://any@default")
+                conv = Remote(str(n), "fail_99", opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fail_99, opts=opts))
+            case 19:
+                opts = Options(target="sim://any@default")
+                conv = Remote(f"fib-{n}", "fib", (n,), opts=opts)
+                sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib, (n,), opts=opts))
+            case 20:
+                opts = Options(target="sim://any@default")
                 conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_lfi, (n,), opts=opts))
-            case 16:
+            case 21:
                 opts = Options(target="sim://any@default")
                 conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_lfc, (n,), opts=opts))
-            case 17:
+            case 22:
                 opts = Options(target="sim://any@default")
                 conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_rfi, (n,), opts=opts))
-            case 18:
+            case 23:
                 opts = Options(target="sim://any@default")
                 conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, fib_rfc, (n,), opts=opts))

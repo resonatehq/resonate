@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 from resonate import Context
 from resonate.clocks import StepClock
 from resonate.conventions import Base
-from resonate.dependencies import Dependencies
 from resonate.errors import ResonateStoreError
 from resonate.models.commands import (
     CancelPromiseReq,
@@ -24,6 +23,7 @@ from resonate.models.commands import (
     CreatePromiseWithTaskRes,
     CreateSubscriptionReq,
     CreateSubscriptionRes,
+    Delayed,
     Function,
     HeartbeatTasksReq,
     HeartbeatTasksRes,
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from random import Random
 
+    from resonate.dependencies import Dependencies
     from resonate.registry import Registry
 
 UUID = 0
@@ -178,7 +179,6 @@ class Component:
         self.time = time
         self.outgoing = []
         self.handle_deferred()
-        self.deferred = []
         self.handle_response(messages)
         self.handle_messages(messages)
         self.next()
@@ -207,11 +207,13 @@ class Component:
 
     def defer(self, callback: Callable[[], None], timeout: int = 0) -> None:
         """Defers a callback to be called after a certain time."""
-        self.deferred.append(callback)
+        self.deferred.append((callback, self.time + timeout))
 
     def handle_deferred(self) -> None:
-        for callback in self.deferred:
-            callback()
+        for callback, time in self.deferred:
+            if self.time >= time:
+                self.deferred.remove((callback, time))
+                callback()
 
     def handle_response(self, messages: list[Message]) -> None:
         for message in messages:
@@ -367,12 +369,12 @@ class Server(Component):
 
 
 class Worker(Component):
-    def __init__(self, r: Random, uni: str, any: str, store: LocalStore, registry: Registry, drop_at: int = 0) -> None:
+    def __init__(self, r: Random, uni: str, any: str, store: LocalStore, registry: Registry, dependencies: Dependencies, drop_at: int = 0) -> None:
         super().__init__(r, uni, any)
         self.store = store
         self.registry = registry
         self.drop_at = drop_at
-        self.dependencies = Dependencies()
+        self.dependencies = dependencies
         self.commands: list[Command] = []
         self.tasks: dict[str, Task] = {}
         self.last_heartbeat = 0
@@ -440,11 +442,14 @@ class Worker(Component):
             case More(reqs):
                 for req in reqs:
                     match req:
-                        case Function(id, cid, func):
+                        case Function(id, cid, func) | Delayed(Function(id, cid, func)):
                             try:
-                                self.defer(lambda id=id, cid=cid: self.commands.append(Return(id, cid, Ok(func()))))
+                                r = Ok(func())
                             except Exception as e:
-                                self.defer(lambda id=id, cid=cid, e=e: self.commands.append(Return(id, cid, Ko(e))))
+                                r = Ko(e)
+
+                            delay = int(req.delay * 1000) if isinstance(req, Delayed) else 0
+                            self.defer(lambda id=id, cid=cid, r=r: self.commands.append(Return(id, cid, r)), delay)
 
                         case Network(id, cid, req):
                             self.send_req("sim://uni@server", req, lambda res, id=id, cid=cid: self.commands.append(Receive(id, cid, res.data.get("data"))))

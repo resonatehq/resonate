@@ -19,7 +19,11 @@ def exit_on_exception[R, **P](func: Callable[P, R]) -> Callable[P, R]:
         try:
             return func(*args, **kwargs)
         except Exception:
-            v = version("resonate-sdk")
+            try:
+                v = version("resonate-sdk")
+            except Exception:
+                v = "unknown"
+
             logger.exception(
                 "An unexpected error happened.\n\nPlease report this issue so we can fix it as fast a possible:\n - https://github.com/resonatehq/resonate-sdk-py/issues/new?body=%s\n\n",
                 urllib.parse.quote(f"Resonate (version {v}) process exited with error:\n```bash\n{traceback.format_exc()}```"),

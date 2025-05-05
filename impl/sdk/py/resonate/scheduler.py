@@ -87,6 +87,9 @@ class Info:
     def __init__(self, func: Lfnc | Coro) -> None:
         self._func = func
 
+    def __repr__(self) -> str:
+        return f"Info(attempt={self.attempt}, ikey={self.idempotency_key} tags={self.tags}, timeout={self.timeout})"
+
     @property
     def attempt(self) -> int:
         return self._func.attempt

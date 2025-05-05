@@ -150,7 +150,7 @@ class SimpleRunner:
     def run[**P, R](self, id: str, func: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> R:
         return self._run(func, args, kwargs)
 
-    def _run[T](self, func: Callable[..., T], args: tuple, kwargs: dict) -> T:
+    def _run(self, func: Callable, args: tuple, kwargs: dict) -> Any:
         if not isgeneratorfunction(func):
             return func(*args, **kwargs)
 

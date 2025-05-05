@@ -8,8 +8,8 @@ from resonate.errors import ResonateValidationError
 
 class Registry:
     def __init__(self) -> None:
-        self._forward_registry: dict[str, dict[int, Callable]] = {}
-        self._reverse_registry: dict[Callable, tuple[str, int]] = {}
+        self._forward_registry: dict[str, dict[int, tuple[str, Callable, int]]] = {}
+        self._reverse_registry: dict[Callable, tuple[str, Callable, int]] = {}
 
     def add(self, func: Callable, name: str, version: int = 1) -> None:
         if name == "<lambda>":
@@ -24,8 +24,9 @@ class Registry:
             msg = f"Function {func.__name__} already registered."
             raise ResonateValidationError(msg)
 
-        self._forward_registry.setdefault(name, {})[version] = func
-        self._reverse_registry[func] = (name, version)
+        item = (name, func, version)
+        self._forward_registry.setdefault(name, {})[version] = item
+        self._reverse_registry[func] = item
 
     @overload
     def get(self, func: str, version: int = 0) -> tuple[str, Callable, int]: ...
@@ -36,20 +37,17 @@ class Registry:
             msg = f"Function {func if isinstance(func, str) else func.__name__} not found in registry."
             raise ResonateValidationError(msg)
 
-        if version != 0 and version not in (self._forward_registry[func] if isinstance(func, str) else (self._reverse_registry[func][1],)):
+        if version != 0 and version not in (self._forward_registry[func] if isinstance(func, str) else (self._reverse_registry[func][2],)):
             msg = f"Function {func if isinstance(func, str) else func.__name__} version {version} not found in registry."
             raise ResonateValidationError(msg)
 
         match func:
             case str():
-                name = func
-                vers = max(self._forward_registry[name]) if version == 0 else version
-                func = self._forward_registry[name][vers]
-                return name, func, vers
+                vers = max(self._forward_registry[func]) if version == 0 else version
+                return self._forward_registry[func][vers]
 
             case Callable():
-                name, vers = self._reverse_registry[func]
-                return name, func, vers
+                return self._reverse_registry[func]
 
     @overload
     def latest(self, func: str, default: int = 1) -> int: ...
@@ -58,7 +56,7 @@ class Registry:
     def latest(self, func: str | Callable, default: int = 1) -> int:
         match func:
             case str():
-                return max(self._forward_registry.get(func, None) or [default])
+                return max(self._forward_registry.get(func, [default]))
             case Callable():
-                _, version = self._reverse_registry.get(func, (None, default))
+                _, _, version = self._reverse_registry.get(func, (None, None, default))
                 return version

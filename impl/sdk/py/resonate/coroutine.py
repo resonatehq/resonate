@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class LFX:
+class LFX[T]:
     conv: Convention
-    func: Callable[..., Any]
+    func: Callable[..., Generator[Any, Any, T] | T]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options = field(default_factory=Options)
@@ -44,17 +44,17 @@ class LFX:
 
 
 @dataclass
-class LFI(LFX):
+class LFI[T](LFX[T]):
     pass
 
 
 @dataclass
-class LFC(LFX):
+class LFC[T](LFX[T]):
     pass
 
 
 @dataclass
-class RFX:
+class RFX[T]:
     conv: Convention
 
     @property
@@ -76,12 +76,12 @@ class RFX:
 
 
 @dataclass
-class RFI(RFX):
+class RFI[T](RFX[T]):
     mode: Literal["attached", "detached"] = "attached"
 
 
 @dataclass
-class RFC(RFX):
+class RFC[T](RFX[T]):
     pass
 
 
@@ -97,7 +97,7 @@ class TRM:
 
 
 @dataclass(frozen=True)
-class Promise:
+class Promise[T]:
     id: str
     cid: str
 
