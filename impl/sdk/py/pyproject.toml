@@ -1,5 +1,5 @@
 [project]
-name = "resonate"
+name = "resonate-sdk"
 version = "0.5.0"
 description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
