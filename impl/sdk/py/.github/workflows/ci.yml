@@ -70,4 +70,4 @@ jobs:
         env:
           RESONATE_HOST: http://localhost
 
-        run: uv run pytest --cov=resonate --no-cov-on-fail --cov-report term:skip-covered tests
+        run: uv run pytest
