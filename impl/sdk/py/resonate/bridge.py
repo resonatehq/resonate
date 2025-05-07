@@ -95,7 +95,7 @@ class Bridge:
         promise, task = self._store.promises.create_with_task(
             id=conv.id,
             ikey=conv.idempotency_key,
-            timeout=conv.timeout,
+            timeout=int((time.time() + conv.timeout) * 1000),
             headers=conv.headers,
             data=conv.data,
             tags=conv.tags,
@@ -113,7 +113,7 @@ class Bridge:
         elif task is not None:
             self._promise_id_to_task[promise.id] = task
             self.start_heartbeat()
-            self._cq.put_nowait((Invoke(conv.id, conv, func, args, kwargs, opts, promise), future))
+            self._cq.put_nowait((Invoke(conv.id, conv, promise.abs_timeout, func, args, kwargs, opts, promise), future))
         else:
             self._cq.put_nowait((Listen(promise.id), future))
 
@@ -123,7 +123,7 @@ class Bridge:
         promise = self._store.promises.create(
             id=conv.id,
             ikey=conv.idempotency_key,
-            timeout=conv.timeout,
+            timeout=int((time.time() + conv.timeout) * 1000),
             headers=conv.headers,
             data=conv.data,
             tags=conv.tags,
@@ -259,12 +259,13 @@ class Bridge:
                 root.id,
                 Base(
                     root.id,
-                    root.timeout,
+                    root.rel_timeout,
                     root.ikey_for_create,
                     root.param.headers,
                     root.param.data,
                     root.tags,
                 ),
+                root.abs_timeout,
                 func,
                 root.param.data.get("args", ()),
                 root.param.data.get("kwargs", {}),

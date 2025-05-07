@@ -24,6 +24,7 @@ type Command = Invoke | Resume | Return | Receive | Retry | Listen | Notify
 class Invoke:
     id: str
     conv: Convention
+    timeout: float  # absolute time in seconds
     func: Callable[..., Any] = field(repr=False)
     args: tuple[Any, ...] = field(default_factory=tuple)
     kwargs: dict[str, Any] = field(default_factory=dict)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class Context(Protocol):
@@ -8,6 +8,8 @@ class Context(Protocol):
     def id(self) -> str: ...
     @property
     def info(self) -> Info: ...
+
+    def get_dependency(self, key: str, default: Any = None) -> Any: ...
 
 
 class Info(Protocol):
@@ -18,6 +20,6 @@ class Info(Protocol):
     @property
     def tags(self) -> dict[str, str] | None: ...
     @property
-    def timeout(self) -> int: ...
+    def timeout(self) -> float: ...
     @property
     def version(self) -> int: ...

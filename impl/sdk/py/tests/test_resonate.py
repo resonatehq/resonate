@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import random
 import sys
 from collections.abc import Callable, Generator
@@ -182,11 +183,13 @@ def test_run(
 
     def invoke(id: str) -> Invoke:
         conv = Remote(id, name, args, kwargs, default_opts)
-        return Invoke(id, conv, func, args, kwargs, default_opts, resonate.promises.get(id=id))
+        promise = resonate.promises.get(id=id)
+        return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, default_opts, promise)
 
     def invoke_with_opts(id: str) -> Invoke:
         conv = Remote(id, name, args, kwargs, updated_opts)
-        return Invoke(id, conv, func, args, kwargs, updated_opts, resonate.promises.get(id=id))
+        promise = resonate.promises.get(id=id)
+        return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, updated_opts, promise)
 
     resonate.run("f1", func, *args, **kwargs)
     assert cmd(resonate) == invoke("f1")
@@ -196,7 +199,7 @@ def test_run(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.run("f2", name, *args, **kwargs)
@@ -207,7 +210,8 @@ def test_run(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f3", func, *args, **kwargs)
@@ -218,7 +222,7 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f4", name, *args, **kwargs)
@@ -229,7 +233,8 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.run("f5", *args, **kwargs)
@@ -240,7 +245,8 @@ def test_run(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).run("f6", *args, **kwargs)
@@ -251,7 +257,8 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
@@ -316,7 +323,7 @@ def test_rpc(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.rpc("f2", name, *args, **kwargs)
@@ -327,7 +334,8 @@ def test_rpc(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f3", func, *args, **kwargs)
@@ -338,7 +346,7 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f4", name, *args, **kwargs)
@@ -349,7 +357,8 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.rpc("f5", *args, **kwargs)
@@ -360,7 +369,8 @@ def test_rpc(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == default_conv.timeout == default_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).rpc("f6", *args, **kwargs)
@@ -371,7 +381,8 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.timeout == updated_conv.timeout == updated_opts.timeout
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.01)
+    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.01)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
@@ -596,7 +607,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.idempotency_key == cmd.id
             assert cmd.conv.headers is None
             assert cmd.conv.data is None
-            assert cmd.conv.timeout == sys.maxsize
+            assert cmd.conv.timeout == 31536000
             assert cmd.conv.tags == {"resonate:scope": "local"}
             assert cmd.opts.version == v
 
@@ -622,7 +633,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.idempotency_key == cmd.id
             assert cmd.conv.headers is None
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
-            assert cmd.conv.timeout == sys.maxsize if rf == ctx.detached else sys.maxsize
+            assert cmd.conv.timeout == 31536000
             assert cmd.conv.tags == {"resonate:scope": "global", "resonate:invoke": "poll://default"}
 
             cmd = cmd.options(tags=tags, timeout=timeout, version=version, target=target)

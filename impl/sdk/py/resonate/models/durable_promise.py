@@ -61,6 +61,14 @@ class DurablePromise:
     def timedout(self) -> bool:
         return self.state == "REJECTED_TIMEDOUT"
 
+    @property
+    def abs_timeout(self) -> float:
+        return self.timeout / 1000
+
+    @property
+    def rel_timeout(self) -> float:
+        return (self.timeout - self.created_on) / 1000
+
     def resolve(self, data: str | None, *, ikey: str | None = None, strict: bool = False, headers: dict[str, str] | None = None) -> None:
         promise = self.store.promises.resolve(
             id=self.id,

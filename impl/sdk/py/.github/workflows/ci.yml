@@ -69,4 +69,4 @@ jobs:
       - name: run tests
         env:
           RESONATE_HOST: http://localhost
-        run: uv run pytest tests
+        run: uv run pytest -s

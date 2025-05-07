@@ -56,6 +56,7 @@ class LFC[T](LFX[T]):
 @dataclass
 class RFX[T]:
     conv: Convention
+    opts: Options = field(default_factory=Options)  # unused for the time being
 
     @property
     def id(self) -> str:

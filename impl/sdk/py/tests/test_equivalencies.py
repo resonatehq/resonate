@@ -52,7 +52,7 @@ def rpt(ctx: LocalContext | RemoteContext, s: str, n: int) -> Generator[Any, Any
     return v
 
 
-def idv(x: Any) -> Any:
+def idv(c: LocalContext | RemoteContext, x: Any) -> Any:
     return x
 
 
@@ -92,9 +92,10 @@ def runners(registry: Registry) -> tuple[Runner, ...]:
         *((f"fib({n})", fib, (n,), {}) for n in range(20)),
         *((f"fac({n})", fac, (n,), {}) for n in range(20)),
         *((f"gcd({a},{b})", gcd, (a, b), {}) for a, b in itertools.product(range(10), repeat=2)),
-        # *((f"rpt({s},{n})", rpt, (s, n), {}) for s, n in itertools.product("abc", range(10))),
+        *((f"rpt({s},{n})", rpt, (s, n), {}) for s, n in itertools.product("abc", range(10))),
     ],
 )
 def test_equivalencies(runners: tuple[Runner, ...], id: str, func: Callable, args: Any, kwargs: Any) -> None:
-    results = [runner.run(id, func, *args, **kwargs) for runner in runners]
+    # a promise is not json serializable so we must skip ResonateRFXRunner and rpt
+    results = [r.run(id, func, *args, **kwargs) for r in runners if not (isinstance(r, ResonateRFXRunner) and func == rpt)]
     assert all(x == results[0] for x in results[1:])

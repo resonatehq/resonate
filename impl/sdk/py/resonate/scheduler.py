@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
@@ -10,6 +11,7 @@ from resonate.conventions import Base
 from resonate.coroutine import AWT, LFI, RFI, TRM, Coroutine
 from resonate.graph import Graph, Node
 from resonate.logging import logger
+from resonate.models.clock import Clock
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
     from resonate.models.context import Context
     from resonate.models.convention import Convention
     from resonate.models.durable_promise import DurablePromise
+    from resonate.models.retry_policy import RetryPolicy
     from resonate.options import Options
 
 
@@ -96,7 +99,6 @@ class Info:
 
     @property
     def idempotency_key(self) -> str | None:
-        # promise takes precedence over conv, conv is needed in case of non durable
         return self._func.promise.ikey_for_create if self._func.promise else self._func.conv.idempotency_key
 
     @property
@@ -104,8 +106,8 @@ class Info:
         return self._func.promise.tags if self._func.promise else self._func.conv.tags
 
     @property
-    def timeout(self) -> int:
-        return self._func.promise.timeout if self._func.promise else self._func.conv.timeout
+    def timeout(self) -> float:
+        return self._func.timeout
 
     @property
     def version(self) -> int:
@@ -275,30 +277,46 @@ class Init:
 @dataclass
 class Lfnc:
     id: str
+    cid: str
     conv: Convention
+    timeout: float  # absolute time in seconds
     func: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options
+    ccls: Callable[[str, Info], Context]
 
-    attempt: int = 1
-    promise: DurablePromise | None = None
-    suspends: list[Node[State]] = field(default_factory=list)
-    result: Result | None = None
+    attempt: int = field(default=1, init=False)
+    ctx: Context = field(init=False)
+    promise: DurablePromise | None = field(default=None, init=False)
+    result: Result | None = field(default=None, init=False)
+    retry_policy: RetryPolicy = field(init=False)
+    suspends: list[Node[State]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
+        self.ctx = self.ccls(self.id, Info(self))
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
-    def map(self, *, attempt: int | None = None, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Lfnc:
+    def map(
+        self,
+        *,
+        attempt: int | None = None,
+        promise: DurablePromise | None = None,
+        result: Result | None = None,
+        suspends: Node[State] | None = None,
+    ) -> Lfnc:
         if attempt:
             assert attempt == self.attempt + 1, "Attempt must be monotonically incremented."
             self.attempt = attempt
         if promise:
+            assert self.opts.durable, "Func must be durable."
             self.promise = promise
-        if suspends:
-            self.suspends.append(suspends)
+            self.result = promise.result if promise.completed else None
+            self.timeout = promise.abs_timeout
         if result:
             self.result = result
+        if suspends:
+            self.suspends.append(suspends)
         return self
 
     def __repr__(self) -> str:
@@ -309,19 +327,30 @@ class Lfnc:
 @dataclass
 class Rfnc:
     id: str
+    cid: str
     conv: Convention
+    timeout: float  # absolute time in seconds
 
-    promise: DurablePromise | None = None
-    suspends: list[Node[State]] = field(default_factory=list)
-    result: Result | None = None
+    attempt: int = field(default=1, init=False)
+    promise: DurablePromise | None = field(default=None, init=False)
+    result: Result | None = field(default=None, init=False)
+    suspends: list[Node[State]] = field(default_factory=list, init=False)
 
-    def map(self, *, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Rfnc:
+    def map(
+        self,
+        *,
+        promise: DurablePromise | None = None,
+        result: Result | None = None,
+        suspends: Node[State] | None = None,
+    ) -> Rfnc:
         if promise:
             self.promise = promise
-        if suspends:
-            self.suspends.append(suspends)
+            self.result = promise.result if promise.completed else None
+            self.timeout = promise.abs_timeout
         if result:
             self.result = result
+        if suspends:
+            self.suspends.append(suspends)
         return self
 
     def __repr__(self) -> str:
@@ -332,42 +361,58 @@ class Rfnc:
 @dataclass
 class Coro:
     id: str
+    cid: str
     conv: Convention
+    timeout: float  # absolute time in seconds
     func: Callable[..., Any]
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options
-
-    cid: str
-    ctx: Callable[[str, Info], Context]
+    ccls: Callable[[str, Info], Context]
 
     coro: Coroutine = field(init=False)
-    next: None | AWT | Result = None
+    next: None | AWT | Result = field(default=None, init=False)
 
-    attempt: int = 1
-    promise: DurablePromise | None = None
-    suspends: list[Node[State]] = field(default_factory=list)
-    result: Result | None = None
+    attempt: int = field(default=1, init=False)
+    ctx: Context = field(init=False)
+    promise: DurablePromise | None = field(default=None, init=False)
+    result: Result | None = field(default=None, init=False)
+    suspends: list[Node[State]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
-        self._ctx = self.ctx(self.id, Info(self))
-        self.coro = Coroutine(self.id, self.cid, self.func(self._ctx, *self.args, **self.kwargs))
+        self.ctx = self.ccls(self.id, Info(self))
+        self.coro = Coroutine(self.id, self.cid, self.func(self.ctx, *self.args, **self.kwargs))
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
-    def map(self, *, attempt: int | None = None, next: AWT | Result | None = None, promise: DurablePromise | None = None, suspends: Node[State] | None = None, result: Result | None = None) -> Coro:
+    def map(
+        self,
+        *,
+        attempt: int | None = None,
+        next: AWT | Result | None = None,
+        promise: DurablePromise | None = None,
+        result: Result | None = None,
+        suspends: Node[State] | None = None,
+        timeout: int | None = None,
+    ) -> Coro:
         if attempt:
             assert attempt == self.attempt + 1, "Attempt must be monotonically incremented."
-            self.next = None
-            self.coro = Coroutine(self.id, self.cid, self.func(self._ctx, *self.args, **self.kwargs))
             self.attempt = attempt
+            self.coro = Coroutine(self.id, self.cid, self.func(self.ctx, *self.args, **self.kwargs))
+            self.next = None
         if next:
             self.next = next
         if promise:
+            assert self.opts.durable, "Func must be durable."
             self.promise = promise
-        if suspends:
-            self.suspends.append(suspends)
+            self.result = promise.result if promise.completed else None
+            self.timeout = promise.abs_timeout
         if result:
             self.result = result
+        if suspends:
+            self.suspends.append(suspends)
+        if timeout:
+            assert timeout >= 0, "Timeout must be greater than or equal to 0."
+            self.timeout = timeout
         return self
 
     def __repr__(self) -> str:
@@ -428,13 +473,12 @@ class Computation:
     def apply(self, cmd: Command) -> None:
         self.history.append(cmd)
         match cmd, self.graph.root.value.func:
-            case Invoke(id, conv, func, args, kwargs, opts, promise), Init(next=None):
-                assert id == conv.id == (promise.id if promise else id), "Id must match convention and promise id."
+            case Invoke(id, conv, timeout, func, args, kwargs, opts, promise), Init(next=None):
+                assert id == conv.id == self.id == (promise.id if promise else id), "Ids must match."
+                assert (promise is not None) == opts.durable, "Promise must be set iff durable."
 
-                if isgeneratorfunction(func):
-                    self.graph.root.transition(Enabled(Running(Coro(id, conv, func, args, kwargs, opts, self.id, self.ctx, promise=promise))))
-                else:
-                    self.graph.root.transition(Enabled(Running(Lfnc(id, conv, func, args, kwargs, opts, promise=promise))))
+                cls = Coro if isgeneratorfunction(func) else Lfnc
+                self.graph.root.transition(Enabled(Running(cls(id, self.id, conv, timeout, func, args, kwargs, opts, self.ctx).map(promise=promise))))
 
             case Invoke(), _:
                 # first invoke "wins", computation will be joined
@@ -484,7 +528,7 @@ class Computation:
 
         match node.value, promise:
             case Enabled(Suspended(Rfnc(suspends=suspends) as f)) | Blocked(Running(Init(next=Rfnc(suspends=suspends) as f))), promise:
-                node.transition(Enabled(Completed(f.map(result=promise.result))))
+                node.transition(Enabled(Completed(f.map(promise=promise))))
 
                 # unblock waiting[v]
                 self._unblock(suspends, promise.result)
@@ -524,13 +568,13 @@ class Computation:
             case Blocked(Running(Init(next, suspends))), promise if promise.completed:
                 assert next, "Next must be set."
                 assert not next.suspends, "Suspends must be initially empty."
-                node.transition(Enabled(Completed(next.map(promise=promise, result=promise.result))))
+                node.transition(Enabled(Completed(next.map(promise=promise))))
 
                 # unblock waiting[p]
                 self._unblock(suspends, AWT(next.id))
 
             case Blocked(Running(Lfnc(suspends=suspends) | Coro(suspends=suspends) as f)), promise if promise.completed:
-                node.transition(Enabled(Completed(f.map(result=promise.result))))
+                node.transition(Enabled(Completed(f.map(promise=promise))))
 
                 # unblock waiting[v]
                 self._unblock(suspends, promise.result)
@@ -554,25 +598,20 @@ class Computation:
     def _apply_notify(self, node: Node[State], promise: DurablePromise) -> None:
         match node.value:
             case Enabled(Suspended(Init(next=None))):
-                node.transition(
-                    Enabled(
-                        Completed(
-                            Rfnc(
-                                promise.id,
-                                Base(
-                                    promise.id,
-                                    promise.timeout,
-                                    promise.ikey_for_create,
-                                    promise.param.headers,
-                                    promise.param.data,
-                                    promise.tags,
-                                ),
-                                promise=promise,
-                                result=promise.result,
-                            )
-                        )
-                    )
+                func = Rfnc(
+                    promise.id,
+                    self.id,
+                    Base(
+                        promise.id,
+                        promise.rel_timeout,
+                        promise.ikey_for_create,
+                        promise.param.headers,
+                        promise.param.data,
+                        promise.tags,
+                    ),
+                    promise.abs_timeout,
                 )
+                node.transition(Enabled(Completed(func.map(promise=promise))))
 
             case _:
                 # Note: we could implement notify in a way that takes precedence over a locally
@@ -591,7 +630,8 @@ class Computation:
                 # Enabled::Suspended::Rfnc requires a callback
                 if isinstance(node.value, Enabled) and isinstance(node.value.exec, Suspended) and isinstance(node.value.func, Rfnc) and node.value.func.suspends:
                     assert node is not self.graph.root, "Node must not be root node."
-                    assert isinstance(self.graph.root.value.func, (Lfnc, Coro))
+                    assert isinstance(self.graph.root.value.func, (Lfnc, Coro)), "Root node must be Lfnc or Coro."
+                    assert self.graph.root.value.func.promise, "Promise must be set."
 
                     done.append(
                         Network(
@@ -601,7 +641,7 @@ class Computation:
                                 f"{self.id}:{node.id}",
                                 node.id,
                                 self.id,
-                                self.graph.root.value.func.opts.timeout,
+                                self.graph.root.value.func.promise.timeout,
                                 self.anycast,
                             ),
                         )
@@ -641,20 +681,21 @@ class Computation:
 
     def _eval(self, node: Node[State]) -> list[Function | Delayed[Function | Retry] | Network[CreatePromiseReq | ResolvePromiseReq | RejectPromiseReq | CancelPromiseReq]]:
         match node.value:
-            case Enabled(Running(Init(Lfnc(id=id, conv=conv, opts=opts) | Coro(id=id, conv=conv, opts=opts) as func, suspends)) as exec):
+            case Enabled(Running(Init(Lfnc(id=id, conv=conv, timeout=timeout, opts=opts) | Coro(id=id, conv=conv, timeout=timeout, opts=opts) as func, suspends))):
                 assert id == conv.id == node.id, "Id must match convention id and node id."
                 assert node is not self.graph.root, "Node must not be root node."
 
+                node.transition(Blocked(Running(Init(func, suspends))) if opts.durable else Enabled(Running(func)))
+
                 match opts.durable:
                     case True:
-                        node.transition(Blocked(exec))
                         return [
                             Network(
                                 id,
                                 self.id,
                                 CreatePromiseReq(
                                     id=id,
-                                    timeout=conv.timeout,
+                                    timeout=int(timeout * 1000),
                                     ikey=conv.idempotency_key,
                                     headers=conv.headers,
                                     data=conv.data,
@@ -663,12 +704,11 @@ class Computation:
                             ),
                         ]
                     case False:
-                        assert len(suspends) == 1, "Nothing should be blocked"
-                        node.transition(Enabled(Running(func)))
+                        assert len(suspends) == 1, "Only the parent couroutine can be blocked."
                         self._unblock(suspends, AWT(id))
                         return []
 
-            case Enabled(Running(Init(Rfnc(id, conv))) as exec):
+            case Enabled(Running(Init(Rfnc(id=id, conv=conv, timeout=timeout))) as exec):
                 assert id == conv.id == node.id, "Id must match convention id and node id."
                 node.transition(Blocked(exec))
 
@@ -678,7 +718,7 @@ class Computation:
                         self.id,
                         CreatePromiseReq(
                             id=id,
-                            timeout=conv.timeout,
+                            timeout=int(timeout * 1000),
                             ikey=conv.idempotency_key,
                             headers=conv.headers,
                             data=conv.data,
@@ -687,57 +727,62 @@ class Computation:
                     ),
                 ]
 
-            case Enabled(Running(Lfnc(id, _, func, args, kwargs, opts, attempt=attempt, result=result, suspends=suspends) as f)):
+            case Enabled(Running(Lfnc(id=id, func=func, args=args, kwargs=kwargs, opts=opts, attempt=attempt, ctx=ctx, result=result, suspends=suspends) as f)):
                 assert id == node.id, "Id must match node id."
-                assert func is not None, "Func is required for local function."
+
+                # TODO(@Tomperez98): take timeout into account
 
                 match result, f.retry_policy.next(attempt), opts.durable:
                     case None, _, _:
                         node.transition(Blocked(Running(f)))
                         return [
-                            Function(id, self.id, lambda: func(self.ctx(self.id, Info(f)), *args, **kwargs)),
+                            Function(id, self.id, lambda: func(ctx, *args, **kwargs)),
                         ]
                     case Ok(v), _, True:
                         node.transition(Blocked(Running(f)))
                         return [
                             Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                         ]
-                    case Ok(v), _, False:
+                    case Ok(), _, False:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
-                    case Ko(v), None, True:
+                    case Ko(e), None, True:
                         node.transition(Blocked(Running(f)))
                         return [
-                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
+                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
                         ]
-                    case Ko(v), delay, True if type(v) in opts.non_retryable_exceptions:
-                        node.transition(Blocked(Running(f)))
-                        return [
-                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
-                        ]
-                    case Ko(v), None, False:
+                    case Ko(), None, False:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
-                    case Ko(v), delay, False if type(v) in opts.non_retryable_exceptions:
+                    case Ko(e), _, True if type(e) in opts.non_retryable_exceptions:
+                        node.transition(Blocked(Running(f)))
+                        return [
+                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
+                        ]
+                    case Ko(e), _, False if type(e) in opts.non_retryable_exceptions:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
                     case Ko(), delay, _:
                         node.transition(Blocked(Running(f.map(attempt=attempt + 1))))
                         return [
-                            Delayed(Function(id, self.id, lambda: func(self.ctx(self.id, Info(f)), *args, **kwargs)), delay),
+                            Delayed(Function(id, self.id, lambda: func(ctx, *args, **kwargs)), delay),
                         ]
 
-            case Enabled(Running(Coro(id=id, coro=coro, next=next, opts=opts, attempt=attempt) as c)):
+            case Enabled(Running(Coro(id=id, coro=coro, next=next, opts=opts, attempt=attempt, ctx=parent_ctx) as c)):
                 cmd = coro.send(next)
                 child = self.graph.find(lambda n: n.id == cmd.id) or Node(cmd.id, Enabled(Suspended(Init())))
                 self.history.append((id, next, cmd))
 
+                clock = parent_ctx.get_dependency("resonate:time", time)
+                assert isinstance(clock, Clock), "resonate:time must be an instance of clock"
+
                 match cmd, child.value:
                     case LFI(conv, func, args, kwargs, opts), Enabled(Suspended(Init(next=None))):
-                        next = Coro(conv.id, conv, func, args, kwargs, opts, self.id, self.ctx) if isgeneratorfunction(func) else Lfnc(conv.id, conv, func, args, kwargs, opts)
+                        cls = Coro if isgeneratorfunction(func) else Lfnc
+                        next = cls(conv.id, self.id, conv, clock.time() + conv.timeout, func, args, kwargs, opts, self.ctx)
 
                         node.add_edge(child)
                         node.add_edge(child, "waiting[p]")
@@ -746,7 +791,7 @@ class Computation:
                         return []
 
                     case RFI(conv), Enabled(Suspended(Init(next=None))):
-                        next = Rfnc(conv.id, conv)
+                        next = Rfnc(conv.id, self.id, conv, clock.time() + conv.timeout)
 
                         node.add_edge(child)
                         node.add_edge(child, "waiting[p]")
@@ -799,31 +844,33 @@ class Computation:
                     case TRM(id, result), _:
                         assert id == node.id, "Id must match node id."
 
+                        # TODO(@Tomperez98): take timeout into account
+
                         match result, c.retry_policy.next(attempt), opts.durable:
                             case Ok(v), _, True:
                                 node.transition(Blocked(Running(c)))
                                 return [
                                     Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                                 ]
-                            case Ok(v), _, False:
+                            case Ok(), _, False:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
-                            case Ko(v), None, True:
+                            case Ko(e), None, True:
                                 node.transition(Blocked(Running(c)))
                                 return [
-                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
+                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
                                 ]
-                            case Ko(v), delay, True if type(v) in opts.non_retryable_exceptions:
-                                node.transition(Blocked(Running(c)))
-                                return [
-                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=v)),
-                                ]
-                            case Ko(v), None, False:
+                            case Ko(), None, False:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
-                            case Ko(v), delay, False if type(v) in opts.non_retryable_exceptions:
+                            case Ko(e), _, True if type(e) in opts.non_retryable_exceptions:
+                                node.transition(Blocked(Running(c)))
+                                return [
+                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
+                                ]
+                            case Ko(e), _, False if type(e) in opts.non_retryable_exceptions:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []

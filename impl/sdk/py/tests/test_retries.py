@@ -7,13 +7,13 @@ import pytest
 
 from resonate.conventions import Base
 from resonate.dependencies import Dependencies
-from resonate.models.commands import Delayed, Function, Invoke, Network, RejectPromiseReq, ResolvePromiseReq, Retry, Return
+from resonate.models.commands import Delayed, Function, Invoke, Retry, Return
 from resonate.models.result import Ko, Ok
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Context
 from resonate.retry_policies import Constant, Exponential, Linear, Never
-from resonate.scheduler import Scheduler
+from resonate.scheduler import Done, More, Scheduler
 
 if TYPE_CHECKING:
     from resonate.models.retry_policy import RetryPolicy
@@ -48,15 +48,14 @@ def scheduler() -> Scheduler:
     ],
 )
 def test_function_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -> None:
-    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), foo, opts=Options(retry_policy=retry_policy)))
+    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), sys.maxsize, foo, opts=Options(durable=False, retry_policy=retry_policy)))
+    assert isinstance(next, More)
     assert len(next.reqs) == 1
     req = next.reqs[0]
     assert isinstance(req, Function)
     next = scheduler.step(Return("foo", "foo", Ok("foo")))
-    assert len(next.reqs) == 1
-    req = next.reqs[0]
-    assert isinstance(req, Network)
-    assert isinstance(req.req, ResolvePromiseReq)
+    assert isinstance(next, Done)
+    assert scheduler.computations["foo"].result() == Ok("foo")
 
 
 @pytest.mark.parametrize(
@@ -69,22 +68,24 @@ def test_function_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) ->
     ],
 )
 def test_function_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retries: int) -> None:
-    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), foo, opts=Options(retry_policy=retry_policy)))
+    e = ValueError("something went wrong")
+
+    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), sys.maxsize, foo, opts=Options(durable=False, retry_policy=retry_policy)))
+    assert isinstance(next, More)
     assert len(next.reqs) == 1
     req = next.reqs[0]
     assert isinstance(req, Function)
 
     for _ in range(retries):
-        next = scheduler.step(Return("foo", "foo", Ko(ValueError("something went wrong"))))
+        next = scheduler.step(Return("foo", "foo", Ko(e)))
+        assert isinstance(next, More)
         assert len(next.reqs) == 1
         req = next.reqs[0]
         assert isinstance(req, Delayed)
 
-    next = scheduler.step(Return("foo", "foo", Ko(ValueError("something went wrong"))))
-    assert len(next.reqs) == 1
-    req = next.reqs[0]
-    assert isinstance(req, Network)
-    assert isinstance(req.req, RejectPromiseReq)
+    next = scheduler.step(Return("foo", "foo", Ko(e)))
+    assert isinstance(next, Done)
+    assert scheduler.computations["foo"].result() == Ko(e)
 
 
 @pytest.mark.parametrize(
@@ -97,11 +98,9 @@ def test_function_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retr
     ],
 )
 def test_generator_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -> None:
-    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), bar_ok, opts=Options(retry_policy=retry_policy)))
-    assert len(next.reqs) == 1
-    req = next.reqs[0]
-    assert isinstance(req, Network)
-    assert isinstance(req.req, ResolvePromiseReq)
+    next = scheduler.step(Invoke("bar", Base("bar", sys.maxsize), sys.maxsize, bar_ok, opts=Options(durable=False, retry_policy=retry_policy)))
+    assert isinstance(next, Done)
+    assert scheduler.computations["bar"].result() == Ok("bar")
 
 
 @pytest.mark.parametrize(
@@ -114,18 +113,18 @@ def test_generator_happy_path(scheduler: Scheduler, retry_policy: RetryPolicy) -
     ],
 )
 def test_generator_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, retries: int) -> None:
-    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), bar_ko, opts=Options(retry_policy=retry_policy)))
-    assert len(next.reqs) == 1
-    req = next.reqs[0]
+    next = scheduler.step(Invoke("bar", Base("bar", sys.maxsize), sys.maxsize, bar_ko, opts=Options(durable=False, retry_policy=retry_policy)))
+
     for _ in range(retries):
+        assert isinstance(next, More)
+        assert len(next.reqs) == 1
+        req = next.reqs[0]
         assert isinstance(req, Delayed)
         assert isinstance(req.item, Retry)
         next = scheduler.step(req.item)
-        assert len(next.reqs) == 1
-        req = next.reqs[0]
 
-    assert isinstance(req, Network)
-    assert isinstance(req.req, RejectPromiseReq)
+    assert isinstance(next, Done)
+    assert isinstance(scheduler.computations["bar"].result(), Ko)
 
 
 @pytest.mark.parametrize(
@@ -138,8 +137,7 @@ def test_generator_sad_path(scheduler: Scheduler, retry_policy: RetryPolicy, ret
     ],
 )
 def test_non_retriable_errors(scheduler: Scheduler, retry_policy: RetryPolicy, non_retryable_exceptions: tuple[type[Exception], ...]) -> None:
-    next = scheduler.step(Invoke("foo", Base("foo", sys.maxsize), bar_ko, opts=Options(retry_policy=retry_policy, non_retryable_exceptions=non_retryable_exceptions)))
-    assert len(next.reqs) == 1
-    req = next.reqs[0]
-    assert isinstance(req, Network)
-    assert isinstance(req.req, RejectPromiseReq)
+    opts = Options(durable=False, retry_policy=retry_policy, non_retryable_exceptions=non_retryable_exceptions)
+    next = scheduler.step(Invoke("bar", Base("bar", sys.maxsize), sys.maxsize, bar_ko, opts=opts))
+    assert isinstance(next, Done)
+    assert isinstance(scheduler.computations["bar"].result(), Ko)

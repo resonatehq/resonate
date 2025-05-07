@@ -16,7 +16,7 @@ class Convention(Protocol):
     @property
     def data(self) -> Any: ...
     @property
-    def timeout(self) -> int: ...
+    def timeout(self) -> float: ...  # relative time in seconds
     @property
     def tags(self) -> dict[str, str] | None: ...
 
@@ -24,8 +24,8 @@ class Convention(Protocol):
         self,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        target: str | None = None,
         tags: dict[str, str] | None = None,
-        timeout: int | None = None,
+        target: str | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Convention: ...

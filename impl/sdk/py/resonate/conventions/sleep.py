@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 @dataclass
 class Sleep:
     id: str
-    timeout: int
+    secs: float
 
     @property
     def idempotency_key(self) -> str:
@@ -25,6 +25,10 @@ class Sleep:
         return None
 
     @property
+    def timeout(self) -> float:
+        return self.secs
+
+    @property
     def tags(self) -> dict[str, str]:
         return {"resonate:timeout": "true"}
 
@@ -32,8 +36,8 @@ class Sleep:
         self,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        target: str | None = None,
         tags: dict[str, str] | None = None,
+        target: str | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Sleep:

@@ -30,7 +30,7 @@ class Remote:
         return {"func": self.name, "args": self.args, "kwargs": self.kwargs, "version": self.opts.version}
 
     @property
-    def timeout(self) -> int:
+    def timeout(self) -> float:
         return self.opts.timeout
 
     @property
@@ -41,8 +41,8 @@ class Remote:
         self,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        target: str | None = None,
         tags: dict[str, str] | None = None,
+        target: str | None = None,
         timeout: int | None = None,
         version: int | None = None,
     ) -> Remote:

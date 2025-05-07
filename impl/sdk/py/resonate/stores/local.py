@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, final
 
-from resonate.clocks import WallClock
 from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
 from resonate.errors import ResonateStoreError
 from resonate.message_sources import LocalMessageSource
@@ -27,7 +27,7 @@ class LocalStore:
         self._routers: list[Router] = [TagRouter()]
 
         self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
-        self._clock = clock or WallClock()
+        self._clock: Clock = clock or time
 
     @property
     def encoder(self) -> Encoder[Any, str | None]:
@@ -64,7 +64,7 @@ class LocalStore:
         messages: list[tuple[str, Mesg]] = []
 
         for promise in self._promises.values():
-            match promise, self._clock.time() >= promise.timeout:
+            match promise, int(self._clock.time() * 1000) >= promise.timeout:
                 case DurablePromiseRecord(state="PENDING"), True:
                     record, applied = self.promises.transition(id=promise.id, to="REJECTED_TIMEDOUT")
                     assert applied
@@ -80,7 +80,7 @@ class LocalStore:
                     record.callbacks.clear()
 
         for task in self._tasks.values():
-            match task, self._clock.time() >= (task.expiry or 0):
+            match task, self._clock.time() * 1000 >= (task.expiry or 0):
                 case TaskRecord(type="invoke", state="INIT"), _:
                     _, applied = self.tasks.transition(id=task.id, to="ENQUEUED")
                     if applied:
@@ -226,7 +226,7 @@ class LocalPromiseStore:
         if promise.state != "PENDING":
             return durable_promise, None
 
-        callback = CallbackRecord(id=id, type="resume", promise_id=promise_id, root_promise_id=root_promise_id, timeout=timeout, created_on=self._clock.time(), recv=recv)
+        callback = CallbackRecord(id=id, type="resume", promise_id=promise_id, root_promise_id=root_promise_id, timeout=timeout, created_on=int(self._clock.time() * 1000), recv=recv)
         promise.callbacks.append(callback)
         return durable_promise, Callback(
             id=callback.id,
@@ -254,7 +254,7 @@ class LocalPromiseStore:
         if promise.state != "PENDING":
             return durable_promise, None
 
-        callback = CallbackRecord(id=id, type="notify", promise_id=promise_id, root_promise_id=promise_id, timeout=timeout, created_on=self._clock.time(), recv=recv)
+        callback = CallbackRecord(id=id, type="notify", promise_id=promise_id, root_promise_id=promise_id, timeout=timeout, created_on=int(self._clock.time() * 1000), recv=recv)
         promise.callbacks.append(callback)
         return durable_promise, Callback(
             id=callback.id,
@@ -354,7 +354,7 @@ class LocalPromiseStore:
         match record := self._promises.get(id), to, strict:
             case None, "PENDING", _:
                 assert timeout is not None
-                assert self._clock.time() is not None
+                assert int(self._clock.time() * 1000) is not None
                 record = DurablePromiseRecord(
                     id=id,
                     state=to,
@@ -364,7 +364,7 @@ class LocalPromiseStore:
                         data=self.encoder.encode(data),
                     ),
                     value=DurablePromiseRecordValue(headers={}, data=None),
-                    created_on=self._clock.time(),
+                    created_on=int(self._clock.time() * 1000),
                     completed_on=None,
                     ikey_for_create=ikey,
                     ikey_for_complete=None,
@@ -374,13 +374,13 @@ class LocalPromiseStore:
                 self._promises[record.id] = record
                 return record, True
 
-            case DurablePromiseRecord(state="PENDING"), "PENDING", _ if self._clock.time() < record.timeout and ikey_match(record.ikey_for_create, ikey):
+            case DurablePromiseRecord(state="PENDING"), "PENDING", _ if int(self._clock.time() * 1000) < record.timeout and ikey_match(record.ikey_for_create, ikey):
                 return record, False
 
-            case DurablePromiseRecord(state="PENDING"), "PENDING", False if self._clock.time() >= record.timeout and ikey_match(record.ikey_for_create, ikey):
+            case DurablePromiseRecord(state="PENDING"), "PENDING", False if int(self._clock.time() * 1000) >= record.timeout and ikey_match(record.ikey_for_create, ikey):
                 return self.transition(id=id, to="REJECTED_TIMEDOUT")
 
-            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", _ if self._clock.time() < record.timeout:
+            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", _ if int(self._clock.time() * 1000) < record.timeout:
                 record = DurablePromiseRecord(
                     id=record.id,
                     state=to,
@@ -388,7 +388,7 @@ class LocalPromiseStore:
                     param=record.param,
                     value=DurablePromiseRecordValue(headers=headers, data=self.encoder.encode(data)),
                     created_on=record.created_on,
-                    completed_on=self._clock.time(),
+                    completed_on=int(self._clock.time() * 1000),
                     ikey_for_create=record.ikey_for_create,
                     ikey_for_complete=ikey,
                     tags=record.tags,
@@ -397,16 +397,16 @@ class LocalPromiseStore:
                 self._promises[record.id] = record
                 return record, True
 
-            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", False if self._clock.time() >= record.timeout:
+            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", False if int(self._clock.time() * 1000) >= record.timeout:
                 return self.transition(id=id, to="REJECTED_TIMEDOUT")
 
-            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", True if self._clock.time() >= record.timeout:
+            case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", True if int(self._clock.time() * 1000) >= record.timeout:
                 self.transition(id=id, to="REJECTED_TIMEDOUT")
                 msg = "Promise has timedout"
                 raise ResonateStoreError(msg, "STORE_FORBIDDEN")
 
             case DurablePromiseRecord(state="PENDING"), "REJECTED_TIMEDOUT", _:
-                assert self._clock.time() >= record.timeout
+                assert int(self._clock.time() * 1000) >= record.timeout
                 record = DurablePromiseRecord(
                     id=record.id,
                     state="RESOLVED" if record.tags and record.tags.get("resonate:timeout") == "true" else to,
@@ -522,7 +522,7 @@ class LocalTaskStore:
                 assert recv is not None
                 assert root_promise_id is not None
                 assert leaf_promise_id is not None
-                assert self._clock.time() is not None
+                assert int(self._clock.time() * 1000) is not None
                 record = TaskRecord(
                     id=id,
                     counter=1,
@@ -534,7 +534,7 @@ class LocalTaskStore:
                     pid=None,
                     ttl=None,
                     expiry=None,
-                    created_on=self._clock.time(),
+                    created_on=int(self._clock.time() * 1000),
                     completed_on=None,
                 )
                 self._tasks[record.id] = record
@@ -551,7 +551,7 @@ class LocalTaskStore:
                     leaf_promise_id=record.leaf_promise_id,
                     pid=record.pid,
                     ttl=record.ttl,
-                    expiry=self._clock.time() + 5000,  # TODO(dfarr): make this configurable
+                    expiry=int(self._clock.time() * 1000) + 5000,  # TODO(dfarr): make this configurable
                     created_on=record.created_on,
                     completed_on=record.completed_on,
                 )
@@ -570,7 +570,7 @@ class LocalTaskStore:
                     leaf_promise_id=record.leaf_promise_id,
                     pid=pid,
                     ttl=ttl,
-                    expiry=self._clock.time() + ttl,
+                    expiry=int(self._clock.time() * 1000) + ttl,
                     created_on=record.created_on,
                     completed_on=record.completed_on,
                 )
@@ -590,7 +590,7 @@ class LocalTaskStore:
                     leaf_promise_id=record.leaf_promise_id,
                     pid=pid,
                     ttl=ttl,
-                    expiry=self._clock.time() + ttl,
+                    expiry=int(self._clock.time() * 1000) + ttl,
                     created_on=record.created_on,
                     completed_on=record.completed_on,
                 )
@@ -610,13 +610,13 @@ class LocalTaskStore:
                     ttl=None,
                     expiry=None,
                     created_on=record.created_on,
-                    completed_on=self._clock.time(),
+                    completed_on=int(self._clock.time() * 1000),
                 )
                 self._tasks[record.id] = record
                 return record, True
             case TaskRecord(state="ENQUEUED" | "CLAIMED"), "INIT":
                 assert record.expiry is not None
-                assert self._clock.time() >= record.expiry
+                assert int(self._clock.time() * 1000) >= record.expiry
                 record = TaskRecord(
                     id=record.id,
                     counter=record.counter + 1,
@@ -646,14 +646,14 @@ class LocalTaskStore:
                     leaf_promise_id=record.leaf_promise_id,
                     pid=record.pid,
                     ttl=record.ttl,
-                    expiry=self._clock.time() + record.ttl,
+                    expiry=int(self._clock.time() * 1000) + record.ttl,
                     created_on=record.created_on,
                     completed_on=record.completed_on,
                 )
                 self._tasks[record.id] = record
                 return record, True
 
-            case TaskRecord(state="CLAIMED"), "COMPLETED" if record.counter == counter and (record.expiry is not None and record.expiry >= self._clock.time()):
+            case TaskRecord(state="CLAIMED"), "COMPLETED" if record.counter == counter and (record.expiry is not None and record.expiry >= int(self._clock.time() * 1000)):
                 record = TaskRecord(
                     id=record.id,
                     counter=record.counter,
@@ -666,7 +666,7 @@ class LocalTaskStore:
                     ttl=None,
                     expiry=None,
                     created_on=record.created_on,
-                    completed_on=self._clock.time(),
+                    completed_on=int(self._clock.time() * 1000),
                 )
                 self._tasks[record.id] = record
                 return record, False
@@ -684,7 +684,7 @@ class LocalTaskStore:
                     ttl=None,
                     expiry=None,
                     created_on=record.created_on,
-                    completed_on=self._clock.time(),
+                    completed_on=int(self._clock.time() * 1000),
                 )
                 self._tasks[record.id] = record
                 return record, False

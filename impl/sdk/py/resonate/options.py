@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING
@@ -23,7 +22,7 @@ class Options:
     retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] = lambda f: Never() if isgeneratorfunction(f) else Exponential()
     target: str = "poll://default"
     tags: dict[str, str] = field(default_factory=dict)
-    timeout: int = sys.maxsize
+    timeout: float = 31536000  # relative time in seconds, default 1 year
     version: int = 0
 
     def __post_init__(self) -> None:
@@ -44,7 +43,7 @@ class Options:
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         target: str | None = None,
         tags: dict[str, str] | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Options:
         if version and not (version >= 0):
