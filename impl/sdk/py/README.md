@@ -6,6 +6,8 @@
 
 <div align="center">
 
+[![ci](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/ci.yml/badge.svg)](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/ci.yml)
+[![dst](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/dst.yml/badge.svg)](https://github.com/resonatehq/resonate-sdk-py/actions/workflows/dst.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 </div>
