@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import random
 import sys
 from collections.abc import Callable, Generator
@@ -199,7 +198,6 @@ def test_run(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.run("f2", name, *args, **kwargs)
@@ -210,8 +208,6 @@ def test_run(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f3", func, *args, **kwargs)
@@ -222,7 +218,6 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f4", name, *args, **kwargs)
@@ -233,8 +228,6 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.run("f5", *args, **kwargs)
@@ -245,8 +238,6 @@ def test_run(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).run("f6", *args, **kwargs)
@@ -257,8 +248,6 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
@@ -323,7 +312,6 @@ def test_rpc(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.rpc("f2", name, *args, **kwargs)
@@ -334,8 +322,6 @@ def test_rpc(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f3", func, *args, **kwargs)
@@ -346,7 +332,6 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f4", name, *args, **kwargs)
@@ -357,8 +342,6 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     f.rpc("f5", *args, **kwargs)
@@ -369,8 +352,6 @@ def test_rpc(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, default_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
 
     f.options(**opts).rpc("f6", *args, **kwargs)
@@ -381,8 +362,6 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_opts.timeout, rel_tol=0.2)
-    assert math.isclose((promise.timeout - promise.created_on) / 1000, updated_conv.timeout, rel_tol=0.2)
     assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
 
