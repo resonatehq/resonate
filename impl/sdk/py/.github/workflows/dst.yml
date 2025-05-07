@@ -10,21 +10,21 @@ on:
         description: "seed"
         type: number
       steps:
-        description: "ticks"
+        description: "steps"
         type: number
   schedule:
     - cron: "*/20 * * * *" # every 20 mins
 
 jobs:
   values:
-      runs-on: ubuntu-22.04
-      steps:
-        - id: seed
-          name: Set random seed
-          run: echo seed=$RANDOM >> $GITHUB_OUTPUT
-      outputs:
-        seed: ${{ inputs.seed || steps.seed.outputs.seed }}
-        ticks: ${{ inputs.steps || 10000 }}
+    runs-on: ubuntu-22.04
+    steps:
+      - id: seed
+        name: Set random seed
+        run: echo seed=$RANDOM >> $GITHUB_OUTPUT
+    outputs:
+      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+      steps: ${{ inputs.steps || 10000 }}
 
   dst:
     runs-on: ${{ matrix.os }}
@@ -52,7 +52,7 @@ jobs:
       - name: Install resonate
         run: uv sync --dev
 
-      - name: Run dst (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.ticks }})
+      - name: Run dst (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }})
         run: uv run pytest -s --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} tests/test_dst.py 2> logs.txt
 
       - uses: actions/upload-artifact@v4
