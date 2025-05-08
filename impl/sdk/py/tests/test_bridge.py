@@ -4,7 +4,7 @@ import sys
 import threading
 import time
 import uuid
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -147,6 +147,36 @@ def info2(ctx: Context, *args: Any, **kwargs: Any) -> Generator[Yieldable, Any, 
     yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 0, 1))
 
 
+def parent_bound(ctx: Context, child_timeout_rel: int, mode: Literal["rfc", "lfc"]) -> Generator[Yieldable, Any, None]:
+    match mode:
+        case "lfc":
+            yield ctx.lfc(child_bounded, ctx.info.timeout).options(timeout=child_timeout_rel)
+        case "rfc":
+            yield ctx.rfc(child_bounded, ctx.info.timeout).options(timeout=child_timeout_rel)
+
+
+def child_bounded(ctx: Context, parent_timeout_abs: float) -> None:
+    assert not (ctx.info.timeout > parent_timeout_abs)  # child timeout never exceeds parent timeout
+
+
+def unbound_detached(
+    ctx: Context,
+    parent_timeout_rel: int,
+    child_timeout_rel: int,
+) -> Generator[Yieldable, Any, None]:
+    p = yield ctx.detached(child_unbounded, parent_timeout_rel, child_timeout_rel, ctx.info.timeout).options(timeout=child_timeout_rel)
+    yield p
+
+
+def child_unbounded(ctx: Context, parent_timeout_rel: int, child_timeout_rel: int, parent_timeout_abs: float) -> None:
+    if parent_timeout_rel < child_timeout_rel:
+        assert ctx.info.timeout > parent_timeout_abs
+    elif parent_timeout_rel > child_timeout_rel:
+        assert ctx.info.timeout < parent_timeout_abs
+    else:
+        assert pytest.approx(ctx.info.timeout) == parent_timeout_abs
+
+
 @pytest.fixture(scope="module")
 def resonate_instance(store: Store, message_source: MessageSource) -> Generator[Resonate, None, None]:
     resonate = Resonate(store=store, message_source=message_source)
@@ -167,6 +197,10 @@ def resonate_instance(store: Store, message_source: MessageSource) -> Generator[
     resonate.register(random_generation)
     resonate.register(info1, name="info", version=1)
     resonate.register(info2, name="info", version=2)
+    resonate.register(parent_bound)
+    resonate.register(child_bounded)
+    resonate.register(unbound_detached)
+    resonate.register(child_unbounded)
     resonate.start()
     yield resonate
     resonate.stop()
@@ -174,6 +208,26 @@ def resonate_instance(store: Store, message_source: MessageSource) -> Generator[
     # this timeout is set to cover the timeout time of the test poller, you can
     # see where this is set in conftest.py
     time.sleep(3)
+
+
+@pytest.mark.parametrize("mode", ["rfc", "lfc"])
+@pytest.mark.parametrize(("parent_timeout", "child_timeout"), [(1100, 10), (10, 1100), (10, 10), (10, 11), (11, 10)])
+def test_timeout_bound_by_parent(resonate_instance: Resonate, mode: Literal["rfc", "lfc"], parent_timeout: int, child_timeout: int) -> None:
+    resonate_instance.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", parent_bound, child_timeout, mode).result()
+
+
+@pytest.mark.parametrize(
+    ("parent_timeout", "child_timeout"),
+    [
+        (1100, 10),
+        (10, 1100),
+        (10, 10),
+        (10, 11),
+        (11, 10),
+    ],
+)
+def test_timeout_unbound_by_parent_detached(resonate_instance: Resonate, parent_timeout: int, child_timeout: int) -> None:
+    resonate_instance.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", unbound_detached, parent_timeout, child_timeout).result()
 
 
 def test_random_generation(resonate_instance: Resonate) -> None:
@@ -185,10 +239,10 @@ def test_random_generation(resonate_instance: Resonate) -> None:
 
 @pytest.mark.parametrize("id", ["foo", None])
 def test_hitl(resonate_instance: Resonate, id: str | None) -> None:
-    timestamp = int(time.time())
-    handle = resonate_instance.run(f"hitl-{timestamp}", hitl, id)
+    uid = uuid.uuid4()
+    handle = resonate_instance.run(f"hitl-{uid}", hitl, id)
     time.sleep(1)
-    resonate_instance.promises.resolve(id=id or f"hitl-{timestamp}.1", data=1)
+    resonate_instance.promises.resolve(id=id or f"hitl-{uid}.1", data=1)
     assert handle.result() == 1
 
 
