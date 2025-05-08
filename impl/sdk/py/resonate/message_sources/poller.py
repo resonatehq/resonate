@@ -84,16 +84,17 @@ class Poller:
                         mq.enqueue(msg)
 
             except requests.exceptions.Timeout:
-                logger.warning("Polling request timed out for group %s. Retrying...", self._group)
-                time.sleep(1)
+                logger.warning("Polling request timed out for group %s. Retrying after delay...", self._group)
+                time.sleep(0.5)
                 continue
             except requests.exceptions.RequestException as e:
                 logger.warning("Polling network error for group %s: %s. Retrying after delay...", self._group, str(e))
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
             except Exception as e:
-                logger.warning("Unexpected error in poller loop for group %s: %s", self._group, e)
-                raise
+                logger.warning("Unexpected error in poller loop for group %s: %s. Retrying after delay...", self._group, e)
+                time.sleep(0.5)
+                continue
 
     def step(self) -> list[Mesg]:
         with requests.get(self.url, stream=True, timeout=self._timeout) as res:
