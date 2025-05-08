@@ -10,6 +10,7 @@ from resonate.delay_q import DelayQ
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
+    Command,
     CreateCallbackReq,
     CreateCallbackRes,
     CreatePromiseReq,
@@ -29,6 +30,7 @@ from resonate.models.commands import (
     Resume,
     Retry,
     Return,
+    Shutdown,
 )
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.result import Ko, Ok, Result
@@ -41,7 +43,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from concurrent.futures import Future
 
-    from resonate.models.commands import Command
     from resonate.models.convention import Convention
     from resonate.models.message import Mesg
     from resonate.models.message_source import MessageSource
@@ -181,31 +182,37 @@ class Bridge:
     def _process_cq(self) -> None:
         while True:
             item = self._cq.get()
+
+            # shuting down
+            if item is None:
+                return
+
             cid: str
-            match item:
-                case None:
-                    # None signals to stop processing
-                    return
-                case (cmd, future):
-                    cid = cmd.cid
-                    action = self._scheduler.step(cmd, future)
-                case cmd:
-                    cid = cmd.cid
-                    action = self._scheduler.step(cmd)
+
+            cmd, future = item if isinstance(item, tuple) else (item, None)
+            action = self._scheduler.step(cmd, future)
 
             match action:
                 case More(reqs):
                     for req in reqs:
                         match req:
                             case Network(id, cid, n_req):
-                                # TODO(avillega): probaly put this in a try/except and handle errors better
-                                self._cq.put_nowait(self._handle_network_request(id, cid, n_req))
+                                cmd = Command
+                                try:
+                                    cmd = self._handle_network_request(id, cid, n_req)
+                                    self._cq.put_nowait(cmd)
+                                except Exception as err:
+                                    cmd = Shutdown(err)
+                                    self._scheduler.step(cmd)  # bypass the cq and shutdown right away
+                                    return
+
                             case Function(id, cid, func):
                                 self._cq.put_nowait(Return(id, cid, self._handle_function(func)))
                             case Delayed() as item:
                                 self._handle_delay(item)
 
-                case Done(reqs):
+                case Done(reqs) if reqs:
+                    cid = reqs[0].cid
                     task = self._promise_id_to_task.get(cid, None)
                     match reqs:
                         case [Network(_, cid, CreateSubscriptionReq(id, promise_id, timeout, recv))]:
@@ -243,6 +250,8 @@ class Bridge:
 
                             if task is not None:
                                 self._store.tasks.complete(id=task.id, counter=task.counter)
+                case Done(reqs=[]):
+                    continue
 
     @exit_on_exception
     def _process_msgs(self) -> None:

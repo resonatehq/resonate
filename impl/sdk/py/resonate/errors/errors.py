@@ -46,3 +46,9 @@ class ResonateStoreError(ResonateError):
 class ResonateValidationError(ResonateError):
     def __init__(self, msg: str) -> None:
         super().__init__(msg, 100)
+
+
+class ResonateShutdownError(ResonateError):
+    def __init__(self, inner_err: Exception) -> None:
+        self.inner = inner_err
+        super().__init__(f"{inner_err}", 1000)

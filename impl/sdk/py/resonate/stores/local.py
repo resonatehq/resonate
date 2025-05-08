@@ -28,14 +28,7 @@ class LocalStore:
 
         self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
         self._clock: Clock = clock or time
-
-    @property
-    def encoder(self) -> Encoder[Any, str | None]:
-        return self._encoder
-
-    @property
-    def promises(self) -> LocalPromiseStore:
-        return LocalPromiseStore(
+        self.promises = LocalPromiseStore(
             self,
             self._encoder,
             self._promises,
@@ -43,16 +36,17 @@ class LocalStore:
             self._routers,
             self._clock,
         )
-
-    @property
-    def tasks(self) -> LocalTaskStore:
-        return LocalTaskStore(
+        self.tasks = LocalTaskStore(
             self,
             self._encoder,
             self._promises,
             self._tasks,
             self._clock,
         )
+
+    @property
+    def encoder(self) -> Encoder[Any, str | None]:
+        return self._encoder
 
     def add_router(self, router: Router) -> None:
         self._routers.append(router)

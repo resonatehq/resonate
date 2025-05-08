@@ -5,11 +5,14 @@ import threading
 import time
 import uuid
 from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 
+from resonate.errors.errors import ResonateShutdownError, ResonateStoreError
 from resonate.resonate import Resonate
 from resonate.retry_policies import Constant, Never
+from resonate.stores.local import LocalStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -356,3 +359,48 @@ def test_resonate_get(resonate_instance: Resonate) -> None:
     res = handle.result()
     assert res == 42
     thread.join()
+
+
+def test_resonate_platform_errors() -> None:
+    # If you look at this test and you think: "This is horrible"
+    # You are right, this test is cursed. But it needed to be done.
+    local_store = LocalStore()
+    resonate = Resonate(
+        store=local_store,
+        message_source=local_store.message_source("default", "default"),
+    )
+
+    original_transition = local_store.promises.transition
+    raise_flag = [False]  # Use mutable container for flag
+
+    def side_effect(*args: Any, **kwargs: Any) -> Any:
+        if raise_flag[0]:
+            msg = "Got an error from server"
+            raise ResonateStoreError(msg, "UNKNOWN")
+
+        return original_transition(*args[1:], **kwargs)
+
+    def g(_: Context) -> int:
+        return 42
+
+    def f(ctx: Context, flag: bool) -> Generator[Any, Any, None]:
+        raise_flag[0] = flag  # Update mutable flag
+        val = yield ctx.rfc(g)
+        return val
+
+    with patch.object(
+        local_store.promises,
+        "transition",
+        side_effect=side_effect,
+    ):
+        resonate.register(f)
+        resonate.register(g)
+
+        # First test normal behavior
+        handle = resonate.run("f-no-err", f, flag=False)
+        assert handle.result() == 42
+
+        # Now trigger errors
+        handle = resonate.run("f-err", f, flag=True)
+        with pytest.raises(ResonateShutdownError):
+            handle.result()
