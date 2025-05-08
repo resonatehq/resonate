@@ -31,7 +31,7 @@ jobs:
           key: resonate-${{ github.sha }}  # Cache key tied to the commit SHA
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+        uses: DeterminateSystems/nix-installer-action@v17
 
       - name: Build resonate binary
         if: steps.cache.outputs.cache-hit != 'true'  # Only run if cache missed
