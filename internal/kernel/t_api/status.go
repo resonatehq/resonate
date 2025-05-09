@@ -51,6 +51,8 @@ func (s StatusCode) String() string {
 		return "The request was successful"
 	case StatusFieldValidationError:
 		return "The request is invalid"
+	case StatusCallbackInvalidPromise:
+		return "The promise and root promise must be different"
 	case StatusPromiseAlreadyResolved:
 		return "The promise has already been resolved"
 	case StatusPromiseAlreadyRejected:
