@@ -30,7 +30,7 @@ jobs:
         run: uv sync --dev
 
       - name: generate api docs
-        run: uv run pydoctor resonate --docformat=google
+        run: uv run pydoctor resonate --docformat=google --project-name "Resonate Python SDK" --project-url "https://github.com/resonatehq/resonate-sdk-py" --html-output docs/build
 
       - name: publish api docs to gh pages
         uses: peaceiris/actions-gh-pages@v3
