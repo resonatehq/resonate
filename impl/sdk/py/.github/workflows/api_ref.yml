@@ -1,0 +1,42 @@
+name: api ref
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: 0.5.23
+
+      - name: set up python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.12
+
+      - name: install
+        run: uv sync --dev
+
+      - name: generate api docs
+        run: pydoctor resonate --docformat=google
+
+      - name: publish api docs to gh pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/build
+          publish_branch: gh-pages
+          force_orphan: true # Ensure this creates a fresh gh-pages branch if needed
+          commit_message: generate API docs

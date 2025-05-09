@@ -18,3 +18,6 @@ wheels/
 
 # cov
 .coverage
+
+# docs
+apidocs/

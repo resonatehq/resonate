@@ -18,6 +18,8 @@ build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
+    "docutils>=0.21.2",
+    "pydoctor>=24.11.2",
     "pyright>=1.1.396",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
