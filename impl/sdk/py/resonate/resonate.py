@@ -406,12 +406,12 @@ class Context:
         tags: dict[str, str] | None = None,
     ) -> RFI:
         self._counter += 1
-
+        id = id or f"{self.id}.{self._counter}"
         return RFI(
             Base(
-                f"{self.id}.{self._counter}",
+                id,
                 timeout or 31536000,
-                idempotency_key,
+                idempotency_key or id,
                 headers,
                 data,
                 tags,

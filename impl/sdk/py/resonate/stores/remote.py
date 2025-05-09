@@ -133,7 +133,6 @@ class RemotePromiseStore:
                 "tags": tags or {},
             },
         )
-
         res = self._store.call(req.prepare())
         return DurablePromise.from_dict(self._store, res)
 
