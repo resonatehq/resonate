@@ -30,7 +30,7 @@ jobs:
         run: uv sync --dev
 
       - name: generate api docs
-        run: pydoctor resonate --docformat=google
+        run: uv run pydoctor resonate --docformat=google
 
       - name: publish api docs to gh pages
         uses: peaceiris/actions-gh-pages@v3
