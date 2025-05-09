@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from resonate.conventions import Base
 from resonate.delay_q import DelayQ
+from resonate.errors.errors import ResonateShutdownError
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -30,7 +31,6 @@ from resonate.models.commands import (
     Resume,
     Retry,
     Return,
-    Shutdown,
 )
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.result import Ko, Ok, Result
@@ -197,13 +197,15 @@ class Bridge:
                     for req in reqs:
                         match req:
                             case Network(id, cid, n_req):
-                                cmd = Command
                                 try:
                                     cmd = self._handle_network_request(id, cid, n_req)
                                     self._cq.put_nowait(cmd)
-                                except Exception as err:
-                                    cmd = Shutdown(err)
-                                    self._scheduler.step(cmd)  # bypass the cq and shutdown right away
+                                except Exception as e:
+                                    err = ResonateShutdownError(mesg="Store error occurred, shutting down")
+                                    err.__cause__ = e  # bind original error
+
+                                    # bypass the cq and shutdown right away
+                                    self._scheduler.shutdown(err)
                                     return
 
                             case Function(id, cid, func):

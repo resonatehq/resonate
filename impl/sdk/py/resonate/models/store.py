@@ -21,12 +21,16 @@ class Store(Protocol):
 
 
 class PromiseStore(Protocol):
-    def get(self, *, id: str) -> DurablePromise: ...
+    def get(
+        self,
+        id: str,
+    ) -> DurablePromise: ...
+
     def create(
         self,
-        *,
         id: str,
         timeout: int,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -36,11 +40,11 @@ class PromiseStore(Protocol):
 
     def create_with_task(
         self,
-        *,
         id: str,
         timeout: int,
         pid: str,
         ttl: int,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -50,8 +54,8 @@ class PromiseStore(Protocol):
 
     def resolve(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -60,8 +64,8 @@ class PromiseStore(Protocol):
 
     def reject(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -70,8 +74,8 @@ class PromiseStore(Protocol):
 
     def cancel(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -80,7 +84,6 @@ class PromiseStore(Protocol):
 
     def callback(
         self,
-        *,
         id: str,
         promise_id: str,
         root_promise_id: str,
@@ -90,7 +93,6 @@ class PromiseStore(Protocol):
 
     def subscribe(
         self,
-        *,
         id: str,
         promise_id: str,
         timeout: int,
@@ -101,7 +103,6 @@ class PromiseStore(Protocol):
 class TaskStore(Protocol):
     def claim(
         self,
-        *,
         id: str,
         counter: int,
         pid: str,
@@ -110,13 +111,11 @@ class TaskStore(Protocol):
 
     def complete(
         self,
-        *,
         id: str,
         counter: int,
     ) -> bool: ...
 
     def heartbeat(
         self,
-        *,
         pid: str,
     ) -> int: ...

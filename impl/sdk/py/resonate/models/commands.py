@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # Commands
 
-type Command = Invoke | Resume | Return | Receive | Retry | Listen | Notify | Shutdown
+type Command = Invoke | Resume | Return | Receive | Retry | Listen | Notify
 
 
 @dataclass
@@ -75,15 +75,6 @@ class Notify:
     @property
     def cid(self) -> str:
         return self.id
-
-
-@dataclass
-class Shutdown:
-    err: Exception
-
-    @property
-    def cid(self) -> str:
-        return "__shutdown"
 
 
 @dataclass

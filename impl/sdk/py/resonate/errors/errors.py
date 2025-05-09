@@ -1,54 +1,51 @@
 from __future__ import annotations
 
-from typing import Literal
+import datetime
+import json
+from typing import Any
 
 
 class ResonateError(Exception):
-    def __init__(self, msg: str, code: int) -> None:
-        super().__init__(msg, code)
+    def __init__(self, mesg: str, code: str, details: Any = None) -> None:
+        super().__init__(mesg)
+        self.mesg = mesg
+        self.code = code
+        try:
+            self.details = json.dumps(details, indent=2) if details else None
+        except Exception:
+            self.details = details
 
-
-class ResonateStoreError(ResonateError):
-    def __init__(
-        self,
-        msg: str,
-        code: Literal[
-            "UNKNOWN",
-            "STORE_UNAUTHORIZED",
-            "STORE_PAYLOAD",
-            "STORE_FORBIDDEN",
-            "STORE_NOT_FOUND",
-            "STORE_ALREADY_EXISTS",
-            "STORE_INVALID_STATE",
-            "STORE_ENCODER",
-        ],
-    ) -> None:
-        match code:
-            case "UNKNOWN":
-                num_code = 0
-            case "STORE_UNAUTHORIZED":
-                num_code = 41
-            case "STORE_PAYLOAD":
-                num_code = 42
-            case "STORE_FORBIDDEN":
-                num_code = 43
-            case "STORE_NOT_FOUND":
-                num_code = 44
-            case "STORE_ALREADY_EXISTS":
-                num_code = 45
-            case "STORE_INVALID_STATE":
-                num_code = 46
-            case "STORE_ENCODER":
-                num_code = 47
-        super().__init__(msg, num_code)
+    def __str__(self) -> str:
+        return f"[{self.code}] {self.mesg}{'\n' + self.details if self.details else ''}"
 
 
 class ResonateValidationError(ResonateError):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg, 100)
+    def __init__(self, mesg: str) -> None:
+        super().__init__(mesg, "10")
 
 
 class ResonateShutdownError(ResonateError):
-    def __init__(self, inner_err: Exception) -> None:
-        self.inner = inner_err
-        super().__init__(f"{inner_err}", 1000)
+    def __init__(self, mesg: str) -> None:
+        super().__init__(mesg, "20")
+
+
+class ResonateStoreError(ResonateError):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        mesg = kwargs.pop("message", "Unknown store error")
+        code = kwargs.pop("code", "0")
+        details = kwargs.pop("details", [])
+        super().__init__(mesg, f"30.{code}", details)
+
+
+class ResonateCanceledError(ResonateError):
+    def __init__(self, promise_id: str) -> None:
+        super().__init__(f"Promise {promise_id} canceled", "40")
+        self.promise_id = promise_id
+
+
+class ResonateTimedoutError(ResonateError):
+    def __init__(self, promise_id: str, timeout: float) -> None:
+        formatted = datetime.datetime.fromtimestamp(timeout, tz=datetime.UTC).isoformat()
+        super().__init__(f"Promise {promise_id} timedout at {formatted}", "41")
+        self.promise_id = promise_id
+        self.timeout = timeout

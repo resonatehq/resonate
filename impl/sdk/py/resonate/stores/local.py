@@ -28,17 +28,16 @@ class LocalStore:
 
         self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
         self._clock: Clock = clock or time
-        self.promises = LocalPromiseStore(
+
+        self._promise_store = LocalPromiseStore(
             self,
-            self._encoder,
             self._promises,
             self._tasks,
             self._routers,
             self._clock,
         )
-        self.tasks = LocalTaskStore(
+        self._task_store = LocalTaskStore(
             self,
-            self._encoder,
             self._promises,
             self._tasks,
             self._clock,
@@ -47,6 +46,14 @@ class LocalStore:
     @property
     def encoder(self) -> Encoder[Any, str | None]:
         return self._encoder
+
+    @property
+    def promises(self) -> LocalPromiseStore:
+        return self._promise_store
+
+    @property
+    def tasks(self) -> LocalTaskStore:
+        return self._task_store
 
     def add_router(self, router: Router) -> None:
         self._routers.append(router)
@@ -95,25 +102,19 @@ class LocalStore:
 
         return messages
 
-    def freeze(self) -> str:
-        return f"{self._promises}:{self._tasks}"
-
 
 class LocalPromiseStore:
-    def __init__(self, store: LocalStore, encoder: Encoder[Any, str | None], promises: dict[str, DurablePromiseRecord], tasks: dict[str, TaskRecord], routers: list[Router], clock: Clock) -> None:
-        self.encoder = encoder
-
+    def __init__(self, store: LocalStore, promises: dict[str, DurablePromiseRecord], tasks: dict[str, TaskRecord], routers: list[Router], clock: Clock) -> None:
         self._store = store
         self._promises = promises
         self._tasks = tasks
         self._routers = routers
         self._clock = clock
 
-    def get(self, *, id: str) -> DurablePromise:
+    def get(self, id: str) -> DurablePromise:
         record = self._promises.get(id)
         if record is None:
-            msg = "Not found"
-            raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+            raise ResonateStoreError(message="The specified promise was not found", code=40400)
         return DurablePromise.from_dict(
             self._store,
             record.to_dict(),
@@ -121,9 +122,9 @@ class LocalPromiseStore:
 
     def create(
         self,
-        *,
         id: str,
         timeout: int,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -144,11 +145,11 @@ class LocalPromiseStore:
 
     def create_with_task(
         self,
-        *,
         id: str,
         timeout: int,
         pid: str,
         ttl: int,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -169,40 +170,39 @@ class LocalPromiseStore:
 
     def resolve(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
         data: Any = None,
     ) -> DurablePromise:
-        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, new_state="RESOLVED")
+        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, state="RESOLVED")
 
     def reject(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
         data: Any = None,
     ) -> DurablePromise:
-        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, new_state="REJECTED")
+        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, state="REJECTED")
 
     def cancel(
         self,
-        *,
         id: str,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
         data: Any = None,
     ) -> DurablePromise:
-        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, new_state="REJECTED_CANCELED")
+        return self._complete(id=id, ikey=ikey, strict=strict, headers=headers, data=data, state="REJECTED_CANCELED")
 
     def callback(
         self,
-        *,
         id: str,
         promise_id: str,
         root_promise_id: str,
@@ -211,8 +211,7 @@ class LocalPromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         promise = self._promises.get(promise_id)
         if promise is None:
-            msg = "Promise not found"
-            raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+            raise ResonateStoreError(message="The specified promise was not found", code=40400)
         durable_promise = DurablePromise.from_dict(
             self._store,
             promise.to_dict(),
@@ -231,7 +230,6 @@ class LocalPromiseStore:
 
     def subscribe(
         self,
-        *,
         id: str,
         promise_id: str,
         timeout: int,
@@ -239,8 +237,7 @@ class LocalPromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         promise = self._promises.get(promise_id)
         if promise is None:
-            msg = "Promise not found"
-            raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+            raise ResonateStoreError(message="The specified promise was not found", code=40400)
         durable_promise = DurablePromise.from_dict(
             self._store,
             promise.to_dict(),
@@ -259,9 +256,9 @@ class LocalPromiseStore:
 
     def _create(
         self,
-        *,
         id: str,
         timeout: int,
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
@@ -304,15 +301,15 @@ class LocalPromiseStore:
 
     def _complete(
         self,
-        *,
         id: str,
-        new_state: Literal["REJECTED_CANCELED", "REJECTED", "RESOLVED"],
+        state: Literal["REJECTED_CANCELED", "REJECTED", "RESOLVED"],
+        *,
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
         data: Any = None,
     ) -> DurablePromise:
-        record, applied = self.transition(id=id, to=new_state, strict=strict, headers=headers, data=data, ikey=ikey)
+        record, applied = self.transition(id=id, to=state, strict=strict, headers=headers, data=data, ikey=ikey)
         if applied:
             for task in self._tasks.values():
                 if (task.state in ("INIT", "ENQUEUED", "CLAIMED")) and task.root_promise_id == record.id:
@@ -353,10 +350,7 @@ class LocalPromiseStore:
                     id=id,
                     state=to,
                     timeout=timeout,
-                    param=DurablePromiseRecordValue(
-                        headers=headers or {},
-                        data=self.encoder.encode(data),
-                    ),
+                    param=DurablePromiseRecordValue(headers=headers or {}, data=self._store.encoder.encode(data)),
                     value=DurablePromiseRecordValue(headers={}, data=None),
                     created_on=int(self._clock.time() * 1000),
                     completed_on=None,
@@ -367,6 +361,9 @@ class LocalPromiseStore:
                 )
                 self._promises[record.id] = record
                 return record, True
+
+            case None, "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", _:
+                raise ResonateStoreError(message="The specified promise was not found", code=40400)
 
             case DurablePromiseRecord(state="PENDING"), "PENDING", _ if int(self._clock.time() * 1000) < record.timeout and ikey_match(record.ikey_for_create, ikey):
                 return record, False
@@ -380,7 +377,7 @@ class LocalPromiseStore:
                     state=to,
                     timeout=record.timeout,
                     param=record.param,
-                    value=DurablePromiseRecordValue(headers=headers, data=self.encoder.encode(data)),
+                    value=DurablePromiseRecordValue(headers=headers, data=self._store.encoder.encode(data)),
                     created_on=record.created_on,
                     completed_on=int(self._clock.time() * 1000),
                     ikey_for_create=record.ikey_for_create,
@@ -396,8 +393,7 @@ class LocalPromiseStore:
 
             case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", True if int(self._clock.time() * 1000) >= record.timeout:
                 self.transition(id=id, to="REJECTED_TIMEDOUT")
-                msg = "Promise has timedout"
-                raise ResonateStoreError(msg, "STORE_FORBIDDEN")
+                raise ResonateStoreError(message="The promise has already timedout", code=40303)
 
             case DurablePromiseRecord(state="PENDING"), "REJECTED_TIMEDOUT", _:
                 assert int(self._clock.time() * 1000) >= record.timeout
@@ -417,6 +413,9 @@ class LocalPromiseStore:
                 self._promises[record.id] = record
                 return record, True
 
+            case DurablePromiseRecord(state="RESOLVED" | "REJECTED" | "REJECTED_CANCELED"), "PENDING", False if ikey_match(record.ikey_for_create, ikey):
+                return record, False
+
             case DurablePromiseRecord(state="RESOLVED" | "REJECTED" | "REJECTED_CANCELED"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", False if ikey_match(record.ikey_for_complete, ikey):
                 return record, False
 
@@ -425,35 +424,28 @@ class LocalPromiseStore:
             ):
                 return record, False
 
-            case DurablePromiseRecord(state="RESOLVED" | "REJECTED" | "REJECTED_CANCELED"), "PENDING", False if ikey_match(record.ikey_for_create, ikey):
-                return record, False
-
-            case None, "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", _:
-                msg = "Not found"
-                raise ResonateStoreError(msg, "STORE_NOT_FOUND")
-
             case record, to, strict:
-                msg = f"Forbidden request, can not do {record} to {to} when strict {strict}"
-                raise ResonateStoreError(msg, "STORE_FORBIDDEN")
+                # TODO(dfarr): match server error messages
+                raise ResonateStoreError(message=f"Unexpected transition ({record.state if record else 'None'} -> {to}, strict={strict})", code=403)
 
 
 class LocalTaskStore:
-    def __init__(self, store: LocalStore, encoder: Encoder[Any, str | None], promises: dict[str, DurablePromiseRecord], tasks: dict[str, TaskRecord], clock: Clock) -> None:
+    def __init__(self, store: LocalStore, promises: dict[str, DurablePromiseRecord], tasks: dict[str, TaskRecord], clock: Clock) -> None:
         self._store = store
-        self._encoder = encoder
         self._promises = promises
         self._tasks = tasks
         self._clock = clock
 
     def claim(
         self,
-        *,
         id: str,
         counter: int,
         pid: str,
         ttl: int,
     ) -> tuple[DurablePromise, DurablePromise | None]:
         task_record, _ = self.transition(id=id, to="CLAIMED", pid=pid, ttl=ttl, counter=counter)
+        assert task_record.type in ("invoke", "resume")
+
         match task_record.type:
             case "invoke":
                 root_promise = self._promises[task_record.root_promise_id]
@@ -471,14 +463,12 @@ class LocalTaskStore:
                     self._store,
                     leaf_promise.to_dict(),
                 )
-            case "notify":
-                raise NotImplementedError
 
-    def complete(self, *, id: str, counter: int) -> bool:
+    def complete(self, id: str, counter: int) -> bool:
         self.transition(id=id, to="COMPLETED", counter=counter)
         return True
 
-    def heartbeat(self, *, pid: str) -> int:
+    def heartbeat(self, pid: str) -> int:
         affected_tasks = 0
         for record in self._tasks.values():
             if record.state != "CLAIMED" or record.pid != pid:
@@ -494,9 +484,9 @@ class LocalTaskStore:
 
     def transition(
         self,
-        *,
         id: str,
         to: Literal["INIT", "ENQUEUED", "CLAIMED", "COMPLETED"],
+        *,
         type: Literal["invoke", "resume", "notify"] | None = None,
         recv: str | None = None,
         root_promise_id: str | None = None,
@@ -687,12 +677,10 @@ class LocalTaskStore:
                 return record, False
 
             case None, _:
-                msg = "Task not found"
-                raise ResonateStoreError(msg, "STORE_NOT_FOUND")
+                raise ResonateStoreError(message="The specified task was not found", code=40403)
 
             case _:
-                msg = "Task already claimed, completed, or invalid counter"
-                raise ResonateStoreError(msg, "STORE_FORBIDDEN")
+                raise ResonateStoreError(message="The task is already claimed, completed, or an invalid counter was provided", code=40305)
 
 
 @final

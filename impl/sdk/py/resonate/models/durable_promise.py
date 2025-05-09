@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from resonate.errors.errors import ResonateCanceledError, ResonateTimedoutError
 from resonate.models.result import Ko, Ok, Result
 
 if TYPE_CHECKING:
@@ -32,10 +33,15 @@ class DurablePromise:
     @property
     def result(self) -> Result:
         assert self.completed, "Promise must be completed"
-        if self.resolved:
-            return Ok(self.value.data)
 
-        return Ko(self.value.data)
+        if self.rejected:
+            return Ko(self.value.data)
+        if self.canceled:
+            return Ko(ResonateCanceledError(self.id))
+        if self.timedout:
+            return Ko(ResonateTimedoutError(self.id, self.abs_timeout))
+
+        return Ok(self.value.data)
 
     @property
     def pending(self) -> bool:

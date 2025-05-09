@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from resonate.conventions import Base
 from resonate.coroutine import AWT, LFI, RFI, TRM, Coroutine
-from resonate.errors.errors import ResonateShutdownError
 from resonate.graph import Graph, Node
 from resonate.logging import logger
 from resonate.models.clock import Clock
@@ -35,7 +34,6 @@ from resonate.models.commands import (
     Resume,
     Retry,
     Return,
-    Shutdown,
 )
 from resonate.models.result import Ko, Ok, Result
 
@@ -43,6 +41,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from concurrent.futures import Future
 
+    from resonate.errors import ResonateShutdownError
     from resonate.models.context import Context
     from resonate.models.convention import Convention
     from resonate.models.durable_promise import DurablePromise
@@ -75,15 +74,6 @@ class Scheduler:
         return f"Scheduler(pid={self.pid}, computations={list(self.computations.values())})"
 
     def step(self, cmd: Command, future: Future | None = None) -> More | Done:
-        if isinstance(cmd, Shutdown):
-            # reject all the futures for all the computations
-            for computation in self.computations.values():
-                while future := computation.futures.spop():
-                    if not future.done():
-                        future.set_exception(ResonateShutdownError(cmd.err))
-
-            return Done([])
-
         computation = self.computations.setdefault(cmd.cid, Computation(cmd.cid, self.ctx, self.pid, self.unicast, self.anycast))
 
         # subscribe
@@ -95,6 +85,13 @@ class Scheduler:
 
         # eval
         return computation.eval()
+
+    def shutdown(self, e: ResonateShutdownError) -> None:
+        # reject all futures for all computations
+        for computation in self.computations.values():
+            while future := computation.futures.spop():
+                assert not future.done()
+                future.set_exception(e)
 
 
 class Info:
@@ -682,6 +679,7 @@ class Computation:
 
         if result := self.result():
             while future := self.futures.spop():
+                assert not future.done()
                 match result:
                     case Ok(v):
                         future.set_result(v)
