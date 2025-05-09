@@ -10,7 +10,7 @@ from resonate.dependencies import Dependencies
 from resonate.models.commands import Invoke, Listen
 from resonate.options import Options
 from resonate.registry import Registry
-from sim.simulator import Server, Simulator, Worker
+from resonate.simulator import Server, Simulator, Worker
 
 if TYPE_CHECKING:
     from collections.abc import Generator
