@@ -166,17 +166,22 @@ class Bridge:
             self._delay_thread.start()
 
     def stop(self) -> None:
-        self._message_src.stop()
-        self._cq.put_nowait(None)
-        self._mq.put_nowait(None)
-        self._heartbeat_active.clear()
-        self._shutdown.set()
+        """Stop internal components and threads. Intended for use only within the resonate class."""
+        self._stop_no_join()
         if self._bridge_thread.is_alive():
             self._bridge_thread.join()
         if self._messages_thread.is_alive():
             self._messages_thread.join()
         if self._heartbeat_thread.is_alive():
             self._heartbeat_thread.join()
+
+    def _stop_no_join(self) -> None:
+        """Stop internal components and threads. Does not join the threads, to be able to call it from the bridge itself."""
+        self._message_src.stop()
+        self._cq.put_nowait(None)
+        self._mq.put_nowait(None)
+        self._heartbeat_active.clear()
+        self._shutdown.set()
 
     @exit_on_exception
     def _process_cq(self) -> None:
@@ -206,6 +211,7 @@ class Bridge:
 
                                     # bypass the cq and shutdown right away
                                     self._scheduler.shutdown(err)
+                                    self._stop_no_join()
                                     return
 
                             case Function(id, cid, func):
