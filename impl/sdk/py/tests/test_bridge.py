@@ -177,6 +177,19 @@ def child_unbounded(ctx: Context, parent_timeout_rel: int, child_timeout_rel: in
         assert pytest.approx(ctx.info.timeout) == parent_timeout_abs
 
 
+def wkflw(ctx: Context, durable: bool) -> Generator[Yieldable, Any, None]:
+    yield ctx.lfc(failure_fn).options(timeout=1, retry_policy=Constant(delay=10, max_retries=1_000_000), durable=durable)
+
+
+def failure_fn(ctx: Context) -> None:
+    raise RuntimeError
+
+
+def failure_wkflw(ctx: Context) -> Generator[Yieldable, Any, None]:
+    yield ctx.lfc(add_one, 1)
+    raise RuntimeError
+
+
 @pytest.fixture(scope="module")
 def resonate_instance(store: Store, message_source: MessageSource) -> Generator[Resonate, None, None]:
     resonate = Resonate(store=store, message_source=message_source)
@@ -201,6 +214,8 @@ def resonate_instance(store: Store, message_source: MessageSource) -> Generator[
     resonate.register(child_bounded)
     resonate.register(unbound_detached)
     resonate.register(child_unbounded)
+    resonate.register(wkflw)
+    resonate.register(failure_wkflw)
     resonate.start()
     yield resonate
     resonate.stop()
@@ -208,6 +223,17 @@ def resonate_instance(store: Store, message_source: MessageSource) -> Generator[
     # this timeout is set to cover the timeout time of the test poller, you can
     # see where this is set in conftest.py
     time.sleep(3)
+
+
+@pytest.mark.parametrize("durable", [True, False])
+def test_fail_inmediatelly_fn(resonate_instance: Resonate, durable: bool) -> None:
+    with pytest.raises(RuntimeError):
+        resonate_instance.run(f"fail-inmediatelly-fn-{uuid.uuid4()}", wkflw, durable).result()
+
+
+def test_fail_inmediatelly_coro(resonate_instance: Resonate) -> None:
+    with pytest.raises(RuntimeError):
+        resonate_instance.options(timeout=1, retry_policy=Constant(delay=10, max_retries=1_000_000)).run(f"fail-inmediatelly-coro-{uuid.uuid4()}", failure_wkflw).result()
 
 
 @pytest.mark.parametrize("mode", ["rfc", "lfc"])
