@@ -3,7 +3,7 @@ package t_api
 import (
 	"encoding/json"
 
-	"github.com/golang-jwt/jwt"
+	"github.com/golang-jwt/jwt/v5"
 )
 
 var (
@@ -16,11 +16,8 @@ type Cursor[T any] struct {
 }
 
 type Claims[T any] struct {
+	jwt.RegisteredClaims
 	Next *T
-}
-
-func (c *Claims[T]) Valid() error {
-	return nil
 }
 
 func NewCursor[T any](tokenString string) (*Cursor[T], error) {
@@ -43,7 +40,7 @@ func (c *Cursor[T]) Encode() (string, error) {
 
 func (c *Cursor[T]) Decode(tokenString string) error {
 	claims := &Claims[T]{}
-	_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (interface{}, error) {
+	_, err := jwt.ParseWithClaims(tokenString, claims, func(*jwt.Token) (any, error) {
 		return secretKey, nil
 	})
 
