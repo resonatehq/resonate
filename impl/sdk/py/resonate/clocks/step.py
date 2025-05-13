@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 
 class StepClock:
     def __init__(self) -> None:
@@ -14,4 +16,4 @@ class StepClock:
         return self._time
 
     def strftime(self, format: str, /) -> str:
-        raise NotImplementedError
+        return time.strftime(format, time.gmtime(self._time))
