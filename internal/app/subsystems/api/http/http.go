@@ -9,6 +9,7 @@ import (
 
 	"log/slog"
 
+	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -21,8 +22,13 @@ import (
 type Config struct {
 	Addr          string            `flag:"addr" desc:"http server address" default:":8001"`
 	Auth          map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
+	Cors          Cors              `flag:"cors" desc:"http cors settings"`
 	Timeout       time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 	TaskFrequency time.Duration     `flag:"task-frequency" desc:"default task frequency" default:"1m"`
+}
+
+type Cors struct {
+	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
 }
 
 type Http struct {
@@ -50,6 +56,13 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 
 	// Middleware
 	handler.Use(server.log)
+
+	// CORS
+	if len(config.Cors.AllowOrigins) > 0 {
+		handler.Use(cors.New(cors.Config{
+			AllowOrigins: config.Cors.AllowOrigins,
+		}))
+	}
 
 	// Authentication
 	authorized := handler.Group("/")

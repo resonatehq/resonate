@@ -268,11 +268,11 @@ func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST
 
 // Helper functions
 
-func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix string) error {
+func bind(cmd *cobra.Command, cfg any, dst bool, fPrefix string, kPrefix string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
-	for i := 0; i < v.NumField(); i++ {
+	for i := range v.NumField() {
 		field := t.Field(i)
 		flag := field.Tag.Get("flag")
 		desc := field.Tag.Get("desc")
@@ -366,8 +366,19 @@ func bind(cmd *cobra.Command, cfg interface{}, dst bool, fPrefix string, kPrefix
 				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 			}
 		case reflect.Slice:
-			// TODO: support slice types
-			// for now, slice types may only be defined in the config file
+			// TODO: support additional slice types via flags
+			if field.Type != reflect.TypeOf([]string{}) {
+				continue
+			}
+
+			var v []string
+			if value == "" {
+				v = []string{}
+			} else {
+				v = []string{value}
+			}
+			cmd.Flags().StringArray(n, v, desc)
+			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
