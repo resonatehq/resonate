@@ -114,10 +114,16 @@ jobs:
 
   linearizability:
     runs-on: ubuntu-24.04
-    needs: [lint, test, build]
+    needs: [build]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Check out durable-promise-test-harness repository
+        uses: actions/checkout@v4
+        with:
+          repository: resonatehq/durable-promise-test-harness
+          path: durable-promise-test-harness
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -128,6 +134,10 @@ jobs:
       - name: Build resonate
         run: |
           go build -o resonate main.go
+
+      - name: Build durable-promise-test-harness
+        run: |
+          go build -o resonate durable-promise-test-harness/main.go
 
       - name: Run resonate server
         run: |
