@@ -738,46 +738,37 @@ class Computation:
             case Enabled(Running(Lfnc(id=id, func=func, args=args, kwargs=kwargs, opts=opts, attempt=attempt, ctx=ctx, result=result, suspends=suspends, timeout=timeout) as f)):
                 assert id == node.id, "Id must match node id."
 
-                match result, f.retry_policy.next(attempt), opts.durable:
+                match result, opts.durable, f.retry_policy.next(attempt):
                     case None, _, _:
                         node.transition(Blocked(Running(f)))
                         return [
                             Function(id, self.id, lambda: func(ctx, *args, **kwargs)),
                         ]
-                    case Ok(v), _, True:
+                    case Ok(v), True, _:
                         node.transition(Blocked(Running(f)))
                         return [
                             Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                         ]
-                    case Ok(), _, False:
+                    case Ok(), False, _:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
-                    case Ko(e), delay, True if delay is None or time.time() + delay > timeout:
+                    case Ko(e), True, d if d is None or time.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                         node.transition(Blocked(Running(f)))
                         return [
                             Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
                         ]
-                    case Ko(), delay, False if delay is None or time.time() + delay > timeout:
+                    case Ko(e), False, d if d is None or time.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                         node.transition(Enabled(Completed(f.map(result=result))))
                         self._unblock(suspends, result)
                         return []
-                    case Ko(e), _, True if type(e) in opts.non_retryable_exceptions:
-                        node.transition(Blocked(Running(f)))
-                        return [
-                            Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
-                        ]
-                    case Ko(e), _, False if type(e) in opts.non_retryable_exceptions:
-                        node.transition(Enabled(Completed(f.map(result=result))))
-                        self._unblock(suspends, result)
-                        return []
-                    case Ko(), delay, _ if delay is not None:
+                    case Ko(), _, d:
+                        assert d is not None, "Delay must be set."
+
                         node.transition(Blocked(Running(f.map(attempt=attempt + 1))))
                         return [
-                            Delayed(Function(id, self.id, lambda: func(ctx, *args, **kwargs)), delay),
+                            Delayed(Function(id, self.id, lambda: func(ctx, *args, **kwargs)), d),
                         ]
-                    case _:
-                        raise NotImplementedError
 
             case Enabled(Running(Coro(id=id, coro=coro, next=next, opts=opts, attempt=attempt, ctx=parent_ctx, timeout=timeout) as c)):
                 cmd = coro.send(next)
@@ -852,41 +843,33 @@ class Computation:
                     case TRM(id, result), _:
                         assert id == node.id, "Id must match node id."
 
-                        match result, c.retry_policy.next(attempt), opts.durable:
-                            case Ok(v), _, True:
+                        match result, opts.durable, c.retry_policy.next(attempt):
+                            case Ok(v), True, _:
                                 node.transition(Blocked(Running(c)))
                                 return [
                                     Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, data=v)),
                                 ]
-                            case Ok(), _, False:
+                            case Ok(), False, _:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
-                            case Ko(e), delay, True if delay is None or time.time() + delay > timeout:
+                            case Ko(e), True, d if d is None or time.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                                 node.transition(Blocked(Running(c)))
                                 return [
                                     Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
                                 ]
-                            case Ko(), delay, False if delay is None or time.time() + delay > timeout:
+                            case Ko(e), False, d if d is None or time.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
-                            case Ko(e), _, True if type(e) in opts.non_retryable_exceptions:
-                                node.transition(Blocked(Running(c)))
-                                return [
-                                    Network(id, self.id, RejectPromiseReq(id=id, ikey=id, data=e)),
-                                ]
-                            case Ko(e), _, False if type(e) in opts.non_retryable_exceptions:
-                                node.transition(Enabled(Completed(c.map(result=result))))
-                                self._unblock(c.suspends, result)
-                                return []
-                            case Ko(), delay, _ if delay is not None:
+                            case Ko(), _, d:
+                                assert d is not None, "Delay must be set."
+
                                 node.transition(Blocked(Running(c.map(attempt=attempt + 1))))
                                 return [
-                                    Delayed(Retry(id, self.id), delay),
+                                    Delayed(Retry(id, self.id), d),
                                 ]
-                            case _:
-                                raise NotImplementedError
+
                     case _:
                         raise NotImplementedError
 
