@@ -137,7 +137,7 @@ jobs:
 
       - name: Build durable-promise-test-harness
         run: |
-          go build -o resonate durable-promise-test-harness/main.go
+          go build -o durable-promise-test-harness durable-promise-test-harness/main.go
 
       - name: Run resonate server
         run: |
