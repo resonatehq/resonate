@@ -25,7 +25,12 @@ type Config struct {
 	BufferSize     int           `flag:"buffer-size" desc:"connection buffer size" default:"100"`
 	MaxConnections int           `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
 	Addr           string        `flag:"addr" desc:"http server address" default:":8002"`
+	Cors           Cors          `flag:"cors" desc:"http cors settings"`
 	Timeout        time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+}
+
+type Cors struct {
+	AllowOrigins []string `flag:"allow-origin" desc:"allowed origins, if not provided cors is not enabled"`
 }
 
 type Poll struct {
@@ -385,6 +390,23 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	// cors headers
+	if len(h.config.Cors.AllowOrigins) > 0 {
+		if len(h.config.Cors.AllowOrigins) == 1 && h.config.Cors.AllowOrigins[0] == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else {
+			// according to the CORS spec the allow origin header must return only the
+			// request origin header if it is in the allow list
+			for _, origin := range h.config.Cors.AllowOrigins {
+				if strings.EqualFold(origin, r.Header.Get("Origin")) {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					break
+				}
+			}
+		}
+	}
+
 	f.Flush()
 
 	for {
