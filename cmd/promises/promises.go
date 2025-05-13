@@ -52,7 +52,7 @@ func NewCmd() *cobra.Command {
 func prettyPrintPromises(cmd *cobra.Command, promises ...v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	formatted := func(row ...any) {
-		fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", row...)
+		_, _ = fmt.Fprintf(w, "%v\t%v\t%v\t%v\n", row...)
 	}
 
 	formatted(
@@ -71,47 +71,47 @@ func prettyPrintPromises(cmd *cobra.Command, promises ...v1.Promise) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func prettyPrintPromise(cmd *cobra.Command, promise *v1.Promise) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
-	fmt.Fprintf(w, "Id:\t%v\n", promise.Id)
-	fmt.Fprintf(w, "State:\t%s\n", promise.State)
-	fmt.Fprintf(w, "Timeout:\t%d\n", promise.Timeout)
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "Id:\t%v\n", promise.Id)
+	_, _ = fmt.Fprintf(w, "State:\t%s\n", promise.State)
+	_, _ = fmt.Fprintf(w, "Timeout:\t%d\n", promise.Timeout)
+	_, _ = fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Idempotency Key (create):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForCreate))
-	fmt.Fprintf(w, "Idempotency Key (complete):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForComplete))
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "Idempotency Key (create):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForCreate))
+	_, _ = fmt.Fprintf(w, "Idempotency Key (complete):\t%s\n", util.SafeDeref(promise.IdempotencyKeyForComplete))
+	_, _ = fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Param:\n")
-	fmt.Fprintf(w, "\tHeaders:\n")
+	_, _ = fmt.Fprintf(w, "Param:\n")
+	_, _ = fmt.Fprintf(w, "\tHeaders:\n")
 	for _, tag := range util.PrettyHeaders(util.SafeDeref(promise.Param.Headers), ":\t") {
-		fmt.Fprintf(w, "\t\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
-	fmt.Fprintf(w, "\tData:\n")
+	_, _ = fmt.Fprintf(w, "\tData:\n")
 	if promise.Param.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Param.Data)))
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Param.Data)))
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Value:\n")
-	fmt.Fprintf(w, "\tHeaders:\n")
+	_, _ = fmt.Fprintf(w, "Value:\n")
+	_, _ = fmt.Fprintf(w, "\tHeaders:\n")
 	for _, tag := range util.PrettyHeaders(util.SafeDeref(promise.Value.Headers), ":\t") {
-		fmt.Fprintf(w, "\t\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
-	fmt.Fprintf(w, "\tData:\n")
+	_, _ = fmt.Fprintf(w, "\tData:\n")
 	if promise.Value.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Value.Data)))
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(promise.Value.Data)))
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Tags:\n")
+	_, _ = fmt.Fprintf(w, "Tags:\n")
 	for _, tag := range util.PrettyHeaders(promise.Tags, ":\t") {
-		fmt.Fprintf(w, "\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t%s\n", tag)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }

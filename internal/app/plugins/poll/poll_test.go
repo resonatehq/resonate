@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/stretchr/testify/assert"
 )
@@ -241,7 +242,7 @@ func TestPollPlugin(t *testing.T) {
 				disconnected.Add(1)
 
 				reader := bufio.NewReader(res.Body)
-				defer res.Body.Close()
+				defer util.DeferAndLog(res.Body.Close)
 
 				go func() {
 					defer disconnected.Done()

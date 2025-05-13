@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"reflect"
 	"sort"
 	"strings"
@@ -123,4 +124,10 @@ func RemoveWhitespace(s string) string {
 		}
 		return r
 	}, s)
+}
+
+func DeferAndLog(f func() error) {
+	if err := f(); err != nil {
+		slog.Warn("defer failed", "err", err)
+	}
 }

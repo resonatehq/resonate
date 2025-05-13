@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 // scaffold orchestrates the setup of the project from source to destination.
@@ -36,7 +38,7 @@ func setup(url, dest string) error {
 	if err := download(url, tmp); err != nil {
 		return err
 	}
-	defer os.Remove(tmp)
+	defer util.DeferAndLog(func() error {return os.Remove(tmp)})
 
 	if err := unzip(tmp, dest); err != nil {
 		return err
@@ -51,7 +53,7 @@ func download(url, file string) error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer util.DeferAndLog(res.Body.Close)
 
 	if err := checkstatus(res); err != nil {
 		return err
@@ -61,7 +63,7 @@ func download(url, file string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer util.DeferAndLog(out.Close)
 
 	_, err = io.Copy(out, res.Body)
 	return err
@@ -82,7 +84,7 @@ func unzip(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer util.DeferAndLog(r.Close)
 
 	root, err := extract(r, dest)
 	if err != nil {
@@ -143,13 +145,13 @@ func write(f *zip.File, path string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer util.DeferAndLog(out.Close)
 
 	rc, err := f.Open()
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer util.DeferAndLog(rc.Close)
 
 	_, err = io.Copy(out, rc)
 	return err

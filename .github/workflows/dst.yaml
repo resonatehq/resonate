@@ -23,23 +23,25 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Restore resonate binary from cache
-        uses: actions/cache/restore@v4
-        id: cache  # Unique identifier to reference the cache step's output
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          path: resonate  # Path to the binary you want to cache
+          go-version-file: go.mod
+          cache: false
+
+      - name: Restore resonate from cache
+        uses: actions/cache/restore@v4
+        id: cache
+        with:
+          path: resonate
           key: resonate-${{ github.sha }}  # Cache key tied to the commit SHA
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
-
-      - name: Build resonate binary
+      - name: Build resonate
         if: steps.cache.outputs.cache-hit != 'true'  # Only run if cache missed
         run: |
-          nix build ".#resonate"
-          cp ./result/bin/resonate resonate
+          go build -o resonate main.go
 
-      - name: Save resonate binary to cache
+      - name: Save resonate to cache
         if: steps.cache.outputs.cache-hit != 'true'  # Only save if cache was missed
         uses: actions/cache/save@v4
         with:
@@ -97,7 +99,7 @@ jobs:
           - 5432:5432
 
     steps:
-      - name: Restore resonate binary
+      - name: Restore resonate
         uses: actions/cache/restore@v4
         with:
           path: resonate
@@ -159,7 +161,7 @@ jobs:
             logs2: postgres-1-logs
 
     steps:
-      - name: Restore resonate binary
+      - name: Restore resonate
         uses: actions/cache/restore@v4
         with:
           path: resonate

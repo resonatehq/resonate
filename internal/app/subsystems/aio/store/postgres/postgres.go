@@ -623,7 +623,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer promiseInsertStmt.Close()
+					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
 
 				util.Assert(command.CreatePromise != nil, "command must not be nil")
@@ -634,7 +634,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer promiseUpdateStmt.Close()
+					defer util.DeferAndLog(promiseUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
@@ -647,7 +647,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer callbackInsertStmt.Close()
+					defer util.DeferAndLog(callbackInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateCallback != nil, "command must not be nil")
@@ -658,7 +658,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer callbackDeleteStmt.Close()
+					defer util.DeferAndLog(callbackDeleteStmt.Close)
 				}
 
 				util.Assert(command.DeleteCallbacks != nil, "command must not be nil")
@@ -680,7 +680,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer scheduleInsertStmt.Close()
+					defer util.DeferAndLog(scheduleInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateSchedule != nil, "command must not be nil")
@@ -691,7 +691,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer scheduleUpdateStmt.Close()
+					defer util.DeferAndLog(scheduleUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
@@ -702,7 +702,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer scheduleDeleteStmt.Close()
+					defer util.DeferAndLog(scheduleDeleteStmt.Close)
 				}
 
 				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
@@ -718,7 +718,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer lockAcquireStmt.Close()
+					defer util.DeferAndLog(lockAcquireStmt.Close)
 				}
 
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
@@ -729,7 +729,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer lockReleaseStmt.Close()
+					defer util.DeferAndLog(lockReleaseStmt.Close)
 				}
 
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
@@ -740,7 +740,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer lockHeartbeatStmt.Close()
+					defer util.DeferAndLog(lockHeartbeatStmt.Close)
 				}
 
 				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
@@ -751,7 +751,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer lockTimeoutStmt.Close()
+					defer util.DeferAndLog(lockTimeoutStmt.Close)
 				}
 
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
@@ -773,7 +773,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer taskInsertStmt.Close()
+					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateTask != nil, "command must not be nil")
@@ -784,7 +784,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer tasksInsertStmt.Close()
+					defer util.DeferAndLog(tasksInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateTasks != nil, "command must not be nil")
@@ -795,7 +795,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer taskUpdateStmt.Close()
+					defer util.DeferAndLog(taskUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
@@ -806,7 +806,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer tasksCompleteStmt.Close()
+					defer util.DeferAndLog(tasksCompleteStmt.Close)
 				}
 
 				util.Assert(command.CompleteTasks != nil, "command must not be nil")
@@ -817,7 +817,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer taskHeartbeatStmt.Close()
+					defer util.DeferAndLog(taskHeartbeatStmt.Close)
 				}
 
 				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
@@ -829,7 +829,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer promiseInsertStmt.Close()
+					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
 
 				if taskInsertStmt == nil {
@@ -837,7 +837,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 					if err != nil {
 						return nil, err
 					}
-					defer taskInsertStmt.Close()
+					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
 
 				util.Assert(command.CreatePromiseAndTask != nil, "createPromiseAndTask command must bot be nil")
@@ -905,7 +905,7 @@ func (w *PostgresStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCo
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
@@ -985,7 +985,7 @@ func (w *PostgresStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromis
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
@@ -1213,7 +1213,7 @@ func (w *PostgresStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedules
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*schedule.ScheduleRecord
@@ -1270,7 +1270,7 @@ func (w *PostgresStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSched
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*schedule.ScheduleRecord
@@ -1562,7 +1562,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*task.TaskRecord
@@ -1605,7 +1605,7 @@ func (w *PostgresStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEn
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
-	defer rows.Close()
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*task.TaskRecord

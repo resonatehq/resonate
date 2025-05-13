@@ -20,7 +20,7 @@ type ResponseValidator func(*Model, int64, int64, *t_api.Request, *t_api.Respons
 
 func NewValidator(r *rand.Rand, config *Config) *Validator {
 	regexes := map[string]*regexp.Regexp{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		regexes[fmt.Sprintf("p*%d", i)] = regexp.MustCompile(fmt.Sprintf("^p.*%d$", i))
 		regexes[fmt.Sprintf("p%d*", i)] = regexp.MustCompile(fmt.Sprintf("^p%d.*$", i))
 		regexes[fmt.Sprintf("s*%d", i)] = regexp.MustCompile(fmt.Sprintf("^s.*%d$", i))
@@ -246,7 +246,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", req.CompletePromise.Id)
 		}
-		if p.State != promise.Resolved && !(p.State == promise.Pending && p.Tags["resonate:timeout"] == "true" && resTime >= p.Timeout) {
+		if p.State != promise.Resolved && (p.State != promise.Pending || p.Tags["resonate:timeout"] != "true" || resTime < p.Timeout) {
 			return model, fmt.Errorf("promise '%s' not resolved", req.CompletePromise.Id)
 		}
 		return model, nil
@@ -270,7 +270,7 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", req.CompletePromise.Id)
 		}
-		if p.State != promise.Timedout && !(p.State == promise.Pending && p.Tags["resonate:timeout"] != "true" && resTime >= p.Timeout) {
+		if p.State != promise.Timedout && (p.State != promise.Pending || p.Tags["resonate:timeout"] == "true" || resTime < p.Timeout) {
 			return model, fmt.Errorf("promise '%s' not timedout", req.CompletePromise.Id)
 		}
 		return model, nil

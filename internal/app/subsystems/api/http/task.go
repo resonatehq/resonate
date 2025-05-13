@@ -37,7 +37,7 @@ func (s *server) claimTask(c *gin.Context) {
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
 		if err != nil {
-			err := api.RequestValidationError(errors.New("The field counter must be a number."))
+			err := api.RequestValidationError(errors.New("he field counter must be a number"))
 			c.JSON(s.code(err.Code), gin.H{"error": err})
 			return
 		}
@@ -126,7 +126,7 @@ func (s *server) completeTask(c *gin.Context) {
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
 		if err != nil {
-			err := api.RequestValidationError(errors.New("The field counter must be a number."))
+			err := api.RequestValidationError(errors.New("the field counter must be a number"))
 			c.JSON(s.code(err.Code), gin.H{"error": err})
 			return
 		}
@@ -185,7 +185,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 	if c.Request.Method == "GET" {
 		counter, err := strconv.Atoi(c.Param("counter"))
 		if err != nil {
-			err := api.RequestValidationError(errors.New("The field counter must be a number."))
+			err := api.RequestValidationError(errors.New("the field counter must be a number"))
 			c.JSON(s.code(err.Code), gin.H{"error": err})
 			return
 		}

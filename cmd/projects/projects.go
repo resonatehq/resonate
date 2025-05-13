@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +42,7 @@ func GetProjects() (Projects, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer util.DeferAndLog(res.Body.Close)
 
 	if err := checkstatus(res); err != nil {
 		return nil, err

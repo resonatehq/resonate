@@ -63,7 +63,7 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 		p := model.promises.get(req.bc.Task.RootPromiseId)
 
 		if stored != nil && stored.RootPromiseId != reqT.RootPromiseId {
-			return model, fmt.Errorf("Same task with different rootpromiseId: '%s'", req.bc.Task.Id)
+			return model, fmt.Errorf("same task with different rootpromiseId: '%s'", req.bc.Task.Id)
 		}
 
 		if stored != nil && stored.State.In(task.Completed|task.Timedout) {
@@ -79,7 +79,7 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 		if p != nil &&
 			p.State != promise.Pending {
 			if reqT.Mesg.Type == message.Invoke && *p.CompletedOn <= *reqT.CreatedOn {
-				return model, fmt.Errorf("Invocation for a promise that is alredy completed.")
+				return model, fmt.Errorf("invocation for a promise that is alredy completed")
 			} else if *p.CompletedOn > *reqT.CreatedOn {
 				state = task.Completed
 				completedOn = util.ToPointer(*p.CompletedOn)
@@ -94,7 +94,7 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 			}
 			if !t.value.State.In(task.Completed|task.Timedout) &&
 				t.value.Timeout > reqTime {
-				return model, fmt.Errorf("Multiple tasks with same rootpromiseId '%s' active at the same time.", req.bc.Task.RootPromiseId)
+				return model, fmt.Errorf("multiple tasks with same rootpromiseId '%s' active at the same time", req.bc.Task.RootPromiseId)
 			}
 		}
 
