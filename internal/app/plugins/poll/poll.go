@@ -396,6 +396,8 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if len(h.config.Cors.AllowOrigins) == 1 && h.config.Cors.AllowOrigins[0] == "*" {
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 		} else {
+			// according to the CORS spec the allow origin header must return only the
+			// request origin header if it is in the allow list
 			for _, origin := range h.config.Cors.AllowOrigins {
 				if strings.EqualFold(origin, r.Header.Get("Origin")) {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
