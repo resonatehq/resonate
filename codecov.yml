@@ -3,6 +3,3 @@ ignore:
   - "pkg/client"
   - "*.pb.go"
   - "test/*"
-  - "**/*.nix"
-  - "flake.lock"
-  - "gomod2nix.toml"
