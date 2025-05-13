@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
 )
 
@@ -113,6 +114,7 @@ func parseLogs(filename string, head int, tail int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	defer util.DeferAndLog(file.Close)
 
 	var result strings.Builder
 
@@ -143,10 +145,6 @@ func parseLogs(filename string, head int, tail int) (string, error) {
 		}
 	}
 
-	if err := file.Close(); err != nil {
-		return "", err
-	}
-
 	return result.String(), nil
 }
 
@@ -175,11 +173,12 @@ func createGitHubIssue(repo string, token string, issue *Issue) error {
 	if err != nil {
 		return err
 	}
+	defer util.DeferAndLog(res.Body.Close)
 
 	// Check the response status
 	if res.StatusCode != netHttp.StatusCreated {
 		return fmt.Errorf("failed to create GitHub issue, status code: %d", res.StatusCode)
 	}
 
-	return res.Body.Close()
+	return nil
 }

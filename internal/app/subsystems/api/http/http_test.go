@@ -10,6 +10,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -110,13 +111,10 @@ func TestHttp(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					defer util.DeferAndLog(res.Body.Close)
 
 					body, err := io.ReadAll(res.Body)
 					if err != nil {
-						t.Fatal(err)
-					}
-
-					if err := res.Body.Close(); err != nil {
 						t.Fatal(err)
 					}
 

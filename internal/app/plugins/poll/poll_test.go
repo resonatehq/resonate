@@ -13,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/stretchr/testify/assert"
 )
@@ -238,8 +239,10 @@ func TestPollPlugin(t *testing.T) {
 					continue
 				}
 
-				reader := bufio.NewReader(res.Body)
 				disconnected.Add(1)
+
+				reader := bufio.NewReader(res.Body)
+				defer util.DeferAndLog(res.Body.Close)
 
 				go func() {
 					defer disconnected.Done()
@@ -248,7 +251,6 @@ func TestPollPlugin(t *testing.T) {
 						// read each SSE message
 						data, err := reader.ReadBytes('\n')
 						if err == io.EOF {
-							_ = res.Body.Close()
 							return
 						} else if err != nil {
 							// panic because we are in a goroutine

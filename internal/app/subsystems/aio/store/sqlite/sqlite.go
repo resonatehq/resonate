@@ -577,6 +577,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
 
 				util.Assert(command.CreatePromise != nil, "command must not be nil")
@@ -587,6 +588,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(promiseUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdatePromise != nil, "command must not be nil")
@@ -599,6 +601,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(callbackInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateCallback != nil, "command must not be nil")
@@ -609,6 +612,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(callbackDeleteStmt.Close)
 				}
 
 				util.Assert(command.DeleteCallbacks != nil, "command must not be nil")
@@ -630,6 +634,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(scheduleInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateSchedule != nil, "command must not be nil")
@@ -640,6 +645,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(scheduleUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
@@ -650,6 +656,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(scheduleDeleteStmt.Close)
 				}
 
 				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
@@ -665,6 +672,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(lockAcquireStmt.Close)
 				}
 
 				util.Assert(command.AcquireLock != nil, "command must not be nil")
@@ -675,6 +683,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(lockReleaseStmt.Close)
 				}
 
 				util.Assert(command.ReleaseLock != nil, "command must not be nil")
@@ -685,6 +694,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(lockHeartbeatStmt.Close)
 				}
 
 				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
@@ -695,6 +705,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(lockTimeoutStmt.Close)
 				}
 
 				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
@@ -716,6 +727,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateTask != nil, "command must not be nil")
@@ -726,6 +738,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(tasksInsertStmt.Close)
 				}
 
 				util.Assert(command.CreateTasks != nil, "command must not be nil")
@@ -736,6 +749,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(tasksCompleteStmt.Close)
 				}
 
 				util.Assert(command.CompleteTasks != nil, "command must not be nil")
@@ -746,6 +760,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(taskUpdateStmt.Close)
 				}
 
 				util.Assert(command.UpdateTask != nil, "command must not be nil")
@@ -756,6 +771,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(taskHeartbeatStmt.Close)
 				}
 
 				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
@@ -766,12 +782,14 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
+					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
 
 				util.Assert(command.CreatePromiseAndTask != nil, "createPromiseAndTask command must bot be nil")
@@ -784,87 +802,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 			if err != nil {
 				return nil, err
 			}
-		}
-	}
-
-	if promiseInsertStmt != nil {
-		if err := promiseInsertStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if promiseUpdateStmt != nil {
-		if err := promiseUpdateStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if callbackInsertStmt != nil {
-		if err := callbackInsertStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if callbackDeleteStmt != nil {
-		if err := callbackDeleteStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if scheduleInsertStmt != nil {
-		if err := scheduleInsertStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if scheduleUpdateStmt != nil {
-		if err := scheduleUpdateStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if scheduleDeleteStmt != nil {
-		if err := scheduleDeleteStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if lockAcquireStmt != nil {
-		if err := lockAcquireStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if lockReleaseStmt != nil {
-		if err := lockReleaseStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if lockHeartbeatStmt != nil {
-		if err := lockHeartbeatStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if lockTimeoutStmt != nil {
-		if err := lockTimeoutStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if tasksInsertStmt != nil {
-		if err := tasksInsertStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if taskInsertStmt != nil {
-		if err := taskInsertStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if taskUpdateStmt != nil {
-		if err := taskUpdateStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if tasksCompleteStmt != nil {
-		if err := tasksCompleteStmt.Close(); err != nil {
-			return nil, err
-		}
-	}
-	if taskHeartbeatStmt != nil {
-		if err := taskHeartbeatStmt.Close(); err != nil {
-			return nil, err
 		}
 	}
 
@@ -920,6 +857,7 @@ func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesComm
 	if err != nil {
 		return nil, err
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
@@ -948,10 +886,6 @@ func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesComm
 		records = append(records, record)
 		lastSortId = record.SortId
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
@@ -1008,6 +942,7 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 	if err != nil {
 		return nil, err
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*promise.PromiseRecord
@@ -1036,10 +971,6 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 		records = append(records, record)
 		lastSortId = record.SortId
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
@@ -1252,6 +1183,7 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 	if err != nil {
 		return nil, err
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*schedule.ScheduleRecord
@@ -1274,10 +1206,6 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 
 		records = append(records, record)
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
@@ -1324,6 +1252,7 @@ func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedul
 	if err != nil {
 		return nil, err
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*schedule.ScheduleRecord
@@ -1347,10 +1276,6 @@ func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedul
 		records = append(records, record)
 		lastSortId = record.SortId
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
@@ -1619,6 +1544,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*task.TaskRecord
@@ -1645,10 +1571,6 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 
 		records = append(records, record)
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
@@ -1665,6 +1587,7 @@ func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqu
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}
+	defer util.DeferAndLog(rows.Close)
 
 	rowsReturned := int64(0)
 	var records []*task.TaskRecord
@@ -1691,10 +1614,6 @@ func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqu
 
 		records = append(records, record)
 		rowsReturned++
-	}
-
-	if err := rows.Close(); err != nil {
-		return nil, err
 	}
 
 	return &t_aio.Result{
