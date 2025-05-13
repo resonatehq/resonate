@@ -52,7 +52,7 @@ func NewCmd() *cobra.Command {
 func prettyPrintSchedules(cmd *cobra.Command, schedules ...v1.Schedule) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 	formatted := func(row ...any) {
-		fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\n", row...)
+		_, _ = fmt.Fprintf(w, "%v\t%v\t%v\t%v\t%v\n", row...)
 	}
 
 	formatted(
@@ -73,40 +73,40 @@ func prettyPrintSchedules(cmd *cobra.Command, schedules ...v1.Schedule) {
 		)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func prettyPrintSchedule(cmd *cobra.Command, schedule *v1.Schedule) {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 0, 2, ' ', 0)
 
-	fmt.Fprintf(w, "Id:\t%v\n", schedule.Id)
-	fmt.Fprintf(w, "Description:\t%s\n", schedule.Description)
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "Cron:\t%s\n", schedule.Cron)
-	fmt.Fprintf(w, "Last run time:\t%d\n", util.SafeDeref(schedule.LastRunTime))
-	fmt.Fprintf(w, "Next run time:\t%d\n", util.SafeDeref(schedule.NextRunTime))
-	fmt.Fprintf(w, "\n")
-	fmt.Fprintf(w, "Tags:\n")
+	_, _ = fmt.Fprintf(w, "Id:\t%v\n", schedule.Id)
+	_, _ = fmt.Fprintf(w, "Description:\t%s\n", schedule.Description)
+	_, _ = fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "Cron:\t%s\n", schedule.Cron)
+	_, _ = fmt.Fprintf(w, "Last run time:\t%d\n", util.SafeDeref(schedule.LastRunTime))
+	_, _ = fmt.Fprintf(w, "Next run time:\t%d\n", util.SafeDeref(schedule.NextRunTime))
+	_, _ = fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "Tags:\n")
 	for _, tag := range util.PrettyHeaders(schedule.Tags, ":\t") {
-		fmt.Fprintf(w, "\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t%s\n", tag)
 	}
-	fmt.Fprintf(w, "\n")
+	_, _ = fmt.Fprintf(w, "\n")
 
-	fmt.Fprintf(w, "Promise id:\t%s\n", schedule.PromiseId)
-	fmt.Fprintf(w, "Promise timeout:\t%d\n", schedule.PromiseTimeout)
-	fmt.Fprintf(w, "Promise param:\n")
-	fmt.Fprintf(w, "\tHeaders:\n")
+	_, _ = fmt.Fprintf(w, "Promise id:\t%s\n", schedule.PromiseId)
+	_, _ = fmt.Fprintf(w, "Promise timeout:\t%d\n", schedule.PromiseTimeout)
+	_, _ = fmt.Fprintf(w, "Promise param:\n")
+	_, _ = fmt.Fprintf(w, "\tHeaders:\n")
 	for _, tag := range util.PrettyHeaders(util.SafeDeref(schedule.PromiseParam.Headers), ":\t") {
-		fmt.Fprintf(w, "\t\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", tag)
 	}
-	fmt.Fprintf(w, "\tData:\n")
+	_, _ = fmt.Fprintf(w, "\tData:\n")
 	if schedule.PromiseParam.Data != nil {
-		fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(schedule.PromiseParam.Data)))
+		_, _ = fmt.Fprintf(w, "\t\t%s\n", util.PrettyData(util.SafeDeref(schedule.PromiseParam.Data)))
 	}
-	fmt.Fprintf(w, "Promise tags:\n")
+	_, _ = fmt.Fprintf(w, "Promise tags:\n")
 	for _, tag := range util.PrettyHeaders(schedule.PromiseTags, ":\t") {
-		fmt.Fprintf(w, "\t%s\n", tag)
+		_, _ = fmt.Fprintf(w, "\t%s\n", tag)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }

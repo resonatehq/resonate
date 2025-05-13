@@ -36,13 +36,12 @@ func setup(url, dest string) error {
 	if err := download(url, tmp); err != nil {
 		return err
 	}
-	defer os.Remove(tmp)
 
 	if err := unzip(tmp, dest); err != nil {
 		return err
 	}
 
-	return nil
+	return os.Remove(tmp)
 }
 
 // download fetches a file from the URL and stores it locally.
@@ -51,7 +50,6 @@ func download(url, file string) error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
 
 	if err := checkstatus(res); err != nil {
 		return err
@@ -61,10 +59,20 @@ func download(url, file string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, res.Body)
-	return err
+	if _, err := io.Copy(out, res.Body); err != nil {
+		return err
+	}
+
+	if err := res.Body.Close(); err != nil {
+		return err
+	}
+
+	if err := out.Close(); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // checkstatus verifies the HTTP response for a successful status.
@@ -82,7 +90,6 @@ func unzip(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
 
 	root, err := extract(r, dest)
 	if err != nil {
@@ -94,7 +101,7 @@ func unzip(src, dest string) error {
 		return restructure(path, dest)
 	}
 
-	return nil
+	return r.Close()
 }
 
 // extract unzips the contents and returns the root folder name.
@@ -143,13 +150,17 @@ func write(f *zip.File, path string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
 
 	rc, err := f.Open()
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	if err := rc.Close(); err != nil {
+		return err
+	}
 
 	_, err = io.Copy(out, rc)
 	return err

@@ -110,10 +110,13 @@ func TestHttp(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					defer res.Body.Close()
 
 					body, err := io.ReadAll(res.Body)
 					if err != nil {
+						t.Fatal(err)
+					}
+
+					if err := res.Body.Close(); err != nil {
 						t.Fatal(err)
 					}
 

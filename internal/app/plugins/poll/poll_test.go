@@ -238,10 +238,8 @@ func TestPollPlugin(t *testing.T) {
 					continue
 				}
 
-				disconnected.Add(1)
-
 				reader := bufio.NewReader(res.Body)
-				defer res.Body.Close()
+				disconnected.Add(1)
 
 				go func() {
 					defer disconnected.Done()
@@ -250,6 +248,7 @@ func TestPollPlugin(t *testing.T) {
 						// read each SSE message
 						data, err := reader.ReadBytes('\n')
 						if err == io.EOF {
+							_ = res.Body.Close()
 							return
 						} else if err != nil {
 							// panic because we are in a goroutine

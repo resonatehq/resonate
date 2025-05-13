@@ -86,7 +86,7 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 
 	// validate id
 	if id == "" {
-		return nil, RequestValidationError(errors.New("The field id is required."))
+		return nil, RequestValidationError(errors.New("the field id is required"))
 	}
 
 	// set states
@@ -115,7 +115,7 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 			promise.Canceled,
 		}
 	default:
-		return nil, RequestValidationError(errors.New("The field state must be one of pending, resolved, rejected."))
+		return nil, RequestValidationError(errors.New("the field state must be one of pending, resolved, rejected"))
 	}
 
 	// set default tags
@@ -130,7 +130,7 @@ func (a *API) SearchPromises(id string, state string, tags map[string]string, li
 
 	// validate limit
 	if limit < 1 || limit > 100 {
-		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))
+		return nil, RequestValidationError(errors.New("the field limit must be between 1 and 100"))
 	}
 
 	return &t_api.SearchPromisesRequest{
@@ -153,7 +153,7 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 
 	// validate id
 	if id == "" {
-		return nil, RequestValidationError(errors.New("The field id is required."))
+		return nil, RequestValidationError(errors.New("the field id is required"))
 	}
 
 	// set default tags
@@ -168,7 +168,7 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 
 	// validate limit
 	if limit < 1 || limit > 100 {
-		return nil, RequestValidationError(errors.New("The field limit must be between 1 and 100."))
+		return nil, RequestValidationError(errors.New("the field limit must be between 1 and 100"))
 	}
 
 	return &t_api.SearchSchedulesRequest{
@@ -180,7 +180,7 @@ func (a *API) SearchSchedules(id string, tags map[string]string, limit int, curs
 
 func (a *API) ValidateCron(cron string) *Error {
 	if _, err := util.ParseCron(cron); err != nil {
-		return RequestValidationError(errors.New("The field cron must be a valid cron expression."))
+		return RequestValidationError(errors.New("the field cron must be a valid cron expression"))
 	}
 
 	return nil

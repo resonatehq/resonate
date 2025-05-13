@@ -14,16 +14,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
 
-      - name: Build Resonate binary
+      - name: Build resonate
         run: |
-          # Build resonate binary
-          nix build ".#resonate"
-
-          # Copy into root
-          cp ./result/bin/resonate resonate
+          go build -o resonate main.go
 
       - name: Check version
         env:

@@ -241,7 +241,7 @@ func (s *server) completePromise(c *gin.Context) {
 	}
 
 	if !body.State.In(promise.Resolved | promise.Rejected | promise.Canceled) {
-		err := api.RequestValidationError(errors.New("The field state must be one of resolved, rejected, rejected_canceled."))
+		err := api.RequestValidationError(errors.New("the field state must be one of resolved, rejected, rejected_canceled"))
 		c.JSON(s.code(err.Code), gin.H{"error": err})
 		return
 	}

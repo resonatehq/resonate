@@ -41,7 +41,6 @@ func GetProjects() (Projects, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
 
 	if err := checkstatus(res); err != nil {
 		return nil, err
@@ -49,6 +48,10 @@ func GetProjects() (Projects, error) {
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := res.Body.Close(); err != nil {
 		return nil, err
 	}
 

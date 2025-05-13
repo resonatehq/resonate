@@ -4,7 +4,6 @@ about: Report a bug or unexpected behavior with Resonate
 title: ''
 labels: bug
 assignees: ''
-
 ---
 
 ## Expected Behavior
@@ -22,4 +21,4 @@ assignees: ''
   - Version:
   - Platform:
 
-## Additional context
+## Additional Context

@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  release-artifacts-nix:
+  release-artifacts:
     runs-on: ${{ matrix.systems.runner }}
     strategy:
       matrix:
@@ -35,23 +35,24 @@ jobs:
             arch: aarch64
             arch_grep: arm64
             runner: macos-14
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
 
-      - name: Build Resonate binary
+      - name: Build resonate
         run: |
           TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
           TARBALL_CHECKSUM="${TARBALL}.sha256"
 
-          # Build resonate binary
-          nix build ".#resonate"
-
-          # Copy into root
-          cp ./result/bin/resonate resonate
+          # Build resonate
+          go build -o resonate main.go
 
           # Verify binary
           file resonate | grep "${{ matrix.systems.arch_grep }}"

@@ -25,9 +25,6 @@ go.work
 # ignore goland files
 .idea
 
-# Nix artifacts
-result*
-
 # Resonate specific
 .env
 resonate

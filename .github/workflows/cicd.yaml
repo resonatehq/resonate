@@ -18,34 +18,16 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Check Nixpkgs input
-        uses: DeterminateSystems/flake-checker-action@v9
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
-
-      # basic check to verify that all Nix flake outputs are soundly typed
-      - name: Check flake
-        run: |
-          nix flake check \
-            --all-systems \
-            --no-build
-
-      # If running `gomod2nix` changes `gomod2nix.toml`, that means that the
-      # file is not up to date and the build needs to fail. If that happens,
-      # run `gomod2nix` inside the Nix development environment to regenerate
-      # that file and then commit the changes to Git.
-      - name: Ensure gomod2nix dependencies are up to date
-        run: |
-          nix develop --command gomod2nix
-          git diff --exit-code gomod2nix.toml
-
-      - name: Run golangci-lint
-        run: |
-          nix develop --command \
-            golangci-lint run \
-              --verbose \
-              --timeout=3m
+      - name: Rum golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1
 
   test:
     runs-on: ubuntu-24.04
@@ -81,13 +63,12 @@ jobs:
           go-version-file: go.mod
           cache: false
 
-      # Intentionally not using nix here as a workout around to the postgres dependency.
       - name: Run go test and generate coverage report
         run: |
           go test -v -coverprofile=coverage.out -coverpkg=./... ./...
 
       - name: Upload coverage report to Codecov
-        uses: codecov/codecov-action@v5 # nosemgrep
+        uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
@@ -98,22 +79,55 @@ jobs:
           name: dst-results
           path: test/dst/dst*.html
 
-  linearizability:
+  build:
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
 
-      - name: Build server and harness
+      - name: Build resonate
         run: |
-          nix build ".#resonate"
-          cp ./result/bin/resonate resonate
+          go build -o resonate main.go
 
-          nix build ".#durable-promise-test-harness"
-          cp ./result/bin/durable-promise-test-harness durable-promise-test-harness
+  scan:
+    runs-on: ubuntu-24.04
+    if: (github.actor != 'dependabot[bot]')
+    env:
+      SEMGREP_RULES: "auto semgrep.yml"
+
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run semgrep
+        run: |
+          semgrep ci
+
+  linearizability:
+    runs-on: ubuntu-24.04
+    needs: [lint, test, build]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Build resonate
+        run: |
+          go build -o resonate main.go
 
       - name: Run resonate server
         run: |
@@ -128,21 +142,3 @@ jobs:
         with:
           name: test-harness-results
           path: test/results/
-
-  scan:
-    runs-on: ubuntu-24.04
-    needs: [lint, test, linearizability]
-    env:
-      SEMGREP_RULES: "auto semgrep.yml"
-    if: (github.actor != 'dependabot[bot]')
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@v16
-
-      - name: semgrep
-        run: |
-          nix develop --command \
-            semgrep ci

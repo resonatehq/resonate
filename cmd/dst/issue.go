@@ -113,7 +113,6 @@ func parseLogs(filename string, head int, tail int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
 
 	var result strings.Builder
 
@@ -144,6 +143,10 @@ func parseLogs(filename string, head int, tail int) (string, error) {
 		}
 	}
 
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+
 	return result.String(), nil
 }
 
@@ -172,12 +175,11 @@ func createGitHubIssue(repo string, token string, issue *Issue) error {
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
 
 	// Check the response status
 	if res.StatusCode != netHttp.StatusCreated {
 		return fmt.Errorf("failed to create GitHub issue, status code: %d", res.StatusCode)
 	}
 
-	return nil
+	return res.Body.Close()
 }
