@@ -108,9 +108,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// callbacks
 	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
-	// subscription
-	d.Add(t_api.CreateSubscription, d.generator.GenerateCreateSubscription, d.validator.ValidateCreateSubscription)
-
 	// schedules
 	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
 	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)

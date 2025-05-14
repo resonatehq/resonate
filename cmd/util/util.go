@@ -18,14 +18,14 @@ func SafeDeref[T any](val *T) T {
 	return *val
 }
 
-func PrettyHeaders(headers map[string]string, seperator string) []string {
+func PrettyHeaders(headers map[string]string, separator string) []string {
 	if headers == nil {
 		return []string{}
 	}
 
 	result := []string{}
 	for _, header := range util.OrderedRangeKV(headers) {
-		result = append(result, fmt.Sprintf("%s%s%s", header.Key, seperator, header.Value))
+		result = append(result, fmt.Sprintf("%s%s%s", header.Key, separator, header.Value))
 	}
 
 	return result

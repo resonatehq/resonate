@@ -15,6 +15,8 @@ service Promises {
     rpc ResolvePromise(ResolvePromiseRequest) returns (ResolvePromiseResponse) {}
     rpc RejectPromise(RejectPromiseRequest) returns (RejectPromiseResponse) {}
     rpc CancelPromise(CancelPromiseRequest) returns (CancelPromiseResponse) {}
+    rpc CreateCallback (CreateCallbackRequest) returns (CreateCallbackResponse) {}
+    rpc CreateSubscription (CreateSubscriptionRequest) returns (CreateSubscriptionResponse) {}
 }
 
 message ReadPromiseRequest {
@@ -114,4 +116,32 @@ message CancelPromiseRequest {
 message CancelPromiseResponse {
     bool noop = 1;
     promise_t.Promise promise = 2;
+}
+
+message CreateCallbackRequest {
+    string promiseId = 1;
+    string rootPromiseId = 2;
+    int64 timeout = 3;
+    callback_t.Recv recv = 4;
+    string requestId = 5;
+}
+
+message CreateCallbackResponse {
+    bool noop = 1;
+    callback_t.Callback callback = 2;
+    promise_t.Promise promise = 3;
+}
+
+message CreateSubscriptionRequest {
+    string id = 1;
+    string promiseId = 2;
+    int64 timeout = 4;
+    callback_t.Recv recv = 5;
+    string requestId = 6;
+}
+
+message CreateSubscriptionResponse {
+    bool noop = 1;
+    callback_t.Callback callback = 2;
+    promise_t.Promise promise = 3;
 }

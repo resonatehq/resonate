@@ -1308,11 +1308,11 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
-				Id:            "foo.1",
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          []byte(`"foo"`),
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
@@ -1342,7 +1342,6 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
-				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1357,11 +1356,11 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
-				Id:            "foo.1",
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
@@ -1391,7 +1390,6 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
-				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1406,11 +1404,11 @@ var TestCases = []*testCase{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
 			CreateCallback: &t_api.CreateCallbackRequest{
-				Id:            "foo.1",
-				PromiseId:     "foo",
-				RootPromiseId: "bar",
-				Timeout:       1,
-				Recv:          []byte(`"foo"`),
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
@@ -1440,7 +1438,6 @@ var TestCases = []*testCase{
 		},
 		Grpc: &grpcTestCase{
 			Req: &pb.CreateCallbackRequest{
-				Id:            "foo.1",
 				PromiseId:     "foo",
 				RootPromiseId: "bar",
 				Timeout:       1,
@@ -1455,18 +1452,19 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateSubscription,
-			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateSubscription"},
-			CreateSubscription: &t_api.CreateSubscriptionRequest{
-				Id:        "foo.1",
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
-				Timeout:   1,
 				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateSubscription,
-			CreateSubscription: &t_api.CreateSubscriptionResponse{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
 				Status: t_api.StatusCreated,
 			},
 		},
@@ -1501,18 +1499,19 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateSubscription,
-			Tags: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateSubscription"},
-			CreateSubscription: &t_api.CreateSubscriptionRequest{
-				Id:        "foo.1",
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
-				Timeout:   1,
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateSubscription,
-			CreateSubscription: &t_api.CreateSubscriptionResponse{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
 				Status: t_api.StatusCreated,
 			},
 		},
@@ -1547,18 +1546,19 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFound",
 		Req: &t_api.Request{
-			Kind: t_api.CreateSubscription,
-			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateSubscription"},
-			CreateSubscription: &t_api.CreateSubscriptionRequest{
-				Id:        "foo.1",
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
-				Timeout:   1,
 				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateSubscription,
-			CreateSubscription: &t_api.CreateSubscriptionResponse{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},
 		},

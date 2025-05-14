@@ -38,7 +38,7 @@ func setup(url, dest string) error {
 	if err := download(url, tmp); err != nil {
 		return err
 	}
-	defer util.DeferAndLog(func() error {return os.Remove(tmp)})
+	defer util.DeferAndLog(func() error { return os.Remove(tmp) })
 
 	if err := unzip(tmp, dest); err != nil {
 		return err

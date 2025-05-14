@@ -301,15 +301,15 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
 
 		switch completion.Store.Results[0].Kind {
-			case t_aio.CreatePromiseAndTask:
-				promiseAndTaskResult := completion.Store.Results[0].CreatePromiseAndTask
-				util.Assert(promiseAndTaskResult.PromiseRowsAffected == 0 || promiseAndTaskResult.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
-				util.Assert(promiseAndTaskResult.TaskRowsAffected == promiseAndTaskResult.PromiseRowsAffected, "If not promise was created a task must have not been created")
-			case t_aio.CreatePromise:
-				createPromiseResult := completion.Store.Results[0].CreatePromise
-				util.Assert(createPromiseResult.RowsAffected == 0 || createPromiseResult.RowsAffected == 1, "CreatePromise result must return 0 or 1 rows")
-			default:
-				panic("First result must be CreatePromise or CreatePromiseAndTask")
+		case t_aio.CreatePromiseAndTask:
+			promiseAndTaskResult := completion.Store.Results[0].CreatePromiseAndTask
+			util.Assert(promiseAndTaskResult.PromiseRowsAffected == 0 || promiseAndTaskResult.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
+			util.Assert(promiseAndTaskResult.TaskRowsAffected == promiseAndTaskResult.PromiseRowsAffected, "If not promise was created a task must have not been created")
+		case t_aio.CreatePromise:
+			createPromiseResult := completion.Store.Results[0].CreatePromise
+			util.Assert(createPromiseResult.RowsAffected == 0 || createPromiseResult.RowsAffected == 1, "CreatePromise result must return 0 or 1 rows")
+		default:
+			panic("First result must be CreatePromise or CreatePromiseAndTask")
 		}
 
 		return completion, nil

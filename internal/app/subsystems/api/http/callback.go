@@ -2,11 +2,11 @@ package http
 
 import (
 	"encoding/json"
-
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Create
@@ -16,11 +16,10 @@ type createCallbackHeader struct {
 }
 
 type createCallbackBody struct {
-	Id            string          `json:"Id" binding:"required"`
 	PromiseId     string          `json:"promiseId" binding:"required"`
 	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
-	Timeout       int64           `json:"timeout"`
 	Recv          json.RawMessage `json:"recv" binding:"required"`
+	Timeout       int64           `json:"timeout"`
 }
 
 func (s *server) createCallback(c *gin.Context) {
@@ -41,11 +40,11 @@ func (s *server) createCallback(c *gin.Context) {
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
-			Id:            body.Id,
-			PromiseId:     body.PromiseId,
-			RootPromiseId: body.RootPromiseId,
-			Timeout:       body.Timeout,
-			Recv:          body.Recv,
+			Id:        s.api.CallbackId(body.RootPromiseId, body.PromiseId),
+			PromiseId: body.PromiseId,
+			Recv:      body.Recv,
+			Mesg:      &message.Mesg{Type: "resume", Root: body.RootPromiseId, Leaf: body.PromiseId},
+			Timeout:   body.Timeout,
 		},
 	})
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
+	"github.com/resonatehq/resonate/pkg/message"
 )
 
 // Create
@@ -17,8 +18,8 @@ type createSubscriptionHeader struct {
 type createSubscriptionBody struct {
 	Id        string          `json:"Id" binding:"required"`
 	PromiseId string          `json:"promiseId" binding:"required"`
-	Timeout   int64           `json:"timeout"`
 	Recv      json.RawMessage `json:"recv" binding:"required"`
+	Timeout   int64           `json:"timeout"`
 }
 
 func (s *server) createSubscription(c *gin.Context) {
@@ -37,12 +38,13 @@ func (s *server) createSubscription(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateSubscription,
-		CreateSubscription: &t_api.CreateSubscriptionRequest{
-			Id:        body.Id,
+		Kind: t_api.CreateCallback,
+		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:        s.api.SubscriptionId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,
-			Timeout:   body.Timeout,
 			Recv:      body.Recv,
+			Mesg:      &message.Mesg{Type: "notify", Root: body.PromiseId},
+			Timeout:   body.Timeout,
 		},
 	})
 	if err != nil {
@@ -50,9 +52,9 @@ func (s *server) createSubscription(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateSubscription != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateSubscription.Status), gin.H{
-		"callback": res.CreateSubscription.Callback,
-		"promise":  res.CreateSubscription.Promise,
+	util.Assert(res.CreateCallback != nil, "result must not be nil")
+	c.JSON(s.code(res.CreateCallback.Status), gin.H{
+		"callback": res.CreateCallback.Callback,
+		"promise":  res.CreateCallback.Promise,
 	})
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -239,37 +240,32 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	promiseId := g.promiseId(r)
 	rootPromiseId := g.promiseId(r)
 	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-	id := g.callbackId(r)
 
-	return &t_api.Request{
-		Kind: t_api.CreateCallback,
-		Tags: map[string]string{"partitionId": promiseId},
-		CreateCallback: &t_api.CreateCallbackRequest{
-			Id:            id,
-			PromiseId:     promiseId,
-			RootPromiseId: rootPromiseId,
-			Timeout:       timeout,
-			Recv:          []byte(`"dst"`), // ignored in dst, use hardcoded value
-		},
-	}
-}
-
-// SUBSCRIPTIONS
-
-func (g *Generator) GenerateCreateSubscription(r *rand.Rand, t int64) *t_api.Request {
-	promiseId := g.promiseId(r)
-	timeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
-	id := g.subscriptionId(r)
-
-	return &t_api.Request{
-		Kind: t_api.CreateSubscription,
-		Tags: map[string]string{"partitionId": promiseId},
-		CreateSubscription: &t_api.CreateSubscriptionRequest{
-			Id:        id,
-			PromiseId: promiseId,
-			Timeout:   timeout,
-			Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
-		},
+	switch r.Intn(2) {
+	case 0:
+		return &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"partitionId": promiseId},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId),
+				PromiseId: promiseId,
+				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
+				Mesg:      &message.Mesg{Type: "resume", Root: rootPromiseId, Leaf: promiseId},
+				Timeout:   timeout,
+			},
+		}
+	default:
+		return &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"partitionId": promiseId},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        fmt.Sprintf("__notify:%s:%s", promiseId, g.callbackId(r)),
+				PromiseId: promiseId,
+				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
+				Mesg:      &message.Mesg{Type: "notify", Root: promiseId},
+				Timeout:   timeout,
+			},
+		}
 	}
 }
 
@@ -428,10 +424,6 @@ func (g *Generator) scheduleId(r *rand.Rand) string {
 
 func (g *Generator) callbackId(r *rand.Rand) string {
 	return "cb" + g.idSet[r.Intn(len(g.idSet))]
-}
-
-func (g *Generator) subscriptionId(r *rand.Rand) string {
-	return "sb" + g.idSet[r.Intn(len(g.idSet))]
 }
 
 func (g *Generator) promiseSearch(r *rand.Rand) string {
