@@ -103,11 +103,11 @@ func (r *CompletePromiseRequest) String() string {
 // Callbacks
 
 type CreateCallbackRequest struct {
-	Id        string `json:"id"`
-	PromiseId string `json:"promiseId"`
-	Recv    json.RawMessage `json:"recv"`
-	Mesg    *message.Mesg   `json:"mesg"`
-	Timeout int64           `json:"timeout"`
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"recv"`
+	Mesg      *message.Mesg   `json:"mesg"`
+	Timeout   int64           `json:"timeout"`
 }
 
 func (r *CreateCallbackRequest) String() string {
