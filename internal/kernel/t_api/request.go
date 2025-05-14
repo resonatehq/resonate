@@ -40,6 +40,7 @@ type Request struct {
 	// TASKS
 	ClaimTask      *ClaimTaskRequest
 	CompleteTask   *CompleteTaskRequest
+	DropTask       *DropTaskRequest
 	HeartbeatTasks *HeartbeatTasksRequest
 
 	// ECHO
@@ -260,6 +261,15 @@ func (r *CompleteTaskRequest) String() string {
 	return fmt.Sprintf("CompleteTask(id=%s, counter=%d)", r.Id, r.Counter)
 }
 
+type DropTaskRequest struct {
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
+}
+
+func (r *DropTaskRequest) String() string {
+	return fmt.Sprintf("DropTask(id=%s, counter=%d)", r.Id, r.Counter)
+}
+
 type HeartbeatTasksRequest struct {
 	ProcessId string `json:"processId"`
 }
@@ -323,6 +333,8 @@ func (r *Request) String() string {
 		return r.ClaimTask.String()
 	case CompleteTask:
 		return r.CompleteTask.String()
+	case DropTask:
+		return r.DropTask.String()
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.String()
 

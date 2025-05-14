@@ -412,6 +412,10 @@ func (g *Generator) GenerateCompleteTask(r *rand.Rand, t int64) *t_api.Request {
 	return g.pop(r, t_api.CompleteTask)
 }
 
+func (g *Generator) GenerateDropTask(r *rand.Rand, t int64) *t_api.Request {
+	return g.pop(r, t_api.DropTask)
+}
+
 func (g *Generator) GenerateHeartbeatTasks(r *rand.Rand, t int64) *t_api.Request {
 	return g.pop(r, t_api.HeartbeatTasks)
 }
@@ -469,7 +473,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(3); i++ {
-		switch r.Intn(4) {
+		switch r.Intn(5) {
 		case 0:
 			g.AddRequest(&t_api.Request{
 				Kind: t_api.ClaimTask,
@@ -492,13 +496,22 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 2:
 			g.AddRequest(&t_api.Request{
+				Kind: t_api.DropTask,
+				Tags: reqTags,
+				DropTask: &t_api.DropTaskRequest{
+					Id:      id,
+					Counter: counter,
+				},
+			})
+		case 3:
+			g.AddRequest(&t_api.Request{
 				Kind: t_api.HeartbeatTasks,
 				Tags: reqTags,
 				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
 					ProcessId: pid,
 				},
 			})
-		case 3:
+		case 4:
 			// do nothing
 		}
 	}

@@ -2406,6 +2406,82 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		Name: "DropTask",
+		Req: &t_api.Request{
+			Kind: t_api.DropTask,
+			Tags: map[string]string{"id": "DropTask", "name": "DropTask"},
+			DropTask: &t_api.DropTaskRequest{
+				Id:      "foo",
+				Counter: 1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.DropTask,
+			DropTask: &t_api.DropTaskResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "tasks/drop",
+				Headers: map[string]string{
+					"Request-Id": "DropTask",
+				},
+				Body: []byte(`{
+					"id": "foo",
+					"counter": 1
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.DropTaskRequest{
+				Id:        "foo",
+				Counter:   1,
+				RequestId: "DropTask",
+			},
+		},
+	},
+	{
+		Name: "DropTaskGet",
+		Req: &t_api.Request{
+			Kind: t_api.DropTask,
+			Tags: map[string]string{"id": "DropTaskGet", "name": "DropTask"},
+			DropTask: &t_api.DropTaskRequest{
+				Id:      "foo",
+				Counter: 1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.DropTask,
+			DropTask: &t_api.DropTaskResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "GET",
+				Path:   "tasks/drop/foo/1",
+				Headers: map[string]string{
+					"Request-Id": "DropTaskGet",
+				},
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.DropTaskRequest{
+				Id:        "foo",
+				Counter:   1,
+				RequestId: "DropTaskGet",
+			},
+		},
+	},
+	{
 		Name: "HeartbeatTasks",
 		Req: &t_api.Request{
 			Kind: t_api.HeartbeatTasks,

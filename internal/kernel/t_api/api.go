@@ -30,6 +30,7 @@ const (
 	// TASKS
 	ClaimTask
 	CompleteTask
+	DropTask
 	HeartbeatTasks
 
 	// Echo
@@ -76,6 +77,8 @@ func (k Kind) String() string {
 		return "ClaimTask"
 	case CompleteTask:
 		return "CompleteTask"
+	case DropTask:
+		return "DropTask"
 	case HeartbeatTasks:
 		return "HeartbeatTasks"
 	// ECHO
