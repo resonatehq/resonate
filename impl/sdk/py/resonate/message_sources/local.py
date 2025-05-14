@@ -47,7 +47,7 @@ class LocalMessageSource:
             self._thread = None
             self._stop_event.clear()
 
-    @exit_on_exception
+    @exit_on_exception("mesg_source.local")
     def _loop(self, mq: MessageQ) -> None:
         while not self._stop_event.is_set():
             for msg in self.step():

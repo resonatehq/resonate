@@ -37,7 +37,6 @@ ignore = [
     "TD003",
 ]
 select = ["ALL"]
-logger-objects = ["resonate.logging.logger"]
 
 [lint.isort]
 combine-as-imports = true

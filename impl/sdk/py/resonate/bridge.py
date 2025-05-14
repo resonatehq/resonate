@@ -183,7 +183,7 @@ class Bridge:
         self._heartbeat_active.clear()
         self._shutdown.set()
 
-    @exit_on_exception
+    @exit_on_exception("bridge")
     def _process_cq(self) -> None:
         while True:
             item = self._cq.get()
@@ -261,7 +261,7 @@ class Bridge:
                 case Done(reqs=[]):
                     continue
 
-    @exit_on_exception
+    @exit_on_exception("bridge.messages")
     def _process_msgs(self) -> None:
         def _invoke(root: DurablePromise) -> Invoke:
             assert "func" in root.param.data
@@ -322,7 +322,7 @@ class Bridge:
                     durable_promise = DurablePromise.from_dict(self._store, _promise)
                     self._cq.put_nowait(Notify(durable_promise.id, durable_promise))
 
-    @exit_on_exception
+    @exit_on_exception("bridge.delayq")
     def _process_delayed_events(self) -> None:
         while not self._shutdown.is_set():
             with self._delay_condition:
@@ -359,7 +359,7 @@ class Bridge:
     def start_heartbeat(self) -> None:
         self._heartbeat_active.set()
 
-    @exit_on_exception
+    @exit_on_exception("bridge.heartbeat")
     def _heartbeat(self) -> None:
         while not self._shutdown.is_set():
             # If this timeout don't execute the heartbeat

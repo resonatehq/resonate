@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from threading import Thread
@@ -8,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from resonate.encoders import JsonEncoder
-from resonate.logging import logger
 from resonate.models.message import InvokeMesg, NotifyMesg, ResumeMesg
 from resonate.utils import exit_on_exception
 
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from resonate.models.encoder import Encoder
     from resonate.models.message import Mesg
     from resonate.models.message_source import MessageQ
+
+logger = logging.getLogger(f"{__package__}.poller")
 
 
 class Poller:
@@ -70,7 +72,7 @@ class Poller:
         # value, which is not the default. This is still useful for tests.
         self._shutdown = True
 
-    @exit_on_exception
+    @exit_on_exception("mesg_source.poller")
     def loop(self, mq: MessageQ) -> None:
         while True:
             if self._shutdown:
