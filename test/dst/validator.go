@@ -328,7 +328,6 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		}
 
 		// otherwise verify the callback was created previously
-		// callbackId := fmt.Sprintf("__resume:%s:%s", req.CreateCallback.RootPromiseId, req.CreateCallback.PromiseId)
 		if model.callbacks.get(req.CreateCallback.Id) == nil {
 			return model, fmt.Errorf("callback '%s' must exist", req.CreateCallback.Id)
 		}
