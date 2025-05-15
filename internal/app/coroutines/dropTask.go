@@ -122,7 +122,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 		}, nil
 	} else {
 		// It's possible that the task was modified by another coroutine
-		// while we were trying to complete. In that case, we should just retry.
+		// while we were trying to update it. In that case, we should just retry.
 		return DropTask(c, r)
 	}
 }
