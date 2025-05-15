@@ -38,6 +38,7 @@ type Response struct {
 	// TASKS
 	ClaimTask      *ClaimTaskResponse
 	CompleteTask   *CompleteTaskResponse
+	DropTask       *DropTaskResponse
 	HeartbeatTasks *HeartbeatTasksResponse
 
 	// ECHO
@@ -195,6 +196,14 @@ func (r *CompleteTaskResponse) String() string {
 	return fmt.Sprintf("CompleteTask(status=%d, task=%v)", r.Status, r.Task)
 }
 
+type DropTaskResponse struct {
+	Status StatusCode `json:"status"`
+}
+
+func (r *DropTaskResponse) String() string {
+	return fmt.Sprintf("DropTask(status=%d)", r.Status)
+}
+
 type HeartbeatTasksResponse struct {
 	Status        StatusCode `json:"status"`
 	TasksAffected int64      `json:"tasksAffected"`
@@ -255,6 +264,8 @@ func (r *Response) Status() StatusCode {
 		return r.ClaimTask.Status
 	case CompleteTask:
 		return r.CompleteTask.Status
+	case DropTask:
+		return r.DropTask.Status
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.Status
 
@@ -308,6 +319,8 @@ func (r *Response) String() string {
 		return r.ClaimTask.String()
 	case CompleteTask:
 		return r.CompleteTask.String()
+	case DropTask:
+		return r.DropTask.String()
 	case HeartbeatTasks:
 		return r.HeartbeatTasks.String()
 

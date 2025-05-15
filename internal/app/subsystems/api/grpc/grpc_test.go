@@ -126,6 +126,8 @@ func TestGrpc(t *testing.T) {
 				res, err = grpcTest.tasks.ClaimTask(ctx, req)
 			case *pb.CompleteTaskRequest:
 				_, err = grpcTest.tasks.CompleteTask(ctx, req)
+			case *pb.DropTaskRequest:
+				_, err = grpcTest.tasks.DropTask(ctx, req)
 			case *pb.HeartbeatTasksRequest:
 				_, err = grpcTest.tasks.HeartbeatTasks(ctx, req)
 			default:

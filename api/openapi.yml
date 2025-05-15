@@ -907,6 +907,72 @@ paths:
         404:
           description: Task not found
 
+  /tasks/drop:
+    post:
+      tags:
+        - Tasks
+      summary: Drop a task
+      operationId: dropTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - id
+                - counter
+              properties:
+                id:
+                  type: string
+                  description: The task id
+                counter:
+                  type: integer
+                  description: The task counter
+      responses:
+        200:
+          description: Task dropped
+        201:
+          description: Task dropped
+        403:
+          description: Task not dropped, invalid counter
+        404:
+          description: Task not found
+
+  /tasks/drop/{id}/{counter}:
+    get:
+      tags:
+        - Tasks
+      summary: Drop a task
+      operationId: dropTaskGet
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          description: The task id
+        - in: path
+          name: counter
+          required: true
+          schema:
+            type: integer
+          description: The task counter
+        - in: header
+          name: request-id
+          description: Unique tracking id
+          schema:
+            type: string
+      responses:
+        200:
+          description: Task dropped
+        201:
+          description: Task dropped
+        403:
+          description: Task not dropped, invalid counter
+        404:
+          description: Task not found
+
   /tasks/heartbeat:
     post:
       tags:

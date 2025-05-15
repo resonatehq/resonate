@@ -121,6 +121,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// tasks
 	d.Add(t_api.ClaimTask, d.generator.GenerateClaimTask, d.validator.ValidateClaimTask)
 	d.Add(t_api.CompleteTask, d.generator.GenerateCompleteTask, d.validator.ValidateCompleteTask)
+	d.Add(t_api.DropTask, d.generator.GenerateDropTask, d.validator.ValidateDropTask)
 	d.Add(t_api.HeartbeatTasks, d.generator.GenerateHeartbeatTasks, d.validator.ValidateHeartbeatTasks)
 
 	// backchannel validators

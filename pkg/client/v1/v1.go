@@ -405,6 +405,21 @@ type CompleteTaskGetParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
+// DropTaskJSONBody defines parameters for DropTask.
+type DropTaskJSONBody struct {
+	// Counter The task counter
+	Counter int `json:"counter"`
+
+	// Id The task id
+	Id string `json:"id"`
+}
+
+// DropTaskGetParams defines parameters for DropTaskGet.
+type DropTaskGetParams struct {
+	// RequestId Unique tracking id
+	RequestId *string `json:"request-id,omitempty"`
+}
+
 // HeartbeatTasksJSONBody defines parameters for HeartbeatTasks.
 type HeartbeatTasksJSONBody struct {
 	ProcessId string `json:"processId"`
@@ -454,6 +469,9 @@ type ClaimTaskJSONRequestBody ClaimTaskJSONBody
 
 // CompleteTaskJSONRequestBody defines body for CompleteTask for application/json ContentType.
 type CompleteTaskJSONRequestBody CompleteTaskJSONBody
+
+// DropTaskJSONRequestBody defines body for DropTask for application/json ContentType.
+type DropTaskJSONRequestBody DropTaskJSONBody
 
 // HeartbeatTasksJSONRequestBody defines body for HeartbeatTasks for application/json ContentType.
 type HeartbeatTasksJSONRequestBody HeartbeatTasksJSONBody
@@ -668,6 +686,14 @@ type ClientInterface interface {
 
 	// CompleteTaskGet request
 	CompleteTaskGet(ctx context.Context, id string, counter int, params *CompleteTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DropTaskWithBody request with any body
+	DropTaskWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	DropTask(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DropTaskGet request
+	DropTaskGet(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// HeartbeatTasksWithBody request with any body
 	HeartbeatTasksWithBody(ctx context.Context, params *HeartbeatTasksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1016,6 +1042,42 @@ func (c *Client) CompleteTask(ctx context.Context, body CompleteTaskJSONRequestB
 
 func (c *Client) CompleteTaskGet(ctx context.Context, id string, counter int, params *CompleteTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCompleteTaskGetRequest(c.Server, id, counter, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DropTaskWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDropTaskRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DropTask(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDropTaskRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) DropTaskGet(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDropTaskGetRequest(c.Server, id, counter, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2249,6 +2311,102 @@ func NewCompleteTaskGetRequest(server string, id string, counter int, params *Co
 	return req, nil
 }
 
+// NewDropTaskRequest calls the generic DropTask builder with application/json body
+func NewDropTaskRequest(server string, body DropTaskJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewDropTaskRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewDropTaskRequestWithBody generates requests for DropTask with any type of body
+func NewDropTaskRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/tasks/drop")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDropTaskGetRequest generates requests for DropTaskGet
+func NewDropTaskGetRequest(server string, id string, counter int, params *DropTaskGetParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithLocation("simple", false, "counter", runtime.ParamLocationPath, counter)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/tasks/drop/%s/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
 // NewHeartbeatTasksRequest calls the generic HeartbeatTasks builder with application/json body
 func NewHeartbeatTasksRequest(server string, params *HeartbeatTasksParams, body HeartbeatTasksJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2478,6 +2636,14 @@ type ClientWithResponsesInterface interface {
 
 	// CompleteTaskGetWithResponse request
 	CompleteTaskGetWithResponse(ctx context.Context, id string, counter int, params *CompleteTaskGetParams, reqEditors ...RequestEditorFn) (*CompleteTaskGetResponse, error)
+
+	// DropTaskWithBodyWithResponse request with any body
+	DropTaskWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DropTaskResponse, error)
+
+	DropTaskWithResponse(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*DropTaskResponse, error)
+
+	// DropTaskGetWithResponse request
+	DropTaskGetWithResponse(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*DropTaskGetResponse, error)
 
 	// HeartbeatTasksWithBodyWithResponse request with any body
 	HeartbeatTasksWithBodyWithResponse(ctx context.Context, params *HeartbeatTasksParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*HeartbeatTasksResponse, error)
@@ -2920,6 +3086,48 @@ func (r CompleteTaskGetResponse) StatusCode() int {
 	return 0
 }
 
+type DropTaskResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// Status returns HTTPResponse.Status
+func (r DropTaskResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DropTaskResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type DropTaskGetResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+}
+
+// Status returns HTTPResponse.Status
+func (r DropTaskGetResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DropTaskGetResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type HeartbeatTasksResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3216,6 +3424,32 @@ func (c *ClientWithResponses) CompleteTaskGetWithResponse(ctx context.Context, i
 		return nil, err
 	}
 	return ParseCompleteTaskGetResponse(rsp)
+}
+
+// DropTaskWithBodyWithResponse request with arbitrary body returning *DropTaskResponse
+func (c *ClientWithResponses) DropTaskWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DropTaskResponse, error) {
+	rsp, err := c.DropTaskWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDropTaskResponse(rsp)
+}
+
+func (c *ClientWithResponses) DropTaskWithResponse(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*DropTaskResponse, error) {
+	rsp, err := c.DropTask(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDropTaskResponse(rsp)
+}
+
+// DropTaskGetWithResponse request returning *DropTaskGetResponse
+func (c *ClientWithResponses) DropTaskGetWithResponse(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*DropTaskGetResponse, error) {
+	rsp, err := c.DropTaskGet(ctx, id, counter, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDropTaskGetResponse(rsp)
 }
 
 // HeartbeatTasksWithBodyWithResponse request with arbitrary body returning *HeartbeatTasksResponse
@@ -3755,6 +3989,38 @@ func ParseCompleteTaskGetResponse(rsp *http.Response) (*CompleteTaskGetResponse,
 		}
 		response.JSON201 = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseDropTaskResponse parses an HTTP response from a DropTaskWithResponse call
+func ParseDropTaskResponse(rsp *http.Response) (*DropTaskResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DropTaskResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	return response, nil
+}
+
+// ParseDropTaskGetResponse parses an HTTP response from a DropTaskGetWithResponse call
+func ParseDropTaskGetResponse(rsp *http.Response) (*DropTaskGetResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DropTaskGetResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
 	}
 
 	return response, nil

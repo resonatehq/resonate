@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion7
 const (
 	Tasks_ClaimTask_FullMethodName      = "/task.Tasks/ClaimTask"
 	Tasks_CompleteTask_FullMethodName   = "/task.Tasks/CompleteTask"
+	Tasks_DropTask_FullMethodName       = "/task.Tasks/DropTask"
 	Tasks_HeartbeatTasks_FullMethodName = "/task.Tasks/HeartbeatTasks"
 )
 
@@ -30,6 +31,7 @@ const (
 type TasksClient interface {
 	ClaimTask(ctx context.Context, in *ClaimTaskRequest, opts ...grpc.CallOption) (*ClaimTaskResponse, error)
 	CompleteTask(ctx context.Context, in *CompleteTaskRequest, opts ...grpc.CallOption) (*CompleteTaskResponse, error)
+	DropTask(ctx context.Context, in *DropTaskRequest, opts ...grpc.CallOption) (*DropTaskResponse, error)
 	HeartbeatTasks(ctx context.Context, in *HeartbeatTasksRequest, opts ...grpc.CallOption) (*HeartbeatTasksResponse, error)
 }
 
@@ -59,6 +61,15 @@ func (c *tasksClient) CompleteTask(ctx context.Context, in *CompleteTaskRequest,
 	return out, nil
 }
 
+func (c *tasksClient) DropTask(ctx context.Context, in *DropTaskRequest, opts ...grpc.CallOption) (*DropTaskResponse, error) {
+	out := new(DropTaskResponse)
+	err := c.cc.Invoke(ctx, Tasks_DropTask_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *tasksClient) HeartbeatTasks(ctx context.Context, in *HeartbeatTasksRequest, opts ...grpc.CallOption) (*HeartbeatTasksResponse, error) {
 	out := new(HeartbeatTasksResponse)
 	err := c.cc.Invoke(ctx, Tasks_HeartbeatTasks_FullMethodName, in, out, opts...)
@@ -74,6 +85,7 @@ func (c *tasksClient) HeartbeatTasks(ctx context.Context, in *HeartbeatTasksRequ
 type TasksServer interface {
 	ClaimTask(context.Context, *ClaimTaskRequest) (*ClaimTaskResponse, error)
 	CompleteTask(context.Context, *CompleteTaskRequest) (*CompleteTaskResponse, error)
+	DropTask(context.Context, *DropTaskRequest) (*DropTaskResponse, error)
 	HeartbeatTasks(context.Context, *HeartbeatTasksRequest) (*HeartbeatTasksResponse, error)
 	mustEmbedUnimplementedTasksServer()
 }
@@ -87,6 +99,9 @@ func (UnimplementedTasksServer) ClaimTask(context.Context, *ClaimTaskRequest) (*
 }
 func (UnimplementedTasksServer) CompleteTask(context.Context, *CompleteTaskRequest) (*CompleteTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CompleteTask not implemented")
+}
+func (UnimplementedTasksServer) DropTask(context.Context, *DropTaskRequest) (*DropTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DropTask not implemented")
 }
 func (UnimplementedTasksServer) HeartbeatTasks(context.Context, *HeartbeatTasksRequest) (*HeartbeatTasksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HeartbeatTasks not implemented")
@@ -140,6 +155,24 @@ func _Tasks_CompleteTask_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Tasks_DropTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DropTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TasksServer).DropTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Tasks_DropTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TasksServer).DropTask(ctx, req.(*DropTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Tasks_HeartbeatTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HeartbeatTasksRequest)
 	if err := dec(in); err != nil {
@@ -172,6 +205,10 @@ var Tasks_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteTask",
 			Handler:    _Tasks_CompleteTask_Handler,
+		},
+		{
+			MethodName: "DropTask",
+			Handler:    _Tasks_DropTask_Handler,
 		},
 		{
 			MethodName: "HeartbeatTasks",

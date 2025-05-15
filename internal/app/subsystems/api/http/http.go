@@ -103,6 +103,8 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	authorized.GET("/tasks/claim/:id/:counter", server.claimTask)
 	authorized.POST("/tasks/complete", server.completeTask)
 	authorized.GET("/tasks/complete/:id/:counter", server.completeTask)
+	authorized.POST("/tasks/drop", server.dropTask)
+	authorized.GET("/tasks/drop/:id/:counter", server.dropTask)
 	authorized.POST("/tasks/heartbeat", server.heartbeatTasks)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
