@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"reflect"
 	"sort"
@@ -130,4 +131,16 @@ func DeferAndLog(f func() error) {
 	if err := f(); err != nil {
 		slog.Warn("defer failed", "err", err)
 	}
+}
+
+func InvokeId(promiseId string) string {
+	return fmt.Sprintf("__invoke:%s", promiseId)
+}
+
+func ResumeId(rootPromiseId, promiseId string) string {
+	return fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId)
+}
+
+func NotifyId(promiseId, id string) string {
+	return fmt.Sprintf("__notify:%s:%s", promiseId, id)
 }

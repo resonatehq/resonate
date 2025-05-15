@@ -14,7 +14,6 @@ const (
 	StatusNoContent StatusCode = 20400
 
 	StatusFieldValidationError   StatusCode = 40000
-	StatusCallbackInvalidPromise StatusCode = 40001
 	StatusPromiseAlreadyResolved StatusCode = 40300
 	StatusPromiseAlreadyRejected StatusCode = 40301
 	StatusPromiseAlreadyCanceled StatusCode = 40302
@@ -51,8 +50,6 @@ func (s StatusCode) String() string {
 		return "The request was successful"
 	case StatusFieldValidationError:
 		return "The request is invalid"
-	case StatusCallbackInvalidPromise:
-		return "The promise and root promise must be different"
 	case StatusPromiseAlreadyResolved:
 		return "The promise has already been resolved"
 	case StatusPromiseAlreadyRejected:

@@ -108,9 +108,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 	// callbacks
 	d.Add(t_api.CreateCallback, d.generator.GenerateCreateCallback, d.validator.ValidateCreateCallback)
 
-	// subscription
-	d.Add(t_api.CreateSubscription, d.generator.GenerateCreateSubscription, d.validator.ValidateCreateSubscription)
-
 	// schedules
 	d.Add(t_api.ReadSchedule, d.generator.GenerateReadSchedule, d.validator.ValidateReadSchedule)
 	d.Add(t_api.CreateSchedule, d.generator.GenerateCreateSchedule, d.validator.ValidateCreateSchedule)
@@ -659,6 +656,13 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 			return model, nil
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
+		case t_api.StatusFieldValidationError:
+			if req.Kind == t_api.CreateCallback && req.CreateCallback.Mesg.Type == "resume" && req.CreateCallback.PromiseId == req.CreateCallback.Mesg.Root {
+				// sometimes we generate create callback requests with the same root and
+				// leaf promise ids by chance
+				return model, nil
+			}
+			fallthrough
 		default:
 			return model, fmt.Errorf("unexpected resonate error '%v'", error)
 		}

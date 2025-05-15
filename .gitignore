@@ -33,3 +33,4 @@ resonate.yml
 coverage.out
 dst*.html
 redoc-static.html
+api/index.html

@@ -83,7 +83,7 @@ func (f *rangeFlag[T]) Type() string {
 func (f *rangeFlag[T]) Set(s string) error {
 	r := strings.Split(s, ":")
 	if len(r) != 1 && len(r) != 2 {
-		return fmt.Errorf("range flag must contain one or two values seperated by a ':'")
+		return fmt.Errorf("range flag must contain one or two values separated by a ':'")
 	}
 
 	var err error

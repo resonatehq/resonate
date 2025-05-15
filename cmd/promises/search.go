@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var searchPromiseExample = `
+var searchPromisesExample = `
 # Search for all promises
 resonate promises search "*"
 
@@ -38,7 +38,7 @@ func SearchPromisesCmd(c client.Client) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "search <q>",
 		Short:   "Search promises",
-		Example: searchPromiseExample,
+		Example: searchPromisesExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
 				return errors.New("must specify search query")

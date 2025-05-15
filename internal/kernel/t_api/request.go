@@ -6,6 +6,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
@@ -22,9 +23,6 @@ type Request struct {
 
 	// CALLBACKS
 	CreateCallback *CreateCallbackRequest
-
-	// SUBSCRIPTIONS
-	CreateSubscription *CreateSubscriptionRequest
 
 	// SCHEDULES
 	ReadSchedule    *ReadScheduleRequest
@@ -106,28 +104,15 @@ func (r *CompletePromiseRequest) String() string {
 // Callbacks
 
 type CreateCallbackRequest struct {
-	Id            string          `json:"id"`
-	PromiseId     string          `json:"promiseId"`
-	RootPromiseId string          `json:"rootPromiseId"` // TODO: we should be able to know this from the promise itself
-	Timeout       int64           `json:"timeout"`
-	Recv          json.RawMessage `json:"recv"`
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"recv"`
+	Mesg      *message.Mesg   `json:"mesg"`
+	Timeout   int64           `json:"timeout"`
 }
 
 func (r *CreateCallbackRequest) String() string {
-	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, rootPromiseId=%s, timeout=%d, recv=%s)", r.Id, r.PromiseId, r.RootPromiseId, r.Timeout, r.Recv)
-}
-
-// Subscription
-
-type CreateSubscriptionRequest struct {
-	Id        string          `json:"id"`
-	PromiseId string          `json:"promiseId"`
-	Timeout   int64           `json:"timeout"`
-	Recv      json.RawMessage `json:"recv"`
-}
-
-func (r *CreateSubscriptionRequest) String() string {
-	return fmt.Sprintf("CreateSubscription(id=%s, promiseId=%s, recv=%s)", r.Id, r.PromiseId, r.Recv)
+	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
 }
 
 // Schedules
@@ -305,10 +290,6 @@ func (r *Request) String() string {
 	// CALLBACKS
 	case CreateCallback:
 		return r.CreateCallback.String()
-
-	// SUBSCRIPTION
-	case CreateSubscription:
-		return r.CreateSubscription.String()
 
 	// SCHEDULES
 	case ReadSchedule:

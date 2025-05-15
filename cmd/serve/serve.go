@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/validators"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -71,6 +72,9 @@ func ServeCmd() *cobra.Command {
 				aio.AddSubsystem(subsystem)
 			}
 
+			// api validators
+			api.AddValidator(t_api.CreateCallback, validators.CreateCallback)
+
 			// start api/aio
 			if err := api.Start(); err != nil {
 				slog.Error("failed to start api", "error", err)
@@ -95,7 +99,6 @@ func ServeCmd() *cobra.Command {
 			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
 			system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
 			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
-			system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)

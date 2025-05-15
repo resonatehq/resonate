@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/validators"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
@@ -73,6 +74,9 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)
 
+	// add api validators
+	api.AddValidator(t_api.CreateCallback, validators.CreateCallback)
+
 	// instantiate system
 	system := system.New(api, aio, config, metrics)
 	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
@@ -82,7 +86,6 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
 	system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
-	system.AddOnRequest(t_api.CreateSubscription, coroutines.CreateSubscription)
 	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
 	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
 	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)

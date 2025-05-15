@@ -36,6 +36,7 @@ type api struct {
 	sq         chan *bus.SQE[t_api.Request, t_api.Response]
 	buffer     *bus.SQE[t_api.Request, t_api.Response]
 	subsystems []Subsystem
+	validators map[t_api.Kind]func(*t_api.Request) error
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
@@ -43,9 +44,10 @@ type api struct {
 
 func New(size int, metrics *metrics.Metrics) *api {
 	return &api{
-		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
-		errors:  make(chan error),
-		metrics: metrics,
+		sq:         make(chan *bus.SQE[t_api.Request, t_api.Response], size),
+		errors:     make(chan error),
+		validators: map[t_api.Kind]func(*t_api.Request) error{},
+		metrics:    metrics,
 	}
 }
 
@@ -59,6 +61,10 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
+}
+
+func (a *api) AddValidator(kind t_api.Kind, validator func(*t_api.Request) error) {
+	a.validators[kind] = validator
 }
 
 func (a *api) Addr() string {
@@ -166,6 +172,16 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	if a.done {
 		sqe.Callback(nil, t_api.NewError(t_api.StatusSystemShuttingDown, nil))
 		return
+	}
+
+	// validate the submission before sending it to the cq, this will
+	// run in the same goroutine as the api request in order to fail
+	// fast
+	if validate, ok := a.validators[sqe.Submission.Kind]; ok {
+		if err := validate(sqe.Submission); err != nil {
+			sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
+			return
+		}
 	}
 
 	select {
