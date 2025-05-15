@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 import uuid
@@ -48,7 +49,25 @@ if TYPE_CHECKING:
     from resonate.models.retry_policy import RetryPolicy
     from resonate.options import Options
 
+
+class LogRecordFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        record.computation_id = getattr(record, "computation_id", "none")
+        record.id = getattr(record, "id", "")
+        record.attempt = f"(attempt={attempt})" if (attempt := getattr(record, "attempt", 1)) > 1 else ""
+        return super().format(record)
+
+
 logger = logging.getLogger(__package__)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
+handler = logging.StreamHandler()
+handler.setFormatter(
+    LogRecordFormatter(
+        fmt="%(asctime)s %(levelname)s [%(name)s] %(computation_id)s::%(id)s %(message)s %(attempt)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ),
+)
+logger.addHandler(handler)
 
 
 class Scheduler:
