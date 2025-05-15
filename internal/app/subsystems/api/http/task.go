@@ -162,6 +162,66 @@ func (s *server) completeTask(c *gin.Context) {
 	c.JSON(s.code(res.CompleteTask.Status), res.CompleteTask.Task)
 }
 
+// Drop tasks
+type dropTaskHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type dropTaskBody struct {
+	Id      string `json:"id" binding:"required"`
+	Counter int    `json:"counter" binding:"required"`
+}
+
+func (s *server) dropTask(c *gin.Context) {
+	var header dropTaskHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	var dropTask *t_api.DropTaskRequest
+
+	if c.Request.Method == "GET" {
+		counter, err := strconv.Atoi(c.Param("counter"))
+		if err != nil {
+			err := api.RequestValidationError(errors.New("the field counter must be a number"))
+			c.JSON(s.code(err.Code), gin.H{"error": err})
+			return
+		}
+
+		dropTask = &t_api.DropTaskRequest{
+			Id:      c.Param("id"),
+			Counter: counter,
+		}
+
+	} else {
+		var body dropTaskBody
+		if err := c.ShouldBindJSON(&body); err != nil {
+			err := api.RequestValidationError(err)
+			c.JSON(s.code(err.Code), gin.H{"error": err})
+			return
+		}
+
+		dropTask = &t_api.DropTaskRequest{
+			Id:      body.Id,
+			Counter: body.Counter,
+		}
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind:     t_api.DropTask,
+		DropTask: dropTask,
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.DropTask != nil, "result must not be nil")
+	c.Status(s.code(res.DropTask.Status))
+}
+
 // Heartbeat
 
 type heartbeatTasksHeader struct {

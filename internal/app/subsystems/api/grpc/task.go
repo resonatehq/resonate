@@ -79,6 +79,24 @@ func (s *server) CompleteTask(c context.Context, r *pb.CompleteTaskRequest) (*pb
 	}, nil
 }
 
+func (s *server) DropTask(c context.Context, r *pb.DropTaskRequest) (*pb.DropTaskResponse, error) {
+	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Kind: t_api.DropTask,
+		DropTask: &t_api.DropTaskRequest{
+			Id:      r.Id,
+			Counter: int(r.Counter),
+		},
+	})
+	if err != nil {
+		return nil, status.Error(s.code(err.Code), err.Error())
+	}
+
+	util.Assert(res.DropTask != nil, "result must not be nil")
+	return &pb.DropTaskResponse{
+		Dropped: res.DropTask.Status == t_api.StatusCreated,
+	}, nil
+}
+
 func (s *server) HeartbeatTasks(c context.Context, r *pb.HeartbeatTasksRequest) (*pb.HeartbeatTasksResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.HeartbeatTasks,

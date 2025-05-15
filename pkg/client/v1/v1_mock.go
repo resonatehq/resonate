@@ -501,6 +501,66 @@ func (mr *MockClientInterfaceMockRecorder) DeleteSchedule(ctx, id, params any, r
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteSchedule", reflect.TypeOf((*MockClientInterface)(nil).DeleteSchedule), varargs...)
 }
 
+// DropTask mocks base method.
+func (m *MockClientInterface) DropTask(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTask", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTask indicates an expected call of DropTask.
+func (mr *MockClientInterfaceMockRecorder) DropTask(ctx, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTask", reflect.TypeOf((*MockClientInterface)(nil).DropTask), varargs...)
+}
+
+// DropTaskGet mocks base method.
+func (m *MockClientInterface) DropTaskGet(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, counter, params}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTaskGet", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTaskGet indicates an expected call of DropTaskGet.
+func (mr *MockClientInterfaceMockRecorder) DropTaskGet(ctx, id, counter, params any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, counter, params}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskGet", reflect.TypeOf((*MockClientInterface)(nil).DropTaskGet), varargs...)
+}
+
+// DropTaskWithBody mocks base method.
+func (m *MockClientInterface) DropTaskWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTaskWithBody", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTaskWithBody indicates an expected call of DropTaskWithBody.
+func (mr *MockClientInterfaceMockRecorder) DropTaskWithBody(ctx, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskWithBody", reflect.TypeOf((*MockClientInterface)(nil).DropTaskWithBody), varargs...)
+}
+
 // HeartbeatLocks mocks base method.
 func (m *MockClientInterface) HeartbeatLocks(ctx context.Context, params *HeartbeatLocksParams, body HeartbeatLocksJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -1163,6 +1223,66 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) DeleteScheduleWithRespon
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, id, params}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteScheduleWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).DeleteScheduleWithResponse), varargs...)
+}
+
+// DropTaskGetWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) DropTaskGetWithResponse(ctx context.Context, id string, counter int, params *DropTaskGetParams, reqEditors ...RequestEditorFn) (*DropTaskGetResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, counter, params}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTaskGetWithResponse", varargs...)
+	ret0, _ := ret[0].(*DropTaskGetResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTaskGetWithResponse indicates an expected call of DropTaskGetWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) DropTaskGetWithResponse(ctx, id, counter, params any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, counter, params}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskGetWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).DropTaskGetWithResponse), varargs...)
+}
+
+// DropTaskWithBodyWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) DropTaskWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DropTaskResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTaskWithBodyWithResponse", varargs...)
+	ret0, _ := ret[0].(*DropTaskResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTaskWithBodyWithResponse indicates an expected call of DropTaskWithBodyWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) DropTaskWithBodyWithResponse(ctx, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).DropTaskWithBodyWithResponse), varargs...)
+}
+
+// DropTaskWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) DropTaskWithResponse(ctx context.Context, body DropTaskJSONRequestBody, reqEditors ...RequestEditorFn) (*DropTaskResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "DropTaskWithResponse", varargs...)
+	ret0, _ := ret[0].(*DropTaskResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DropTaskWithResponse indicates an expected call of DropTaskWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) DropTaskWithResponse(ctx, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DropTaskWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).DropTaskWithResponse), varargs...)
 }
 
 // HeartbeatLocksWithBodyWithResponse mocks base method.

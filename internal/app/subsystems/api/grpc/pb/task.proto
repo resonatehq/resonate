@@ -9,6 +9,7 @@ option go_package = "github.com/resonatehq/resonate/internal/app/subsystems/api/
 service Tasks {
     rpc ClaimTask (ClaimTaskRequest) returns (ClaimTaskResponse) {}
     rpc CompleteTask (CompleteTaskRequest) returns (CompleteTaskResponse) {}
+    rpc DropTask(DropTaskRequest) returns (DropTaskResponse) {}
     rpc HeartbeatTasks (HeartbeatTasksRequest) returns (HeartbeatTasksResponse) {}
 }
 
@@ -44,6 +45,16 @@ message CompleteTaskRequest {
 
 message CompleteTaskResponse {
     bool completed = 1;
+}
+
+message DropTaskRequest {
+    string id = 1;
+    int32 counter = 2;
+    string requestId = 3;
+}
+
+message DropTaskResponse {
+    bool dropped = 1;
 }
 
 message HeartbeatTasksRequest {

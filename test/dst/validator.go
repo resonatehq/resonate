@@ -729,6 +729,64 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 	}
 }
 
+func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
+	t := model.tasks.get(req.DropTask.Id)
+
+	switch res.DropTask.Status {
+	case t_api.StatusCreated:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", req.DropTask.Id)
+		}
+
+		if t.State != task.Claimed {
+			return model, fmt.Errorf("task '%s' was not in claim state when droping it", req.DropTask.Id)
+		}
+		model = model.Copy()
+		new_t := *t
+		new_t.State = task.Init
+		new_t.Counter = t.Counter + 1
+		model.tasks.set(req.DropTask.Id, &new_t)
+		return model, nil
+	case t_api.StatusOK:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", req.DropTask.Id)
+		}
+
+		// Is possible that the task was timedout
+		if t.State == task.Claimed {
+			if t.Timeout <= reqTime {
+				model = model.Copy()
+				new_t := *t
+				new_t.State = task.Timedout
+				new_t.Counter = 0
+				model.tasks.set(req.DropTask.Id, &new_t)
+				return model, nil
+			}
+			if t.ExpiresAt <= reqTime {
+				model = model.Copy()
+				new_t := *t
+				new_t.State = task.Init
+				model.tasks.set(req.DropTask.Id, &new_t)
+				return model, nil
+			}
+			return model, fmt.Errorf("task '%s' was claimed", req.DropTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskInvalidCounter:
+		if t == nil {
+			return model, fmt.Errorf("task '%s' does not exist", req.DropTask.Id)
+		}
+		return model, nil
+	case t_api.StatusTaskNotFound:
+		if t != nil {
+			return model, fmt.Errorf("task '%s' exists", req.DropTask.Id)
+		}
+		return model, nil
+	default:
+		return model, fmt.Errorf("unexpected response status '%d'", res.DropTask.Status)
+	}
+}
+
 func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	switch res.HeartbeatTasks.Status {
 	case t_api.StatusOK:
