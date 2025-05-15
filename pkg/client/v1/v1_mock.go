@@ -281,46 +281,6 @@ func (mr *MockClientInterfaceMockRecorder) CompleteTaskWithBody(ctx, contentType
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteTaskWithBody", reflect.TypeOf((*MockClientInterface)(nil).CompleteTaskWithBody), varargs...)
 }
 
-// CreateCallback mocks base method.
-func (m *MockClientInterface) CreateCallback(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateCallback", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateCallback indicates an expected call of CreateCallback.
-func (mr *MockClientInterfaceMockRecorder) CreateCallback(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCallback", reflect.TypeOf((*MockClientInterface)(nil).CreateCallback), varargs...)
-}
-
-// CreateCallbackWithBody mocks base method.
-func (m *MockClientInterface) CreateCallbackWithBody(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateCallbackWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateCallbackWithBody indicates an expected call of CreateCallbackWithBody.
-func (mr *MockClientInterfaceMockRecorder) CreateCallbackWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCallbackWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreateCallbackWithBody), varargs...)
-}
-
 // CreatePromise mocks base method.
 func (m *MockClientInterface) CreatePromise(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -381,6 +341,86 @@ func (mr *MockClientInterfaceMockRecorder) CreatePromiseAndTaskWithBody(ctx, par
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndTaskWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseAndTaskWithBody), varargs...)
 }
 
+// CreatePromiseCallback mocks base method.
+func (m *MockClientInterface) CreatePromiseCallback(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseCallback", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseCallback indicates an expected call of CreatePromiseCallback.
+func (mr *MockClientInterfaceMockRecorder) CreatePromiseCallback(ctx, id, params, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseCallback", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseCallback), varargs...)
+}
+
+// CreatePromiseCallbackWithBody mocks base method.
+func (m *MockClientInterface) CreatePromiseCallbackWithBody(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseCallbackWithBody", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseCallbackWithBody indicates an expected call of CreatePromiseCallbackWithBody.
+func (mr *MockClientInterfaceMockRecorder) CreatePromiseCallbackWithBody(ctx, id, params, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseCallbackWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseCallbackWithBody), varargs...)
+}
+
+// CreatePromiseSubscription mocks base method.
+func (m *MockClientInterface) CreatePromiseSubscription(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseSubscription", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseSubscription indicates an expected call of CreatePromiseSubscription.
+func (mr *MockClientInterfaceMockRecorder) CreatePromiseSubscription(ctx, id, params, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseSubscription", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseSubscription), varargs...)
+}
+
+// CreatePromiseSubscriptionWithBody mocks base method.
+func (m *MockClientInterface) CreatePromiseSubscriptionWithBody(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseSubscriptionWithBody", varargs...)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseSubscriptionWithBody indicates an expected call of CreatePromiseSubscriptionWithBody.
+func (mr *MockClientInterfaceMockRecorder) CreatePromiseSubscriptionWithBody(ctx, id, params, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseSubscriptionWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreatePromiseSubscriptionWithBody), varargs...)
+}
+
 // CreatePromiseWithBody mocks base method.
 func (m *MockClientInterface) CreatePromiseWithBody(ctx context.Context, params *CreatePromiseParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	m.ctrl.T.Helper()
@@ -439,46 +479,6 @@ func (mr *MockClientInterfaceMockRecorder) CreateScheduleWithBody(ctx, params, c
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateScheduleWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreateScheduleWithBody), varargs...)
-}
-
-// CreateSubscription mocks base method.
-func (m *MockClientInterface) CreateSubscription(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateSubscription", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateSubscription indicates an expected call of CreateSubscription.
-func (mr *MockClientInterfaceMockRecorder) CreateSubscription(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSubscription", reflect.TypeOf((*MockClientInterface)(nil).CreateSubscription), varargs...)
-}
-
-// CreateSubscriptionWithBody mocks base method.
-func (m *MockClientInterface) CreateSubscriptionWithBody(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateSubscriptionWithBody", varargs...)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateSubscriptionWithBody indicates an expected call of CreateSubscriptionWithBody.
-func (mr *MockClientInterfaceMockRecorder) CreateSubscriptionWithBody(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSubscriptionWithBody", reflect.TypeOf((*MockClientInterface)(nil).CreateSubscriptionWithBody), varargs...)
 }
 
 // DeleteSchedule mocks base method.
@@ -945,46 +945,6 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) CompleteTaskWithResponse
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteTaskWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CompleteTaskWithResponse), varargs...)
 }
 
-// CreateCallbackWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreateCallbackWithBodyWithResponse(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateCallbackWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreateCallbackResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateCallbackWithBodyWithResponse indicates an expected call of CreateCallbackWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateCallbackWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCallbackWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateCallbackWithBodyWithResponse), varargs...)
-}
-
-// CreateCallbackWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreateCallbackWithResponse(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateCallbackWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreateCallbackResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateCallbackWithResponse indicates an expected call of CreateCallbackWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateCallbackWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateCallbackWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateCallbackWithResponse), varargs...)
-}
-
 // CreatePromiseAndTaskWithBodyWithResponse mocks base method.
 func (m *MockClientWithResponsesInterface) CreatePromiseAndTaskWithBodyWithResponse(ctx context.Context, params *CreatePromiseAndTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseAndTaskResponse, error) {
 	m.ctrl.T.Helper()
@@ -1023,6 +983,86 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseAndTaskWith
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, params, body}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseAndTaskWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseAndTaskWithResponse), varargs...)
+}
+
+// CreatePromiseCallbackWithBodyWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) CreatePromiseCallbackWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseCallbackWithBodyWithResponse", varargs...)
+	ret0, _ := ret[0].(*CreatePromiseCallbackResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseCallbackWithBodyWithResponse indicates an expected call of CreatePromiseCallbackWithBodyWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseCallbackWithBodyWithResponse(ctx, id, params, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseCallbackWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseCallbackWithBodyWithResponse), varargs...)
+}
+
+// CreatePromiseCallbackWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) CreatePromiseCallbackWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseCallbackWithResponse", varargs...)
+	ret0, _ := ret[0].(*CreatePromiseCallbackResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseCallbackWithResponse indicates an expected call of CreatePromiseCallbackWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseCallbackWithResponse(ctx, id, params, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseCallbackWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseCallbackWithResponse), varargs...)
+}
+
+// CreatePromiseSubscriptionWithBodyWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) CreatePromiseSubscriptionWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, contentType, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseSubscriptionWithBodyWithResponse", varargs...)
+	ret0, _ := ret[0].(*CreatePromiseSubscriptionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseSubscriptionWithBodyWithResponse indicates an expected call of CreatePromiseSubscriptionWithBodyWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseSubscriptionWithBodyWithResponse(ctx, id, params, contentType, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, contentType, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseSubscriptionWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseSubscriptionWithBodyWithResponse), varargs...)
+}
+
+// CreatePromiseSubscriptionWithResponse mocks base method.
+func (m *MockClientWithResponsesInterface) CreatePromiseSubscriptionWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []any{ctx, id, params, body}
+	for _, a := range reqEditors {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "CreatePromiseSubscriptionWithResponse", varargs...)
+	ret0, _ := ret[0].(*CreatePromiseSubscriptionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CreatePromiseSubscriptionWithResponse indicates an expected call of CreatePromiseSubscriptionWithResponse.
+func (mr *MockClientWithResponsesInterfaceMockRecorder) CreatePromiseSubscriptionWithResponse(ctx, id, params, body any, reqEditors ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{ctx, id, params, body}, reqEditors...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreatePromiseSubscriptionWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreatePromiseSubscriptionWithResponse), varargs...)
 }
 
 // CreatePromiseWithBodyWithResponse mocks base method.
@@ -1103,46 +1143,6 @@ func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateScheduleWithRespon
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]any{ctx, params, body}, reqEditors...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateScheduleWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateScheduleWithResponse), varargs...)
-}
-
-// CreateSubscriptionWithBodyWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreateSubscriptionWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, contentType, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateSubscriptionWithBodyWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreateSubscriptionResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateSubscriptionWithBodyWithResponse indicates an expected call of CreateSubscriptionWithBodyWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateSubscriptionWithBodyWithResponse(ctx, params, contentType, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, contentType, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSubscriptionWithBodyWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateSubscriptionWithBodyWithResponse), varargs...)
-}
-
-// CreateSubscriptionWithResponse mocks base method.
-func (m *MockClientWithResponsesInterface) CreateSubscriptionWithResponse(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
-	m.ctrl.T.Helper()
-	varargs := []any{ctx, params, body}
-	for _, a := range reqEditors {
-		varargs = append(varargs, a)
-	}
-	ret := m.ctrl.Call(m, "CreateSubscriptionWithResponse", varargs...)
-	ret0, _ := ret[0].(*CreateSubscriptionResponse)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// CreateSubscriptionWithResponse indicates an expected call of CreateSubscriptionWithResponse.
-func (mr *MockClientWithResponsesInterfaceMockRecorder) CreateSubscriptionWithResponse(ctx, params, body any, reqEditors ...any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	varargs := append([]any{ctx, params, body}, reqEditors...)
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CreateSubscriptionWithResponse", reflect.TypeOf((*MockClientWithResponsesInterface)(nil).CreateSubscriptionWithResponse), varargs...)
 }
 
 // DeleteScheduleWithResponse mocks base method.

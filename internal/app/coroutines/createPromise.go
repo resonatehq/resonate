@@ -1,7 +1,6 @@
 package coroutines
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -25,7 +24,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 	util.Assert(r.CreatePromiseAndTask.Promise.Timeout == r.CreatePromiseAndTask.Task.Timeout, "timeouts must match")
 
 	return createPromiseAndTask(c, r, r.CreatePromiseAndTask.Promise, &t_aio.CreateTaskCommand{
-		Id:        invokeTaskId(r.CreatePromiseAndTask.Task.PromiseId),
+		Id:        util.InvokeId(r.CreatePromiseAndTask.Task.PromiseId),
 		Recv:      nil,
 		Mesg:      &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
 		Timeout:   r.CreatePromiseAndTask.Task.Timeout,
@@ -258,7 +257,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 				taskCmd.Recv = completion.Router.Recv
 			} else {
 				taskCmd = &t_aio.CreateTaskCommand{
-					Id:        invokeTaskId(promiseCmd.Id),
+					Id:        util.InvokeId(promiseCmd.Id),
 					Recv:      completion.Router.Recv,
 					Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 					Timeout:   promiseCmd.Timeout,
@@ -314,8 +313,4 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 
 		return completion, nil
 	}
-}
-
-func invokeTaskId(promiseId string) string {
-	return fmt.Sprintf("__invoke:%s", promiseId)
 }

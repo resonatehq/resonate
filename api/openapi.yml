@@ -316,14 +316,19 @@ paths:
         404:
           description: Promise not found
 
-  # Callbacks
-  /callbacks:
+  /promises/callback/{id}:
     post:
       tags:
-        - Callbacks
-      summary: Create callback
-      operationId: createCallback
+        - Promises
+      summary: Create promise callback
+      operationId: createPromiseCallback
       parameters:
+        - in: path
+          name: id
+          required: true
+          description: The promise id
+          schema:
+            type: string
         - in: header
           name: request-id
           description: Unique tracking id
@@ -336,16 +341,10 @@ paths:
             schema:
               type: object
               required:
-                - id
-                - promiseId
                 - rootPromiseId
                 - timeout
                 - recv
               properties:
-                id:
-                  type: string
-                promiseId:
-                  type: string
                 rootPromiseId:
                   type: string
                 timeout:
@@ -377,14 +376,19 @@ paths:
         404:
           description: Promise not found
 
-  # Subscriptions
-  /subscriptions:
+  /promises/subscribe/{id}:
     post:
       tags:
-        - Subscription
-      summary: Create a Subscription
-      operationId: createSubscription
+        - Promises
+      summary: Create promise subscription
+      operationId: createPromiseSubscription
       parameters:
+        - in: path
+          name: id
+          required: true
+          description: The promise id
+          schema:
+            type: string
         - in: header
           name: request-id
           description: Unique tracking id
@@ -398,13 +402,10 @@ paths:
               type: object
               required:
                 - id
-                - promiseId
                 - timeout
                 - recv
               properties:
                 id:
-                  type: string
-                promiseId:
                   type: string
                 timeout:
                   type: integer

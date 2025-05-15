@@ -285,7 +285,7 @@ func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
-			Id:        s.api.CallbackId(r.RootPromiseId, r.PromiseId),
+			Id:        util.ResumeId(r.RootPromiseId, r.PromiseId),
 			PromiseId: r.PromiseId,
 			Recv:      recv,
 			Mesg:      &message.Mesg{Type: "resume", Root: r.RootPromiseId, Leaf: r.PromiseId},
@@ -313,7 +313,7 @@ func (s *server) CreateSubscription(c context.Context, r *pb.CreateSubscriptionR
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Kind: t_api.CreateCallback,
 		CreateCallback: &t_api.CreateCallbackRequest{
-			Id:        s.api.SubscriptionId(r.PromiseId, r.Id),
+			Id:        util.NotifyId(r.PromiseId, r.Id),
 			PromiseId: r.PromiseId,
 			Recv:      recv,
 			Mesg:      &message.Mesg{Type: "notify", Root: r.PromiseId},

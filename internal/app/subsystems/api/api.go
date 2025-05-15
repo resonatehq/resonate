@@ -189,11 +189,3 @@ func (a *API) ValidateCron(cron string) *Error {
 func (a *API) TaskProcessId(id string, counter int) string {
 	return fmt.Sprintf("%s/%d", id, counter)
 }
-
-func (a *API) CallbackId(rootPromiseId, promiseId string) string {
-	return fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId)
-}
-
-func (a *API) SubscriptionId(promiseId, customId string) string {
-	return fmt.Sprintf("__notify:%s:%s", promiseId, customId)
-}

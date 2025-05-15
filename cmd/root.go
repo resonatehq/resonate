@@ -5,14 +5,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/resonatehq/resonate/cmd/callbacks"
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
-	"github.com/resonatehq/resonate/cmd/subscriptions"
 	"github.com/resonatehq/resonate/cmd/tasks"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -36,14 +34,12 @@ func init() {
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands
-	rootCmd.AddCommand(callbacks.NewCmd())
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(quickstart.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
-	rootCmd.AddCommand(subscriptions.NewCmd())
 	rootCmd.AddCommand(tasks.NewCmd())
 
 	// Set default output

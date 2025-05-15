@@ -40,6 +40,8 @@ func NewCmd() *cobra.Command {
 	cmd.AddCommand(SearchPromisesCmd(c))
 	cmd.AddCommand(CreatePromiseCmd(c))
 	cmd.AddCommand(CompletePromiseCmds(c)...)
+	cmd.AddCommand(CreatePromiseCallbackCmd(c))
+	cmd.AddCommand(CreateSubscriptionCmd(c))
 
 	// Flags
 	cmd.PersistentFlags().StringVarP(&server, "server", "", "http://localhost:8001", "resonate url")

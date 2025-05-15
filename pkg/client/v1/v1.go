@@ -145,21 +145,6 @@ type Value struct {
 	Headers *map[string]string `json:"headers,omitempty"`
 }
 
-// CreateCallbackJSONBody defines parameters for CreateCallback.
-type CreateCallbackJSONBody struct {
-	Id            string `json:"id"`
-	PromiseId     string `json:"promiseId"`
-	Recv          Recv   `json:"recv"`
-	RootPromiseId string `json:"rootPromiseId"`
-	Timeout       int64  `json:"timeout"`
-}
-
-// CreateCallbackParams defines parameters for CreateCallback.
-type CreateCallbackParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
-}
-
 // AcquireLockJSONBody defines parameters for AcquireLock.
 type AcquireLockJSONBody struct {
 	ExecutionId string `json:"executionId"`
@@ -242,6 +227,32 @@ type CreatePromiseParams struct {
 
 	// Strict If true, deduplicates only when promise state matches the request
 	Strict *bool `json:"strict,omitempty"`
+}
+
+// CreatePromiseCallbackJSONBody defines parameters for CreatePromiseCallback.
+type CreatePromiseCallbackJSONBody struct {
+	Recv          Recv   `json:"recv"`
+	RootPromiseId string `json:"rootPromiseId"`
+	Timeout       int64  `json:"timeout"`
+}
+
+// CreatePromiseCallbackParams defines parameters for CreatePromiseCallback.
+type CreatePromiseCallbackParams struct {
+	// RequestId Unique tracking id
+	RequestId *string `json:"request-id,omitempty"`
+}
+
+// CreatePromiseSubscriptionJSONBody defines parameters for CreatePromiseSubscription.
+type CreatePromiseSubscriptionJSONBody struct {
+	Id      string `json:"id"`
+	Recv    Recv   `json:"recv"`
+	Timeout int64  `json:"timeout"`
+}
+
+// CreatePromiseSubscriptionParams defines parameters for CreatePromiseSubscription.
+type CreatePromiseSubscriptionParams struct {
+	// RequestId Unique tracking id
+	RequestId *string `json:"request-id,omitempty"`
 }
 
 // CreatePromiseAndTaskJSONBody defines parameters for CreatePromiseAndTask.
@@ -352,20 +363,6 @@ type ReadScheduleParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
-// CreateSubscriptionJSONBody defines parameters for CreateSubscription.
-type CreateSubscriptionJSONBody struct {
-	Id        string `json:"id"`
-	PromiseId string `json:"promiseId"`
-	Recv      Recv   `json:"recv"`
-	Timeout   int64  `json:"timeout"`
-}
-
-// CreateSubscriptionParams defines parameters for CreateSubscription.
-type CreateSubscriptionParams struct {
-	// RequestId Unique tracking id
-	RequestId *string `json:"request-id,omitempty"`
-}
-
 // ClaimTaskJSONBody defines parameters for ClaimTask.
 type ClaimTaskJSONBody struct {
 	// Counter The task counter
@@ -425,9 +422,6 @@ type HeartbeatTaskGetParams struct {
 	RequestId *string `json:"request-id,omitempty"`
 }
 
-// CreateCallbackJSONRequestBody defines body for CreateCallback for application/json ContentType.
-type CreateCallbackJSONRequestBody CreateCallbackJSONBody
-
 // AcquireLockJSONRequestBody defines body for AcquireLock for application/json ContentType.
 type AcquireLockJSONRequestBody AcquireLockJSONBody
 
@@ -440,6 +434,12 @@ type ReleaseLockJSONRequestBody ReleaseLockJSONBody
 // CreatePromiseJSONRequestBody defines body for CreatePromise for application/json ContentType.
 type CreatePromiseJSONRequestBody CreatePromiseJSONBody
 
+// CreatePromiseCallbackJSONRequestBody defines body for CreatePromiseCallback for application/json ContentType.
+type CreatePromiseCallbackJSONRequestBody CreatePromiseCallbackJSONBody
+
+// CreatePromiseSubscriptionJSONRequestBody defines body for CreatePromiseSubscription for application/json ContentType.
+type CreatePromiseSubscriptionJSONRequestBody CreatePromiseSubscriptionJSONBody
+
 // CreatePromiseAndTaskJSONRequestBody defines body for CreatePromiseAndTask for application/json ContentType.
 type CreatePromiseAndTaskJSONRequestBody CreatePromiseAndTaskJSONBody
 
@@ -448,9 +448,6 @@ type CompletePromiseJSONRequestBody CompletePromiseJSONBody
 
 // CreateScheduleJSONRequestBody defines body for CreateSchedule for application/json ContentType.
 type CreateScheduleJSONRequestBody CreateScheduleJSONBody
-
-// CreateSubscriptionJSONRequestBody defines body for CreateSubscription for application/json ContentType.
-type CreateSubscriptionJSONRequestBody CreateSubscriptionJSONBody
 
 // ClaimTaskJSONRequestBody defines body for ClaimTask for application/json ContentType.
 type ClaimTaskJSONRequestBody ClaimTaskJSONBody
@@ -596,11 +593,6 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// CreateCallbackWithBody request with any body
-	CreateCallbackWithBody(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	CreateCallback(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// AcquireLockWithBody request with any body
 	AcquireLockWithBody(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -623,6 +615,16 @@ type ClientInterface interface {
 	CreatePromiseWithBody(ctx context.Context, params *CreatePromiseParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	CreatePromise(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePromiseCallbackWithBody request with any body
+	CreatePromiseCallbackWithBody(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreatePromiseCallback(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePromiseSubscriptionWithBody request with any body
+	CreatePromiseSubscriptionWithBody(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	CreatePromiseSubscription(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreatePromiseAndTaskWithBody request with any body
 	CreatePromiseAndTaskWithBody(ctx context.Context, params *CreatePromiseAndTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -651,11 +653,6 @@ type ClientInterface interface {
 	// ReadSchedule request
 	ReadSchedule(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// CreateSubscriptionWithBody request with any body
-	CreateSubscriptionWithBody(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	CreateSubscription(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// ClaimTaskWithBody request with any body
 	ClaimTaskWithBody(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -679,30 +676,6 @@ type ClientInterface interface {
 
 	// HeartbeatTaskGet request
 	HeartbeatTaskGet(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-}
-
-func (c *Client) CreateCallbackWithBody(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateCallbackRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateCallback(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateCallbackRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
 }
 
 func (c *Client) AcquireLockWithBody(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -803,6 +776,54 @@ func (c *Client) CreatePromiseWithBody(ctx context.Context, params *CreatePromis
 
 func (c *Client) CreatePromise(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreatePromiseRequest(c.Server, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePromiseCallbackWithBody(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePromiseCallbackRequestWithBody(c.Server, id, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePromiseCallback(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePromiseCallbackRequest(c.Server, id, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePromiseSubscriptionWithBody(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePromiseSubscriptionRequestWithBody(c.Server, id, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) CreatePromiseSubscription(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePromiseSubscriptionRequest(c.Server, id, params, body)
 	if err != nil {
 		return nil, err
 	}
@@ -933,30 +954,6 @@ func (c *Client) ReadSchedule(ctx context.Context, id string, params *ReadSchedu
 	return c.Client.Do(req)
 }
 
-func (c *Client) CreateSubscriptionWithBody(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSubscriptionRequestWithBody(c.Server, params, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-func (c *Client) CreateSubscription(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCreateSubscriptionRequest(c.Server, params, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 func (c *Client) ClaimTaskWithBody(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewClaimTaskRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
@@ -1063,61 +1060,6 @@ func (c *Client) HeartbeatTaskGet(ctx context.Context, id string, counter int, p
 		return nil, err
 	}
 	return c.Client.Do(req)
-}
-
-// NewCreateCallbackRequest calls the generic CreateCallback builder with application/json body
-func NewCreateCallbackRequest(server string, params *CreateCallbackParams, body CreateCallbackJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateCallbackRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewCreateCallbackRequestWithBody generates requests for CreateCallback with any type of body
-func NewCreateCallbackRequestWithBody(server string, params *CreateCallbackParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/callbacks")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
 }
 
 // NewAcquireLockRequest calls the generic AcquireLock builder with application/json body
@@ -1483,6 +1425,130 @@ func NewCreatePromiseRequestWithBody(server string, params *CreatePromiseParams,
 			}
 
 			req.Header.Set("strict", headerParam2)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreatePromiseCallbackRequest calls the generic CreatePromiseCallback builder with application/json body
+func NewCreatePromiseCallbackRequest(server string, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreatePromiseCallbackRequestWithBody(server, id, params, "application/json", bodyReader)
+}
+
+// NewCreatePromiseCallbackRequestWithBody generates requests for CreatePromiseCallback with any type of body
+func NewCreatePromiseCallbackRequestWithBody(server string, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/promises/callback/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
+		}
+
+	}
+
+	return req, nil
+}
+
+// NewCreatePromiseSubscriptionRequest calls the generic CreatePromiseSubscription builder with application/json body
+func NewCreatePromiseSubscriptionRequest(server string, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreatePromiseSubscriptionRequestWithBody(server, id, params, "application/json", bodyReader)
+}
+
+// NewCreatePromiseSubscriptionRequestWithBody generates requests for CreatePromiseSubscription with any type of body
+func NewCreatePromiseSubscriptionRequestWithBody(server string, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithLocation("simple", false, "id", runtime.ParamLocationPath, id)
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/promises/subscribe/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		if params.RequestId != nil {
+			var headerParam0 string
+
+			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
+			if err != nil {
+				return nil, err
+			}
+
+			req.Header.Set("request-id", headerParam0)
 		}
 
 	}
@@ -1976,61 +2042,6 @@ func NewReadScheduleRequest(server string, id string, params *ReadScheduleParams
 	return req, nil
 }
 
-// NewCreateSubscriptionRequest calls the generic CreateSubscription builder with application/json body
-func NewCreateSubscriptionRequest(server string, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewCreateSubscriptionRequestWithBody(server, params, "application/json", bodyReader)
-}
-
-// NewCreateSubscriptionRequestWithBody generates requests for CreateSubscription with any type of body
-func NewCreateSubscriptionRequestWithBody(server string, params *CreateSubscriptionParams, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/subscriptions")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	if params != nil {
-
-		if params.RequestId != nil {
-			var headerParam0 string
-
-			headerParam0, err = runtime.StyleParamWithLocation("simple", false, "request-id", runtime.ParamLocationHeader, *params.RequestId)
-			if err != nil {
-				return nil, err
-			}
-
-			req.Header.Set("request-id", headerParam0)
-		}
-
-	}
-
-	return req, nil
-}
-
 // NewClaimTaskRequest calls the generic ClaimTask builder with application/json body
 func NewClaimTaskRequest(server string, params *ClaimTaskParams, body ClaimTaskJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2392,11 +2403,6 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// CreateCallbackWithBodyWithResponse request with any body
-	CreateCallbackWithBodyWithResponse(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error)
-
-	CreateCallbackWithResponse(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error)
-
 	// AcquireLockWithBodyWithResponse request with any body
 	AcquireLockWithBodyWithResponse(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error)
 
@@ -2419,6 +2425,16 @@ type ClientWithResponsesInterface interface {
 	CreatePromiseWithBodyWithResponse(ctx context.Context, params *CreatePromiseParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseResponse, error)
 
 	CreatePromiseWithResponse(ctx context.Context, params *CreatePromiseParams, body CreatePromiseJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseResponse, error)
+
+	// CreatePromiseCallbackWithBodyWithResponse request with any body
+	CreatePromiseCallbackWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error)
+
+	CreatePromiseCallbackWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error)
+
+	// CreatePromiseSubscriptionWithBodyWithResponse request with any body
+	CreatePromiseSubscriptionWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error)
+
+	CreatePromiseSubscriptionWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error)
 
 	// CreatePromiseAndTaskWithBodyWithResponse request with any body
 	CreatePromiseAndTaskWithBodyWithResponse(ctx context.Context, params *CreatePromiseAndTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseAndTaskResponse, error)
@@ -2447,11 +2463,6 @@ type ClientWithResponsesInterface interface {
 	// ReadScheduleWithResponse request
 	ReadScheduleWithResponse(ctx context.Context, id string, params *ReadScheduleParams, reqEditors ...RequestEditorFn) (*ReadScheduleResponse, error)
 
-	// CreateSubscriptionWithBodyWithResponse request with any body
-	CreateSubscriptionWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error)
-
-	CreateSubscriptionWithResponse(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error)
-
 	// ClaimTaskWithBodyWithResponse request with any body
 	ClaimTaskWithBodyWithResponse(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClaimTaskResponse, error)
 
@@ -2475,34 +2486,6 @@ type ClientWithResponsesInterface interface {
 
 	// HeartbeatTaskGetWithResponse request
 	HeartbeatTaskGetWithResponse(ctx context.Context, id string, counter int, params *HeartbeatTaskGetParams, reqEditors ...RequestEditorFn) (*HeartbeatTaskGetResponse, error)
-}
-
-type CreateCallbackResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		Promise *Promise `json:"promise,omitempty"`
-	}
-	JSON201 *struct {
-		Callback *Callback `json:"callback,omitempty"`
-		Promise  *Promise  `json:"promise,omitempty"`
-	}
-}
-
-// Status returns HTTPResponse.Status
-func (r CreateCallbackResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CreateCallbackResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
 }
 
 type AcquireLockResponse struct {
@@ -2614,6 +2597,62 @@ func (r CreatePromiseResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r CreatePromiseResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreatePromiseCallbackResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Promise *Promise `json:"promise,omitempty"`
+	}
+	JSON201 *struct {
+		Callback *Callback `json:"callback,omitempty"`
+		Promise  *Promise  `json:"promise,omitempty"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r CreatePromiseCallbackResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreatePromiseCallbackResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type CreatePromiseSubscriptionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *struct {
+		Promise *Promise `json:"promise,omitempty"`
+	}
+	JSON201 *struct {
+		Callback *Callback `json:"callback,omitempty"`
+		Promise  *Promise  `json:"promise,omitempty"`
+	}
+}
+
+// Status returns HTTPResponse.Status
+func (r CreatePromiseSubscriptionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreatePromiseSubscriptionResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -2793,34 +2832,6 @@ func (r ReadScheduleResponse) StatusCode() int {
 	return 0
 }
 
-type CreateSubscriptionResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *struct {
-		Promise *Promise `json:"promise,omitempty"`
-	}
-	JSON201 *struct {
-		Callback *Callback `json:"callback,omitempty"`
-		Promise  *Promise  `json:"promise,omitempty"`
-	}
-}
-
-// Status returns HTTPResponse.Status
-func (r CreateSubscriptionResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r CreateSubscriptionResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
 type ClaimTaskResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2957,23 +2968,6 @@ func (r HeartbeatTaskGetResponse) StatusCode() int {
 	return 0
 }
 
-// CreateCallbackWithBodyWithResponse request with arbitrary body returning *CreateCallbackResponse
-func (c *ClientWithResponses) CreateCallbackWithBodyWithResponse(ctx context.Context, params *CreateCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error) {
-	rsp, err := c.CreateCallbackWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateCallbackResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateCallbackWithResponse(ctx context.Context, params *CreateCallbackParams, body CreateCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateCallbackResponse, error) {
-	rsp, err := c.CreateCallback(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateCallbackResponse(rsp)
-}
-
 // AcquireLockWithBodyWithResponse request with arbitrary body returning *AcquireLockResponse
 func (c *ClientWithResponses) AcquireLockWithBodyWithResponse(ctx context.Context, params *AcquireLockParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AcquireLockResponse, error) {
 	rsp, err := c.AcquireLockWithBody(ctx, params, contentType, body, reqEditors...)
@@ -3049,6 +3043,40 @@ func (c *ClientWithResponses) CreatePromiseWithResponse(ctx context.Context, par
 		return nil, err
 	}
 	return ParseCreatePromiseResponse(rsp)
+}
+
+// CreatePromiseCallbackWithBodyWithResponse request with arbitrary body returning *CreatePromiseCallbackResponse
+func (c *ClientWithResponses) CreatePromiseCallbackWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error) {
+	rsp, err := c.CreatePromiseCallbackWithBody(ctx, id, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePromiseCallbackResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreatePromiseCallbackWithResponse(ctx context.Context, id string, params *CreatePromiseCallbackParams, body CreatePromiseCallbackJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseCallbackResponse, error) {
+	rsp, err := c.CreatePromiseCallback(ctx, id, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePromiseCallbackResponse(rsp)
+}
+
+// CreatePromiseSubscriptionWithBodyWithResponse request with arbitrary body returning *CreatePromiseSubscriptionResponse
+func (c *ClientWithResponses) CreatePromiseSubscriptionWithBodyWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error) {
+	rsp, err := c.CreatePromiseSubscriptionWithBody(ctx, id, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePromiseSubscriptionResponse(rsp)
+}
+
+func (c *ClientWithResponses) CreatePromiseSubscriptionWithResponse(ctx context.Context, id string, params *CreatePromiseSubscriptionParams, body CreatePromiseSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePromiseSubscriptionResponse, error) {
+	rsp, err := c.CreatePromiseSubscription(ctx, id, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePromiseSubscriptionResponse(rsp)
 }
 
 // CreatePromiseAndTaskWithBodyWithResponse request with arbitrary body returning *CreatePromiseAndTaskResponse
@@ -3138,23 +3166,6 @@ func (c *ClientWithResponses) ReadScheduleWithResponse(ctx context.Context, id s
 	return ParseReadScheduleResponse(rsp)
 }
 
-// CreateSubscriptionWithBodyWithResponse request with arbitrary body returning *CreateSubscriptionResponse
-func (c *ClientWithResponses) CreateSubscriptionWithBodyWithResponse(ctx context.Context, params *CreateSubscriptionParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
-	rsp, err := c.CreateSubscriptionWithBody(ctx, params, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateSubscriptionResponse(rsp)
-}
-
-func (c *ClientWithResponses) CreateSubscriptionWithResponse(ctx context.Context, params *CreateSubscriptionParams, body CreateSubscriptionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateSubscriptionResponse, error) {
-	rsp, err := c.CreateSubscription(ctx, params, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseCreateSubscriptionResponse(rsp)
-}
-
 // ClaimTaskWithBodyWithResponse request with arbitrary body returning *ClaimTaskResponse
 func (c *ClientWithResponses) ClaimTaskWithBodyWithResponse(ctx context.Context, params *ClaimTaskParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClaimTaskResponse, error) {
 	rsp, err := c.ClaimTaskWithBody(ctx, params, contentType, body, reqEditors...)
@@ -3231,44 +3242,6 @@ func (c *ClientWithResponses) HeartbeatTaskGetWithResponse(ctx context.Context, 
 		return nil, err
 	}
 	return ParseHeartbeatTaskGetResponse(rsp)
-}
-
-// ParseCreateCallbackResponse parses an HTTP response from a CreateCallbackWithResponse call
-func ParseCreateCallbackResponse(rsp *http.Response) (*CreateCallbackResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CreateCallbackResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Promise *Promise `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest struct {
-			Callback *Callback `json:"callback,omitempty"`
-			Promise  *Promise  `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
-
-	}
-
-	return response, nil
 }
 
 // ParseAcquireLockResponse parses an HTTP response from a AcquireLockWithResponse call
@@ -3393,6 +3366,82 @@ func ParseCreatePromiseResponse(rsp *http.Response) (*CreatePromiseResponse, err
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
 		var dest Promise
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreatePromiseCallbackResponse parses an HTTP response from a CreatePromiseCallbackWithResponse call
+func ParseCreatePromiseCallbackResponse(rsp *http.Response) (*CreatePromiseCallbackResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreatePromiseCallbackResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Promise *Promise `json:"promise,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest struct {
+			Callback *Callback `json:"callback,omitempty"`
+			Promise  *Promise  `json:"promise,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreatePromiseSubscriptionResponse parses an HTTP response from a CreatePromiseSubscriptionWithResponse call
+func ParseCreatePromiseSubscriptionResponse(rsp *http.Response) (*CreatePromiseSubscriptionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreatePromiseSubscriptionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Promise *Promise `json:"promise,omitempty"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest struct {
+			Callback *Callback `json:"callback,omitempty"`
+			Promise  *Promise  `json:"promise,omitempty"`
+		}
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -3601,44 +3650,6 @@ func ParseReadScheduleResponse(rsp *http.Response) (*ReadScheduleResponse, error
 			return nil, err
 		}
 		response.JSON200 = &dest
-
-	}
-
-	return response, nil
-}
-
-// ParseCreateSubscriptionResponse parses an HTTP response from a CreateSubscriptionWithResponse call
-func ParseCreateSubscriptionResponse(rsp *http.Response) (*CreateSubscriptionResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &CreateSubscriptionResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest struct {
-			Promise *Promise `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
-		var dest struct {
-			Callback *Callback `json:"callback,omitempty"`
-			Promise  *Promise  `json:"promise,omitempty"`
-		}
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON201 = &dest
 
 	}
 

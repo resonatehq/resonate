@@ -1324,12 +1324,57 @@ var TestCases = []*testCase{
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
+				Path:   "promises/callback/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateCallback",
+				},
+				Body: []byte(`{
+					"rootPromiseId": "bar",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId:     "CreateCallback",
+			},
+		},
+	},
+	{
+		Name: "CreateCallbackLogicalReceiverDeprecated",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
 				Path:   "callbacks",
 				Headers: map[string]string{
 					"Request-Id": "CreateCallback",
 				},
 				Body: []byte(`{
-					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1372,12 +1417,57 @@ var TestCases = []*testCase{
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
+				Path:   "promises/callback/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateCallbackPhysicalReceiver",
+				},
+				Body: []byte(`{
+					"rootPromiseId": "bar",
+					"timeout": 1,
+					"recv": {"type":"http","data":{"url":"http://localhost:3000"}}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
+				RequestId:     "CreateCallbackPhysicalReceiver",
+			},
+		},
+	},
+	{
+		Name: "CreateCallbackPhysicalReceiverDeprecated",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
 				Path:   "callbacks",
 				Headers: map[string]string{
 					"Request-Id": "CreateCallbackPhysicalReceiver",
 				},
 				Body: []byte(`{
-					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1420,12 +1510,58 @@ var TestCases = []*testCase{
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
 				Method: "POST",
+				Path:   "promises/callback/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateCallbackNotFound",
+				},
+				Body: []byte(`{
+					"rootPromiseId": "bar",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 404,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId:     "CreateCallbackNotFound",
+			},
+			Code: codes.NotFound,
+		},
+	},
+	{
+		Name: "CreateCallbackNotFoundDeprecated",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "resume", Root: "bar", Leaf: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
 				Path:   "callbacks",
 				Headers: map[string]string{
 					"Request-Id": "CreateCallbackNotFound",
 				},
 				Body: []byte(`{
-					"id": "foo.1",
 					"promiseId": "foo",
 					"rootPromiseId": "bar",
 					"timeout": 1,
@@ -1451,6 +1587,52 @@ var TestCases = []*testCase{
 	// Subscriptions
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/subscribe/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateSubscription",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateSubscriptionRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId: "CreateSubscription",
+			},
+		},
+	},
+	{
+		Name: "CreateSubscriptionLogicalReceiverDeprecated",
 		Req: &t_api.Request{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
@@ -1544,7 +1726,100 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
+				PromiseId: "foo",
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusCreated,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/subscribe/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateSubscriptionPhysicalRecv",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"timeout": 1,
+					"recv": {"type":"http","data":{"url":"http://localhost:3000"}}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateSubscriptionRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
+				RequestId: "CreateSubscriptionPhysicalRecv",
+			},
+		},
+	},
+	{
 		Name: "CreateSubscriptionNotFound",
+		Req: &t_api.Request{
+			Kind: t_api.CreateCallback,
+			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
+			CreateCallback: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
+				PromiseId: "foo",
+				Recv:      []byte(`"foo"`),
+				Mesg:      &message.Mesg{Type: "notify", Root: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Kind: t_api.CreateCallback,
+			CreateCallback: &t_api.CreateCallbackResponse{
+				Status: t_api.StatusPromiseNotFound,
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/subscribe/foo",
+				Headers: map[string]string{
+					"Request-Id": "CreateSubscriptionNotFound",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"timeout": 1,
+					"recv": "foo"
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 404,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateSubscriptionRequest{
+				Id:        "foo.1",
+				PromiseId: "foo",
+				Timeout:   1,
+				Recv:      &pb.Recv{Recv: &pb.Recv_Logical{Logical: "foo"}},
+				RequestId: "CreateSubscriptionNotFound",
+			},
+			Code: codes.NotFound,
+		},
+	},
+	{
+		Name: "CreateSubscriptionNotFoundDeprecated",
 		Req: &t_api.Request{
 			Kind: t_api.CreateCallback,
 			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},

@@ -1,12 +1,14 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
+	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 
 	"github.com/gin-gonic/gin"
@@ -263,4 +265,118 @@ func (s *server) completePromise(c *gin.Context) {
 
 	util.Assert(res.CompletePromise != nil, "result must not be nil")
 	c.JSON(s.code(res.CompletePromise.Status), res.CompletePromise.Promise)
+}
+
+// Callback
+
+type createCallbackHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type createCallbackBody struct {
+	PromiseId     string          `json:"promiseId"`
+	RootPromiseId string          `json:"rootPromiseId" binding:"required"`
+	Recv          json.RawMessage `json:"recv" binding:"required"`
+	Timeout       int64           `json:"timeout"`
+}
+
+func (s *server) createCallback(c *gin.Context) {
+	var header createCallbackHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	var body createCallbackBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	// The parameter takes priority, but once we remove the deprecated route we
+	// can remove promise id from the body and retrieve the information solely
+	// from the route parameter.
+	if c.Param("id") != "" {
+		body.PromiseId = extractId(c.Param("id"))
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CreateCallback,
+		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
+			PromiseId: body.PromiseId,
+			Recv:      body.Recv,
+			Mesg:      &message.Mesg{Type: "resume", Root: body.RootPromiseId, Leaf: body.PromiseId},
+			Timeout:   body.Timeout,
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.CreateCallback != nil, "result must not be nil")
+	c.JSON(s.code(res.CreateCallback.Status), gin.H{
+		"callback": res.CreateCallback.Callback,
+		"promise":  res.CreateCallback.Promise,
+	})
+}
+
+// Subscribe
+
+type createSubscriptionHeader struct {
+	RequestId string `header:"request-id"`
+}
+
+type createSubscriptionBody struct {
+	Id        string          `json:"Id" binding:"required"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"recv" binding:"required"`
+	Timeout   int64           `json:"timeout"`
+}
+
+func (s *server) createSubscription(c *gin.Context) {
+	var header createSubscriptionHeader
+	if err := c.ShouldBindHeader(&header); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	var body createSubscriptionBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		err := api.RequestValidationError(err)
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	// The parameter takes priority, but once we remove the deprecated route we
+	// can remove promise id from the body and retrieve the information solely
+	// from the route parameter.
+	if c.Param("id") != "" {
+		body.PromiseId = extractId(c.Param("id"))
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Kind: t_api.CreateCallback,
+		CreateCallback: &t_api.CreateCallbackRequest{
+			Id:        util.NotifyId(body.PromiseId, body.Id),
+			PromiseId: body.PromiseId,
+			Recv:      body.Recv,
+			Mesg:      &message.Mesg{Type: "notify", Root: body.PromiseId},
+			Timeout:   body.Timeout,
+		},
+	})
+	if err != nil {
+		c.JSON(s.code(err.Code), gin.H{"error": err})
+		return
+	}
+
+	util.Assert(res.CreateCallback != nil, "result must not be nil")
+	c.JSON(s.code(res.CreateCallback.Status), gin.H{
+		"callback": res.CreateCallback.Callback,
+		"promise":  res.CreateCallback.Promise,
+	})
 }

@@ -1,4 +1,4 @@
-package callbacks
+package promises
 
 import (
 	"context"
@@ -7,39 +7,39 @@ import (
 	"strings"
 	"time"
 
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	v1 "github.com/resonatehq/resonate/pkg/client/v1"
 	"github.com/spf13/cobra"
 )
 
-var createCallbacksExample = `
+var createPromiseCallbackExample = `
 # Create a callback
-resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv default
+resonate promises callback foo --root-promise-id bar --timeout 1h --recv default
 
 # Create a callback with url
-resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv poll://default/6fa89b7e-4a56-40e8-ba4e-78864caa3278
+resonate promises callback foo --root-promise-id bar --timeout 1h --recv poll://default/1
 
 # Create a callback with object
-resonate callback create foo --promise-id bar --root-promise-id baz --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "6fa89b7e-4a56-40e8-ba4e-78864caa3278"}}
+resonate promises callback foo --root-promise-id bar --timeout 1h --recv {"type": "poll", "data": {"group": "default", "id": "2"}}
 `
 
-func CreateCallbackCmd(c client.Client) *cobra.Command {
+func CreatePromiseCallbackCmd(c client.Client) *cobra.Command {
 	var (
-		promiseId     string
 		rootPromiseId string
-		timeout       time.Duration
 		recvStr       string
+		timeout       time.Duration
 	)
 	cmd := &cobra.Command{
-		Use:     "create <id>",
+		Use:     "callback <id>",
 		Short:   "Create callback",
-		Example: createCallbacksExample,
+		Example: createPromiseCallbackExample,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return errors.New("must specify an id")
+				return errors.New("must specify a promise id")
 			}
 
-			id := args[0]
+			promiseId := args[0]
 
 			var recv v1.Recv
 
@@ -58,26 +58,24 @@ func CreateCallbackCmd(c client.Client) *cobra.Command {
 				}
 			}
 
-			body := v1.CreateCallbackJSONRequestBody{
-				Id:            id,
-				PromiseId:     promiseId,
+			body := v1.CreatePromiseCallbackJSONRequestBody{
 				RootPromiseId: rootPromiseId,
-				Timeout:       time.Now().Add(timeout).UnixMilli(),
 				Recv:          recv,
+				Timeout:       time.Now().Add(timeout).UnixMilli(),
 			}
 
-			res, err := c.V1().CreateCallbackWithResponse(context.TODO(), nil, body)
+			res, err := c.V1().CreatePromiseCallbackWithResponse(context.TODO(), promiseId, nil, body)
 			if err != nil {
 				return err
 			}
 
 			if res.StatusCode() == 201 {
-				cmd.Printf("Created callback: %s\n", id)
+				cmd.Printf("Created callback: %s\n", util.ResumeId(rootPromiseId, promiseId))
 			} else if res.StatusCode() == 200 {
 				if res.JSON200.Promise != nil && res.JSON200.Promise.State != v1.PromiseStatePENDING {
 					cmd.Printf("Promise %s already %s\n", promiseId, strings.ToLower(string(res.JSON200.Promise.State)))
 				} else {
-					cmd.Printf("Created callback: %s (deduplicated)\n", id)
+					cmd.Printf("Created callback: %s (deduplicated)\n", util.ResumeId(rootPromiseId, promiseId))
 				}
 			} else {
 				cmd.PrintErrln(res.Status(), string(res.Body))
@@ -87,12 +85,10 @@ func CreateCallbackCmd(c client.Client) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&promiseId, "promise-id", "", "promise id")
 	cmd.Flags().StringVar(&rootPromiseId, "root-promise-id", "", "root promise id")
-	cmd.Flags().DurationVar(&timeout, "timeout", 0, "task timeout")
 	cmd.Flags().StringVar(&recvStr, "recv", "default", "task receiver")
+	cmd.Flags().DurationVar(&timeout, "timeout", 0, "task timeout")
 
-	_ = cmd.MarkFlagRequired("promise-id")
 	_ = cmd.MarkFlagRequired("root-promise-id")
 	_ = cmd.MarkFlagRequired("timeout")
 

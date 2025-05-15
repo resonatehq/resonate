@@ -76,11 +76,15 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	authorized.GET("/promises", server.searchPromises)
 	authorized.GET("/promises/*id", server.readPromise)
 	authorized.PATCH("/promises/*id", server.completePromise)
+	authorized.POST("/promises/callback/*id", server.createCallback)
+	authorized.POST("/promises/subscribe/*id", server.createSubscription)
 
 	// Callbacks API
+	// Deprecated, use /promises/callback instead
 	authorized.POST("/callbacks", server.createCallback)
 
 	// Subscriptions API
+	// Deprecated, use /promises/subscribe instead
 	authorized.POST("/subscriptions", server.createSubscription)
 
 	// Schedules API
