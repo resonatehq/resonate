@@ -24,6 +24,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
         python-version: ["3.12", "3.13"]
+        server-version: ["main", "latest"]
 
     steps:
       - uses: actions/checkout@v4
@@ -52,11 +53,20 @@ jobs:
         with:
           go-version: "1.23.0"
 
+      - name: Get latest Resonate release tag (if needed)
+        if: matrix.server-version == 'latest'
+        id: get-resonate-tag
+        run: |
+          LATEST_TAG=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/resonatehq/resonate/releases/latest | jq -r .tag_name)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
       - name: checkout resonate repository
         uses: actions/checkout@v4
         with:
           repository: resonatehq/resonate
           path: server
+          ref: ${{ matrix.server-version == 'latest' && steps.get-resonate-tag.outputs.tag || 'main' }}
 
       - name: build resonate
         run: go build -o resonate
