@@ -752,7 +752,23 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 			return model, fmt.Errorf("task '%s' does not exist", req.DropTask.Id)
 		}
 
+		// Is possible that the task was timedout
 		if t.State == task.Claimed {
+			if t.Timeout <= reqTime {
+				model = model.Copy()
+				new_t := *t
+				new_t.State = task.Timedout
+				new_t.Counter = 0
+				model.tasks.set(req.DropTask.Id, &new_t)
+				return model, nil
+			}
+			if t.ExpiresAt <= reqTime {
+				model = model.Copy()
+				new_t := *t
+				new_t.State = task.Init
+				model.tasks.set(req.DropTask.Id, &new_t)
+				return model, nil
+			}
 			return model, fmt.Errorf("task '%s' was claimed", req.DropTask.Id)
 		}
 		return model, nil
