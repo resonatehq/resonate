@@ -655,6 +655,13 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 			return model, nil
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
+		case t_api.StatusFieldValidationError:
+			if req.Kind == t_api.CreateCallback && req.CreateCallback.Mesg.Type == "resume" && req.CreateCallback.PromiseId == req.CreateCallback.Mesg.Root {
+				// sometimes we generate create callback requests with the same root and
+				// leaf promise ids by chance
+				return model, nil
+			}
+			fallthrough
 		default:
 			return model, fmt.Errorf("unexpected resonate error '%v'", error)
 		}

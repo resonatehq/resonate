@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/validators"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
@@ -72,6 +73,9 @@ func dst(t *testing.T, p float64, l bool, vp string) {
 	aio.AddSubsystem(router)
 	aio.AddSubsystem(sender)
 	aio.AddSubsystem(store)
+
+	// add api validators
+	api.AddValidator(t_api.CreateCallback, validators.CreateCallback)
 
 	// instantiate system
 	system := system.New(api, aio, config, metrics)

@@ -340,12 +340,6 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		}
 		return model, nil
 
-	case t_api.StatusCallbackInvalidPromise:
-		if req.CreateCallback.PromiseId != req.CreateCallback.Mesg.Root {
-			return model, fmt.Errorf("PromiseId and RootPromiseId are not equal (promiseId=%s, rootPromiseId=%s)", req.CreateCallback.PromiseId, req.CreateCallback.Mesg.Root)
-		}
-		return model, nil
-
 	default:
 		return model, fmt.Errorf("unexpected response status '%d'", res.CreateCallback.Status)
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/validators"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -126,6 +127,9 @@ func RunDSTCmd() *cobra.Command {
 			for _, subsystem := range aioSubsystems {
 				aio.AddSubsystem(subsystem)
 			}
+
+			// api validators
+			api.AddValidator(t_api.CreateCallback, validators.CreateCallback)
 
 			// start api/aio
 			if err := api.Start(); err != nil {

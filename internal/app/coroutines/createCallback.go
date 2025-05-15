@@ -16,18 +16,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	util.Assert(r.CreateCallback != nil, "create callback must not be nil")
 	util.Assert(r.CreateCallback.Mesg.Type == "resume" || r.CreateCallback.Mesg.Type == "notify", "message type must be resume or notify")
 	util.Assert(r.CreateCallback.Mesg.Type == "resume" || r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Root, "if notify, root promise id must equal leaf promise id")
-	// util.Assert(r.CreateCallback.Mesg.Type == "notify" ||(r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Leaf && r.CreateCallback.PromiseId != r.CreateCallback.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
-
-	// TODO: should this be a validation in the api layer?
-	if r.CreateCallback.Mesg.Type == "resume" && r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Root {
-		return &t_api.Response{
-			Kind: t_api.CreateCallback,
-			Tags: r.Tags,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCallbackInvalidPromise,
-			},
-		}, nil
-	}
+	util.Assert(r.CreateCallback.Mesg.Type == "notify" || (r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Leaf && r.CreateCallback.PromiseId != r.CreateCallback.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
 
 	var res *t_api.Response
 
