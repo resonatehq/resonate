@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 class Bridge:
     def __init__(
         self,
-        ctx: Callable[[str, Info], Context],
+        ctx: Callable[[str, str, Info], Context],
         store: Store,
         message_source: MessageSource,
         registry: Registry,

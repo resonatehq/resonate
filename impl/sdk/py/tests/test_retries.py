@@ -35,7 +35,7 @@ def bar_ko(ctx: Context):  # noqa: ANN201
 
 @pytest.fixture
 def scheduler() -> Scheduler:
-    return Scheduler(lambda id, info: Context(id, info, Registry(), Dependencies()))
+    return Scheduler(lambda id, cid, info: Context(id, cid, info, Registry(), Dependencies()))
 
 
 @pytest.mark.parametrize(

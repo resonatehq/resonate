@@ -73,7 +73,7 @@ logger.addHandler(handler)
 class Scheduler:
     def __init__(
         self,
-        ctx: Callable[[str, Info], Context],
+        ctx: Callable[[str, str, Info], Context],
         pid: str | None = None,
         unicast: str | None = None,
         anycast: str | None = None,
@@ -313,7 +313,7 @@ class Lfnc:
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options
-    ccls: Callable[[str, Info], Context]
+    ccls: Callable[[str, str, Info], Context]
 
     attempt: int = field(default=1, init=False)
     ctx: Context = field(init=False)
@@ -323,7 +323,7 @@ class Lfnc:
     suspends: list[Node[State]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
-        self.ctx = self.ccls(self.id, Info(self))
+        self.ctx = self.ccls(self.id, self.cid, Info(self))
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
     def map(
@@ -397,7 +397,7 @@ class Coro:
     args: tuple[Any, ...]
     kwargs: dict[str, Any]
     opts: Options
-    ccls: Callable[[str, Info], Context]
+    ccls: Callable[[str, str, Info], Context]
 
     coro: Coroutine = field(init=False)
     next: None | AWT | Result = field(default=None, init=False)
@@ -409,7 +409,7 @@ class Coro:
     suspends: list[Node[State]] = field(default_factory=list, init=False)
 
     def __post_init__(self) -> None:
-        self.ctx = self.ccls(self.id, Info(self))
+        self.ctx = self.ccls(self.id, self.cid, Info(self))
         self.coro = Coroutine(self.id, self.cid, self.func(self.ctx, *self.args, **self.kwargs))
         self.retry_policy = self.opts.retry_policy(self.func) if callable(self.opts.retry_policy) else self.opts.retry_policy
 
@@ -467,7 +467,7 @@ class Done:
 
 
 class Computation:
-    def __init__(self, id: str, ctx: Callable[[str, Info], Context], pid: str, unicast: str, anycast: str) -> None:
+    def __init__(self, id: str, ctx: Callable[[str, str, Info], Context], pid: str, unicast: str, anycast: str) -> None:
         self.id = id
         self.ctx = ctx
         self.pid = pid

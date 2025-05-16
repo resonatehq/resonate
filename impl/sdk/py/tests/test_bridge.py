@@ -130,21 +130,20 @@ def random_generation(ctx: Context) -> Generator[Yieldable, Any, float]:
     return (yield ctx.random.randint(0, 10))
 
 
-def info1(ctx: Context, idempotency_key: str, tags: dict[str, str], timeout: float, version: int) -> None:
+def info1(ctx: Context, idempotency_key: str, tags: dict[str, str], version: int) -> None:
     assert ctx.info.attempt == 1
     assert ctx.info.idempotency_key == idempotency_key
     assert ctx.info.tags == tags
     assert ctx.info.version == version
-    # TODO(dfarr): how to assert the timeout?
 
 
 def info2(ctx: Context, *args: Any, **kwargs: Any) -> Generator[Yieldable, Any, None]:
     info1(ctx, *args, **kwargs)
-    yield ctx.lfc(info1, f"{ctx.id}.1", {"resonate:scope": "local"}, 0, 1)
-    yield ctx.rfc(info1, f"{ctx.id}.2", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 0, 1)
-    yield (yield ctx.lfi(info1, f"{ctx.id}.3", {"resonate:scope": "local"}, 0, 1))
-    yield (yield ctx.rfi(info1, f"{ctx.id}.4", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 0, 1))
-    yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:scope": "global", "resonate:invoke": "poll://default"}, 0, 1))
+    yield ctx.lfc(info1, f"{ctx.id}.1", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "local"}, 1)
+    yield ctx.rfc(info1, f"{ctx.id}.2", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://default"}, 1)
+    yield (yield ctx.lfi(info1, f"{ctx.id}.3", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "local"}, 1))
+    yield (yield ctx.rfi(info1, f"{ctx.id}.4", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://default"}, 1))
+    yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://default"}, 1))
 
 
 def parent_bound(ctx: Context, child_timeout_rel: int, mode: Literal["rfc", "lfc"]) -> Generator[Yieldable, Any, None]:
@@ -391,14 +390,12 @@ def test_implicit_resonate_start() -> None:
 @pytest.mark.parametrize("idempotency_key", ["foo", None])
 @pytest.mark.parametrize("tags", [{"foo": "bar"}, None])
 @pytest.mark.parametrize("target", ["foo", None])
-@pytest.mark.parametrize("timeout", [100, 200, None])
 @pytest.mark.parametrize("version", [1, 2])
 def test_info(
     idempotency_key: str | None,
     resonate_instance: Resonate,
     tags: dict[str, str] | None,
     target: str | None,
-    timeout: float | None,
     version: int,
 ) -> None:
     id = f"info-{uuid.uuid4()}"
@@ -408,7 +405,7 @@ def test_info(
         retry_policy=Never(),
         tags=tags,
         target=target,
-        timeout=timeout,
+        timeout=10,
         version=version,
     )
 
@@ -416,8 +413,7 @@ def test_info(
         id,
         "info",
         idempotency_key or id,
-        {**(tags or {}), "resonate:scope": "global", "resonate:invoke": target or "poll://default"},
-        timeout or 31536000,
+        {**(tags or {}), "resonate:root": id, "resonate:parent": id, "resonate:scope": "global", "resonate:invoke": target or "poll://default"},
         version,
     )
 

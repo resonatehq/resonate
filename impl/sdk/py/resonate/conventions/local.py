@@ -12,6 +12,8 @@ if TYPE_CHECKING:
 @dataclass
 class Local:
     id: str
+    r_id: str
+    p_id: str
     opts: Options = field(default_factory=Options, repr=False)
 
     @property
@@ -32,7 +34,7 @@ class Local:
 
     @property
     def tags(self) -> dict[str, str]:
-        return {**self.opts.tags, "resonate:scope": "local"}
+        return {**self.opts.tags, "resonate:root": self.r_id, "resonate:parent": self.p_id, "resonate:scope": "local"}
 
     def options(
         self,

@@ -377,7 +377,7 @@ class Worker(Component):
         self.last_heartbeat = 0.0
 
         self.scheduler = Scheduler(
-            lambda id, info: Context(id, info, self.registry, self.dependencies),
+            lambda id, cid, info: Context(id, cid, info, self.registry, self.dependencies),
             pid=self.uni,
             unicast=f"sim://uni@{self.uni}",
             anycast=f"sim://any@{self.uni}",  # this looks silly, but this is right

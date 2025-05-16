@@ -277,96 +277,119 @@ def test_dst(seed: str, steps: int) -> None:
             case 0:
                 sim.send_msg("sim://any@default", Listen(str(n)))
             case 1:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo", opts=opts)
+                conv = Remote(id, id, id, "foo", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo, opts=opts))
             case 2:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar", opts=opts)
+                conv = Remote(id, id, id, "bar", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar, opts=opts))
             case 3:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo", opts=opts)
+                conv = Remote(id, id, id, "foo", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, baz, opts=opts))
             case 4:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo_lfi", opts=opts)
+                conv = Remote(id, id, id, "foo_lfi", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo_lfi, opts=opts))
             case 5:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar_lfi", opts=opts)
+                conv = Remote(id, id, id, "bar_lfi", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar_lfi, opts=opts))
             case 6:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo_lfc", opts=opts)
+                conv = Remote(id, id, id, "foo_lfc", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo_lfc, opts=opts))
             case 7:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar_lfc", opts=opts)
+                conv = Remote(id, id, id, "bar_lfc", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar_lfc, opts=opts))
             case 8:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo_rfi", opts=opts)
+                conv = Remote(id, id, id, "foo_rfi", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo_rfi, opts=opts))
             case 9:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar_rfi", opts=opts)
+                conv = Remote(id, id, id, "bar_rfi", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar_rfi, opts=opts))
             case 10:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo_rfc", opts=opts)
+                conv = Remote(id, id, id, "foo_rfc", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo_rfc, opts=opts))
             case 11:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar_rfc", opts=opts)
+                conv = Remote(id, id, id, "bar_rfc", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar_rfc, opts=opts))
             case 12:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "foo_detached", opts=opts)
+                conv = Remote(id, id, id, "foo_detached", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, foo_detached, opts=opts))
             case 13:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "bar_detached", opts=opts)
+                conv = Remote(id, id, id, "bar_detached", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, bar_detached, opts=opts))
             case 14:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "structured_concurrency", opts=opts)
+                conv = Remote(id, id, id, "structured_concurrency", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, structured_concurrency, opts=opts))
             case 15:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "fail_25", opts=opts)
+                conv = Remote(id, id, id, "fail_25", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fail_25, opts=opts))
             case 16:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "fail_50", opts=opts)
+                conv = Remote(id, id, id, "fail_50", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fail_50, opts=opts))
             case 17:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "fail_75", opts=opts)
+                conv = Remote(id, id, id, "fail_75", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fail_75, opts=opts))
             case 18:
+                id = str(n)
                 opts = Options(target="sim://any@default")
-                conv = Remote(str(n), "fail_99", opts=opts)
+                conv = Remote(id, id, id, "fail_99", opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fail_99, opts=opts))
             case 19:
+                id = f"fib-{n}"
                 opts = Options(target="sim://any@default")
-                conv = Remote(f"fib-{n}", "fib", (n,), opts=opts)
+                conv = Remote(id, id, id, "fib", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fib, (n,), opts=opts))
             case 20:
+                id = f"fibl-{n}"
                 opts = Options(target="sim://any@default")
-                conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
+                conv = Remote(id, id, id, "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fib_lfi, (n,), opts=opts))
             case 21:
+                id = f"fibl-{n}"
                 opts = Options(target="sim://any@default")
-                conv = Remote(f"fibl-{n}", "fib_lfi", (n,), opts=opts)
+                conv = Remote(id, id, id, "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fib_lfc, (n,), opts=opts))
             case 22:
+                id = f"fibr-{n}"
                 opts = Options(target="sim://any@default")
-                conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
+                conv = Remote(id, id, id, "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fib_rfi, (n,), opts=opts))
             case 23:
+                id = f"fibr-{n}"
                 opts = Options(target="sim://any@default")
-                conv = Remote(f"fibr-{n}", "fib_lfi", (n,), opts=opts)
+                conv = Remote(id, id, id, "fib_lfi", (n,), opts=opts)
                 sim.send_msg("sim://any@default", Invoke(conv.id, conv, 0, fib_rfc, (n,), opts=opts))
 
         # step

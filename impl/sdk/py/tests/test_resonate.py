@@ -169,10 +169,10 @@ def test_run(
     }
 
     default_opts = Options(version=version or 1)
-    default_conv = Remote("f", name, args, kwargs, default_opts)
+    default_conv = Remote("f", "f", "f", name, args, kwargs, default_opts)
 
     updated_opts = Options(version=version or 1).merge(**opts)
-    updated_conv = Remote("f", name, args, kwargs, updated_opts)
+    updated_conv = Remote("f", "f", "f", name, args, kwargs, updated_opts)
 
     assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
     assert updated_opts.target == (target or default_opts.target)
@@ -181,12 +181,12 @@ def test_run(
     assert updated_opts.tags == (tags or default_opts.tags)
 
     def invoke(id: str) -> Invoke:
-        conv = Remote(id, name, args, kwargs, default_opts)
+        conv = Remote(id, id, id, name, args, kwargs, default_opts)
         promise = resonate.promises.get(id=id)
         return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, default_opts, promise)
 
     def invoke_with_opts(id: str) -> Invoke:
-        conv = Remote(id, name, args, kwargs, updated_opts)
+        conv = Remote(id, id, id, name, args, kwargs, updated_opts)
         promise = resonate.promises.get(id=id)
         return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, updated_opts, promise)
 
@@ -198,7 +198,7 @@ def test_run(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
 
     resonate.run("f2", name, *args, **kwargs)
     assert cmd(resonate) == invoke("f2")
@@ -208,7 +208,11 @@ def test_run(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+    )
 
     resonate.options(**opts).run("f3", func, *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f3")
@@ -218,7 +222,7 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f4", name, *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f4")
@@ -228,7 +232,11 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    )
 
     f.run("f5", *args, **kwargs)
     assert cmd(resonate) == invoke("f5")
@@ -238,7 +246,11 @@ def test_run(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
+    )
 
     f.options(**opts).run("f6", *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f6")
@@ -248,7 +260,11 @@ def test_run(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    )
 
 
 @pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
@@ -293,10 +309,10 @@ def test_rpc(
     }
 
     default_opts = Options(version=version or 1)
-    default_conv = Remote("f", name, args, kwargs, default_opts)
+    default_conv = Remote("f", "f", "f", name, args, kwargs, default_opts)
 
     updated_opts = Options(version=version or 1).merge(**opts)
-    updated_conv = Remote("f", name, args, kwargs, updated_opts)
+    updated_conv = Remote("f", "f", "f", name, args, kwargs, updated_opts)
 
     assert updated_opts.idempotency_key == (idempotency_key or default_opts.idempotency_key)
     assert updated_opts.target == (target or default_opts.target)
@@ -312,7 +328,7 @@ def test_rpc(
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
 
     resonate.rpc("f2", name, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f2")
@@ -322,7 +338,11 @@ def test_rpc(
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+    )
 
     resonate.options(**opts).rpc("f3", func, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f3")
@@ -332,7 +352,7 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f4", name, *args, **kwargs)
     assert cmd(resonate) == Listen(id="f4")
@@ -342,7 +362,11 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    )
 
     f.rpc("f5", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f5")
@@ -352,7 +376,11 @@ def test_rpc(
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**default_conv.tags, "resonate:scope": "global"} == {"resonate:invoke": default_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
+    )
 
     f.options(**opts).rpc("f6", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f6")
@@ -362,7 +390,11 @@ def test_rpc(
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_conv.tags, "resonate:scope": "global"} == {**updated_opts.tags, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    assert (
+        promise.tags
+        == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+    )
 
 
 @pytest.mark.parametrize(
@@ -527,7 +559,7 @@ def test_context_type_annotations() -> None:
     baz = resonate.register(baz)
     qux = resonate.register(qux)
 
-    ctx = Context("f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
 
     assert_type(ctx.lfi(foo, 1, 2), LFI[int])
     assert_type(ctx.lfi(bar, 1, 2), LFI[int])
@@ -567,7 +599,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
     registry.add(f1, "func", version)
     registry.add(f2, "func", version + 1)
 
-    ctx = Context("f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
     counter = 0
 
     for f, v in ((f1, version), (f2, version + 1)):
@@ -587,7 +619,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.headers is None
             assert cmd.conv.data is None
             assert cmd.conv.timeout == 31536000
-            assert cmd.conv.tags == {"resonate:scope": "local"}
+            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "local"}
             assert cmd.opts.version == v
 
             # update the command
@@ -613,7 +645,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.headers is None
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
             assert cmd.conv.timeout == 31536000
-            assert cmd.conv.tags == {"resonate:scope": "global", "resonate:invoke": "poll://default"}
+            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "global", "resonate:invoke": "poll://default"}
 
             cmd = cmd.options(tags=tags, timeout=timeout, version=version, target=target)
 
