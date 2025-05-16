@@ -24,7 +24,7 @@ type Http struct {
 	workers []*HttpWorker
 }
 
-type Data struct {
+type Addr struct {
 	Headers map[string]string `json:"headers,omitempty"`
 	Url     string            `json:"url"`
 }
@@ -105,27 +105,27 @@ func (w *HttpWorker) Start() {
 		}
 
 		counter.Inc()
-		msg.Done(w.Process(msg.Data, msg.Body))
+		msg.Done(w.Process(msg.Addr, msg.Body))
 		counter.Dec()
 	}
 }
 
 func (w *HttpWorker) Process(data []byte, body []byte) (bool, error) {
-	var httpData *Data
-	if err := json.Unmarshal(data, &httpData); err != nil {
+	var addr *Addr
+	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
 	}
 
-	req, err := http.NewRequest("POST", httpData.Url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", addr.Url, bytes.NewReader(body))
 	if err != nil {
 		return false, err
 	}
 
-	if httpData.Headers == nil {
-		httpData.Headers = map[string]string{}
+	if addr.Headers == nil {
+		addr.Headers = map[string]string{}
 	}
 
-	for k, v := range httpData.Headers { // nosemgrep: range-over-map
+	for k, v := range addr.Headers { // nosemgrep: range-over-map
 		req.Header.Set(k, v)
 	}
 

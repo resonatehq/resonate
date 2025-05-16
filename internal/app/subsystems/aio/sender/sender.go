@@ -93,7 +93,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Sender, error) {
 
 	if _, ok := targets["default"]; !ok {
 		// add default target if none
-		targets["default"] = &receiver.Recv{Type: "poll", Data: []byte(`{"group":"default"}`)}
+		targets["default"] = &receiver.Recv{Type: "poll", Data: []byte(`{"cast": "any", "group": "default"}`)}
 	}
 
 	worker := &SenderWorker{
@@ -278,7 +278,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 
 	ok := plugin.Enqueue(&aio.Message{
 		Type: mesgType,
-		Data: recv.Data,
+		Addr: recv.Data,
 		Body: body,
 		Done: func(success bool, err error) {
 			if err != nil {
@@ -330,12 +330,19 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 		return &receiver.Recv{Type: "http", Data: data}, true
 	case "poll":
-		rawData := map[string]string{"group": u.Host}
-		if id := strings.TrimPrefix(u.Path, "/"); id != "" {
-			rawData["id"] = id
+		cast := "uni"
+		if u.User != nil {
+			if cast = strings.ToLower(u.User.Username()); cast != "uni" && cast != "any" {
+				return nil, false
+			}
 		}
 
-		data, err := json.Marshal(rawData)
+		addr := map[string]string{"cast": cast, "group": u.Host}
+		if id := strings.TrimPrefix(u.Path, "/"); id != "" {
+			addr["id"] = id
+		}
+
+		data, err := json.Marshal(addr)
 		if err != nil {
 			return nil, false
 		}

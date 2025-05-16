@@ -14,7 +14,6 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -52,9 +51,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "b"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a", "b"}, "data: ok1"},
@@ -70,9 +69,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "b"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a"}, "data: ok1"},
@@ -88,9 +87,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "b"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a", "b"}, "data: ok1"},
@@ -106,9 +105,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "c/d"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a/b"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c/d"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"e/f"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a/b"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c/d"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"e/f"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a/b"}, "data: ok1"},
@@ -126,15 +125,15 @@ func TestPollPlugin(t *testing.T) {
 				{"bar", "b"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"b"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
-				{true, &aio.Message{Data: []byte(`{"group":"bar","id":"a"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"bar","id":"b"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"bar","id":"c"}`), Body: []byte("ok3")}},
-				{false, &aio.Message{Data: []byte(`{"group":"baz","id":"a"}`), Body: []byte("ko1")}},
-				{false, &aio.Message{Data: []byte(`{"group":"baz","id":"b"}`), Body: []byte("ko2")}},
-				{false, &aio.Message{Data: []byte(`{"group":"baz","id":"c"}`), Body: []byte("ko3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"b"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"bar","id":"a"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"bar","id":"b"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"bar","id":"c"}`), Body: []byte("ok3")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"baz","id":"a"}`), Body: []byte("ko1")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"baz","id":"b"}`), Body: []byte("ko2")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"baz","id":"c"}`), Body: []byte("ko3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a"}, "data: ok1"},
@@ -149,9 +148,9 @@ func TestPollPlugin(t *testing.T) {
 			name: "NoConnection",
 			mc:   5,
 			messages: []*Mesg{
-				{false, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ko1")}},
-				{false, &aio.Message{Data: []byte(`{"group":"foo","id":"b"}`), Body: []byte("ko2")}},
-				{false, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ko3")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ko1")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"b"}`), Body: []byte("ko2")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ko3")}},
 			},
 		},
 		{
@@ -162,9 +161,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "a"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"b"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"a"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"b"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a"}, "data: ok1"},
@@ -182,9 +181,9 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", "d"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"d"}`), Body: []byte("ok1")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"d"}`), Body: []byte("ok2")}},
-				{true, &aio.Message{Data: []byte(`{"group":"foo","id":"d"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"d"}`), Body: []byte("ok1")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"d"}`), Body: []byte("ok2")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"d"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a", "b", "c"}, "data: ok1"},
@@ -193,15 +192,15 @@ func TestPollPlugin(t *testing.T) {
 			},
 		},
 		{
-			name: "NotifyMustBeSameGroupAndId",
+			name: "UnicastMustBeSameGroupAndId",
 			mc:   5,
 			connections: []*Conn{
 				{"foo", "a"},
 			},
 			messages: []*Mesg{
-				{true, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"a"}`), Body: []byte("ok1")}},
-				{false, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"b"}`), Body: []byte("ok2")}},
-				{false, &aio.Message{Type: message.Notify, Data: []byte(`{"group":"foo","id":"c"}`), Body: []byte("ok3")}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"uni","group":"foo","id":"a"}`), Body: []byte("ok1")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"uni","group":"foo","id":"b"}`), Body: []byte("ok2")}},
+				{false, &aio.Message{Addr: []byte(`{"cast":"uni","group":"foo","id":"c"}`), Body: []byte("ok3")}},
 			},
 			expected: []*Resp{
 				{"foo", []string{"a"}, "data: ok1"},
