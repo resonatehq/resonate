@@ -93,7 +93,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Sender, error) {
 
 	if _, ok := targets["default"]; !ok {
 		// add default target if none
-		targets["default"] = &receiver.Recv{Type: "poll", Data: []byte(`{"cast": "any", "group": "default"}`)}
+		targets["default"] = &receiver.Recv{Type: "poll", Data: []byte(`{"cast":"any","group":"default"}`)}
 	}
 
 	worker := &SenderWorker{
