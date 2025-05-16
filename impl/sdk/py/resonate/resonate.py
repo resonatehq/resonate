@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import inspect
 import random
 import time
 import uuid
@@ -12,6 +13,7 @@ from resonate.bridge import Bridge
 from resonate.conventions import Base, Local, Remote, Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI, Promise
 from resonate.dependencies import Dependencies
+from resonate.errors import ResonateValidationError
 from resonate.message_sources import LocalMessageSource, Poller
 from resonate.models.handle import Handle
 from resonate.options import Options
@@ -173,7 +175,11 @@ class Resonate:
         name: str | None = None,
         version: int = 1,
     ) -> Function[P, R] | Callable[[Callable[Concatenate[Context, P], R]], Function[P, R]]:
-        def wrapper(func: Callable[Concatenate[Context, P], R]) -> Function[P, R]:
+        def wrapper(func: Callable[..., Any]) -> Function[P, R]:
+            if not inspect.isfunction(func):
+                msg = "Can only register functions"
+                raise ResonateValidationError(msg)
+
             self._registry.add(func, name or func.__name__, version)
             return Function(self, name or func.__name__, func, self._opts.merge(version=version))
 
