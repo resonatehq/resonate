@@ -174,9 +174,9 @@ func EnqueueTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 						ProcessId:      nil,
 						State:          task.Completed,
 						Counter:        t.Counter,
-						Attempt:        t.Attempt,
+						Attempt:        0,
 						Ttl:            0,
-						ExpiresAt:      expiresAt, // time to be claimed
+						ExpiresAt:      0,
 						CurrentStates:  []task.State{task.Init},
 						CurrentCounter: t.Counter,
 					},
