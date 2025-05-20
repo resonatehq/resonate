@@ -16,5 +16,5 @@ EXPOSE 8001
 EXPOSE 8002
 EXPOSE 50051
 
-ENTRYPOINT ["./resonate"]
+USER non-root ENTRYPOINT ["./resonate"]
 
