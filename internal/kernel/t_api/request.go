@@ -91,11 +91,10 @@ func (r *CreatePromiseRequest) isRequestPayload() {}
 type CreatePromiseAndTaskRequest struct {
 	Promise *CreatePromiseRequest
 	Task    *CreateTaskRequest
-	Tags    map[string]string `json:"tags,omitempty"`
 }
 
 func (r *CreatePromiseAndTaskRequest) String() string {
-	return fmt.Sprintf("CreatePromiseAndTask(promise=%v, task=%v, tags=%v)", r.Promise, r.Task, r.Tags)
+	return fmt.Sprintf("CreatePromiseAndTask(promise=%v, task=%v)", r.Promise, r.Task)
 }
 
 func (r *CreatePromiseAndTaskRequest) Validate() error {
@@ -109,16 +108,15 @@ func (r *CreatePromiseAndTaskRequest) Kind() Kind {
 func (r *CreatePromiseAndTaskRequest) isRequestPayload() {}
 
 type CompletePromiseRequest struct {
-	Id             string            `json:"id"`
-	IdempotencyKey *idempotency.Key  `json:"idemptencyKey,omitempty"`
-	Strict         bool              `json:"strict"`
-	State          promise.State     `json:"state"`
-	Value          promise.Value     `json:"value,omitempty"`
-	Tags           map[string]string `json:"tags,omitempty"`
+	Id             string           `json:"id"`
+	IdempotencyKey *idempotency.Key `json:"idemptencyKey,omitempty"`
+	Strict         bool             `json:"strict"`
+	State          promise.State    `json:"state"`
+	Value          promise.Value    `json:"value,omitempty"`
 }
 
 func (r *CompletePromiseRequest) String() string {
-	return fmt.Sprintf("CompletePromise(id=%s, idempotencyKey=%v, strict=%v, state=%v, value=%v, tags=%v)", r.Id, r.IdempotencyKey, r.Strict, r.State, r.Value, r.Tags)
+	return fmt.Sprintf("CompletePromise(id=%s, idempotencyKey=%v, strict=%v, state=%v, value=%v)", r.Id, r.IdempotencyKey, r.Strict, r.State, r.Value)
 }
 
 func (r *CompletePromiseRequest) Validate() error {
@@ -134,16 +132,15 @@ func (r *CompletePromiseRequest) isRequestPayload() {}
 // Callbacks
 
 type CreateCallbackRequest struct {
-	Id        string            `json:"id"`
-	PromiseId string            `json:"promiseId"`
-	Recv      json.RawMessage   `json:"recv"`
-	Mesg      *message.Mesg     `json:"mesg"`
-	Timeout   int64             `json:"timeout"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	Id        string          `json:"id"`
+	PromiseId string          `json:"promiseId"`
+	Recv      json.RawMessage `json:"recv"`
+	Mesg      *message.Mesg   `json:"mesg"`
+	Timeout   int64           `json:"timeout"`
 }
 
 func (r *CreateCallbackRequest) String() string {
-	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d, tags=%v)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout, r.Tags)
+	return fmt.Sprintf("CreateCallback(id=%s, promiseId=%s, recv=%s, mesg=%s, timeout=%d)", r.Id, r.PromiseId, r.Recv, r.Mesg, r.Timeout)
 }
 
 func (r *CreateCallbackRequest) Validate() error {
@@ -162,12 +159,11 @@ func (r *CreateCallbackRequest) isRequestPayload() {}
 // Schedules
 
 type ReadScheduleRequest struct {
-	Id   string            `json:"id"`
-	Tags map[string]string `json:"tags,omitempty"`
+	Id string `json:"id"`
 }
 
 func (r *ReadScheduleRequest) String() string {
-	return fmt.Sprintf("ReadSchedule(id=%s, tags=%v)", r.Id, r.Tags)
+	return fmt.Sprintf("ReadSchedule(id=%s)", r.Id)
 }
 
 func (r *ReadScheduleRequest) Validate() error {
@@ -239,12 +235,11 @@ func (r *CreateScheduleRequest) Kind() Kind {
 func (r *CreateScheduleRequest) isRequestPayload() {}
 
 type DeleteScheduleRequest struct {
-	Id   string            `json:"id"`
-	Tags map[string]string `json:"tags,omitempty"`
+	Id string `json:"id"`
 }
 
 func (r *DeleteScheduleRequest) String() string {
-	return fmt.Sprintf("DeleteSchedule(id=%s, tags=%v)", r.Id, r.Tags)
+	return fmt.Sprintf("DeleteSchedule(id=%s)", r.Id)
 }
 
 func (r *DeleteScheduleRequest) Validate() error {
@@ -260,21 +255,19 @@ func (r *DeleteScheduleRequest) isRequestPayload() {}
 // Locks
 
 type AcquireLockRequest struct {
-	ResourceId  string            `json:"resourceId"`
-	ExecutionId string            `json:"executionId"`
-	ProcessId   string            `json:"processId"`
-	Ttl         int64             `json:"ttl" binding:"min=0"`
-	Tags        map[string]string `json:"tags,omitempty"`
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
+	ProcessId   string `json:"processId"`
+	Ttl         int64  `json:"ttl" binding:"min=0"`
 }
 
 func (r *AcquireLockRequest) String() string {
 	return fmt.Sprintf(
-		"AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d, tags=%v)",
+		"AcquireLock(resourceId=%s, executionId=%s, processId=%s, ttl=%d)",
 		r.ResourceId,
 		r.ExecutionId,
 		r.ProcessId,
 		r.Ttl,
-		r.Tags,
 	)
 }
 
@@ -289,13 +282,12 @@ func (r *AcquireLockRequest) Kind() Kind {
 func (r *AcquireLockRequest) isRequestPayload() {}
 
 type ReleaseLockRequest struct {
-	ResourceId  string            `json:"resourceId"`
-	ExecutionId string            `json:"executionId"`
-	Tags        map[string]string `json:"tags,omitempty"`
+	ResourceId  string `json:"resourceId"`
+	ExecutionId string `json:"executionId"`
 }
 
 func (r *ReleaseLockRequest) String() string {
-	return fmt.Sprintf("ReleaseLock(resourceId=%s, executionId=%s, tags=%v)", r.ResourceId, r.ExecutionId, r.Tags)
+	return fmt.Sprintf("ReleaseLock(resourceId=%s, executionId=%s)", r.ResourceId, r.ExecutionId)
 }
 
 func (r *ReleaseLockRequest) Validate() error {
@@ -309,12 +301,11 @@ func (r *ReleaseLockRequest) Kind() Kind {
 func (r *ReleaseLockRequest) isRequestPayload() {}
 
 type HeartbeatLocksRequest struct {
-	ProcessId string            `json:"processId"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	ProcessId string `json:"processId"`
 }
 
 func (r *HeartbeatLocksRequest) String() string {
-	return fmt.Sprintf("HeartbeatLocks(processId=%s, tags=%v)", r.ProcessId, r.Tags)
+	return fmt.Sprintf("HeartbeatLocks(processId=%s)", r.ProcessId)
 }
 
 func (r *HeartbeatLocksRequest) Validate() error {
@@ -332,34 +323,31 @@ func (r *HeartbeatLocksRequest) isRequestPayload() {}
 // CreateTaskRequest is not a Request on its own it needs to be part of a CreatePromiseAndTask Request
 // that is why it does not implement the request interface
 type CreateTaskRequest struct {
-	PromiseId string            `json:"promiseId"`
-	ProcessId string            `json:"processId"`
-	Ttl       int               `json:"ttl" binding:"min=0"`
-	Timeout   int64             `json:"timeout"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	PromiseId string `json:"promiseId"`
+	ProcessId string `json:"processId"`
+	Ttl       int    `json:"ttl" binding:"min=0"`
+	Timeout   int64  `json:"timeout"`
 }
 
 func (r *CreateTaskRequest) String() string {
 	return fmt.Sprintf(
-		"CreateTask(promiseId=%s, processId=%s, ttl=%d, timeout=%d, tags=%v)",
+		"CreateTask(promiseId=%s, processId=%s, ttl=%d, timeout=%d)",
 		r.PromiseId,
 		r.ProcessId,
 		r.Ttl,
 		r.Timeout,
-		r.Tags,
 	)
 }
 
 type ClaimTaskRequest struct {
-	Id        string            `json:"id"`
-	Counter   int               `json:"counter"`
-	ProcessId string            `json:"processId"`
-	Ttl       int               `json:"ttl" binding:"min=0"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	Id        string `json:"id"`
+	Counter   int    `json:"counter"`
+	ProcessId string `json:"processId"`
+	Ttl       int    `json:"ttl" binding:"min=0"`
 }
 
 func (r *ClaimTaskRequest) String() string {
-	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, ttl=%d, tags=%v)", r.Id, r.Counter, r.ProcessId, r.Ttl, r.Tags)
+	return fmt.Sprintf("ClaimTask(id=%s, counter=%d, processId=%s, ttl=%d)", r.Id, r.Counter, r.ProcessId, r.Ttl)
 }
 
 func (r *ClaimTaskRequest) Validate() error {
@@ -373,13 +361,12 @@ func (r *ClaimTaskRequest) Kind() Kind {
 func (r *ClaimTaskRequest) isRequestPayload() {}
 
 type CompleteTaskRequest struct {
-	Id      string            `json:"id"`
-	Counter int               `json:"counter"`
-	Tags    map[string]string `json:"tags,omitempty"`
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
 }
 
 func (r *CompleteTaskRequest) String() string {
-	return fmt.Sprintf("CompleteTask(id=%s, counter=%d, tags=%v)", r.Id, r.Counter, r.Tags)
+	return fmt.Sprintf("CompleteTask(id=%s, counter=%d)", r.Id, r.Counter)
 }
 
 func (r *CompleteTaskRequest) Validate() error {
@@ -393,13 +380,12 @@ func (r *CompleteTaskRequest) Kind() Kind {
 func (r *CompleteTaskRequest) isRequestPayload() {}
 
 type DropTaskRequest struct {
-	Id      string            `json:"id"`
-	Counter int               `json:"counter"`
-	Tags    map[string]string `json:"tags,omitempty"`
+	Id      string `json:"id"`
+	Counter int    `json:"counter"`
 }
 
 func (r *DropTaskRequest) String() string {
-	return fmt.Sprintf("DropTask(id=%s, counter=%d, tags=%v)", r.Id, r.Counter, r.Tags)
+	return fmt.Sprintf("DropTask(id=%s, counter=%d)", r.Id, r.Counter)
 }
 
 func (r *DropTaskRequest) Validate() error {
@@ -413,12 +399,11 @@ func (r *DropTaskRequest) Kind() Kind {
 func (r *DropTaskRequest) isRequestPayload() {}
 
 type HeartbeatTasksRequest struct {
-	ProcessId string            `json:"processId"`
-	Tags      map[string]string `json:"tags,omitempty"`
+	ProcessId string `json:"processId"`
 }
 
 func (r *HeartbeatTasksRequest) String() string {
-	return fmt.Sprintf("HeartbeatTasks(processId=%s, tags=%v)", r.ProcessId, r.Tags)
+	return fmt.Sprintf("HeartbeatTasks(processId=%s)", r.ProcessId)
 }
 
 func (r *HeartbeatTasksRequest) Validate() error {
@@ -434,12 +419,11 @@ func (r *HeartbeatTasksRequest) isRequestPayload() {}
 // Echo
 
 type EchoRequest struct {
-	Data string            `json:"data"`
-	Tags map[string]string `json:"tags,omitempty"`
+	Data string `json:"data"`
 }
 
 func (r *EchoRequest) String() string {
-	return fmt.Sprintf("Echo(data=%s, tags=%v)", r.Data, r.Tags)
+	return fmt.Sprintf("Echo(data=%s)", r.Data)
 }
 
 func (r *EchoRequest) Validate() error {
