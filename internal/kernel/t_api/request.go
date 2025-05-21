@@ -19,19 +19,18 @@ type RequestPayload interface {
 }
 
 type Request struct {
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Metadata map[string]string
 	Payload  RequestPayload
 }
 
 // Promises
 
 type ReadPromiseRequest struct {
-	Id   string            `json:"id"`
-	Tags map[string]string `json:"tags,omitempty"`
+	Id string `json:"id"`
 }
 
 func (r *ReadPromiseRequest) String() string {
-	return fmt.Sprintf("ReadPromise(id=%s, tags=%v)", r.Id, r.Tags)
+	return fmt.Sprintf("ReadPromise(id=%s)", r.Id)
 }
 
 func (r *ReadPromiseRequest) Validate() error {
