@@ -11,21 +11,16 @@ import (
 	"github.com/resonatehq/resonate/pkg/promise"
 )
 
-// RequestPayload is an interface that all specific request types must implement.
-// The `isRequestPayload()` method is a private "marker" method that ensures
-// only types defined within this package can implement this interface.
 type RequestPayload interface {
 	Kind() Kind
-	String() string  // Retain the Stringer interface for consistent string representation
-	Validate() error // Method for validation
+	String() string
+	Validate() error
 	isRequestPayload()
 }
 
-// Request is the top-level request type, holding the RequestPayload interface
-// and a top-level Metadata field.
 type Request struct {
-	Metadata map[string]string `json:"metadata,omitempty"` // Top-level metadata
-	Payload  RequestPayload    // The actual request payload
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Payload  RequestPayload
 }
 
 // Promises
@@ -457,6 +452,8 @@ func (r *EchoRequest) Kind() Kind {
 }
 
 func (r *EchoRequest) isRequestPayload() {}
+
+// Request Methods
 
 func (r *Request) String() string {
 	util.Assert(r.Payload != nil, "Payload cannot be nil")
