@@ -29,8 +29,7 @@ func (s *server) readPromise(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.ReadPromise,
-		ReadPromise: &t_api.ReadPromiseRequest{
+		Payload: &t_api.ReadPromiseRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})
@@ -89,8 +88,7 @@ func (s *server) searchPromises(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:           t_api.SearchPromises,
-		SearchPromises: req,
+		Payload: req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -137,8 +135,7 @@ func (s *server) createPromise(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromise,
-		CreatePromise: &t_api.CreatePromiseRequest{
+		Payload: &t_api.CreatePromiseRequest{
 			Id:             body.Id,
 			IdempotencyKey: header.IdempotencyKey,
 			Strict:         header.Strict,
@@ -184,8 +181,7 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromiseAndTask,
-		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+		Payload: &t_api.CreatePromiseAndTaskRequest{
 			Promise: &t_api.CreatePromiseRequest{
 				Id:             body.Promise.Id,
 				IdempotencyKey: header.IdempotencyKey,
@@ -249,8 +245,7 @@ func (s *server) completePromise(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CompletePromise,
-		CompletePromise: &t_api.CompletePromiseRequest{
+		Payload: &t_api.CompletePromiseRequest{
 			Id:             extractId(c.Param("id")),
 			IdempotencyKey: header.IdempotencyKey,
 			Strict:         header.Strict,
@@ -303,8 +298,7 @@ func (s *server) createCallback(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateCallback,
-		CreateCallback: &t_api.CreateCallbackRequest{
+		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
@@ -360,8 +354,7 @@ func (s *server) createSubscription(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateCallback,
-		CreateCallback: &t_api.CreateCallbackRequest{
+		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.NotifyId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,

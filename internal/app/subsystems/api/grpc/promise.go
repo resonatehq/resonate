@@ -19,8 +19,7 @@ import (
 
 func (s *server) ReadPromise(c context.Context, r *pb.ReadPromiseRequest) (*pb.ReadPromiseResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.ReadPromise,
-		ReadPromise: &t_api.ReadPromiseRequest{
+		Payload: &t_api.ReadPromiseRequest{
 			Id: r.Id,
 		},
 	})
@@ -40,10 +39,7 @@ func (s *server) SearchPromises(c context.Context, r *pb.SearchPromisesRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind:           t_api.SearchPromises,
-		SearchPromises: req,
-	})
+	res, err := s.api.Process(r.RequestId, &t_api.Request{Payload: req})
 	if err != nil {
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
@@ -87,8 +83,7 @@ func (s *server) CreatePromise(c context.Context, r *pb.CreatePromiseRequest) (*
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromise,
-		CreatePromise: &t_api.CreatePromiseRequest{
+		Payload: &t_api.CreatePromiseRequest{
 			Id:             r.Id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         r.Strict,
@@ -136,8 +131,7 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 	}
 
 	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
-		Kind: t_api.CreatePromiseAndTask,
-		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+		Payload: &t_api.CreatePromiseAndTaskRequest{
 			Promise: &t_api.CreatePromiseRequest{
 				Id:             r.Promise.Id,
 				IdempotencyKey: idempotencyKey,
@@ -182,8 +176,7 @@ func (s *server) ResolvePromise(c context.Context, r *pb.ResolvePromiseRequest) 
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CompletePromise,
-		CompletePromise: &t_api.CompletePromiseRequest{
+		Payload: &t_api.CompletePromiseRequest{
 			Id:             r.Id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         r.Strict,
@@ -219,8 +212,7 @@ func (s *server) RejectPromise(c context.Context, r *pb.RejectPromiseRequest) (*
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CompletePromise,
-		CompletePromise: &t_api.CompletePromiseRequest{
+		Payload: &t_api.CompletePromiseRequest{
 			Id:             r.Id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         r.Strict,
@@ -256,8 +248,7 @@ func (s *server) CancelPromise(c context.Context, r *pb.CancelPromiseRequest) (*
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CompletePromise,
-		CompletePromise: &t_api.CompletePromiseRequest{
+		Payload: &t_api.CompletePromiseRequest{
 			Id:             r.Id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         r.Strict,
@@ -283,8 +274,7 @@ func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) 
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CreateCallback,
-		CreateCallback: &t_api.CreateCallbackRequest{
+		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(r.RootPromiseId, r.PromiseId),
 			PromiseId: r.PromiseId,
 			Recv:      recv,
@@ -311,8 +301,7 @@ func (s *server) CreateSubscription(c context.Context, r *pb.CreateSubscriptionR
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CreateCallback,
-		CreateCallback: &t_api.CreateCallbackRequest{
+		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.NotifyId(r.PromiseId, r.Id),
 			PromiseId: r.PromiseId,
 			Recv:      recv,

@@ -36,8 +36,7 @@ func (s *server) acquireLock(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.AcquireLock,
-		AcquireLock: &t_api.AcquireLockRequest{
+		Payload: &t_api.AcquireLockRequest{
 			ResourceId:  body.ResourceId,
 			ExecutionId: body.ExecutionId,
 			ProcessId:   body.ProcessId,
@@ -80,8 +79,7 @@ func (s *server) releaseLock(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.ReleaseLock,
-		ReleaseLock: &t_api.ReleaseLockRequest{
+		Payload: &t_api.ReleaseLockRequest{
 			ResourceId:  body.ResourceId,
 			ExecutionId: body.ExecutionId,
 		},
@@ -121,8 +119,7 @@ func (s *server) heartbeatLocks(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.HeartbeatLocks,
-		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+		Payload: &t_api.HeartbeatLocksRequest{
 			ProcessId: body.ProcessId,
 		},
 	})

@@ -10,17 +10,19 @@ import (
 )
 
 func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	heartbeatLocksReq := r.Payload.(*t_api.HeartbeatLocksRequest)
+
 	// Try to update all locks that belong to this process.
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.HeartbeatLocks,
 						HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
-							ProcessId: r.HeartbeatLocks.ProcessId,
+							ProcessId: heartbeatLocksReq.ProcessId,
 							Time:      c.Time(),
 						},
 					},
@@ -38,7 +40,7 @@ func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Kind: t_api.HeartbeatLocks,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		HeartbeatLocks: &t_api.HeartbeatLocksResponse{
 			Status:        t_api.StatusOK,
 			LocksAffected: result.RowsAffected,

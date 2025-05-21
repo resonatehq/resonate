@@ -10,13 +10,13 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(tags != nil, "tags must be set")
+func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(metadata != nil, "metadata must be set")
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: tags,
+			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -86,7 +86,7 @@ func TimeoutTasks(config *system.Config, tags map[string]string) gocoro.Coroutin
 		if len(commands) > 0 {
 			_, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: tags,
+				Tags: metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: commands,

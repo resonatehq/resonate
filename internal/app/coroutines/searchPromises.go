@@ -12,27 +12,29 @@ import (
 )
 
 func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.SearchPromises.Id != "", "id must not be empty")
-	util.Assert(r.SearchPromises.Limit > 0, "limit must be greater than zero")
+	searchPromisesReq := r.Payload.(*t_api.SearchPromisesRequest)
 
-	if r.SearchPromises.Tags == nil {
-		r.SearchPromises.Tags = map[string]string{}
+	util.Assert(searchPromisesReq.Id != "", "id must not be empty")
+	util.Assert(searchPromisesReq.Limit > 0, "limit must be greater than zero")
+
+	if searchPromisesReq.Tags == nil {
+		searchPromisesReq.Tags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.SearchPromises,
 						SearchPromises: &t_aio.SearchPromisesCommand{
-							Id:     r.SearchPromises.Id,
-							States: r.SearchPromises.States,
-							Tags:   r.SearchPromises.Tags,
-							Limit:  r.SearchPromises.Limit,
-							SortId: r.SearchPromises.SortId,
+							Id:     searchPromisesReq.Id,
+							States: searchPromisesReq.States,
+							Tags:   searchPromisesReq.Tags,
+							Limit:  searchPromisesReq.Limit,
+							SortId: searchPromisesReq.SortId,
 						},
 					},
 				},
@@ -62,7 +64,7 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		promises = append(promises, p)
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
-			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Tags, &t_aio.UpdatePromiseCommand{
+			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Metadata, &t_aio.UpdatePromiseCommand{
 				Id:             p.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
@@ -85,13 +87,13 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	// set cursor only if there are more results
 	var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
-	if result.RowsReturned == int64(r.SearchPromises.Limit) {
+	if result.RowsReturned == int64(searchPromisesReq.Limit) {
 		cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
 			Next: &t_api.SearchPromisesRequest{
-				Id:     r.SearchPromises.Id,
-				States: r.SearchPromises.States,
-				Tags:   r.SearchPromises.Tags,
-				Limit:  r.SearchPromises.Limit,
+				Id:     searchPromisesReq.Id,
+				States: searchPromisesReq.States,
+				Tags:   searchPromisesReq.Tags,
+				Limit:  searchPromisesReq.Limit,
 				SortId: &result.LastSortId,
 			},
 		}
@@ -99,7 +101,7 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	return &t_api.Response{
 		Kind: t_api.SearchPromises,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		SearchPromises: &t_api.SearchPromisesResponse{
 			Status:   t_api.StatusOK,
 			Cursor:   cursor,

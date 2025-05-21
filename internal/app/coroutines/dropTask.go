@@ -11,16 +11,17 @@ import (
 )
 
 func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	dropTaskReq := r.Payload.(*t_api.DropTaskRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadTask,
 						ReadTask: &t_aio.ReadTaskCommand{
-							Id: r.DropTask.Id,
+							Id: dropTaskReq.Id,
 						},
 					},
 				},
@@ -39,7 +40,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	if readResult.RowsReturned == 0 {
 		return &t_api.Response{
 			Kind: t_api.DropTask,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			DropTask: &t_api.DropTaskResponse{
 				Status: t_api.StatusTaskNotFound,
 			},
@@ -57,17 +58,17 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	if t.State != task.Claimed {
 		return &t_api.Response{
 			Kind: t_api.DropTask,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			DropTask: &t_api.DropTaskResponse{
 				Status: t_api.StatusOK,
 			},
 		}, nil
 	}
 
-	if t.Counter != r.DropTask.Counter {
+	if t.Counter != dropTaskReq.Counter {
 		return &t_api.Response{
 			Kind: t_api.DropTask,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			DropTask: &t_api.DropTaskResponse{
 				Status: t_api.StatusTaskInvalidCounter,
 			},
@@ -80,22 +81,22 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	// to 1 will cause that nodes with stale tasks could claim them.
 	completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.UpdateTask,
 						UpdateTask: &t_aio.UpdateTaskCommand{
-							Id:             r.DropTask.Id,
+							Id:             dropTaskReq.Id,
 							ProcessId:      nil,
 							State:          task.Init,
-							Counter:        r.DropTask.Counter + 1,
+							Counter:        dropTaskReq.Counter + 1,
 							Attempt:        0,
 							Ttl:            0,
 							ExpiresAt:      0,
 							CurrentStates:  []task.State{task.Claimed},
-							CurrentCounter: r.DropTask.Counter,
+							CurrentCounter: dropTaskReq.Counter,
 						},
 					},
 				},
@@ -115,7 +116,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	if updateResult.RowsAffected == 1 {
 		return &t_api.Response{
 			Kind: t_api.DropTask,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			DropTask: &t_api.DropTaskResponse{
 				Status: t_api.StatusCreated,
 			},

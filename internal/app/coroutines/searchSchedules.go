@@ -11,26 +11,27 @@ import (
 )
 
 func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.SearchSchedules.Id != "", "id must not be empty")
-	util.Assert(r.SearchSchedules.Limit > 0, "limit must be greater than zero")
+	searchSchedulesReq := r.Payload.(*t_api.SearchSchedulesRequest)
+	util.Assert(searchSchedulesReq.Id != "", "id must not be empty")
+	util.Assert(searchSchedulesReq.Limit > 0, "limit must be greater than zero")
 
-	if r.SearchSchedules.Tags == nil {
-		r.SearchSchedules.Tags = map[string]string{}
+	if searchSchedulesReq.Tags == nil {
+		searchSchedulesReq.Tags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.SearchSchedules,
 						SearchSchedules: &t_aio.SearchSchedulesCommand{
-							Id:     r.SearchSchedules.Id,
-							Tags:   r.SearchSchedules.Tags,
-							Limit:  r.SearchSchedules.Limit,
-							SortId: r.SearchSchedules.SortId,
+							Id:     searchSchedulesReq.Id,
+							Tags:   searchSchedulesReq.Tags,
+							Limit:  searchSchedulesReq.Limit,
+							SortId: searchSchedulesReq.SortId,
 						},
 					},
 				},
@@ -60,12 +61,12 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	// set cursor only if there are more results
 	var cursor *t_api.Cursor[t_api.SearchSchedulesRequest]
-	if result.RowsReturned == int64(r.SearchSchedules.Limit) {
+	if result.RowsReturned == int64(searchSchedulesReq.Limit) {
 		cursor = &t_api.Cursor[t_api.SearchSchedulesRequest]{
 			Next: &t_api.SearchSchedulesRequest{
-				Id:     r.SearchSchedules.Id,
-				Tags:   r.SearchSchedules.Tags,
-				Limit:  r.SearchSchedules.Limit,
+				Id:     searchSchedulesReq.Id,
+				Tags:   searchSchedulesReq.Tags,
+				Limit:  searchSchedulesReq.Limit,
 				SortId: &result.LastSortId,
 			},
 		}
@@ -73,7 +74,7 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	return &t_api.Response{
 		Kind: t_api.SearchSchedules,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		SearchSchedules: &t_api.SearchSchedulesResponse{
 			Status:    t_api.StatusOK,
 			Cursor:    cursor,

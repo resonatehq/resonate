@@ -29,14 +29,14 @@ func (a *API) Process(id string, submission *t_api.Request) (*t_api.Response, *E
 	if id == "" {
 		id = uuid.New().String()
 	}
-	if submission.Tags == nil {
-		submission.Tags = map[string]string{}
+	if submission.Metadata == nil {
+		submission.Metadata = map[string]string{}
 	}
 
 	// inject tags
-	submission.Tags["id"] = id
-	submission.Tags["name"] = submission.Kind.String()
-	submission.Tags["protocol"] = a.protocol
+	submission.Metadata["id"] = id
+	submission.Metadata["name"] = submission.Kind().String()
+	submission.Metadata["protocol"] = a.protocol
 
 	// completion queue
 	cq := make(chan *bus.CQE[t_api.Request, t_api.Response], 1)

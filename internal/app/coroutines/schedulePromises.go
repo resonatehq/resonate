@@ -13,14 +13,14 @@ import (
 	"github.com/resonatehq/resonate/internal/util"
 )
 
-func SchedulePromises(config *system.Config, tags map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
-	util.Assert(tags != nil, "tags must be set")
+func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+	util.Assert(metadata != nil, "metadata must be set")
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
 		// read elapsed schedules
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: tags,
+			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
@@ -86,7 +86,7 @@ func SchedulePromises(config *system.Config, tags map[string]string) gocoro.Coro
 				CreatedOn: c.Time(),
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(tags, commands[i], nil, &t_aio.Command{
+			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, commands[i], nil, &t_aio.Command{
 				Kind: t_aio.UpdateSchedule,
 				UpdateSchedule: &t_aio.UpdateScheduleCommand{
 					Id:          s.Id,

@@ -12,16 +12,17 @@ import (
 )
 
 func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	completePromiseReq := r.Payload.(*t_api.CompletePromiseRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: r.CompletePromise.Id,
+							Id: completePromiseReq.Id,
 						},
 					},
 				},
@@ -54,16 +55,16 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 			if c.Time() < p.Timeout {
 				cmd = &t_aio.UpdatePromiseCommand{
-					Id:             r.CompletePromise.Id,
-					State:          r.CompletePromise.State,
-					Value:          r.CompletePromise.Value,
-					IdempotencyKey: r.CompletePromise.IdempotencyKey,
+					Id:             completePromiseReq.Id,
+					State:          completePromiseReq.State,
+					Value:          completePromiseReq.Value,
+					IdempotencyKey: completePromiseReq.IdempotencyKey,
 					CompletedOn:    c.Time(),
 				}
 				status = t_api.StatusCreated
 			} else {
 				cmd = &t_aio.UpdatePromiseCommand{
-					Id:             r.CompletePromise.Id,
+					Id:             completePromiseReq.Id,
 					State:          promise.GetTimedoutState(p),
 					Value:          promise.Value{},
 					IdempotencyKey: nil,
@@ -72,14 +73,14 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 				if cmd.State == promise.Resolved {
 					status = t_api.StatusPromiseAlreadyResolved
-				} else if r.CompletePromise.Strict {
+				} else if completePromiseReq.Strict {
 					status = t_api.StatusPromiseAlreadyTimedout
 				} else {
 					status = t_api.StatusOK
 				}
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -92,7 +93,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 			res = &t_api.Response{
 				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status: status,
 					Promise: &promise.Promise{
@@ -111,16 +112,16 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 		} else {
 			status := alreadyCompletedStatus(p.State)
-			strict := r.CompletePromise.Strict && p.State != r.CompletePromise.State
-			timeout := !r.CompletePromise.Strict && p.State == promise.Timedout
+			strict := completePromiseReq.Strict && p.State != completePromiseReq.State
+			timeout := !completePromiseReq.Strict && p.State == promise.Timedout
 
-			if (!strict && p.IdempotencyKeyForComplete.Match(r.CompletePromise.IdempotencyKey)) || timeout {
+			if (!strict && p.IdempotencyKeyForComplete.Match(completePromiseReq.IdempotencyKey)) || timeout {
 				status = t_api.StatusOK
 			}
 
 			res = &t_api.Response{
 				Kind: t_api.CompletePromise,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				CompletePromise: &t_api.CompletePromiseResponse{
 					Status:  status,
 					Promise: p,
@@ -130,7 +131,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.CompletePromise,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			CompletePromise: &t_api.CompletePromiseResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},

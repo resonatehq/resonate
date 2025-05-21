@@ -12,25 +12,25 @@ import (
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.Kind == t_api.CreateCallback, "kind must be create callback")
-	util.Assert(r.CreateCallback != nil, "create callback must not be nil")
-	util.Assert(r.CreateCallback.Mesg.Type == "resume" || r.CreateCallback.Mesg.Type == "notify", "message type must be resume or notify")
-	util.Assert(r.CreateCallback.Mesg.Type == "resume" || r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Root, "if notify, root promise id must equal leaf promise id")
-	util.Assert(r.CreateCallback.Mesg.Type == "notify" || (r.CreateCallback.PromiseId == r.CreateCallback.Mesg.Leaf && r.CreateCallback.PromiseId != r.CreateCallback.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
+	createCallbackReq := r.Payload.(*t_api.CreateCallbackRequest)
+	util.Assert(createCallbackReq != nil, "create callback must not be nil")
+	util.Assert(createCallbackReq.Mesg.Type == "resume" || createCallbackReq.Mesg.Type == "notify", "message type must be resume or notify")
+	util.Assert(createCallbackReq.Mesg.Type == "resume" || createCallbackReq.PromiseId == createCallbackReq.Mesg.Root, "if notify, root promise id must equal leaf promise id")
+	util.Assert(createCallbackReq.Mesg.Type == "notify" || (createCallbackReq.PromiseId == createCallbackReq.Mesg.Leaf && createCallbackReq.PromiseId != createCallbackReq.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
 
 	var res *t_api.Response
 
 	// read the promise to see if it exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: r.CreateCallback.PromiseId,
+							Id: createCallbackReq.PromiseId,
 						},
 					},
 				},
@@ -66,18 +66,18 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: []*t_aio.Command{
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
-									Id:        r.CreateCallback.Id,
-									PromiseId: r.CreateCallback.PromiseId,
-									Recv:      r.CreateCallback.Recv,
-									Mesg:      r.CreateCallback.Mesg,
-									Timeout:   r.CreateCallback.Timeout,
+									Id:        createCallbackReq.Id,
+									PromiseId: createCallbackReq.PromiseId,
+									Recv:      createCallbackReq.Recv,
+									Mesg:      createCallbackReq.Mesg,
+									Timeout:   createCallbackReq.Timeout,
 									CreatedOn: createdOn,
 								},
 							},
@@ -101,11 +101,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			if result.RowsAffected == 1 {
 				status = t_api.StatusCreated
 				cb = &callback.Callback{
-					Id:        r.CreateCallback.Id,
-					PromiseId: r.CreateCallback.PromiseId,
-					Recv:      r.CreateCallback.Recv,
-					Mesg:      r.CreateCallback.Mesg,
-					Timeout:   r.CreateCallback.Timeout,
+					Id:        createCallbackReq.Id,
+					PromiseId: createCallbackReq.PromiseId,
+					Recv:      createCallbackReq.Recv,
+					Mesg:      createCallbackReq.Mesg,
+					Timeout:   createCallbackReq.Timeout,
 					CreatedOn: createdOn,
 				}
 			}
@@ -113,7 +113,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		res = &t_api.Response{
 			Kind: t_api.CreateCallback,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			CreateCallback: &t_api.CreateCallbackResponse{
 				// Status could be StatusOk or StatusCreated if the Callback Id was already present
 				Status:   status,
@@ -125,7 +125,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.CreateCallback,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			CreateCallback: &t_api.CreateCallbackResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},

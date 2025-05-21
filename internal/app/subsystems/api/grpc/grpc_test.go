@@ -78,7 +78,7 @@ func TestGrpc(t *testing.T) {
 		t.Run(tc.Name, func(t *testing.T) {
 			if tc.Req != nil {
 				// set protocol specific header
-				tc.Req.Tags["protocol"] = "grpc"
+				tc.Req.Metadata["protocol"] = "grpc"
 			}
 
 			grpcTest.Load(t, tc.Req, tc.Res)

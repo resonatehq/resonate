@@ -24,8 +24,7 @@ func (s *server) readSchedule(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.ReadSchedule,
-		ReadSchedule: &t_api.ReadScheduleRequest{
+		Payload: &t_api.ReadScheduleRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})
@@ -82,8 +81,7 @@ func (s *server) searchSchedules(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:            t_api.SearchSchedules,
-		SearchSchedules: req,
+		Payload: req,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -136,8 +134,7 @@ func (s *server) createSchedule(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.CreateSchedule,
-		CreateSchedule: &t_api.CreateScheduleRequest{
+		Payload: &t_api.CreateScheduleRequest{
 			Id:             body.Id,
 			Description:    body.Description,
 			Cron:           body.Cron,
@@ -173,8 +170,7 @@ func (s *server) deleteSchedule(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind: t_api.DeleteSchedule,
-		DeleteSchedule: &t_api.DeleteScheduleRequest{
+		Payload: &t_api.DeleteScheduleRequest{
 			Id: extractId(c.Param("id")),
 		},
 	})

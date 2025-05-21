@@ -11,29 +11,30 @@ import (
 )
 
 func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	if r.CreateSchedule.Tags == nil {
-		r.CreateSchedule.Tags = map[string]string{}
+	createScheduleReq := r.Payload.(*t_api.CreateScheduleRequest)
+	if createScheduleReq.Tags == nil {
+		createScheduleReq.Tags = map[string]string{}
 	}
-	if r.CreateSchedule.PromiseParam.Headers == nil {
-		r.CreateSchedule.PromiseParam.Headers = map[string]string{}
+	if createScheduleReq.PromiseParam.Headers == nil {
+		createScheduleReq.PromiseParam.Headers = map[string]string{}
 	}
-	if r.CreateSchedule.PromiseParam.Data == nil {
-		r.CreateSchedule.PromiseParam.Data = []byte{}
+	if createScheduleReq.PromiseParam.Data == nil {
+		createScheduleReq.PromiseParam.Data = []byte{}
 	}
-	if r.CreateSchedule.PromiseTags == nil {
-		r.CreateSchedule.PromiseTags = map[string]string{}
+	if createScheduleReq.PromiseTags == nil {
+		createScheduleReq.PromiseTags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadSchedule,
 						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: r.CreateSchedule.Id,
+							Id: createScheduleReq.Id,
 						},
 					},
 				},
@@ -53,7 +54,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	if result.RowsReturned == 0 {
 		createdOn := c.Time()
-		next, err := util.Next(createdOn, r.CreateSchedule.Cron)
+		next, err := util.Next(createdOn, createScheduleReq.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "req", r, "err", err)
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
@@ -61,23 +62,23 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
 					Commands: []*t_aio.Command{
 						{
 							Kind: t_aio.CreateSchedule,
 							CreateSchedule: &t_aio.CreateScheduleCommand{
-								Id:             r.CreateSchedule.Id,
-								Description:    r.CreateSchedule.Description,
-								Cron:           r.CreateSchedule.Cron,
-								Tags:           r.CreateSchedule.Tags,
-								PromiseId:      r.CreateSchedule.PromiseId,
-								PromiseTimeout: r.CreateSchedule.PromiseTimeout,
-								PromiseParam:   r.CreateSchedule.PromiseParam,
-								PromiseTags:    r.CreateSchedule.PromiseTags,
+								Id:             createScheduleReq.Id,
+								Description:    createScheduleReq.Description,
+								Cron:           createScheduleReq.Cron,
+								Tags:           createScheduleReq.Tags,
+								PromiseId:      createScheduleReq.PromiseId,
+								PromiseTimeout: createScheduleReq.PromiseTimeout,
+								PromiseParam:   createScheduleReq.PromiseParam,
+								PromiseTags:    createScheduleReq.PromiseTags,
 								NextRunTime:    next,
-								IdempotencyKey: r.CreateSchedule.IdempotencyKey,
+								IdempotencyKey: createScheduleReq.IdempotencyKey,
 								CreatedOn:      createdOn,
 							},
 						},
@@ -97,21 +98,21 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		if result.RowsAffected == 1 {
 			res = &t_api.Response{
 				Kind: t_api.CreateSchedule,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				CreateSchedule: &t_api.CreateScheduleResponse{
 					Status: t_api.StatusCreated,
 					Schedule: &schedule.Schedule{
-						Id:             r.CreateSchedule.Id,
-						Description:    r.CreateSchedule.Description,
-						Cron:           r.CreateSchedule.Cron,
-						Tags:           r.CreateSchedule.Tags,
-						PromiseId:      r.CreateSchedule.PromiseId,
-						PromiseTimeout: r.CreateSchedule.PromiseTimeout,
-						PromiseParam:   r.CreateSchedule.PromiseParam,
-						PromiseTags:    r.CreateSchedule.PromiseTags,
+						Id:             createScheduleReq.Id,
+						Description:    createScheduleReq.Description,
+						Cron:           createScheduleReq.Cron,
+						Tags:           createScheduleReq.Tags,
+						PromiseId:      createScheduleReq.PromiseId,
+						PromiseTimeout: createScheduleReq.PromiseTimeout,
+						PromiseParam:   createScheduleReq.PromiseParam,
+						PromiseTags:    createScheduleReq.PromiseTags,
 						LastRunTime:    nil,
 						NextRunTime:    next,
-						IdempotencyKey: r.CreateSchedule.IdempotencyKey,
+						IdempotencyKey: createScheduleReq.IdempotencyKey,
 						CreatedOn:      createdOn,
 					},
 				},
@@ -131,13 +132,13 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		status := t_api.StatusScheduleAlreadyExists
-		if s.IdempotencyKey.Match(r.CreateSchedule.IdempotencyKey) {
+		if s.IdempotencyKey.Match(createScheduleReq.IdempotencyKey) {
 			status = t_api.StatusOK
 		}
 
 		res = &t_api.Response{
 			Kind: t_api.CreateSchedule,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			CreateSchedule: &t_api.CreateScheduleResponse{
 				Status:   status,
 				Schedule: s,

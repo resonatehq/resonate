@@ -11,22 +11,24 @@ import (
 )
 
 func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	expiresAt := c.Time() + r.AcquireLock.Ttl
+	acquireLockReq := r.Payload.(*t_api.AcquireLockRequest)
+
+	expiresAt := c.Time() + acquireLockReq.Ttl
 
 	// Try to acquire lock, update lock if already acquired by the same execution id
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.AcquireLock,
 						AcquireLock: &t_aio.AcquireLockCommand{
-							ResourceId:  r.AcquireLock.ResourceId,
-							ExecutionId: r.AcquireLock.ExecutionId,
-							ProcessId:   r.AcquireLock.ProcessId,
-							Ttl:         r.AcquireLock.Ttl,
+							ResourceId:  acquireLockReq.ResourceId,
+							ExecutionId: acquireLockReq.ExecutionId,
+							ProcessId:   acquireLockReq.ProcessId,
+							Ttl:         acquireLockReq.Ttl,
 							ExpiresAt:   expiresAt,
 						},
 					},
@@ -56,14 +58,14 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.AcquireLock,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			AcquireLock: &t_api.AcquireLockResponse{
 				Status: t_api.StatusCreated,
 				Lock: &lock.Lock{
-					ResourceId:  r.AcquireLock.ResourceId,
-					ExecutionId: r.AcquireLock.ExecutionId,
-					ProcessId:   r.AcquireLock.ProcessId,
-					Ttl:         r.AcquireLock.Ttl,
+					ResourceId:  acquireLockReq.ResourceId,
+					ExecutionId: acquireLockReq.ExecutionId,
+					ProcessId:   acquireLockReq.ProcessId,
+					Ttl:         acquireLockReq.Ttl,
 					ExpiresAt:   expiresAt,
 				},
 			},

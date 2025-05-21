@@ -15,8 +15,7 @@ import (
 
 func (s *server) ReadSchedule(c context.Context, r *pb.ReadScheduleRequest) (*pb.ReadScheduleResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.ReadSchedule,
-		ReadSchedule: &t_api.ReadScheduleRequest{
+		Payload: &t_api.ReadScheduleRequest{
 			Id: r.Id,
 		},
 	})
@@ -37,8 +36,7 @@ func (s *server) SearchSchedules(c context.Context, r *pb.SearchSchedulesRequest
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind:            t_api.SearchSchedules,
-		SearchSchedules: req,
+		Payload: req,
 	})
 	if err != nil {
 		return nil, status.Error(s.code(err.Code), err.Error())
@@ -87,8 +85,7 @@ func (s *server) CreateSchedule(c context.Context, r *pb.CreateScheduleRequest) 
 	}
 
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CreateSchedule,
-		CreateSchedule: &t_api.CreateScheduleRequest{
+		Payload: &t_api.CreateScheduleRequest{
 			Id:             r.Id,
 			Description:    r.Description,
 			Cron:           r.Cron,
@@ -112,8 +109,7 @@ func (s *server) CreateSchedule(c context.Context, r *pb.CreateScheduleRequest) 
 
 func (s *server) DeleteSchedule(c context.Context, r *pb.DeleteScheduleRequest) (*pb.DeleteScheduleResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.DeleteSchedule,
-		DeleteSchedule: &t_api.DeleteScheduleRequest{
+		Payload: &t_api.DeleteScheduleRequest{
 			Id: r.Id,
 		},
 	})

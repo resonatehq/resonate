@@ -13,25 +13,24 @@ import (
 )
 
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.Kind == t_api.CreatePromise, "must be create promise")
-
-	return createPromiseAndTask(c, r, r.CreatePromise, nil)
+	createPromiseReq := r.Payload.(*t_api.CreatePromiseRequest)
+	return createPromiseAndTask(c, r, createPromiseReq, nil)
 }
 
 func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.Kind == t_api.CreatePromiseAndTask, "must be create promise and task")
-	util.Assert(r.CreatePromiseAndTask.Promise.Id == r.CreatePromiseAndTask.Task.PromiseId, "promise ids must match")
-	util.Assert(r.CreatePromiseAndTask.Promise.Timeout == r.CreatePromiseAndTask.Task.Timeout, "timeouts must match")
+	createPromiseAndTaskReq := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
+	util.Assert(createPromiseAndTaskReq.Promise.Id == createPromiseAndTaskReq.Task.PromiseId, "promise ids must match")
+	util.Assert(createPromiseAndTaskReq.Promise.Timeout == createPromiseAndTaskReq.Task.Timeout, "timeouts must match")
 
-	return createPromiseAndTask(c, r, r.CreatePromiseAndTask.Promise, &t_aio.CreateTaskCommand{
-		Id:        util.InvokeId(r.CreatePromiseAndTask.Task.PromiseId),
+	return createPromiseAndTask(c, r, createPromiseAndTaskReq.Promise, &t_aio.CreateTaskCommand{
+		Id:        util.InvokeId(createPromiseAndTaskReq.Task.PromiseId),
 		Recv:      nil,
-		Mesg:      &message.Mesg{Type: message.Invoke, Root: r.CreatePromiseAndTask.Task.PromiseId, Leaf: r.CreatePromiseAndTask.Task.PromiseId},
-		Timeout:   r.CreatePromiseAndTask.Task.Timeout,
-		ProcessId: &r.CreatePromiseAndTask.Task.ProcessId,
+		Mesg:      &message.Mesg{Type: message.Invoke, Root: createPromiseAndTaskReq.Task.PromiseId, Leaf: createPromiseAndTaskReq.Task.PromiseId},
+		Timeout:   createPromiseAndTaskReq.Task.Timeout,
+		ProcessId: &createPromiseAndTaskReq.Task.ProcessId,
 		State:     task.Claimed,
-		Ttl:       r.CreatePromiseAndTask.Task.Ttl,
-		ExpiresAt: c.Time() + int64(r.CreatePromiseAndTask.Task.Ttl),
+		Ttl:       createPromiseAndTaskReq.Task.Ttl,
+		ExpiresAt: c.Time() + int64(createPromiseAndTaskReq.Task.Ttl),
 		CreatedOn: c.Time(),
 	})
 }
@@ -42,7 +41,7 @@ func createPromiseAndTask(
 	createPromiseReq *t_api.CreatePromiseRequest,
 	taskCmd *t_aio.CreateTaskCommand,
 ) (*t_api.Response, error) {
-	util.Assert(r.Kind == t_api.CreatePromise || r.Kind == t_api.CreatePromiseAndTask, "must be create promise or variant")
+	util.Assert(r.Kind() == t_api.CreatePromise || r.Kind() == t_api.CreatePromiseAndTask, "must be create promise or variant")
 
 	// response status
 	var status t_api.StatusCode
@@ -54,7 +53,7 @@ func createPromiseAndTask(
 	// first read the promise to see if it already exists
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
@@ -90,7 +89,7 @@ func createPromiseAndTask(
 		}
 
 		// if the promise does not exist, create it
-		completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Tags, promiseCmd, taskCmd))
+		completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, promiseCmd, taskCmd))
 		if err != nil {
 			return nil, err
 		}
@@ -124,8 +123,7 @@ func createPromiseAndTask(
 			CreatedOn:               &promiseCmd.CreatedOn,
 		}
 
-		switch r.Kind {
-		case t_api.CreatePromiseAndTask:
+		if r.Kind() == t_api.CreatePromiseAndTask {
 			util.Assert(taskCmd != nil, "create task cmd must not be nil")
 			util.Assert(completion.Store.Results[0].Kind == t_aio.CreatePromiseAndTask, "completion must be createPromiseAndTask")
 
@@ -144,6 +142,7 @@ func createPromiseAndTask(
 				CreatedOn:     &taskCmd.CreatedOn,
 			}
 		}
+
 	} else {
 		p, err = result.Records[0].Promise()
 		if err != nil {
@@ -160,7 +159,7 @@ func createPromiseAndTask(
 				CompletedOn:    p.Timeout,
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -191,9 +190,9 @@ func createPromiseAndTask(
 		}
 	}
 
-	res := &t_api.Response{Kind: r.Kind, Tags: r.Tags}
+	res := &t_api.Response{Kind: r.Kind(), Tags: r.Metadata}
 
-	switch r.Kind {
+	switch r.Kind() {
 	case t_api.CreatePromise:
 		res.CreatePromise = &t_api.CreatePromiseResponse{Status: status, Promise: p}
 	case t_api.CreatePromiseAndTask:

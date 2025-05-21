@@ -15,8 +15,10 @@ import (
 )
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	util.Assert(r.ClaimTask.ProcessId != "", "process id must be set")
-	util.Assert(r.ClaimTask.Ttl >= 0, "ttl must be greater than or equal to 0")
+	claimTaskReq := r.Payload.(*t_api.ClaimTaskRequest)
+
+	util.Assert(claimTaskReq.ProcessId != "", "process id must be set")
+	util.Assert(claimTaskReq.Ttl >= 0, "ttl must be greater than or equal to 0")
 
 	config, ok := c.Get("config").(*system.Config)
 	if !ok {
@@ -30,14 +32,14 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadTask,
 						ReadTask: &t_aio.ReadTaskCommand{
-							Id: r.ClaimTask.Id,
+							Id: claimTaskReq.Id,
 						},
 					},
 				},
@@ -64,28 +66,28 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 			status = t_api.StatusTaskAlreadyClaimed
 		} else if t.State == task.Completed || t.State == task.Timedout {
 			status = t_api.StatusTaskAlreadyCompleted
-		} else if t.Counter != r.ClaimTask.Counter {
+		} else if t.Counter != claimTaskReq.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
-			expiresAt := c.Time() + int64(r.ClaimTask.Ttl)
+			expiresAt := c.Time() + int64(claimTaskReq.Ttl)
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: []*t_aio.Command{
 							{
 								Kind: t_aio.UpdateTask,
 								UpdateTask: &t_aio.UpdateTaskCommand{
-									Id:             r.ClaimTask.Id,
-									ProcessId:      &r.ClaimTask.ProcessId,
+									Id:             claimTaskReq.Id,
+									ProcessId:      &claimTaskReq.ProcessId,
 									State:          task.Claimed,
-									Counter:        r.ClaimTask.Counter,
+									Counter:        claimTaskReq.Counter,
 									Attempt:        t.Attempt,
-									Ttl:            r.ClaimTask.Ttl,
+									Ttl:            claimTaskReq.Ttl,
 									ExpiresAt:      expiresAt, // time to expire unless heartbeated
 									CurrentStates:  []task.State{task.Init, task.Enqueued},
-									CurrentCounter: r.ClaimTask.Counter,
+									CurrentCounter: claimTaskReq.Counter,
 								},
 							},
 						},
@@ -116,7 +118,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 					Kind: t_aio.Store,
-					Tags: r.Tags,
+					Tags: r.Metadata,
 					Store: &t_aio.StoreSubmission{
 						Transaction: &t_aio.Transaction{
 							Commands: commands,
@@ -159,9 +161,9 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 				status = t_api.StatusCreated
 
 				// update task
-				t.ProcessId = &r.ClaimTask.ProcessId
+				t.ProcessId = &claimTaskReq.ProcessId
 				t.State = task.Claimed
-				t.Ttl = r.ClaimTask.Ttl
+				t.Ttl = claimTaskReq.Ttl
 				t.ExpiresAt = expiresAt
 			} else {
 				// It's possible that the task was modified by another coroutine
@@ -178,7 +180,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 	return &t_api.Response{
 		Kind: t_api.ClaimTask,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		ClaimTask: &t_api.ClaimTaskResponse{
 			Status:          status,
 			Task:            t,

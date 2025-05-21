@@ -10,18 +10,20 @@ import (
 )
 
 func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	releaseLockReq := r.Payload.(*t_api.ReleaseLockRequest)
+
 	// Try to release lock.
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReleaseLock,
 						ReleaseLock: &t_aio.ReleaseLockCommand{
-							ResourceId:  r.ReleaseLock.ResourceId,
-							ExecutionId: r.ReleaseLock.ExecutionId,
+							ResourceId:  releaseLockReq.ResourceId,
+							ExecutionId: releaseLockReq.ExecutionId,
 						},
 					},
 				},
@@ -46,7 +48,7 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		// If rows affected is 0, then lock was already released or was never acquired by that executionId.
 		res = &t_api.Response{
 			Kind: t_api.ReleaseLock,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			ReleaseLock: &t_api.ReleaseLockResponse{
 				Status: t_api.StatusLockNotFound,
 			},
@@ -55,7 +57,7 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		// If rows affected is 1, then lock is released.
 		res = &t_api.Response{
 			Kind: t_api.ReleaseLock,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			ReleaseLock: &t_api.ReleaseLockResponse{
 				Status: t_api.StatusNoContent,
 			},
