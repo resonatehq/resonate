@@ -197,7 +197,7 @@ def test_run(
     assert promise.id == "f1"
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
 
     resonate.run("f2", name, *args, **kwargs)
@@ -207,7 +207,7 @@ def test_run(
     assert promise.id == "f2"
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
@@ -221,7 +221,7 @@ def test_run(
     assert promise.id == "f3"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).run("f4", name, *args, **kwargs)
@@ -231,7 +231,7 @@ def test_run(
     assert promise.id == "f4"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
@@ -245,7 +245,7 @@ def test_run(
     assert promise.id == "f5"
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
@@ -259,7 +259,7 @@ def test_run(
     assert promise.id == "f6"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}
@@ -327,7 +327,7 @@ def test_rpc(
     assert promise.id == "f1"
     assert promise.ikey_for_create == "f1"
     assert promise.param.headers == {}  # TODO(dfarr): this should be None
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
 
     resonate.rpc("f2", name, *args, **kwargs)
@@ -337,7 +337,7 @@ def test_rpc(
     assert promise.id == "f2"
     assert promise.ikey_for_create == "f2"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
@@ -351,7 +351,7 @@ def test_rpc(
     assert promise.id == "f3"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
 
     resonate.options(**opts).rpc("f4", name, *args, **kwargs)
@@ -361,7 +361,7 @@ def test_rpc(
     assert promise.id == "f4"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
@@ -375,7 +375,7 @@ def test_rpc(
     assert promise.id == "f5"
     assert promise.ikey_for_create == "f5"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
@@ -389,7 +389,7 @@ def test_rpc(
     assert promise.id == "f6"
     assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
     assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": list(args), "kwargs": kwargs, "version": version or 1}
+    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}

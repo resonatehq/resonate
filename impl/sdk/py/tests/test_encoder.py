@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
+from resonate.errors.errors import ResonateCanceledError, ResonateShutdownError, ResonateStoreError, ResonateTimedoutError, ResonateValidationError
 
 
 @pytest.mark.parametrize(
@@ -19,15 +20,36 @@ def test_base64_enconder(value: str) -> None:
 
 
 class CustomError(Exception):
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
+    def __init__(self, status: int, mesg: str) -> None:
+        self._status = status
+        self._mesg = mesg
+        super().__init__(f"{status}: {mesg}")
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return (self.__class__, (self._status, self._mesg))
 
 
-@pytest.mark.parametrize("value", [{"value": 1}, CustomError("abc"), TypeError("HERE"), None])
+@pytest.mark.parametrize(
+    "value",
+    [
+        {"value": 1},
+        2,
+        "three",
+        ["four", 5],
+        ("six",),
+        CustomError(10, "abc"),
+        TypeError("HERE"),
+        None,
+        ResonateValidationError("foo"),
+        ResonateShutdownError("foo"),
+        ResonateStoreError(1213, 121),
+        ResonateCanceledError("12"),
+        ResonateTimedoutError("12", 12),
+    ],
+)
 def test_json_encoder(value: Any) -> None:
     encoder = JsonEncoder()
     encoded = encoder.encode(value)
-
     match encoder.decode(encoded):
         case Exception() as decoded:
             assert isinstance(decoded, type(value))
@@ -36,7 +58,7 @@ def test_json_encoder(value: Any) -> None:
             assert value == decoded
 
 
-@pytest.mark.parametrize("value", [{"value": 1}, CustomError("abc"), TypeError("HERE"), None])
+@pytest.mark.parametrize("value", [{"value": 1}, CustomError(10, "abc"), TypeError("HERE"), None])
 def test_chain_encoder(value: Any) -> None:
     encoder = ChainEncoder(JsonEncoder(), Base64Encoder())
     encoded = encoder.encode(value)
