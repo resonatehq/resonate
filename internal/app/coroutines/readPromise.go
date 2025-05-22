@@ -11,16 +11,18 @@ import (
 )
 
 func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	req := r.Payload.(*t_api.ReadPromiseRequest)
+
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: r.ReadPromise.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -49,14 +51,14 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			cmd := &t_aio.UpdatePromiseCommand{
-				Id:             r.ReadPromise.Id,
+				Id:             req.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
 				IdempotencyKey: nil,
 				CompletedOn:    p.Timeout,
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Tags, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -69,7 +71,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 
 			res = &t_api.Response{
 				Kind: t_api.ReadPromise,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				ReadPromise: &t_api.ReadPromiseResponse{
 					Status: t_api.StatusOK,
 					Promise: &promise.Promise{
@@ -89,7 +91,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		} else {
 			res = &t_api.Response{
 				Kind: t_api.ReadPromise,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				ReadPromise: &t_api.ReadPromiseResponse{
 					Status:  t_api.StatusOK,
 					Promise: p,
@@ -99,7 +101,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	} else {
 		res = &t_api.Response{
 			Kind: t_api.ReadPromise,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			ReadPromise: &t_api.ReadPromiseResponse{
 				Status: t_api.StatusPromiseNotFound,
 			},

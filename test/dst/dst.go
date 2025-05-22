@@ -101,6 +101,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// promises
 	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
+
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
@@ -141,11 +142,11 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 			req := req
 			reqTime := time
 
-			if req.Tags == nil {
-				req.Tags = make(map[string]string)
+			if req.Metadata == nil {
+				req.Metadata = make(map[string]string)
 			}
-			req.Tags["id"] = id
-			req.Tags["name"] = req.Kind.String()
+			req.Metadata["id"] = id
+			req.Metadata["name"] = req.Kind().String()
 
 			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
 				Submission: req,
@@ -167,15 +168,13 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						case t_api.SearchPromises:
 							if res.SearchPromises.Cursor != nil {
 								d.generator.AddRequest(&t_api.Request{
-									Kind:           t_api.SearchPromises,
-									SearchPromises: res.SearchPromises.Cursor.Next,
+									Payload: res.SearchPromises.Cursor.Next,
 								})
 							}
 						case t_api.SearchSchedules:
 							if res.SearchSchedules.Cursor != nil {
 								d.generator.AddRequest(&t_api.Request{
-									Kind:            t_api.SearchSchedules,
-									SearchSchedules: res.SearchSchedules.Cursor.Next,
+									Payload: res.SearchSchedules.Cursor.Next,
 								})
 							}
 						}
@@ -220,9 +219,8 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 				// add claim req to generator
 				d.generator.AddRequest(&t_api.Request{
-					Kind: t_api.ClaimTask,
-					Tags: map[string]string{"partitionId": obj.RootPromiseId},
-					ClaimTask: &t_api.ClaimTaskRequest{
+					Metadata: map[string]string{"partitionId": obj.RootPromiseId},
+					Payload: &t_api.ClaimTaskRequest{
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
@@ -341,7 +339,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 	var err error
 	if req.kind == Op {
 		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
-		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Tags["id"], req.time, res.time, req.req, res.res)
+		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Metadata["id"], req.time, res.time, req.req, res.res)
 	} else {
 		_, err = d.BcStep(model, req.time, res.time, req)
 		var obj any
@@ -431,7 +429,7 @@ func (d *DST) Model() porcupine.Model {
 					status = int(res.res.Status())
 				}
 
-				return fmt.Sprintf("%s | %s → %d", req.req.Tags["id"], req.req, status)
+				return fmt.Sprintf("%s | %s → %d", req.req.Metadata["id"], req.req, status)
 			case Bc:
 				if req.bc.Task != nil {
 					return fmt.Sprintf("Backchannel | %s", req.bc.Task)
@@ -657,10 +655,13 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		case t_api.StatusSchedulerQueueFull:
 			return model, nil
 		case t_api.StatusFieldValidationError:
-			if req.Kind == t_api.CreateCallback && req.CreateCallback.Mesg.Type == "resume" && req.CreateCallback.PromiseId == req.CreateCallback.Mesg.Root {
-				// sometimes we generate create callback requests with the same root and
-				// leaf promise ids by chance
-				return model, nil
+			if req.Kind() == t_api.CreateCallback {
+				callbackReq := req.Payload.(*t_api.CreateCallbackRequest)
+				if callbackReq.Mesg.Type == "resume" && callbackReq.PromiseId == callbackReq.Mesg.Root {
+					// sometimes we generate create callback requests with the same root and
+					// leaf promise ids by chance
+					return model, nil
+				}
 			}
 			fallthrough
 		default:
@@ -668,8 +669,8 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		}
 	}
 
-	if req.Kind != res.Kind {
-		return model, fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind)
+	if req.Kind() != res.Kind {
+		return model, fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind())
 	}
 
 	return d.validator.Validate(model, reqTime, resTime, req, res)
@@ -705,7 +706,7 @@ func (d *DST) String() string {
 func partition(req *Req) string {
 	switch req.kind {
 	case Op:
-		partition, exists := req.req.Tags["partitionId"]
+		partition, exists := req.req.Metadata["partitionId"]
 		if !exists {
 			panic(fmt.Sprintf("Missing partitionId for request %v", req.req))
 		}

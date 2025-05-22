@@ -13,8 +13,7 @@ import (
 
 func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.ClaimTaskResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.ClaimTask,
-		ClaimTask: &t_api.ClaimTaskRequest{
+		Payload: &t_api.ClaimTaskRequest{
 			Id:        r.Id,
 			ProcessId: r.ProcessId,
 			Counter:   int(r.Counter),
@@ -63,8 +62,7 @@ func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.Claim
 
 func (s *server) CompleteTask(c context.Context, r *pb.CompleteTaskRequest) (*pb.CompleteTaskResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.CompleteTask,
-		CompleteTask: &t_api.CompleteTaskRequest{
+		Payload: &t_api.CompleteTaskRequest{
 			Id:      r.Id,
 			Counter: int(r.Counter),
 		},
@@ -81,8 +79,7 @@ func (s *server) CompleteTask(c context.Context, r *pb.CompleteTaskRequest) (*pb
 
 func (s *server) DropTask(c context.Context, r *pb.DropTaskRequest) (*pb.DropTaskResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.DropTask,
-		DropTask: &t_api.DropTaskRequest{
+		Payload: &t_api.DropTaskRequest{
 			Id:      r.Id,
 			Counter: int(r.Counter),
 		},
@@ -99,8 +96,7 @@ func (s *server) DropTask(c context.Context, r *pb.DropTaskRequest) (*pb.DropTas
 
 func (s *server) HeartbeatTasks(c context.Context, r *pb.HeartbeatTasksRequest) (*pb.HeartbeatTasksResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.HeartbeatTasks,
-		HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+		Payload: &t_api.HeartbeatTasksRequest{
 			ProcessId: r.ProcessId,
 		},
 	})

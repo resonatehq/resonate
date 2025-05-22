@@ -11,8 +11,7 @@ import (
 
 func (s *server) AcquireLock(c context.Context, r *pb.AcquireLockRequest) (*pb.AcquireLockResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.AcquireLock,
-		AcquireLock: &t_api.AcquireLockRequest{
+		Payload: &t_api.AcquireLockRequest{
 			ResourceId:  r.ResourceId,
 			ExecutionId: r.ExecutionId,
 			ProcessId:   r.ProcessId,
@@ -31,8 +30,7 @@ func (s *server) AcquireLock(c context.Context, r *pb.AcquireLockRequest) (*pb.A
 
 func (s *server) ReleaseLock(c context.Context, r *pb.ReleaseLockRequest) (*pb.ReleaseLockResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.ReleaseLock,
-		ReleaseLock: &t_api.ReleaseLockRequest{
+		Payload: &t_api.ReleaseLockRequest{
 			ResourceId:  r.ResourceId,
 			ExecutionId: r.ExecutionId,
 		},
@@ -49,8 +47,7 @@ func (s *server) ReleaseLock(c context.Context, r *pb.ReleaseLockRequest) (*pb.R
 
 func (s *server) HeartbeatLocks(c context.Context, r *pb.HeartbeatLocksRequest) (*pb.HeartbeatLocksResponse, error) {
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
-		Kind: t_api.HeartbeatLocks,
-		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+		Payload: &t_api.HeartbeatLocksRequest{
 			ProcessId: r.ProcessId,
 		},
 	})

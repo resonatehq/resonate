@@ -11,19 +11,21 @@ import (
 )
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	req := r.Payload.(*t_api.CompleteTaskRequest)
+
 	var status t_api.StatusCode
 	var t *task.Task
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadTask,
 						ReadTask: &t_aio.ReadTaskCommand{
-							Id: r.CompleteTask.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -50,29 +52,29 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			status = t_api.StatusOK
 		} else if t.State == task.Init || t.State == task.Enqueued {
 			status = t_api.StatusTaskInvalidState
-		} else if t.Counter != r.CompleteTask.Counter {
+		} else if t.Counter != req.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
 			completedOn := c.Time()
 			completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 				Kind: t_aio.Store,
-				Tags: r.Tags,
+				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
 						Commands: []*t_aio.Command{
 							{
 								Kind: t_aio.UpdateTask,
 								UpdateTask: &t_aio.UpdateTaskCommand{
-									Id:             r.CompleteTask.Id,
+									Id:             req.Id,
 									ProcessId:      nil,
 									State:          task.Completed,
-									Counter:        r.CompleteTask.Counter,
+									Counter:        req.Counter,
 									Attempt:        0,
 									Ttl:            0,
 									ExpiresAt:      0,
 									CompletedOn:    &completedOn,
 									CurrentStates:  []task.State{task.Claimed},
-									CurrentCounter: r.CompleteTask.Counter,
+									CurrentCounter: req.Counter,
 								},
 							},
 						},
@@ -114,7 +116,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 	return &t_api.Response{
 		Kind: t_api.CompleteTask,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		CompleteTask: &t_api.CompleteTaskResponse{
 			Status: status,
 			Task:   t,

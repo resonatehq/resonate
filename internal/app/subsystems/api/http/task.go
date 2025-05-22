@@ -65,8 +65,7 @@ func (s *server) claimTask(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:      t_api.ClaimTask,
-		ClaimTask: claimTask,
+		Payload: claimTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -150,8 +149,7 @@ func (s *server) completeTask(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:         t_api.CompleteTask,
-		CompleteTask: completeTask,
+		Payload: completeTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -210,8 +208,7 @@ func (s *server) dropTask(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:     t_api.DropTask,
-		DropTask: dropTask,
+		Payload: dropTask,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})
@@ -267,8 +264,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 	}
 
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Kind:           t_api.HeartbeatTasks,
-		HeartbeatTasks: heartbeatTasks,
+		Payload: heartbeatTasks,
 	})
 	if err != nil {
 		c.JSON(s.code(err.Code), gin.H{"error": err})

@@ -97,7 +97,7 @@ func (g *Generator) AddGenerator(kind t_api.Kind, generator RequestGenerator) {
 }
 
 func (g *Generator) AddRequest(req *t_api.Request) {
-	g.requests[req.Kind] = append(g.requests[req.Kind], req)
+	g.requests[req.Kind()] = append(g.requests[req.Kind()], req)
 }
 
 func (g *Generator) Generate(r *rand.Rand, t int64, n int) []*t_api.Request {
@@ -121,9 +121,8 @@ func (g *Generator) GenerateReadPromise(r *rand.Rand, t int64) *t_api.Request {
 	id := g.promiseId(r)
 
 	return &t_api.Request{
-		Kind: t_api.ReadPromise,
-		Tags: map[string]string{"partitionId": id},
-		ReadPromise: &t_api.ReadPromiseRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.ReadPromiseRequest{
 			Id: id,
 		},
 	}
@@ -157,8 +156,7 @@ func (g *Generator) GenerateSearchPromises(r *rand.Rand, t int64) *t_api.Request
 	}
 
 	return &t_api.Request{
-		Kind: t_api.SearchPromises,
-		SearchPromises: &t_api.SearchPromisesRequest{
+		Payload: &t_api.SearchPromisesRequest{
 			Id:     id,
 			States: states,
 			Tags:   tags,
@@ -177,9 +175,8 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 	tags := g.tags(r)
 
 	return &t_api.Request{
-		Kind: t_api.CreatePromise,
-		Tags: map[string]string{"partitionId": id},
-		CreatePromise: &t_api.CreatePromiseRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.CreatePromiseRequest{
 			Id:             id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
@@ -192,22 +189,22 @@ func (g *Generator) GenerateCreatePromise(r *rand.Rand, t int64) *t_api.Request 
 
 func (g *Generator) GenerateCreatePromiseAndTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.GenerateCreatePromise(r, t)
-	if req.CreatePromise.Tags == nil {
-		req.CreatePromise.Tags = map[string]string{"resonate:invoke": "dst"}
+	createPromiseReq := req.Payload.(*t_api.CreatePromiseRequest)
+	if createPromiseReq.Tags == nil {
+		createPromiseReq.Tags = map[string]string{"resonate:invoke": "dst"}
 	} else {
-		req.CreatePromise.Tags["resonate:invoke"] = "dst"
+		createPromiseReq.Tags["resonate:invoke"] = "dst"
 	}
 
 	return &t_api.Request{
-		Kind: t_api.CreatePromiseAndTask,
-		Tags: map[string]string{"partitionId": req.CreatePromise.Id},
-		CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
-			Promise: req.CreatePromise,
+		Metadata: map[string]string{"partitionId": createPromiseReq.Id},
+		Payload: &t_api.CreatePromiseAndTaskRequest{
+			Promise: createPromiseReq,
 			Task: &t_api.CreateTaskRequest{
-				PromiseId: req.CreatePromise.Id,
-				ProcessId: req.CreatePromise.Id,
+				PromiseId: createPromiseReq.Id,
+				ProcessId: createPromiseReq.Id,
 				Ttl:       RangeIntn(r, 1000, 5000),
-				Timeout:   req.CreatePromise.Timeout,
+				Timeout:   createPromiseReq.Timeout,
 			},
 		},
 	}
@@ -222,9 +219,8 @@ func (g *Generator) GenerateCompletePromise(r *rand.Rand, t int64) *t_api.Reques
 	data := g.dataSet[r.Intn(len(g.dataSet))]
 
 	return &t_api.Request{
-		Kind: t_api.CompletePromise,
-		Tags: map[string]string{"partitionId": id},
-		CompletePromise: &t_api.CompletePromiseRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.CompletePromiseRequest{
 			Id:             id,
 			IdempotencyKey: idempotencyKey,
 			Strict:         strict,
@@ -244,9 +240,8 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 	switch r.Intn(2) {
 	case 0:
 		return &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"partitionId": promiseId},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"partitionId": promiseId},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        fmt.Sprintf("__resume:%s:%s", rootPromiseId, promiseId),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
@@ -256,9 +251,8 @@ func (g *Generator) GenerateCreateCallback(r *rand.Rand, t int64) *t_api.Request
 		}
 	default:
 		return &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"partitionId": promiseId},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"partitionId": promiseId},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        fmt.Sprintf("__notify:%s:%s", promiseId, g.callbackId(r)),
 				PromiseId: promiseId,
 				Recv:      []byte(`"dst"`), // ignored in dst, use hardcoded value
@@ -275,9 +269,8 @@ func (g *Generator) GenerateReadSchedule(r *rand.Rand, t int64) *t_api.Request {
 	id := g.scheduleId(r)
 
 	return &t_api.Request{
-		Kind: t_api.ReadSchedule,
-		Tags: map[string]string{"partitionId": id},
-		ReadSchedule: &t_api.ReadScheduleRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.ReadScheduleRequest{
 			Id: id,
 		},
 	}
@@ -294,8 +287,7 @@ func (g *Generator) GenerateSearchSchedules(r *rand.Rand, t int64) *t_api.Reques
 	tags := g.tags(r)
 
 	return &t_api.Request{
-		Kind: t_api.SearchSchedules,
-		SearchSchedules: &t_api.SearchSchedulesRequest{
+		Payload: &t_api.SearchSchedulesRequest{
 			Id:    id,
 			Tags:  tags,
 			Limit: limit,
@@ -318,9 +310,8 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	delete(promiseTags, "resonate:invoke")
 
 	return &t_api.Request{
-		Kind: t_api.CreateSchedule,
-		Tags: map[string]string{"partitionId": id},
-		CreateSchedule: &t_api.CreateScheduleRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.CreateScheduleRequest{
 			Id:             id,
 			Description:    "",
 			Cron:           cron,
@@ -338,9 +329,8 @@ func (g *Generator) GenerateDeleteSchedule(r *rand.Rand, t int64) *t_api.Request
 	id := g.scheduleId(r)
 
 	return &t_api.Request{
-		Kind: t_api.DeleteSchedule,
-		Tags: map[string]string{"partitionId": id},
-		DeleteSchedule: &t_api.DeleteScheduleRequest{
+		Metadata: map[string]string{"partitionId": id},
+		Payload: &t_api.DeleteScheduleRequest{
 			Id: id,
 		},
 	}
@@ -355,9 +345,8 @@ func (g *Generator) GenerateAcquireLock(r *rand.Rand, t int64) *t_api.Request {
 	ttl := RangeInt63n(r, 0, max(1, (g.ticks*g.timeElapsedPerTick)/100))
 
 	return &t_api.Request{
-		Kind: t_api.AcquireLock,
-		Tags: map[string]string{"partitionId": resourceId},
-		AcquireLock: &t_api.AcquireLockRequest{
+		Metadata: map[string]string{"partitionId": resourceId},
+		Payload: &t_api.AcquireLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
 			ProcessId:   processId,
@@ -371,9 +360,8 @@ func (g *Generator) GenerateReleaseLock(r *rand.Rand, t int64) *t_api.Request {
 	executionId := g.idSet[r.Intn(len(g.idSet))]
 
 	return &t_api.Request{
-		Kind: t_api.ReleaseLock,
-		Tags: map[string]string{"partitionId": resourceId},
-		ReleaseLock: &t_api.ReleaseLockRequest{
+		Metadata: map[string]string{"partitionId": resourceId},
+		Payload: &t_api.ReleaseLockRequest{
 			ResourceId:  resourceId,
 			ExecutionId: executionId,
 		},
@@ -384,9 +372,8 @@ func (g *Generator) GenerateHeartbeatLocks(r *rand.Rand, t int64) *t_api.Request
 	processId := g.idSet[r.Intn(len(g.idSet))]
 
 	return &t_api.Request{
-		Kind: t_api.HeartbeatLocks,
-		Tags: map[string]string{"partitionId": processId},
-		HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+		Metadata: map[string]string{"partitionId": processId},
+		Payload: &t_api.HeartbeatLocksRequest{
 			ProcessId: processId,
 		},
 	}
@@ -398,7 +385,12 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 	req := g.pop(r, t_api.ClaimTask)
 
 	if req != nil {
-		g.nextTasks(r, req.ClaimTask.Id, req.ClaimTask.ProcessId, req.ClaimTask.Counter, req.Tags)
+		claimTaskReq := req.Payload.(*t_api.ClaimTaskRequest)
+		g.nextTasks(r,
+			claimTaskReq.Id,
+			claimTaskReq.ProcessId,
+			claimTaskReq.Counter,
+			req.Metadata)
 	}
 
 	return req
@@ -468,9 +460,8 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 		switch r.Intn(5) {
 		case 0:
 			g.AddRequest(&t_api.Request{
-				Kind: t_api.ClaimTask,
-				Tags: reqTags,
-				ClaimTask: &t_api.ClaimTaskRequest{
+				Metadata: reqTags,
+				Payload: &t_api.ClaimTaskRequest{
 					Id:        id,
 					ProcessId: pid,
 					Counter:   counter,
@@ -479,27 +470,24 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 1:
 			g.AddRequest(&t_api.Request{
-				Kind: t_api.CompleteTask,
-				Tags: reqTags,
-				CompleteTask: &t_api.CompleteTaskRequest{
+				Metadata: reqTags,
+				Payload: &t_api.CompleteTaskRequest{
 					Id:      id,
 					Counter: counter,
 				},
 			})
 		case 2:
 			g.AddRequest(&t_api.Request{
-				Kind: t_api.DropTask,
-				Tags: reqTags,
-				DropTask: &t_api.DropTaskRequest{
+				Metadata: reqTags,
+				Payload: &t_api.DropTaskRequest{
 					Id:      id,
 					Counter: counter,
 				},
 			})
 		case 3:
 			g.AddRequest(&t_api.Request{
-				Kind: t_api.HeartbeatTasks,
-				Tags: reqTags,
-				HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+				Metadata: reqTags,
+				Payload: &t_api.HeartbeatTasksRequest{
 					ProcessId: pid,
 				},
 			})

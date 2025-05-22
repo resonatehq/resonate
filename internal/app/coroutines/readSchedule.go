@@ -10,16 +10,17 @@ import (
 )
 
 func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
+	req := r.Payload.(*t_api.ReadScheduleRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
-		Tags: r.Tags,
+		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
 				Commands: []*t_aio.Command{
 					{
 						Kind: t_aio.ReadSchedule,
 						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: r.ReadSchedule.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -40,7 +41,7 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	if result.RowsReturned == 0 {
 		res = &t_api.Response{
 			Kind: t_api.ReadSchedule,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			ReadSchedule: &t_api.ReadScheduleResponse{
 				Status: t_api.StatusScheduleNotFound,
 			},
@@ -54,7 +55,7 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 		res = &t_api.Response{
 			Kind: t_api.ReadSchedule,
-			Tags: r.Tags,
+			Tags: r.Metadata,
 			ReadSchedule: &t_api.ReadScheduleResponse{
 				Status:   t_api.StatusOK,
 				Schedule: s,

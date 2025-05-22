@@ -36,7 +36,6 @@ type api struct {
 	sq         chan *bus.SQE[t_api.Request, t_api.Response]
 	buffer     *bus.SQE[t_api.Request, t_api.Response]
 	subsystems []Subsystem
-	validators map[t_api.Kind]func(*t_api.Request) error
 	done       bool
 	errors     chan error
 	metrics    *metrics.Metrics
@@ -44,10 +43,9 @@ type api struct {
 
 func New(size int, metrics *metrics.Metrics) *api {
 	return &api{
-		sq:         make(chan *bus.SQE[t_api.Request, t_api.Response], size),
-		errors:     make(chan error),
-		validators: map[t_api.Kind]func(*t_api.Request) error{},
-		metrics:    metrics,
+		sq:      make(chan *bus.SQE[t_api.Request, t_api.Response], size),
+		errors:  make(chan error),
+		metrics: metrics,
 	}
 }
 
@@ -61,10 +59,6 @@ func (a *api) String() string {
 
 func (a *api) AddSubsystem(subsystem Subsystem) {
 	a.subsystems = append(a.subsystems, subsystem)
-}
-
-func (a *api) AddValidator(kind t_api.Kind, validator func(*t_api.Request) error) {
-	a.validators[kind] = validator
 }
 
 func (a *api) Addr() string {
@@ -141,10 +135,12 @@ func (a *api) Signal(cancel <-chan any) <-chan any {
 
 func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
-	util.Assert(sqe.Submission.Tags != nil, "submission tags must not be nil")
+	util.Assert(sqe.Submission.Metadata != nil, "submission tags must not be nil")
+
+	requestKind := sqe.Submission.Kind().String()
 
 	slog.Debug("api:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
-	a.metrics.ApiInFlight.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"]).Inc()
+	a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Inc()
 
 	// replace callback with a function that emits metrics
 	callback := sqe.Callback
@@ -161,8 +157,8 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 			status = res.Status()
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"], strconv.Itoa(int(status))).Inc()
-		a.metrics.ApiInFlight.WithLabelValues(sqe.Submission.Kind.String(), sqe.Submission.Tags["protocol"]).Dec()
+		a.metrics.ApiTotal.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"], strconv.Itoa(int(status))).Inc()
+		a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Dec()
 
 		callback(res, err)
 	}
@@ -177,11 +173,9 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	// validate the submission before sending it to the cq, this will
 	// run in the same goroutine as the api request in order to fail
 	// fast
-	if validate, ok := a.validators[sqe.Submission.Kind]; ok {
-		if err := validate(sqe.Submission); err != nil {
-			sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
-			return
-		}
+	if err := sqe.Submission.Validate(); err != nil {
+		sqe.Callback(nil, t_api.NewError(t_api.StatusFieldValidationError, err))
+		return
 	}
 
 	select {

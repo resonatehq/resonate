@@ -51,9 +51,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromise",
 		Req: &t_api.Request{
-			Kind: t_api.ReadPromise,
-			Tags: map[string]string{"id": "ReadPromise", "name": "ReadPromise"},
-			ReadPromise: &t_api.ReadPromiseRequest{
+			Metadata: map[string]string{"id": "ReadPromise", "name": "ReadPromise"},
+			Payload: &t_api.ReadPromiseRequest{
 				Id: "foo",
 			},
 		},
@@ -87,9 +86,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromiseWithSlash",
 		Req: &t_api.Request{
-			Kind: t_api.ReadPromise,
-			Tags: map[string]string{"id": "ReadPromiseWithSlash", "name": "ReadPromise"},
-			ReadPromise: &t_api.ReadPromiseRequest{
+			Metadata: map[string]string{"id": "ReadPromiseWithSlash", "name": "ReadPromise"},
+			Payload: &t_api.ReadPromiseRequest{
 				Id: "foo/bar",
 			},
 		},
@@ -123,9 +121,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadPromiseNotFound",
 		Req: &t_api.Request{
-			Kind: t_api.ReadPromise,
-			Tags: map[string]string{"id": "ReadPromiseNotFound", "name": "ReadPromise"},
-			ReadPromise: &t_api.ReadPromiseRequest{
+			Metadata: map[string]string{"id": "ReadPromiseNotFound", "name": "ReadPromise"},
+			Payload: &t_api.ReadPromiseRequest{
 				Id: "bar",
 			},
 		},
@@ -157,9 +154,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromises",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromises", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromises", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -201,9 +197,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesCursor",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesCursor", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesCursor", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -242,9 +237,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesPending",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesPending", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesPending", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -283,9 +277,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesResolved",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesResolved", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesResolved", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Resolved,
@@ -324,9 +317,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesRejected",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesRejected", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesRejected", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Rejected,
@@ -367,9 +359,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesTags",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesTags", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesTags", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -458,9 +449,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchPromisesDefaultLimit",
 		Req: &t_api.Request{
-			Kind: t_api.SearchPromises,
-			Tags: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "SearchPromises"},
-			SearchPromises: &t_api.SearchPromisesRequest{
+			Metadata: map[string]string{"id": "SearchPromisesDefaultLimit", "name": "SearchPromises"},
+			Payload: &t_api.SearchPromisesRequest{
 				Id: "*",
 				States: []promise.State{
 					promise.Pending,
@@ -543,9 +533,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromise",
 		Req: &t_api.Request{
-			Kind: t_api.CreatePromise,
-			Tags: map[string]string{"id": "CreatePromise", "name": "CreatePromise"},
-			CreatePromise: &t_api.CreatePromiseRequest{
+			Metadata: map[string]string{"id": "CreatePromise", "name": "CreatePromise"},
+			Payload: &t_api.CreatePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Strict:         true,
@@ -625,9 +614,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseMinimal",
 		Req: &t_api.Request{
-			Kind: t_api.CreatePromise,
-			Tags: map[string]string{"id": "CreatePromiseMinimal", "name": "CreatePromise"},
-			CreatePromise: &t_api.CreatePromiseRequest{
+			Metadata: map[string]string{"id": "CreatePromiseMinimal", "name": "CreatePromise"},
+			Payload: &t_api.CreatePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -686,9 +674,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTask",
 		Req: &t_api.Request{
-			Kind: t_api.CreatePromiseAndTask,
-			Tags: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
+			Payload: &t_api.CreatePromiseAndTaskRequest{
 				Promise: &t_api.CreatePromiseRequest{
 					Id:      "foo",
 					Timeout: 1,
@@ -760,9 +747,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromise",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Strict:         true,
@@ -838,9 +824,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromiseMinimal",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "ResolvePromiseMinimal", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "ResolvePromiseMinimal", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -895,9 +880,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ResolvePromiseAlreadyCompleted",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "ResolvePromiseAlreadyCompleted", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "ResolvePromiseAlreadyCompleted", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -941,9 +925,8 @@ var TestCases = []*testCase{
 	{
 		Name: "RejectPromise",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "RejectPromise", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Strict:         true,
@@ -1019,9 +1002,8 @@ var TestCases = []*testCase{
 	{
 		Name: "RejectPromiseMinimal",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "RejectPromiseMinimal", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "RejectPromiseMinimal", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -1076,9 +1058,8 @@ var TestCases = []*testCase{
 	{
 		Name: "RejectPromiseAlreadyCompleted",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "RejectPromiseAlreadyCompleted", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "RejectPromiseAlreadyCompleted", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -1122,9 +1103,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CancelPromise",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "CancelPromise", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Strict:         true,
@@ -1200,9 +1180,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CancelPromiseMinimal",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "CancelPromiseMinimal", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "CancelPromiseMinimal", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -1257,9 +1236,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CancelPromiseAlreadyCompleted",
 		Req: &t_api.Request{
-			Kind: t_api.CompletePromise,
-			Tags: map[string]string{"id": "CancelPromiseAlreadyCompleted", "name": "CompletePromise"},
-			CompletePromise: &t_api.CompletePromiseRequest{
+			Metadata: map[string]string{"id": "CancelPromiseAlreadyCompleted", "name": "CompletePromise"},
+			Payload: &t_api.CompletePromiseRequest{
 				Id:             "foo",
 				IdempotencyKey: nil,
 				Strict:         false,
@@ -1305,9 +1283,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1351,9 +1328,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallback", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1398,9 +1374,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1444,9 +1419,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallbackPhysicalReceiver", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1491,9 +1465,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFound",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1538,9 +1511,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateCallbackNotFoundDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__resume:bar:foo",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1588,9 +1560,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1634,9 +1605,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionLogicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscription", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1681,9 +1651,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiver",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1728,9 +1697,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionPhysicalReceiverDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscriptionPhysicalRecv", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
@@ -1774,9 +1742,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFound",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1821,9 +1788,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSubscriptionNotFoundDeprecated",
 		Req: &t_api.Request{
-			Kind: t_api.CreateCallback,
-			Tags: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
-			CreateCallback: &t_api.CreateCallbackRequest{
+			Metadata: map[string]string{"id": "CreateSubscriptionNotFound", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
 				Id:        "__notify:foo:foo.1",
 				PromiseId: "foo",
 				Recv:      []byte(`"foo"`),
@@ -1870,9 +1836,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ReadSchedule",
 		Req: &t_api.Request{
-			Kind: t_api.ReadSchedule,
-			Tags: map[string]string{"id": "ReadSchedule", "name": "ReadSchedule"},
-			ReadSchedule: &t_api.ReadScheduleRequest{
+			Metadata: map[string]string{"id": "ReadSchedule", "name": "ReadSchedule"},
+			Payload: &t_api.ReadScheduleRequest{
 				Id: "foo",
 			},
 		},
@@ -1911,9 +1876,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedules",
 		Req: &t_api.Request{
-			Kind: t_api.SearchSchedules,
-			Tags: map[string]string{"id": "SearchSchedules", "name": "SearchSchedules"},
-			SearchSchedules: &t_api.SearchSchedulesRequest{
+			Metadata: map[string]string{"id": "SearchSchedules", "name": "SearchSchedules"},
+			Payload: &t_api.SearchSchedulesRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 10,
@@ -1950,9 +1914,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesCursor",
 		Req: &t_api.Request{
-			Kind: t_api.SearchSchedules,
-			Tags: map[string]string{"id": "SearchSchedulesCursor", "name": "SearchSchedules"},
-			SearchSchedules: &t_api.SearchSchedulesRequest{
+			Metadata: map[string]string{"id": "SearchSchedulesCursor", "name": "SearchSchedules"},
+			Payload: &t_api.SearchSchedulesRequest{
 				Id:     "*",
 				Tags:   map[string]string{},
 				Limit:  10,
@@ -1988,9 +1951,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesTags",
 		Req: &t_api.Request{
-			Kind: t_api.SearchSchedules,
-			Tags: map[string]string{"id": "SearchSchedulesTags", "name": "SearchSchedules"},
-			SearchSchedules: &t_api.SearchSchedulesRequest{
+			Metadata: map[string]string{"id": "SearchSchedulesTags", "name": "SearchSchedules"},
+			Payload: &t_api.SearchSchedulesRequest{
 				Id: "*",
 				Tags: map[string]string{
 					"foo": "bar",
@@ -2052,9 +2014,8 @@ var TestCases = []*testCase{
 	{
 		Name: "SearchSchedulesDefaultLimit",
 		Req: &t_api.Request{
-			Kind: t_api.SearchSchedules,
-			Tags: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "SearchSchedules"},
-			SearchSchedules: &t_api.SearchSchedulesRequest{
+			Metadata: map[string]string{"id": "SearchSchedulesDefaultLimit", "name": "SearchSchedules"},
+			Payload: &t_api.SearchSchedulesRequest{
 				Id:    "*",
 				Tags:  map[string]string{},
 				Limit: 100,
@@ -2132,9 +2093,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreateSchedule",
 		Req: &t_api.Request{
-			Kind: t_api.CreateSchedule,
-			Tags: map[string]string{"id": "CreateSchedule", "name": "CreateSchedule"},
-			CreateSchedule: &t_api.CreateScheduleRequest{
+			Metadata: map[string]string{"id": "CreateSchedule", "name": "CreateSchedule"},
+			Payload: &t_api.CreateScheduleRequest{
 				Id:             "foo",
 				IdempotencyKey: util.ToPointer(idempotency.Key("bar")),
 				Cron:           "* * * * *",
@@ -2203,9 +2163,8 @@ var TestCases = []*testCase{
 	{
 		Name: "DeleteSchedule",
 		Req: &t_api.Request{
-			Kind: t_api.DeleteSchedule,
-			Tags: map[string]string{"id": "DeleteSchedule", "name": "DeleteSchedule"},
-			DeleteSchedule: &t_api.DeleteScheduleRequest{
+			Metadata: map[string]string{"id": "DeleteSchedule", "name": "DeleteSchedule"},
+			Payload: &t_api.DeleteScheduleRequest{
 				Id: "foo",
 			},
 		},
@@ -2239,9 +2198,8 @@ var TestCases = []*testCase{
 	{
 		Name: "AcquireLock",
 		Req: &t_api.Request{
-			Kind: t_api.AcquireLock,
-			Tags: map[string]string{"id": "AcquireLock", "name": "AcquireLock"},
-			AcquireLock: &t_api.AcquireLockRequest{
+			Metadata: map[string]string{"id": "AcquireLock", "name": "AcquireLock"},
+			Payload: &t_api.AcquireLockRequest{
 				ResourceId:  "foo",
 				ProcessId:   "bar",
 				ExecutionId: "baz",
@@ -2291,9 +2249,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ReleaseLock",
 		Req: &t_api.Request{
-			Kind: t_api.ReleaseLock,
-			Tags: map[string]string{"id": "ReleaseLock", "name": "ReleaseLock"},
-			ReleaseLock: &t_api.ReleaseLockRequest{
+			Metadata: map[string]string{"id": "ReleaseLock", "name": "ReleaseLock"},
+			Payload: &t_api.ReleaseLockRequest{
 				ResourceId:  "foo",
 				ExecutionId: "bar",
 			},
@@ -2331,9 +2288,8 @@ var TestCases = []*testCase{
 	{
 		Name: "HeartbeatLocks",
 		Req: &t_api.Request{
-			Kind: t_api.HeartbeatLocks,
-			Tags: map[string]string{"id": "HeartbeatLocks", "name": "HeartbeatLocks"},
-			HeartbeatLocks: &t_api.HeartbeatLocksRequest{
+			Metadata: map[string]string{"id": "HeartbeatLocks", "name": "HeartbeatLocks"},
+			Payload: &t_api.HeartbeatLocksRequest{
 				ProcessId: "foo",
 			},
 		},
@@ -2371,9 +2327,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTask",
 		Req: &t_api.Request{
-			Kind: t_api.ClaimTask,
-			Tags: map[string]string{"id": "ClaimTask", "name": "ClaimTask"},
-			ClaimTask: &t_api.ClaimTaskRequest{
+			Metadata: map[string]string{"id": "ClaimTask", "name": "ClaimTask"},
+			Payload: &t_api.ClaimTaskRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -2418,9 +2373,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskGet",
 		Req: &t_api.Request{
-			Kind: t_api.ClaimTask,
-			Tags: map[string]string{"id": "ClaimTaskGet", "name": "ClaimTask"},
-			ClaimTask: &t_api.ClaimTaskRequest{
+			Metadata: map[string]string{"id": "ClaimTaskGet", "name": "ClaimTask"},
+			Payload: &t_api.ClaimTaskRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "foo/1", // default process id for get endpoint
@@ -2459,9 +2413,8 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskInvoke",
 		Req: &t_api.Request{
-			Kind: t_api.ClaimTask,
-			Tags: map[string]string{"id": "ClaimTaskInvoke", "name": "ClaimTask"},
-			ClaimTask: &t_api.ClaimTaskRequest{
+			Metadata: map[string]string{"id": "ClaimTaskInvoke", "name": "ClaimTask"},
+			Payload: &t_api.ClaimTaskRequest{
 				Id:        "foo",
 				Counter:   1,
 				ProcessId: "bar",
@@ -2527,13 +2480,12 @@ var TestCases = []*testCase{
 	{
 		Name: "ClaimTaskResume",
 		Req: &t_api.Request{
-			Kind: t_api.ClaimTask,
-			Tags: map[string]string{
+			Metadata: map[string]string{
 				"id":       "ClaimTaskResume",
 				"name":     "ClaimTask",
 				"protocol": "http",
 			},
-			ClaimTask: &t_api.ClaimTaskRequest{
+			Payload: &t_api.ClaimTaskRequest{
 				Id:        "foo",
 				Counter:   2,
 				ProcessId: "bar",
@@ -2607,9 +2559,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CompleteTask",
 		Req: &t_api.Request{
-			Kind: t_api.CompleteTask,
-			Tags: map[string]string{"id": "CompleteTask", "name": "CompleteTask"},
-			CompleteTask: &t_api.CompleteTaskRequest{
+			Metadata: map[string]string{"id": "CompleteTask", "name": "CompleteTask"},
+			Payload: &t_api.CompleteTaskRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
@@ -2647,9 +2598,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CompleteTaskGet",
 		Req: &t_api.Request{
-			Kind: t_api.CompleteTask,
-			Tags: map[string]string{"id": "CompleteTaskGet", "name": "CompleteTask"},
-			CompleteTask: &t_api.CompleteTaskRequest{
+			Metadata: map[string]string{"id": "CompleteTaskGet", "name": "CompleteTask"},
+			Payload: &t_api.CompleteTaskRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
@@ -2683,9 +2633,8 @@ var TestCases = []*testCase{
 	{
 		Name: "DropTask",
 		Req: &t_api.Request{
-			Kind: t_api.DropTask,
-			Tags: map[string]string{"id": "DropTask", "name": "DropTask"},
-			DropTask: &t_api.DropTaskRequest{
+			Metadata: map[string]string{"id": "DropTask", "name": "DropTask"},
+			Payload: &t_api.DropTaskRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
@@ -2723,9 +2672,8 @@ var TestCases = []*testCase{
 	{
 		Name: "DropTaskGet",
 		Req: &t_api.Request{
-			Kind: t_api.DropTask,
-			Tags: map[string]string{"id": "DropTaskGet", "name": "DropTask"},
-			DropTask: &t_api.DropTaskRequest{
+			Metadata: map[string]string{"id": "DropTaskGet", "name": "DropTask"},
+			Payload: &t_api.DropTaskRequest{
 				Id:      "foo",
 				Counter: 1,
 			},
@@ -2759,9 +2707,8 @@ var TestCases = []*testCase{
 	{
 		Name: "HeartbeatTasks",
 		Req: &t_api.Request{
-			Kind: t_api.HeartbeatTasks,
-			Tags: map[string]string{"id": "HeartbeatTasks", "name": "HeartbeatTasks"},
-			HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+			Metadata: map[string]string{"id": "HeartbeatTasks", "name": "HeartbeatTasks"},
+			Payload: &t_api.HeartbeatTasksRequest{
 				ProcessId: "foo",
 			},
 		},
@@ -2797,9 +2744,8 @@ var TestCases = []*testCase{
 	{
 		Name: "HeartbeatTasksGet",
 		Req: &t_api.Request{
-			Kind: t_api.HeartbeatTasks,
-			Tags: map[string]string{"id": "HeartbeatTasksGet", "name": "HeartbeatTasks"},
-			HeartbeatTasks: &t_api.HeartbeatTasksRequest{
+			Metadata: map[string]string{"id": "HeartbeatTasksGet", "name": "HeartbeatTasks"},
+			Payload: &t_api.HeartbeatTasksRequest{
 				ProcessId: "foo/1",
 			},
 		},
@@ -2832,9 +2778,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTaskWithTtlZero",
 		Req: &t_api.Request{
-			Kind: t_api.CreatePromiseAndTask,
-			Tags: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
+			Payload: &t_api.CreatePromiseAndTaskRequest{
 				Promise: &t_api.CreatePromiseRequest{
 					Id:      "foo",
 					Timeout: 1,
@@ -2906,9 +2851,8 @@ var TestCases = []*testCase{
 	{
 		Name: "CreatePromiseAndTaskWithNegativeTtl",
 		Req: &t_api.Request{
-			Kind: t_api.CreatePromiseAndTask,
-			Tags: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskRequest{
+			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
+			Payload: &t_api.CreatePromiseAndTaskRequest{
 				Promise: &t_api.CreatePromiseRequest{
 					Id:      "foo",
 					Timeout: 1,

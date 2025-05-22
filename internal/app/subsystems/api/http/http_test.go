@@ -86,7 +86,7 @@ func TestHttp(t *testing.T) {
 				t.Run(tc.Name, func(t *testing.T) {
 					if tc.Req != nil {
 						// set protocol specific header
-						tc.Req.Tags["protocol"] = "http"
+						tc.Req.Metadata["protocol"] = "http"
 					}
 
 					httpTest.Load(t, tc.Req, tc.Res)

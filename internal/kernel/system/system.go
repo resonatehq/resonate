@@ -153,11 +153,11 @@ func (s *System) Tick(t int64) {
 	for i, sqe := range s.api.DequeueSQE(s.config.SubmissionBatchSize) {
 		util.Assert(i < s.config.SubmissionBatchSize, "sqes length be no greater than the submission batch size")
 
-		coroutine, ok := s.onRequest[sqe.Submission.Kind]
-		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind))
+		coroutine, ok := s.onRequest[sqe.Submission.Kind()]
+		util.Assert(ok, fmt.Sprintf("no registered coroutine for request kind %s", sqe.Submission.Kind()))
 
 		if p, ok := gocoro.Add(s.scheduler, coroutine(sqe.Submission, sqe.Callback)); ok {
-			s.coroutineMetrics(p, sqe.Submission.Tags)
+			s.coroutineMetrics(p, sqe.Submission.Metadata)
 		} else {
 			slog.Warn("scheduler queue full", "size", s.config.CoroutineMaxSize)
 			sqe.Callback(nil, t_api.NewError(t_api.StatusSchedulerQueueFull, nil))
@@ -190,8 +190,8 @@ func (s *System) Done() bool {
 func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], *t_api.Request) (*t_api.Response, error)) {
 	s.onRequest[kind] = func(req *t_api.Request, callback func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
 		return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
-			util.Assert(req.Tags != nil, "request tags must be non nil")
-			util.Assert(req.Tags["id"] != "", "id tag must be set")
+			util.Assert(req.Metadata != nil, "request tags must be non nil")
+			util.Assert(req.Metadata["id"] != "", "id tag must be set")
 
 			// set config
 			c.Set("config", s.config)
@@ -200,7 +200,7 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			res, err := constructor(c, req)
 
 			s.api.EnqueueCQE(&bus.CQE[t_api.Request, t_api.Response]{
-				Id:         req.Tags["id"],
+				Id:         req.Metadata["id"],
 				Completion: res,
 				Callback:   callback,
 				Error:      err,
