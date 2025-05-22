@@ -41,8 +41,6 @@ func (r *ReadPromiseRequest) Kind() Kind {
 	return ReadPromise
 }
 
-func (r *ReadPromiseRequest) isRequestPayload() {}
-
 type SearchPromisesRequest struct {
 	Id     string            `json:"id"`
 	States []promise.State   `json:"states"`
@@ -62,8 +60,6 @@ func (r *SearchPromisesRequest) Validate() error {
 func (r *SearchPromisesRequest) Kind() Kind {
 	return SearchPromises
 }
-
-func (r *SearchPromisesRequest) isRequestPayload() {}
 
 type CreatePromiseRequest struct {
 	Id             string            `json:"id"`
@@ -86,8 +82,6 @@ func (r *CreatePromiseRequest) Kind() Kind {
 	return CreatePromise
 }
 
-func (r *CreatePromiseRequest) isRequestPayload() {}
-
 type CreatePromiseAndTaskRequest struct {
 	Promise *CreatePromiseRequest
 	Task    *CreateTaskRequest
@@ -104,8 +98,6 @@ func (r *CreatePromiseAndTaskRequest) Validate() error {
 func (r *CreatePromiseAndTaskRequest) Kind() Kind {
 	return CreatePromiseAndTask
 }
-
-func (r *CreatePromiseAndTaskRequest) isRequestPayload() {}
 
 type CompletePromiseRequest struct {
 	Id             string           `json:"id"`
@@ -126,8 +118,6 @@ func (r *CompletePromiseRequest) Validate() error {
 func (r *CompletePromiseRequest) Kind() Kind {
 	return CompletePromise
 }
-
-func (r *CompletePromiseRequest) isRequestPayload() {}
 
 // Callbacks
 
@@ -154,8 +144,6 @@ func (r *CreateCallbackRequest) Kind() Kind {
 	return CreateCallback
 }
 
-func (r *CreateCallbackRequest) isRequestPayload() {}
-
 // Schedules
 
 type ReadScheduleRequest struct {
@@ -173,8 +161,6 @@ func (r *ReadScheduleRequest) Validate() error {
 func (r *ReadScheduleRequest) Kind() Kind {
 	return ReadSchedule
 }
-
-func (r *ReadScheduleRequest) isRequestPayload() {}
 
 type SearchSchedulesRequest struct {
 	Id     string            `json:"id"`
@@ -194,8 +180,6 @@ func (r *SearchSchedulesRequest) Validate() error {
 func (r *SearchSchedulesRequest) Kind() Kind {
 	return SearchSchedules
 }
-
-func (r *SearchSchedulesRequest) isRequestPayload() {}
 
 type CreateScheduleRequest struct {
 	Id             string            `json:"id"`
@@ -232,8 +216,6 @@ func (r *CreateScheduleRequest) Kind() Kind {
 	return CreateSchedule
 }
 
-func (r *CreateScheduleRequest) isRequestPayload() {}
-
 type DeleteScheduleRequest struct {
 	Id string `json:"id"`
 }
@@ -249,8 +231,6 @@ func (r *DeleteScheduleRequest) Validate() error {
 func (r *DeleteScheduleRequest) Kind() Kind {
 	return DeleteSchedule
 }
-
-func (r *DeleteScheduleRequest) isRequestPayload() {}
 
 // Locks
 
@@ -279,8 +259,6 @@ func (r *AcquireLockRequest) Kind() Kind {
 	return AcquireLock
 }
 
-func (r *AcquireLockRequest) isRequestPayload() {}
-
 type ReleaseLockRequest struct {
 	ResourceId  string `json:"resourceId"`
 	ExecutionId string `json:"executionId"`
@@ -298,8 +276,6 @@ func (r *ReleaseLockRequest) Kind() Kind {
 	return ReleaseLock
 }
 
-func (r *ReleaseLockRequest) isRequestPayload() {}
-
 type HeartbeatLocksRequest struct {
 	ProcessId string `json:"processId"`
 }
@@ -315,8 +291,6 @@ func (r *HeartbeatLocksRequest) Validate() error {
 func (r *HeartbeatLocksRequest) Kind() Kind {
 	return HeartbeatLocks
 }
-
-func (r *HeartbeatLocksRequest) isRequestPayload() {}
 
 // Tasks
 
@@ -358,8 +332,6 @@ func (r *ClaimTaskRequest) Kind() Kind {
 	return ClaimTask
 }
 
-func (r *ClaimTaskRequest) isRequestPayload() {}
-
 type CompleteTaskRequest struct {
 	Id      string `json:"id"`
 	Counter int    `json:"counter"`
@@ -376,8 +348,6 @@ func (r *CompleteTaskRequest) Validate() error {
 func (r *CompleteTaskRequest) Kind() Kind {
 	return CompleteTask
 }
-
-func (r *CompleteTaskRequest) isRequestPayload() {}
 
 type DropTaskRequest struct {
 	Id      string `json:"id"`
@@ -396,8 +366,6 @@ func (r *DropTaskRequest) Kind() Kind {
 	return DropTask
 }
 
-func (r *DropTaskRequest) isRequestPayload() {}
-
 type HeartbeatTasksRequest struct {
 	ProcessId string `json:"processId"`
 }
@@ -413,8 +381,6 @@ func (r *HeartbeatTasksRequest) Validate() error {
 func (r *HeartbeatTasksRequest) Kind() Kind {
 	return HeartbeatTasks
 }
-
-func (r *HeartbeatTasksRequest) isRequestPayload() {}
 
 // Echo
 
@@ -434,7 +400,26 @@ func (r *EchoRequest) Kind() Kind {
 	return Echo
 }
 
-func (r *EchoRequest) isRequestPayload() {}
+// Marker methods that make each of the request types be a
+// RequestPayload type.
+func (r *ReadPromiseRequest) isRequestPayload()          {}
+func (r *SearchPromisesRequest) isRequestPayload()       {}
+func (r *CreatePromiseRequest) isRequestPayload()        {}
+func (r *CreatePromiseAndTaskRequest) isRequestPayload() {}
+func (r *CompletePromiseRequest) isRequestPayload()      {}
+func (r *CreateCallbackRequest) isRequestPayload()       {}
+func (r *ReadScheduleRequest) isRequestPayload()         {}
+func (r *SearchSchedulesRequest) isRequestPayload()      {}
+func (r *CreateScheduleRequest) isRequestPayload()       {}
+func (r *DeleteScheduleRequest) isRequestPayload()       {}
+func (r *AcquireLockRequest) isRequestPayload()          {}
+func (r *ReleaseLockRequest) isRequestPayload()          {}
+func (r *HeartbeatLocksRequest) isRequestPayload()       {}
+func (r *ClaimTaskRequest) isRequestPayload()            {}
+func (r *CompleteTaskRequest) isRequestPayload()         {}
+func (r *DropTaskRequest) isRequestPayload()             {}
+func (r *HeartbeatTasksRequest) isRequestPayload()       {}
+func (r *EchoRequest) isRequestPayload()                 {}
 
 // Request Methods
 

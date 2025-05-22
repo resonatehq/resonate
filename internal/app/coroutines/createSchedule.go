@@ -11,18 +11,18 @@ import (
 )
 
 func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	createScheduleReq := r.Payload.(*t_api.CreateScheduleRequest)
-	if createScheduleReq.Tags == nil {
-		createScheduleReq.Tags = map[string]string{}
+	req := r.Payload.(*t_api.CreateScheduleRequest)
+	if req.Tags == nil {
+		req.Tags = map[string]string{}
 	}
-	if createScheduleReq.PromiseParam.Headers == nil {
-		createScheduleReq.PromiseParam.Headers = map[string]string{}
+	if req.PromiseParam.Headers == nil {
+		req.PromiseParam.Headers = map[string]string{}
 	}
-	if createScheduleReq.PromiseParam.Data == nil {
-		createScheduleReq.PromiseParam.Data = []byte{}
+	if req.PromiseParam.Data == nil {
+		req.PromiseParam.Data = []byte{}
 	}
-	if createScheduleReq.PromiseTags == nil {
-		createScheduleReq.PromiseTags = map[string]string{}
+	if req.PromiseTags == nil {
+		req.PromiseTags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -34,7 +34,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					{
 						Kind: t_aio.ReadSchedule,
 						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: createScheduleReq.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -54,7 +54,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	if result.RowsReturned == 0 {
 		createdOn := c.Time()
-		next, err := util.Next(createdOn, createScheduleReq.Cron)
+		next, err := util.Next(createdOn, req.Cron)
 		if err != nil {
 			slog.Error("failed to calculate next run time", "req", r, "err", err)
 			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
@@ -69,16 +69,16 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 						{
 							Kind: t_aio.CreateSchedule,
 							CreateSchedule: &t_aio.CreateScheduleCommand{
-								Id:             createScheduleReq.Id,
-								Description:    createScheduleReq.Description,
-								Cron:           createScheduleReq.Cron,
-								Tags:           createScheduleReq.Tags,
-								PromiseId:      createScheduleReq.PromiseId,
-								PromiseTimeout: createScheduleReq.PromiseTimeout,
-								PromiseParam:   createScheduleReq.PromiseParam,
-								PromiseTags:    createScheduleReq.PromiseTags,
+								Id:             req.Id,
+								Description:    req.Description,
+								Cron:           req.Cron,
+								Tags:           req.Tags,
+								PromiseId:      req.PromiseId,
+								PromiseTimeout: req.PromiseTimeout,
+								PromiseParam:   req.PromiseParam,
+								PromiseTags:    req.PromiseTags,
 								NextRunTime:    next,
-								IdempotencyKey: createScheduleReq.IdempotencyKey,
+								IdempotencyKey: req.IdempotencyKey,
 								CreatedOn:      createdOn,
 							},
 						},
@@ -102,17 +102,17 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				CreateSchedule: &t_api.CreateScheduleResponse{
 					Status: t_api.StatusCreated,
 					Schedule: &schedule.Schedule{
-						Id:             createScheduleReq.Id,
-						Description:    createScheduleReq.Description,
-						Cron:           createScheduleReq.Cron,
-						Tags:           createScheduleReq.Tags,
-						PromiseId:      createScheduleReq.PromiseId,
-						PromiseTimeout: createScheduleReq.PromiseTimeout,
-						PromiseParam:   createScheduleReq.PromiseParam,
-						PromiseTags:    createScheduleReq.PromiseTags,
+						Id:             req.Id,
+						Description:    req.Description,
+						Cron:           req.Cron,
+						Tags:           req.Tags,
+						PromiseId:      req.PromiseId,
+						PromiseTimeout: req.PromiseTimeout,
+						PromiseParam:   req.PromiseParam,
+						PromiseTags:    req.PromiseTags,
 						LastRunTime:    nil,
 						NextRunTime:    next,
-						IdempotencyKey: createScheduleReq.IdempotencyKey,
+						IdempotencyKey: req.IdempotencyKey,
 						CreatedOn:      createdOn,
 					},
 				},
@@ -132,7 +132,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		status := t_api.StatusScheduleAlreadyExists
-		if s.IdempotencyKey.Match(createScheduleReq.IdempotencyKey) {
+		if s.IdempotencyKey.Match(req.IdempotencyKey) {
 			status = t_api.StatusOK
 		}
 

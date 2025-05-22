@@ -11,12 +11,12 @@ import (
 )
 
 func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	searchSchedulesReq := r.Payload.(*t_api.SearchSchedulesRequest)
-	util.Assert(searchSchedulesReq.Id != "", "id must not be empty")
-	util.Assert(searchSchedulesReq.Limit > 0, "limit must be greater than zero")
+	req := r.Payload.(*t_api.SearchSchedulesRequest)
+	util.Assert(req.Id != "", "id must not be empty")
+	util.Assert(req.Limit > 0, "limit must be greater than zero")
 
-	if searchSchedulesReq.Tags == nil {
-		searchSchedulesReq.Tags = map[string]string{}
+	if req.Tags == nil {
+		req.Tags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -28,10 +28,10 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					{
 						Kind: t_aio.SearchSchedules,
 						SearchSchedules: &t_aio.SearchSchedulesCommand{
-							Id:     searchSchedulesReq.Id,
-							Tags:   searchSchedulesReq.Tags,
-							Limit:  searchSchedulesReq.Limit,
-							SortId: searchSchedulesReq.SortId,
+							Id:     req.Id,
+							Tags:   req.Tags,
+							Limit:  req.Limit,
+							SortId: req.SortId,
 						},
 					},
 				},
@@ -61,12 +61,12 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	// set cursor only if there are more results
 	var cursor *t_api.Cursor[t_api.SearchSchedulesRequest]
-	if result.RowsReturned == int64(searchSchedulesReq.Limit) {
+	if result.RowsReturned == int64(req.Limit) {
 		cursor = &t_api.Cursor[t_api.SearchSchedulesRequest]{
 			Next: &t_api.SearchSchedulesRequest{
-				Id:     searchSchedulesReq.Id,
-				Tags:   searchSchedulesReq.Tags,
-				Limit:  searchSchedulesReq.Limit,
+				Id:     req.Id,
+				Tags:   req.Tags,
+				Limit:  req.Limit,
 				SortId: &result.LastSortId,
 			},
 		}

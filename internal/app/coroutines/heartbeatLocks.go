@@ -10,7 +10,7 @@ import (
 )
 
 func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	heartbeatLocksReq := r.Payload.(*t_api.HeartbeatLocksRequest)
+	req := r.Payload.(*t_api.HeartbeatLocksRequest)
 
 	// Try to update all locks that belong to this process.
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -22,7 +22,7 @@ func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					{
 						Kind: t_aio.HeartbeatLocks,
 						HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
-							ProcessId: heartbeatLocksReq.ProcessId,
+							ProcessId: req.ProcessId,
 							Time:      c.Time(),
 						},
 					},

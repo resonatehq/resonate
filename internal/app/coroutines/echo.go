@@ -7,12 +7,12 @@ import (
 )
 
 func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	echoReq := r.Payload.(*t_api.EchoRequest)
+	req := r.Payload.(*t_api.EchoRequest)
 	submission := &t_aio.Submission{
 		Kind: t_aio.Echo,
 		Tags: r.Metadata,
 		Echo: &t_aio.EchoSubmission{
-			Data: echoReq.Data,
+			Data: req.Data,
 		},
 	}
 

@@ -10,7 +10,7 @@ import (
 )
 
 func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	deleteScheduleReq := r.Payload.(*t_api.DeleteScheduleRequest)
+	req := r.Payload.(*t_api.DeleteScheduleRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Metadata,
@@ -20,7 +20,7 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					{
 						Kind: t_aio.DeleteSchedule,
 						DeleteSchedule: &t_aio.DeleteScheduleCommand{
-							Id: deleteScheduleReq.Id,
+							Id: req.Id,
 						},
 					},
 				},

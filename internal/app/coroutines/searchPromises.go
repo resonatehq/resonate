@@ -12,13 +12,13 @@ import (
 )
 
 func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	searchPromisesReq := r.Payload.(*t_api.SearchPromisesRequest)
+	req := r.Payload.(*t_api.SearchPromisesRequest)
 
-	util.Assert(searchPromisesReq.Id != "", "id must not be empty")
-	util.Assert(searchPromisesReq.Limit > 0, "limit must be greater than zero")
+	util.Assert(req.Id != "", "id must not be empty")
+	util.Assert(req.Limit > 0, "limit must be greater than zero")
 
-	if searchPromisesReq.Tags == nil {
-		searchPromisesReq.Tags = map[string]string{}
+	if req.Tags == nil {
+		req.Tags = map[string]string{}
 	}
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -30,11 +30,11 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					{
 						Kind: t_aio.SearchPromises,
 						SearchPromises: &t_aio.SearchPromisesCommand{
-							Id:     searchPromisesReq.Id,
-							States: searchPromisesReq.States,
-							Tags:   searchPromisesReq.Tags,
-							Limit:  searchPromisesReq.Limit,
-							SortId: searchPromisesReq.SortId,
+							Id:     req.Id,
+							States: req.States,
+							Tags:   req.Tags,
+							Limit:  req.Limit,
+							SortId: req.SortId,
 						},
 					},
 				},
@@ -87,13 +87,13 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	// set cursor only if there are more results
 	var cursor *t_api.Cursor[t_api.SearchPromisesRequest]
-	if result.RowsReturned == int64(searchPromisesReq.Limit) {
+	if result.RowsReturned == int64(req.Limit) {
 		cursor = &t_api.Cursor[t_api.SearchPromisesRequest]{
 			Next: &t_api.SearchPromisesRequest{
-				Id:     searchPromisesReq.Id,
-				States: searchPromisesReq.States,
-				Tags:   searchPromisesReq.Tags,
-				Limit:  searchPromisesReq.Limit,
+				Id:     req.Id,
+				States: req.States,
+				Tags:   req.Tags,
+				Limit:  req.Limit,
 				SortId: &result.LastSortId,
 			},
 		}

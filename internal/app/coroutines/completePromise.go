@@ -12,7 +12,7 @@ import (
 )
 
 func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	completePromiseReq := r.Payload.(*t_api.CompletePromiseRequest)
+	req := r.Payload.(*t_api.CompletePromiseRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Metadata,
@@ -22,7 +22,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: completePromiseReq.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -55,16 +55,16 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 			if c.Time() < p.Timeout {
 				cmd = &t_aio.UpdatePromiseCommand{
-					Id:             completePromiseReq.Id,
-					State:          completePromiseReq.State,
-					Value:          completePromiseReq.Value,
-					IdempotencyKey: completePromiseReq.IdempotencyKey,
+					Id:             req.Id,
+					State:          req.State,
+					Value:          req.Value,
+					IdempotencyKey: req.IdempotencyKey,
 					CompletedOn:    c.Time(),
 				}
 				status = t_api.StatusCreated
 			} else {
 				cmd = &t_aio.UpdatePromiseCommand{
-					Id:             completePromiseReq.Id,
+					Id:             req.Id,
 					State:          promise.GetTimedoutState(p),
 					Value:          promise.Value{},
 					IdempotencyKey: nil,
@@ -73,7 +73,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 				if cmd.State == promise.Resolved {
 					status = t_api.StatusPromiseAlreadyResolved
-				} else if completePromiseReq.Strict {
+				} else if req.Strict {
 					status = t_api.StatusPromiseAlreadyTimedout
 				} else {
 					status = t_api.StatusOK
@@ -112,10 +112,10 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 		} else {
 			status := alreadyCompletedStatus(p.State)
-			strict := completePromiseReq.Strict && p.State != completePromiseReq.State
-			timeout := !completePromiseReq.Strict && p.State == promise.Timedout
+			strict := req.Strict && p.State != req.State
+			timeout := !req.Strict && p.State == promise.Timedout
 
-			if (!strict && p.IdempotencyKeyForComplete.Match(completePromiseReq.IdempotencyKey)) || timeout {
+			if (!strict && p.IdempotencyKeyForComplete.Match(req.IdempotencyKey)) || timeout {
 				status = t_api.StatusOK
 			}
 

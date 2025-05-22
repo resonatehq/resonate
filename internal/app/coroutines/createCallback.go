@@ -12,11 +12,11 @@ import (
 )
 
 func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	createCallbackReq := r.Payload.(*t_api.CreateCallbackRequest)
-	util.Assert(createCallbackReq != nil, "create callback must not be nil")
-	util.Assert(createCallbackReq.Mesg.Type == "resume" || createCallbackReq.Mesg.Type == "notify", "message type must be resume or notify")
-	util.Assert(createCallbackReq.Mesg.Type == "resume" || createCallbackReq.PromiseId == createCallbackReq.Mesg.Root, "if notify, root promise id must equal leaf promise id")
-	util.Assert(createCallbackReq.Mesg.Type == "notify" || (createCallbackReq.PromiseId == createCallbackReq.Mesg.Leaf && createCallbackReq.PromiseId != createCallbackReq.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
+	req := r.Payload.(*t_api.CreateCallbackRequest)
+	util.Assert(req != nil, "create callback must not be nil")
+	util.Assert(req.Mesg.Type == "resume" || req.Mesg.Type == "notify", "message type must be resume or notify")
+	util.Assert(req.Mesg.Type == "resume" || req.PromiseId == req.Mesg.Root, "if notify, root promise id must equal leaf promise id")
+	util.Assert(req.Mesg.Type == "notify" || (req.PromiseId == req.Mesg.Leaf && req.PromiseId != req.Mesg.Root), "if resume, root promise id must not equal leaf promise id")
 
 	var res *t_api.Response
 
@@ -30,7 +30,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: createCallbackReq.PromiseId,
+							Id: req.PromiseId,
 						},
 					},
 				},
@@ -73,11 +73,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 							{
 								Kind: t_aio.CreateCallback,
 								CreateCallback: &t_aio.CreateCallbackCommand{
-									Id:        createCallbackReq.Id,
-									PromiseId: createCallbackReq.PromiseId,
-									Recv:      createCallbackReq.Recv,
-									Mesg:      createCallbackReq.Mesg,
-									Timeout:   createCallbackReq.Timeout,
+									Id:        req.Id,
+									PromiseId: req.PromiseId,
+									Recv:      req.Recv,
+									Mesg:      req.Mesg,
+									Timeout:   req.Timeout,
 									CreatedOn: createdOn,
 								},
 							},
@@ -101,11 +101,11 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			if result.RowsAffected == 1 {
 				status = t_api.StatusCreated
 				cb = &callback.Callback{
-					Id:        createCallbackReq.Id,
-					PromiseId: createCallbackReq.PromiseId,
-					Recv:      createCallbackReq.Recv,
-					Mesg:      createCallbackReq.Mesg,
-					Timeout:   createCallbackReq.Timeout,
+					Id:        req.Id,
+					PromiseId: req.PromiseId,
+					Recv:      req.Recv,
+					Mesg:      req.Mesg,
+					Timeout:   req.Timeout,
 					CreatedOn: createdOn,
 				}
 			}

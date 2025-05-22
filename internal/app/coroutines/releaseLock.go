@@ -10,7 +10,7 @@ import (
 )
 
 func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	releaseLockReq := r.Payload.(*t_api.ReleaseLockRequest)
+	req := r.Payload.(*t_api.ReleaseLockRequest)
 
 	// Try to release lock.
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -22,8 +22,8 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					{
 						Kind: t_aio.ReleaseLock,
 						ReleaseLock: &t_aio.ReleaseLockCommand{
-							ResourceId:  releaseLockReq.ResourceId,
-							ExecutionId: releaseLockReq.ExecutionId,
+							ResourceId:  req.ResourceId,
+							ExecutionId: req.ExecutionId,
 						},
 					},
 				},

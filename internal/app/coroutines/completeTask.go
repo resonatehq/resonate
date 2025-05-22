@@ -11,7 +11,7 @@ import (
 )
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	compleTaksReq := r.Payload.(*t_api.CompleteTaskRequest)
+	req := r.Payload.(*t_api.CompleteTaskRequest)
 
 	var status t_api.StatusCode
 	var t *task.Task
@@ -25,7 +25,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 					{
 						Kind: t_aio.ReadTask,
 						ReadTask: &t_aio.ReadTaskCommand{
-							Id: compleTaksReq.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -52,7 +52,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			status = t_api.StatusOK
 		} else if t.State == task.Init || t.State == task.Enqueued {
 			status = t_api.StatusTaskInvalidState
-		} else if t.Counter != compleTaksReq.Counter {
+		} else if t.Counter != req.Counter {
 			status = t_api.StatusTaskInvalidCounter
 		} else {
 			completedOn := c.Time()
@@ -65,16 +65,16 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 							{
 								Kind: t_aio.UpdateTask,
 								UpdateTask: &t_aio.UpdateTaskCommand{
-									Id:             compleTaksReq.Id,
+									Id:             req.Id,
 									ProcessId:      nil,
 									State:          task.Completed,
-									Counter:        compleTaksReq.Counter,
+									Counter:        req.Counter,
 									Attempt:        0,
 									Ttl:            0,
 									ExpiresAt:      0,
 									CompletedOn:    &completedOn,
 									CurrentStates:  []task.State{task.Claimed},
-									CurrentCounter: compleTaksReq.Counter,
+									CurrentCounter: req.Counter,
 								},
 							},
 						},

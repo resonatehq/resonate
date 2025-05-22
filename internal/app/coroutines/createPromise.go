@@ -13,24 +13,24 @@ import (
 )
 
 func CreatePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	createPromiseReq := r.Payload.(*t_api.CreatePromiseRequest)
-	return createPromiseAndTask(c, r, createPromiseReq, nil)
+	req := r.Payload.(*t_api.CreatePromiseRequest)
+	return createPromiseAndTask(c, r, req, nil)
 }
 
 func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	createPromiseAndTaskReq := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
-	util.Assert(createPromiseAndTaskReq.Promise.Id == createPromiseAndTaskReq.Task.PromiseId, "promise ids must match")
-	util.Assert(createPromiseAndTaskReq.Promise.Timeout == createPromiseAndTaskReq.Task.Timeout, "timeouts must match")
+	req := r.Payload.(*t_api.CreatePromiseAndTaskRequest)
+	util.Assert(req.Promise.Id == req.Task.PromiseId, "promise ids must match")
+	util.Assert(req.Promise.Timeout == req.Task.Timeout, "timeouts must match")
 
-	return createPromiseAndTask(c, r, createPromiseAndTaskReq.Promise, &t_aio.CreateTaskCommand{
-		Id:        util.InvokeId(createPromiseAndTaskReq.Task.PromiseId),
+	return createPromiseAndTask(c, r, req.Promise, &t_aio.CreateTaskCommand{
+		Id:        util.InvokeId(req.Task.PromiseId),
 		Recv:      nil,
-		Mesg:      &message.Mesg{Type: message.Invoke, Root: createPromiseAndTaskReq.Task.PromiseId, Leaf: createPromiseAndTaskReq.Task.PromiseId},
-		Timeout:   createPromiseAndTaskReq.Task.Timeout,
-		ProcessId: &createPromiseAndTaskReq.Task.ProcessId,
+		Mesg:      &message.Mesg{Type: message.Invoke, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
+		Timeout:   req.Task.Timeout,
+		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
-		Ttl:       createPromiseAndTaskReq.Task.Ttl,
-		ExpiresAt: c.Time() + int64(createPromiseAndTaskReq.Task.Ttl),
+		Ttl:       req.Task.Ttl,
+		ExpiresAt: c.Time() + int64(req.Task.Ttl),
 		CreatedOn: c.Time(),
 	})
 }
@@ -38,7 +38,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 func createPromiseAndTask(
 	c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	r *t_api.Request,
-	createPromiseReq *t_api.CreatePromiseRequest,
+	req *t_api.CreatePromiseRequest,
 	taskCmd *t_aio.CreateTaskCommand,
 ) (*t_api.Response, error) {
 	util.Assert(r.Kind() == t_api.CreatePromise || r.Kind() == t_api.CreatePromiseAndTask, "must be create promise or variant")
@@ -60,7 +60,7 @@ func createPromiseAndTask(
 					{
 						Kind: t_aio.ReadPromise,
 						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: createPromiseReq.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -80,11 +80,11 @@ func createPromiseAndTask(
 
 	if result.RowsReturned == 0 {
 		promiseCmd := &t_aio.CreatePromiseCommand{
-			Id:             createPromiseReq.Id,
-			Param:          createPromiseReq.Param,
-			Timeout:        createPromiseReq.Timeout,
-			IdempotencyKey: createPromiseReq.IdempotencyKey,
-			Tags:           createPromiseReq.Tags,
+			Id:             req.Id,
+			Param:          req.Param,
+			Timeout:        req.Timeout,
+			IdempotencyKey: req.IdempotencyKey,
+			Tags:           req.Tags,
 			CreatedOn:      c.Time(),
 		}
 
@@ -106,7 +106,7 @@ func createPromiseAndTask(
 		if promiseRowsAffected == 0 {
 			// It's possible that the promise was created by another coroutine
 			// while we were creating. In that case, we should just retry.
-			return createPromiseAndTask(c, r, createPromiseReq, taskCmd)
+			return createPromiseAndTask(c, r, req, taskCmd)
 		}
 
 		// set status
@@ -152,7 +152,7 @@ func createPromiseAndTask(
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
 			cmd := &t_aio.UpdatePromiseCommand{
-				Id:             createPromiseReq.Id,
+				Id:             req.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
 				IdempotencyKey: nil,
@@ -167,11 +167,11 @@ func createPromiseAndTask(
 			if !ok {
 				// It's possible that the promise was created by another coroutine
 				// while we were timing out. In that case, we should just retry.
-				return createPromiseAndTask(c, r, createPromiseReq, taskCmd)
+				return createPromiseAndTask(c, r, req, taskCmd)
 			}
 
 			// set status to ok if not strict and idempotency keys match
-			if !createPromiseReq.Strict && p.IdempotencyKeyForCreate.Match(createPromiseReq.IdempotencyKey) {
+			if !req.Strict && p.IdempotencyKeyForCreate.Match(req.IdempotencyKey) {
 				status = t_api.StatusOK
 			} else {
 				status = t_api.StatusPromiseAlreadyExists
@@ -182,7 +182,7 @@ func createPromiseAndTask(
 			p.Value = cmd.Value
 			p.IdempotencyKeyForComplete = cmd.IdempotencyKey
 			p.CompletedOn = &cmd.CompletedOn
-		} else if (!createPromiseReq.Strict || p.State == promise.Pending) && p.IdempotencyKeyForCreate.Match(createPromiseReq.IdempotencyKey) {
+		} else if (!req.Strict || p.State == promise.Pending) && p.IdempotencyKeyForCreate.Match(req.IdempotencyKey) {
 			// switch status to ok if not strict and idempotency keys match
 			status = t_api.StatusOK
 		} else {

@@ -11,9 +11,9 @@ import (
 )
 
 func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	acquireLockReq := r.Payload.(*t_api.AcquireLockRequest)
+	req := r.Payload.(*t_api.AcquireLockRequest)
 
-	expiresAt := c.Time() + acquireLockReq.Ttl
+	expiresAt := c.Time() + req.Ttl
 
 	// Try to acquire lock, update lock if already acquired by the same execution id
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -25,10 +25,10 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 					{
 						Kind: t_aio.AcquireLock,
 						AcquireLock: &t_aio.AcquireLockCommand{
-							ResourceId:  acquireLockReq.ResourceId,
-							ExecutionId: acquireLockReq.ExecutionId,
-							ProcessId:   acquireLockReq.ProcessId,
-							Ttl:         acquireLockReq.Ttl,
+							ResourceId:  req.ResourceId,
+							ExecutionId: req.ExecutionId,
+							ProcessId:   req.ProcessId,
+							Ttl:         req.Ttl,
 							ExpiresAt:   expiresAt,
 						},
 					},
@@ -62,10 +62,10 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			AcquireLock: &t_api.AcquireLockResponse{
 				Status: t_api.StatusCreated,
 				Lock: &lock.Lock{
-					ResourceId:  acquireLockReq.ResourceId,
-					ExecutionId: acquireLockReq.ExecutionId,
-					ProcessId:   acquireLockReq.ProcessId,
-					Ttl:         acquireLockReq.Ttl,
+					ResourceId:  req.ResourceId,
+					ExecutionId: req.ExecutionId,
+					ProcessId:   req.ProcessId,
+					Ttl:         req.Ttl,
 					ExpiresAt:   expiresAt,
 				},
 			},

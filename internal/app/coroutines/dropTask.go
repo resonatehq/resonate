@@ -11,7 +11,7 @@ import (
 )
 
 func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
-	dropTaskReq := r.Payload.(*t_api.DropTaskRequest)
+	req := r.Payload.(*t_api.DropTaskRequest)
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Metadata,
@@ -21,7 +21,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 					{
 						Kind: t_aio.ReadTask,
 						ReadTask: &t_aio.ReadTaskCommand{
-							Id: dropTaskReq.Id,
+							Id: req.Id,
 						},
 					},
 				},
@@ -65,7 +65,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 		}, nil
 	}
 
-	if t.Counter != dropTaskReq.Counter {
+	if t.Counter != req.Counter {
 		return &t_api.Response{
 			Kind: t_api.DropTask,
 			Tags: r.Metadata,
@@ -88,15 +88,15 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 					{
 						Kind: t_aio.UpdateTask,
 						UpdateTask: &t_aio.UpdateTaskCommand{
-							Id:             dropTaskReq.Id,
+							Id:             req.Id,
 							ProcessId:      nil,
 							State:          task.Init,
-							Counter:        dropTaskReq.Counter + 1,
+							Counter:        req.Counter + 1,
 							Attempt:        0,
 							Ttl:            0,
 							ExpiresAt:      0,
 							CurrentStates:  []task.State{task.Claimed},
-							CurrentCounter: dropTaskReq.Counter,
+							CurrentCounter: req.Counter,
 						},
 					},
 				},
