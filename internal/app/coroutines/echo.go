@@ -22,9 +22,9 @@ func Echo(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_ap
 	}
 
 	return &t_api.Response{
-		Kind: t_api.Echo,
-		Tags: r.Metadata,
-		Echo: &t_api.EchoResponse{
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.EchoResponse{
 			Data: completion.Echo.Data,
 		},
 	}, nil

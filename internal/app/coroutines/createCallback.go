@@ -112,11 +112,10 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		res = &t_api.Response{
-			Kind: t_api.CreateCallback,
-			Tags: r.Metadata,
-			CreateCallback: &t_api.CreateCallbackResponse{
+			Status:   status,
+			Metadata: r.Metadata,
+			Payload: &t_api.CreateCallbackResponse{
 				// Status could be StatusOk or StatusCreated if the Callback Id was already present
-				Status:   status,
 				Callback: cb,
 				Promise:  p,
 			},
@@ -124,11 +123,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 	} else {
 		res = &t_api.Response{
-			Kind: t_api.CreateCallback,
-			Tags: r.Metadata,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:   t_api.StatusPromiseNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.CreateCallbackResponse{},
 		}
 	}
 

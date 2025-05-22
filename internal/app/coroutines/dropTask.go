@@ -39,11 +39,9 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 
 	if readResult.RowsReturned == 0 {
 		return &t_api.Response{
-			Kind: t_api.DropTask,
-			Tags: r.Metadata,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusTaskNotFound,
-			},
+			Status:   t_api.StatusTaskNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.DropTaskResponse{},
 		}, nil
 	}
 
@@ -57,21 +55,17 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	// effect of droping a task is already done.
 	if t.State != task.Claimed {
 		return &t_api.Response{
-			Kind: t_api.DropTask,
-			Tags: r.Metadata,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusOK,
-			},
+			Status:   t_api.StatusOK,
+			Metadata: r.Metadata,
+			Payload:  &t_api.DropTaskResponse{},
 		}, nil
 	}
 
 	if t.Counter != req.Counter {
 		return &t_api.Response{
-			Kind: t_api.DropTask,
-			Tags: r.Metadata,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusTaskInvalidCounter,
-			},
+			Status:   t_api.StatusTaskInvalidCounter,
+			Metadata: r.Metadata,
+			Payload:  &t_api.DropTaskResponse{},
 		}, nil
 	}
 
@@ -115,11 +109,9 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 
 	if updateResult.RowsAffected == 1 {
 		return &t_api.Response{
-			Kind: t_api.DropTask,
-			Tags: r.Metadata,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:   t_api.StatusCreated,
+			Metadata: r.Metadata,
+			Payload:  &t_api.DropTaskResponse{},
 		}, nil
 	} else {
 		// It's possible that the task was modified by another coroutine

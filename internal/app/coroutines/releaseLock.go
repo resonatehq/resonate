@@ -47,20 +47,16 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		// Delete operations are already idempotent.
 		// If rows affected is 0, then lock was already released or was never acquired by that executionId.
 		res = &t_api.Response{
-			Kind: t_api.ReleaseLock,
-			Tags: r.Metadata,
-			ReleaseLock: &t_api.ReleaseLockResponse{
-				Status: t_api.StatusLockNotFound,
-			},
+			Status:   t_api.StatusLockNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.ReleaseLockResponse{},
 		}
 	} else {
 		// If rows affected is 1, then lock is released.
 		res = &t_api.Response{
-			Kind: t_api.ReleaseLock,
-			Tags: r.Metadata,
-			ReleaseLock: &t_api.ReleaseLockResponse{
-				Status: t_api.StatusNoContent,
-			},
+			Status:   t_api.StatusNoContent,
+			Metadata: r.Metadata,
+			Payload:  &t_api.ReleaseLockResponse{},
 		}
 	}
 

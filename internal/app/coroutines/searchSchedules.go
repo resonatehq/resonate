@@ -73,10 +73,9 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	}
 
 	return &t_api.Response{
-		Kind: t_api.SearchSchedules,
-		Tags: r.Metadata,
-		SearchSchedules: &t_api.SearchSchedulesResponse{
-			Status:    t_api.StatusOK,
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.SearchSchedulesResponse{
 			Cursor:    cursor,
 			Schedules: schedules,
 		},

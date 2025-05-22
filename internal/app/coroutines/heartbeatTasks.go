@@ -38,10 +38,9 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	util.Assert(result != nil, "result must not be nil")
 
 	return &t_api.Response{
-		Kind: t_api.HeartbeatTasks,
-		Tags: r.Metadata,
-		HeartbeatTasks: &t_api.HeartbeatTasksResponse{
-			Status:        t_api.StatusOK,
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.HeartbeatTasksResponse{
 			TasksAffected: result.RowsAffected,
 		},
 	}, nil

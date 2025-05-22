@@ -50,17 +50,14 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	// If an attempt to acquire a lock results in 0 rows affected, then the lock is already acquired
 	if result.RowsAffected == 0 {
 		res = &t_api.Response{
-			Kind: t_api.AcquireLock,
-			AcquireLock: &t_api.AcquireLockResponse{
-				Status: t_api.StatusLockAlreadyAcquired,
-			},
+			Status:  t_api.StatusLockAlreadyAcquired,
+			Payload: &t_api.AcquireLockResponse{},
 		}
 	} else {
 		res = &t_api.Response{
-			Kind: t_api.AcquireLock,
-			Tags: r.Metadata,
-			AcquireLock: &t_api.AcquireLockResponse{
-				Status: t_api.StatusCreated,
+			Status:   t_api.StatusCreated,
+			Metadata: r.Metadata,
+			Payload: &t_api.AcquireLockResponse{
 				Lock: &lock.Lock{
 					ResourceId:  req.ResourceId,
 					ExecutionId: req.ExecutionId,

@@ -72,33 +72,33 @@ func (s *server) claimTask(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.ClaimTask != nil, "result must not be nil")
-	util.Assert(res.ClaimTask.Status != t_api.StatusCreated || (res.ClaimTask.Task != nil && res.ClaimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
+	claimTaskRes := res.AsClaimTaskResponse()
+	util.Assert(res.Status != t_api.StatusCreated || (claimTaskRes.Task != nil && claimTaskRes.Task.Mesg != nil), "task and mesg must not be nil if created")
 
-	if res.ClaimTask.Status == t_api.StatusCreated {
+	if res.Status == t_api.StatusCreated {
 		promises := gin.H{
 			"root": gin.H{
-				"id":   res.ClaimTask.Task.Mesg.Root,
-				"href": res.ClaimTask.RootPromiseHref,
-				"data": res.ClaimTask.RootPromise,
+				"id":   claimTaskRes.Task.Mesg.Root,
+				"href": claimTaskRes.RootPromiseHref,
+				"data": claimTaskRes.RootPromise,
 			},
 		}
-		if res.ClaimTask.Task.Mesg.Type == message.Resume {
+		if claimTaskRes.Task.Mesg.Type == message.Resume {
 			promises["leaf"] = gin.H{
-				"id":   res.ClaimTask.Task.Mesg.Leaf,
-				"href": res.ClaimTask.LeafPromiseHref,
-				"data": res.ClaimTask.LeafPromise,
+				"id":   claimTaskRes.Task.Mesg.Leaf,
+				"href": claimTaskRes.LeafPromiseHref,
+				"data": claimTaskRes.LeafPromise,
 			}
 		}
 
-		c.JSON(s.code(res.ClaimTask.Status), gin.H{
-			"type":     res.ClaimTask.Task.Mesg.Type,
+		c.JSON(s.code(res.Status), gin.H{
+			"type":     claimTaskRes.Task.Mesg.Type,
 			"promises": promises,
 		})
 		return
 	}
 
-	c.JSON(s.code(res.ClaimTask.Status), nil)
+	c.JSON(s.code(res.Status), nil)
 }
 
 // Complete
@@ -156,8 +156,7 @@ func (s *server) completeTask(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CompleteTask != nil, "result must not be nil")
-	c.JSON(s.code(res.CompleteTask.Status), res.CompleteTask.Task)
+	c.JSON(s.code(res.Status), res.AsCompleteTaskResponse().Task)
 }
 
 // Drop tasks
@@ -215,8 +214,8 @@ func (s *server) dropTask(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.DropTask != nil, "result must not be nil")
-	c.Status(s.code(res.DropTask.Status))
+	_ = res.AsDropTaskResponse() // Serves as a type assertion
+	c.Status(s.code(res.Status))
 }
 
 // Heartbeat
@@ -271,8 +270,7 @@ func (s *server) heartbeatTasks(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.HeartbeatTasks != nil, "result must not be nil")
-	c.JSON(s.code(res.HeartbeatTasks.Status), gin.H{
-		"tasksAffected": res.HeartbeatTasks.TasksAffected,
+	c.JSON(s.code(res.Status), gin.H{
+		"tasksAffected": res.AsHeartbeatTasksResponse().TasksAffected,
 	})
 }

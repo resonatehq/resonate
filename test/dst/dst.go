@@ -164,17 +164,17 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 					// extract cursors for subsequent requests
 					if err == nil {
-						switch res.Kind {
-						case t_api.SearchPromises:
-							if res.SearchPromises.Cursor != nil {
+						switch v := res.Payload.(type) {
+						case *t_api.SearchPromisesResponse:
+							if v.Cursor != nil {
 								d.generator.AddRequest(&t_api.Request{
-									Payload: res.SearchPromises.Cursor.Next,
+									Payload: v.Cursor.Next,
 								})
 							}
-						case t_api.SearchSchedules:
-							if res.SearchSchedules.Cursor != nil {
+						case *t_api.SearchSchedulesResponse:
+							if v.Cursor != nil {
 								d.generator.AddRequest(&t_api.Request{
-									Payload: res.SearchSchedules.Cursor.Next,
+									Payload: v.Cursor.Next,
 								})
 							}
 						}
@@ -426,7 +426,7 @@ func (d *DST) Model() porcupine.Model {
 						status = int(err.Code())
 					}
 				} else {
-					status = int(res.res.Status())
+					status = int(res.res.Status)
 				}
 
 				return fmt.Sprintf("%s | %s → %d", req.req.Metadata["id"], req.req, status)
@@ -669,8 +669,8 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 		}
 	}
 
-	if req.Kind() != res.Kind {
-		return model, fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind, req.Kind())
+	if req.Kind() != res.Kind() {
+		return model, fmt.Errorf("unexpected response kind '%d' for request kind '%d'", res.Kind(), req.Kind())
 	}
 
 	return d.validator.Validate(model, reqTime, resTime, req, res)

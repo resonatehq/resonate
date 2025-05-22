@@ -38,8 +38,7 @@ func (s *server) readPromise(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.ReadPromise != nil, "result must not be nil")
-	c.JSON(s.code(res.ReadPromise.Status), res.ReadPromise.Promise)
+	c.JSON(s.code(res.Status), res.AsReadPromiseResponse().Promise)
 }
 
 // Search
@@ -95,10 +94,10 @@ func (s *server) searchPromises(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.SearchPromises != nil, "result must not be nil")
-	c.JSON(s.code(res.SearchPromises.Status), gin.H{
-		"promises": res.SearchPromises.Promises,
-		"cursor":   res.SearchPromises.Cursor,
+	searchPromise := res.AsSearchPromisesResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"promises": searchPromise.Promises,
+		"cursor":   searchPromise.Cursor,
 	})
 }
 
@@ -149,8 +148,7 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreatePromise != nil, "result must not be nil")
-	c.JSON(s.code(res.CreatePromise.Status), res.CreatePromise.Promise)
+	c.JSON(s.code(res.Status), res.AsCreatePromiseResponse().Promise)
 }
 
 type createPromiseAndTaskBody struct {
@@ -203,10 +201,10 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreatePromiseAndTask != nil, "result must not be nil")
-	c.JSON(s.code(res.CreatePromiseAndTask.Status), gin.H{
-		"promise": res.CreatePromiseAndTask.Promise,
-		"task":    res.CreatePromiseAndTask.Task,
+	createPromiseAndTask := res.AsCreatePromiseAndTaskResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"promise": createPromiseAndTask.Promise,
+		"task":    createPromiseAndTask.Task,
 	})
 }
 
@@ -258,8 +256,7 @@ func (s *server) completePromise(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CompletePromise != nil, "result must not be nil")
-	c.JSON(s.code(res.CompletePromise.Status), res.CompletePromise.Promise)
+	c.JSON(s.code(res.Status), res.AsCompletePromiseResponse().Promise)
 }
 
 // Callback
@@ -311,10 +308,10 @@ func (s *server) createCallback(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateCallback != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateCallback.Status), gin.H{
-		"callback": res.CreateCallback.Callback,
-		"promise":  res.CreateCallback.Promise,
+	createCallback := res.AsCreateCallbackResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"callback": createCallback.Callback,
+		"promise":  createCallback.Promise,
 	})
 }
 
@@ -367,9 +364,9 @@ func (s *server) createSubscription(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateCallback != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateCallback.Status), gin.H{
-		"callback": res.CreateCallback.Callback,
-		"promise":  res.CreateCallback.Promise,
+	createCallback := res.AsCreateCallbackResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"callback": createCallback.Callback,
+		"promise":  createCallback.Promise,
 	})
 }

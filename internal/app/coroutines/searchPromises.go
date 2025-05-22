@@ -100,10 +100,9 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	return &t_api.Response{
-		Kind: t_api.SearchPromises,
-		Tags: r.Metadata,
-		SearchPromises: &t_api.SearchPromisesResponse{
-			Status:   t_api.StatusOK,
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.SearchPromisesResponse{
 			Cursor:   cursor,
 			Promises: promises,
 		},

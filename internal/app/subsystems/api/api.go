@@ -65,7 +65,7 @@ func (a *API) Process(id string, submission *t_api.Request) (*t_api.Response, *E
 		return nil, ServerError(cqe.Error)
 	}
 
-	if status := cqe.Completion.Status(); !status.IsSuccessful() {
+	if status := cqe.Completion.Status; !status.IsSuccessful() {
 		return nil, RequestError(status)
 	}
 

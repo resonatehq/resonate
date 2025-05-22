@@ -154,7 +154,7 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 
 			status = error.Code()
 		} else {
-			status = res.Status()
+			status = res.Status
 		}
 
 		a.metrics.ApiTotal.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"], strconv.Itoa(int(status))).Inc()

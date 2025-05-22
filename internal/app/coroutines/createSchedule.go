@@ -97,10 +97,9 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 
 		if result.RowsAffected == 1 {
 			res = &t_api.Response{
-				Kind: t_api.CreateSchedule,
-				Tags: r.Metadata,
-				CreateSchedule: &t_api.CreateScheduleResponse{
-					Status: t_api.StatusCreated,
+				Status:   t_api.StatusCreated,
+				Metadata: r.Metadata,
+				Payload: &t_api.CreateScheduleResponse{
 					Schedule: &schedule.Schedule{
 						Id:             req.Id,
 						Description:    req.Description,
@@ -137,10 +136,9 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		res = &t_api.Response{
-			Kind: t_api.CreateSchedule,
-			Tags: r.Metadata,
-			CreateSchedule: &t_api.CreateScheduleResponse{
-				Status:   status,
+			Status:   status,
+			Metadata: r.Metadata,
+			Payload: &t_api.CreateScheduleResponse{
 				Schedule: s,
 			},
 		}

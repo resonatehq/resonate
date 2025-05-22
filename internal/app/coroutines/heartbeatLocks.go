@@ -39,10 +39,9 @@ func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	result := completion.Store.Results[0].HeartbeatLocks
 
 	return &t_api.Response{
-		Kind: t_api.HeartbeatLocks,
-		Tags: r.Metadata,
-		HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-			Status:        t_api.StatusOK,
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.HeartbeatLocksResponse{
 			LocksAffected: result.RowsAffected,
 		},
 	}, nil

@@ -190,13 +190,13 @@ func createPromiseAndTask(
 		}
 	}
 
-	res := &t_api.Response{Kind: r.Kind(), Tags: r.Metadata}
+	res := &t_api.Response{Status: status, Metadata: r.Metadata}
 
 	switch r.Kind() {
 	case t_api.CreatePromise:
-		res.CreatePromise = &t_api.CreatePromiseResponse{Status: status, Promise: p}
+		res.Payload = &t_api.CreatePromiseResponse{Promise: p}
 	case t_api.CreatePromiseAndTask:
-		res.CreatePromiseAndTask = &t_api.CreatePromiseAndTaskResponse{Status: status, Promise: p, Task: t}
+		res.Payload = &t_api.CreatePromiseAndTaskResponse{Promise: p, Task: t}
 	}
 
 	return res, nil

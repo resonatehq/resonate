@@ -44,10 +44,8 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	return &t_api.Response{
-		Kind: t_api.DeleteSchedule,
-		Tags: r.Metadata,
-		DeleteSchedule: &t_api.DeleteScheduleResponse{
-			Status: status,
-		},
+		Status:   status,
+		Metadata: r.Metadata,
+		Payload:  &t_api.DeleteScheduleResponse{},
 	}, nil
 }

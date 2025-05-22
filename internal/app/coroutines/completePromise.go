@@ -92,10 +92,9 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 
 			res = &t_api.Response{
-				Kind: t_api.CompletePromise,
-				Tags: r.Metadata,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status: status,
+				Status:   status,
+				Metadata: r.Metadata,
+				Payload: &t_api.CompletePromiseResponse{
 					Promise: &promise.Promise{
 						Id:                        p.Id,
 						State:                     cmd.State,
@@ -120,21 +119,18 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 			}
 
 			res = &t_api.Response{
-				Kind: t_api.CompletePromise,
-				Tags: r.Metadata,
-				CompletePromise: &t_api.CompletePromiseResponse{
-					Status:  status,
+				Status:   status,
+				Metadata: r.Metadata,
+				Payload: &t_api.CompletePromiseResponse{
 					Promise: p,
 				},
 			}
 		}
 	} else {
 		res = &t_api.Response{
-			Kind: t_api.CompletePromise,
-			Tags: r.Metadata,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:   t_api.StatusPromiseNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.CompletePromiseResponse{},
 		}
 	}
 
