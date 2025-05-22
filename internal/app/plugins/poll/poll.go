@@ -17,7 +17,6 @@ import (
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
-	"github.com/resonatehq/resonate/pkg/message"
 )
 
 type Config struct {
@@ -41,7 +40,8 @@ type Poll struct {
 	server     *PollServer
 }
 
-type Data struct {
+type Addr struct {
+	Cast  string `json:"cast"`
 	Group string `json:"group"`
 	Id    string `json:"id,omitempty"`
 }
@@ -59,23 +59,30 @@ type connections struct {
 	conns map[string][]*connection
 }
 
-func (cs *connections) get(group string, id string) (*connection, bool) {
-	if len(cs.conns[group]) == 0 {
+func (cs *connections) get(addr *Addr) (*connection, bool) {
+	util.Assert(addr.Cast == "uni" || addr.Cast == "any", "cast must be one of: uni, any")
+
+	if len(cs.conns[addr.Group]) == 0 {
 		return nil, false
 	}
 
-	if id != "" {
-		// if id is provided, prefer connection with the same id
-		for _, conn := range cs.conns[group] {
-			if conn.id == id {
+	// if id is provided, prefer connection with the same id
+	if addr.Id != "" {
+		for _, conn := range cs.conns[addr.Group] {
+			if conn.id == addr.Id {
 				return conn, true
 			}
 		}
 	}
 
+	// if type is uni, do not send address with different id
+	if addr.Cast == "uni" {
+		return nil, false
+	}
+
 	// if there is no connection with the same id, choose a
 	// connection at random
-	return cs.conns[group][rand.Intn(len(cs.conns[group]))], true
+	return cs.conns[addr.Group][rand.Intn(len(cs.conns[addr.Group]))], true
 }
 
 func (cs *connections) add(conn *connection) {
@@ -298,21 +305,16 @@ func (w *PollWorker) Start() {
 
 func (w *PollWorker) Process(mesg *aio.Message) {
 	// unmarshal message
-	var data *Data
-	if err := json.Unmarshal(mesg.Data, &data); err != nil {
+	var addr *Addr
+	if err := json.Unmarshal(mesg.Addr, &addr); err != nil {
 		mesg.Done(false, err)
 		return
 	}
 
 	// check if we have a connection
-	conn, ok := w.connections.get(data.Group, data.Id)
+	conn, ok := w.connections.get(addr)
 	if !ok {
-		mesg.Done(false, fmt.Errorf("no connection found for group %s", data.Group))
-		return
-	}
-
-	if mesg.Type == message.Notify && conn.id != data.Id {
-		mesg.Done(false, fmt.Errorf("no connection found for group %s and id %s", data.Group, data.Id))
+		mesg.Done(false, fmt.Errorf("no %s connection found for group %s and id %s", addr.Cast, addr.Group, addr.Id))
 		return
 	}
 
@@ -321,7 +323,7 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 	case conn.ch <- mesg.Body:
 		mesg.Done(true, nil)
 	default:
-		mesg.Done(false, fmt.Errorf("connection full for group %s", data.Group))
+		mesg.Done(false, fmt.Errorf("connection full for group %s", addr.Group))
 	}
 }
 

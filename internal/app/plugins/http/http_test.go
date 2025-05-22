@@ -46,11 +46,11 @@ func TestHttpPlugin(t *testing.T) {
 
 	for _, tc := range []struct {
 		name    string
-		data    *Data
+		data    *Addr
 		success bool
 	}{
-		{"ok", &Data{Url: okUrl}, true},
-		{"ko", &Data{Url: koUrl}, false},
+		{"ok", &Addr{Url: okUrl}, true},
+		{"ko", &Addr{Url: koUrl}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second})
@@ -63,7 +63,7 @@ func TestHttpPlugin(t *testing.T) {
 			assert.Nil(t, err)
 
 			ok := http.Enqueue(&aio.Message{
-				Data: data,
+				Addr: data,
 				Body: []byte("ok"),
 				Done: func(ok bool, err error) {
 					assert.Nil(t, err)
