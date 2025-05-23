@@ -21,7 +21,7 @@ from resonate.registry import Registry
 from resonate.stores import LocalStore, RemoteStore
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Callable, Generator, Sequence
 
     from resonate.models.context import Info
     from resonate.models.message_source import MessageSource
@@ -429,37 +429,40 @@ class Time:
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
 
-    def time(self) -> LFC[float]:
-        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:time", time).time())
-
     def strftime(self, format: str) -> LFC[str]:
         return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:time", time).strftime(format))
+
+    def time(self) -> LFC[float]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:time", time).time())
 
 
 class Random:
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
 
-    def random(self) -> LFC[float]:
-        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).random())
-
     def betavariate(self, alpha: float, beta: float) -> LFC[float]:
         return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).betavariate(alpha, beta))
 
-    def randrange(self, start: int, stop: int | None = None, step: int = 1) -> LFC[int]:
-        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).randrange(start, stop, step))
+    def choice[T](self, seq: Sequence[T]) -> LFC[T]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).choice(seq))
 
-    def randint(self, a: int, b: int) -> LFC[int]:
-        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).randint(a, b))
+    def expovariate(self, lambd: float = 1) -> LFC[float]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).expovariate(lambd))
 
     def getrandbits(self, k: int) -> LFC[int]:
         return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).getrandbits(k))
 
+    def randint(self, a: int, b: int) -> LFC[int]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).randint(a, b))
+
+    def random(self) -> LFC[float]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).random())
+
+    def randrange(self, start: int, stop: int | None = None, step: int = 1) -> LFC[int]:
+        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).randrange(start, stop, step))
+
     def triangular(self, low: float = 0, high: float = 1, mode: float | None = None) -> LFC[float]:
         return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).triangular(low, high, mode))
-
-    def expovariate(self, lambd: float = 1) -> LFC[float]:
-        return self._ctx.lfc(lambda _: self._ctx.get_dependency("resonate:random", random).expovariate(lambd))
 
 
 class Function[**P, R]:

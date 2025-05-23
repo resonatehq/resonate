@@ -1,58 +1,66 @@
 from __future__ import annotations
 
-import threading
+import queue
+import urllib
+import urllib.parse
 from typing import TYPE_CHECKING
 
-from resonate.utils import exit_on_exception
+from resonate.models.message import Mesg
 
 if TYPE_CHECKING:
-    from resonate.models.message import Mesg
-    from resonate.models.message_source import MessageQ
     from resonate.stores import LocalStore
 
 
 class LocalMessageSource:
-    def __init__(self, group: str, id: str, store: LocalStore) -> None:
+    def __init__(self, store: LocalStore, group: str, id: str, scheme: str = "local") -> None:
+        self._messages = queue.Queue[Mesg | None]()
+        self._store = store
+        self._scheme = scheme
         self._group = group
         self._id = id
-        self._store = store
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
+
+    @property
+    def group(self) -> str:
+        return self._group
+
+    @property
+    def id(self) -> str:
+        return self._id
 
     @property
     def unicast(self) -> str:
-        return f"poll://{self._group}/{self._id}"
+        return f"{self._scheme}://uni@{self._group}/{self._id}"
 
     @property
     def anycast(self) -> str:
-        return f"poll://{self._group}/{self._id}"
+        return f"{self._scheme}://any@{self._group}/{self._id}"
 
-    def start(self, mq: MessageQ) -> None:
-        if self._thread is not None:
-            return
+    def start(self) -> None:
+        # idempotently connect to the store
+        self._store.connect(self)
 
-        self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._loop,
-            args=(mq,),
-            name="local_msg_source",
-            daemon=True,
-        )
-        self._thread.start()
+        # idempotently start the store
+        self._store.start()
 
     def stop(self) -> None:
-        if self._thread is not None:
-            self._stop_event.set()
-            self._thread.join()
-            self._thread = None
-            self._stop_event.clear()
+        # disconnect from the store
+        self._store.disconnect(self)
 
-    @exit_on_exception("mesg_source.local")
-    def _loop(self, mq: MessageQ) -> None:
-        while not self._stop_event.is_set():
-            for msg in self.step():
-                mq.enqueue(msg)
-            self._stop_event.wait(0.1)
+        # signal to consumers to disconnect
+        self._messages.put(None)
 
-    def step(self) -> list[Mesg]:
-        return [m for _, m in self._store.step()]
+    def enqueue(self, mesg: Mesg) -> None:
+        self._messages.put(mesg)
+
+    def next(self) -> Mesg | None:
+        return self._messages.get()
+
+    def match(self, addr: str) -> tuple[bool, bool]:
+        parsed = urllib.parse.urlparse(addr)
+
+        if parsed.username in ("uni", "any", None) and parsed.scheme == self._scheme and parsed.hostname == self._group and parsed.path == f"/{self._id}":
+            return True, False
+        if parsed.username in ("any", None) and parsed.scheme == self._scheme and parsed.hostname == self._group:
+            return False, True
+
+        return False, False

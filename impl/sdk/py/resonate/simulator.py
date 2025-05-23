@@ -89,61 +89,43 @@ class Simulator:
         self.buffer.append(msg)
         return msg
 
-    def run(self, steps: int) -> None:
-        for _ in range(steps):
-            self.step()
-
     def step(self) -> None:
         # set the clock
         self.clock.step(self.time)
 
-        # TODO(dfarr): determine a better way to drop components
+        # TODO(dfarr): determine a better way to drop components, for now keep
+        # a minimum of two components, the server (which is not droppable) and
+        # one worker
         for comp in self.components:
-            if comp.drop():
+            if comp.droppable() and len(self.components) > 2 and self.r.random() < 0.0001:
                 self.components.remove(comp)
 
         recv: list[Message] = []
-        outgoing: dict[Component, list[Message]] = {}
-        components_by_uni: dict[str, Component] = {}
-        components_by_any: dict[str, list[Component]] = {}
-
-        for comp in self.components:
-            assert comp.uni not in components_by_uni
-            components_by_uni[comp.uni] = comp
-            components_by_any.setdefault(comp.any, []).append(comp)
+        outgoing: dict[Component, list[Message]] = {c: [] for c in self.components}
 
         for send in self.buffer:
-            parsed = urllib.parse.urlparse(send.recv)
-            assert parsed.scheme == "sim"
-
             # TODO(dfarr): all tasks should be droppable, but for now only drop messages from the message source
             if isinstance(send.data, dict) and send.data.get("type") in ("invoke", "resume", "notify") and self.r.random() < self.drop_rate:
                 self.buffer.remove(send)
                 continue
 
-            match parsed:
-                case urllib.parse.ParseResult(scheme="sim", username="uni", hostname=hostname, path=path):
-                    if comp := components_by_uni.get(f"{hostname}{path}"):
-                        outgoing.setdefault(comp, []).append(send)
-                        self.buffer.remove(send)
+            comps = []
+            for comp in self.components:
+                preferred, alternate = comp.match(send.recv)
+                assert not (preferred and alternate)
 
-                case urllib.parse.ParseResult(scheme="sim", username="any", hostname=hostname, path=""):
-                    if hostname in components_by_any:
-                        comp = self.r.choice(components_by_any[hostname])
-                        outgoing.setdefault(comp, []).append(send)
-                        self.buffer.remove(send)
+                if preferred:
+                    comps = [comp]
+                    break
+                if alternate:
+                    comps.append(comp)
 
-                case urllib.parse.ParseResult(scheme="sim", username="any", hostname=hostname, path=path):
-                    if comp := components_by_uni.get(f"{hostname}{path}"):
-                        outgoing.setdefault(comp, []).append(send)
-                        self.buffer.remove(send)
-                    elif hostname in components_by_any:
-                        comp = self.r.choice(components_by_any[hostname])
-                        outgoing.setdefault(comp, []).append(send)
-                        self.buffer.remove(send)
+            assert comps or send.recv.startswith("sim://uni@")
 
-                case _:
-                    raise NotImplementedError
+            # send to chosen component if found
+            if comps:
+                outgoing[self.r.choice(comps)].append(send)
+                self.buffer.remove(send)
 
         for comp, send in outgoing.items():
             self.r.shuffle(send)
@@ -175,10 +157,6 @@ class Component:
         self.outgoing = []
         self.awaiting = {}
         self.deferred = []
-        self.init()
-
-    def init(self) -> None:
-        pass
 
     def step(self, time: float, messages: list[Message]) -> list[Message]:
         self.time = time
@@ -192,13 +170,13 @@ class Component:
     def next(self) -> None:
         pass
 
-    def drop(self) -> bool:
+    def droppable(self) -> bool:
         """Remove the component from the simulation."""
         return False
 
     def send_msg(self, addr: str, data: Any) -> Message:
         """Send a message to another component."""
-        msg = Message(f"sim://uni@{self.uni}", addr, data, self.time)
+        msg = Message(self.uni, addr, data, self.time)
         self.outgoing.append(msg)
         return msg
 
@@ -206,13 +184,32 @@ class Component:
         """Send a request and register a callback for handling the response."""
         self.msgcount += 1
         self.awaiting[self.msgcount] = callback
-        msg = Message(f"sim://uni@{self.uni}", addr, {"type": "req", "uuid": self.msgcount, "data": data}, self.time)
+        msg = Message(self.uni, addr, {"type": "req", "uuid": self.msgcount, "data": data}, self.time)
         self.outgoing.append(msg)
         return msg
 
-    def defer(self, callback: Callable[[], None], timeout: int = 0) -> None:
+    def defer(self, callback: Callable[[], None], timeout: float = 0) -> None:
         """Defers a callback to be called after a certain time."""
         self.deferred.append((callback, self.time + timeout))
+
+    def match(self, addr: str) -> tuple[bool, bool]:
+        parsed = urllib.parse.urlparse(addr)
+        assert parsed.scheme == "sim"
+
+        uni = urllib.parse.urlparse(self.uni)
+        assert uni.scheme == "sim"
+
+        any = urllib.parse.urlparse(self.any)
+        assert any.scheme == "sim"
+
+        if parsed.username == "uni" and parsed.hostname == uni.hostname and parsed.path == uni.path:
+            return True, False
+        if parsed.username == "any" and parsed.hostname == any.hostname and parsed.path == any.path:
+            return True, False
+        if parsed.username == "any" and parsed.hostname == any.hostname:
+            return False, True
+
+        return False, False
 
     def handle_deferred(self) -> None:
         for callback, time in self.deferred:
@@ -244,6 +241,7 @@ class Server(Component):
     def __init__(self, r: Random, uni: str, any: str, clock: Clock) -> None:
         super().__init__(r, uni, any)
         self.store = LocalStore(clock=clock)
+        self.store.add_target("default", "sim://any@default")
 
     def on_message(self, msg: Message) -> None:
         match msg.data.get("data"):
@@ -305,7 +303,6 @@ class Server(Component):
 
             case CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv):
                 promise, callback = self.store.promises.callback(
-                    id=id,
                     promise_id=promise_id,
                     root_promise_id=root_promise_id,
                     timeout=timeout,
@@ -359,28 +356,40 @@ class Server(Component):
                 raise NotImplementedError
 
     def next(self) -> None:
-        for recv, mesg in self.store.step():
-            self.send_msg(recv, mesg)
+        # step the store
+        step = self.store.step()
+        next: bool | None = None
+
+        while True:
+            try:
+                addr, mesg = step.send(next)
+                self.send_msg(addr, mesg)
+
+                # TODO(dfarr): we could randomly not send the message and
+                # return false to the generator, this simulates a different
+                # path than dropping messages (which we also do)
+                next = True
+            except StopIteration:
+                break
 
     def freeze(self) -> str:
         return "server"
 
 
 class Worker(Component):
-    def __init__(self, r: Random, uni: str, any: str, registry: Registry, dependencies: Dependencies, drop_at: float = 0) -> None:
+    def __init__(self, r: Random, uni: str, any: str, registry: Registry, dependencies: Dependencies) -> None:
         super().__init__(r, uni, any)
         self.registry = registry
-        self.drop_at = drop_at
         self.dependencies = dependencies
-        self.commands: list[Command] = []
+        self.commands: list[tuple[Command, Task | None]] = []
         self.tasks: dict[str, Task] = {}
         self.last_heartbeat = 0.0
 
         self.scheduler = Scheduler(
             lambda id, cid, info: Context(id, cid, info, self.registry, self.dependencies),
             pid=self.uni,
-            unicast=f"sim://uni@{self.uni}",
-            anycast=f"sim://any@{self.uni}",  # this looks silly, but this is right
+            unicast=self.uni,
+            anycast=self.any,
         )
 
     def on_message(self, msg: Message) -> None:
@@ -398,46 +407,80 @@ class Worker(Component):
                         data=conv.data,
                         tags=conv.tags,
                         pid=self.scheduler.pid,
-                        ttl=self.r.randint(0, 30000),
+                        ttl=self.r.randint(0, 30000),  # TODO(dfarr): make this configurable
                     ),
-                    lambda res: self.__invoke(res.data.get("data")),
+                    lambda res: self._create_promise_with_task(res.data.get("data")),
                 )
 
             case Listen(id):
-                self.commands.append(Listen(id))
+                self.commands.append((Listen(id), None))
 
             case {"type": "invoke", "task": {"id": id, "counter": counter}}:
                 self.send_req(
                     "sim://uni@server",
                     ClaimTaskReq(id, counter, self.scheduler.pid, self.r.randint(0, 30000)),
-                    lambda res: self._invoke(res.data.get("data")),
+                    lambda res: self._invoke_message(res.data.get("data")),
                 )
 
             case {"type": "resume", "task": {"id": id, "counter": counter}}:
                 self.send_req(
                     "sim://uni@server",
                     ClaimTaskReq(id, counter, self.scheduler.pid, self.r.randint(0, 30000)),
-                    lambda res: self._resume(res.data.get("data")),
+                    lambda res: self._resume_message(res.data.get("data")),
                 )
 
             case {"type": "notify", "promise": promise}:
                 # store instance does not matter
                 promise = DurablePromise.from_dict(LocalStore(), promise)
                 assert promise.completed
-                self.commands.append(Notify(promise.id, promise))
+                self.commands.append((Notify(promise.id, promise), None))
 
             case _:
                 raise NotImplementedError
 
     def next(self) -> None:
-        if not self.commands:
-            return
+        self.r.shuffle(self.commands)
 
-        cmd = self.r.choice(self.commands)
-        self.commands.remove(cmd)
+        for c, t in self.commands:
+            task = self.tasks.get(c.cid)
+            assert task or t or isinstance(c, (Listen, Notify))
+
+            # Ignore the command if we already have a task with the same id and
+            # greater or equal counter.
+            if task and t and task.id == t.id and task.counter >= t.counter:
+                continue
+
+            if t:
+                self.tasks[c.cid] = t
+
+            self._next(c)
+
+        # clear commands
+        self.commands.clear()
+
+        # heartbeat every 15s, the midpoint of the random ttl interval [0, 30s]
+        if self.time - self.last_heartbeat >= 15:
+            self.send_req("sim://uni@server", HeartbeatTasksReq(self.scheduler.pid), lambda _: None)
+            self.last_heartbeat = self.time
+
+    def _next(self, cmd: Command) -> None:
+        suspends = 0
+        if (computation := self.scheduler.computations.get(cmd.cid)) and (node := computation.graph.find(lambda n: n.id == cmd.id)):
+            suspends = len(node.value.func.suspends)
 
         match self.scheduler.step(cmd):
             case More(reqs):
+                computation = self.scheduler.computations[cmd.cid]
+                assert not computation.runnable()
+                assert not computation.suspendable()
+
+                # The number of actions (create promise, complete promise, run
+                # a function) that can be performed is equal to the number of
+                # sub computations suspended by the command plus one.
+                # -> all suspended sub computations may take a step
+                # -> + a new sub computation may take a step
+                assert len(reqs) <= suspends + 1
+
                 for req in reqs:
                     match req:
                         case Function(id, cid, func) | Delayed(Function(id, cid, func)):
@@ -446,48 +489,67 @@ class Worker(Component):
                             except Exception as e:
                                 r = Ko(e)
 
-                            delay = int(req.delay * 1000) if isinstance(req, Delayed) else 0
-                            self.defer(lambda id=id, cid=cid, r=r: self.commands.append(Return(id, cid, r)), delay)
+                            delay = req.delay if isinstance(req, Delayed) else 0
+                            self.defer(lambda id=id, cid=cid, r=r: self.commands.append((Return(id, cid, r), None)), delay)
 
                         case Network(id, cid, req):
-                            self.send_req("sim://uni@server", req, lambda res, id=id, cid=cid: self.commands.append(Receive(id, cid, res.data.get("data"))))
+                            self.send_req("sim://uni@server", req, lambda res, id=id, cid=cid: self.commands.append((Receive(id, cid, res.data.get("data")), None)))
 
-            case Done(reqs):
-                count = 0
-                task = self.tasks.get(cmd.cid)
+            case Done([]):
+                computation = self.scheduler.computations[cmd.cid]
+                assert not computation.runnable()
+                assert computation.suspendable()
+                assert cmd.cid in self.tasks or isinstance(cmd, (Listen, Notify))
 
-                if not reqs and task:
+                if not isinstance(cmd, (Listen, Notify)):
+                    task = self.tasks[cmd.cid]
                     self.send_req(
                         "sim://uni@server",
                         CompleteTaskReq(task.id, task.counter),
                         lambda _: None,
                     )
 
-                def create_callback_callback(res: CreateCallbackRes) -> None:
-                    assert task
-                    nonlocal count
+            case Done(reqs):
+                computation = self.scheduler.computations[cmd.cid]
+                assert not computation.runnable()
+                assert computation.suspendable()
+
+                # We are relying on the closure to keep track of the number
+                # of created callbacks
+                count = 0
+
+                def create_callback_callback(res: CreateCallbackRes, cmd: Command, task_on_req: Task) -> None:
+                    assert cmd.cid in self.tasks
+                    task_on_res = self.tasks[cmd.cid]
 
                     if res.promise.completed:
                         assert not res.callback
-                        self.commands.append(Resume(res.promise.id, cmd.cid, res.promise))
-                    else:
-                        count += 1
+                        self.commands.append((Resume(res.promise.id, cmd.cid, res.promise), None))
+                        return
 
-                    if count == len(reqs):
+                    nonlocal count
+                    count += 1
+
+                    # Only complete the task when all callbacks have been
+                    # created and the task is the same, it is possible that
+                    # while creating the callbacks a new task has been
+                    # received.
+                    if count == len(reqs) and task_on_req.id == task_on_res.id:
+                        assert task_on_res.counter >= task_on_req.counter
                         self.send_req(
                             "sim://uni@server",
-                            CompleteTaskReq(task.id, task.counter),
+                            CompleteTaskReq(task_on_res.id, task_on_res.counter),
                             lambda _: None,
                         )
 
-                def create_subscription_callback(res: Result[CreateSubscriptionRes]) -> None:
+                def create_subscription_callback(res: Result[CreateSubscriptionRes], cmd: Command) -> None:
                     match res:
                         case Ok(CreateSubscriptionRes(promise, callback)):
                             assert promise.id == cmd.cid
-                            assert promise.completed or callback
+                            assert promise.pending or not callback
 
                             if promise.completed:
-                                self.commands.append(Notify(promise.id, promise))
+                                self.commands.append((Notify(promise.id, promise), None))
 
                         case Ko():
                             pass
@@ -497,132 +559,75 @@ class Worker(Component):
 
                 for req in reqs:
                     match req:
-                        case Network(id, cid, CreateCallbackReq() as req):
+                        case Network(id, cid, CreateCallbackReq() as r):
+                            assert cmd.cid == cid
                             assert cmd.cid in self.tasks
-                            self.send_req("sim://uni@server", req, lambda res: create_callback_callback(res.data.get("data")))
+                            self.send_req("sim://uni@server", r, lambda res, cmd=cmd, task=self.tasks[cmd.cid]: create_callback_callback(res.data.get("data"), cmd, task))
 
-                        case Network(id, cid, CreateSubscriptionReq() as req):
-                            self.send_req("sim://uni@server", req, lambda res: create_subscription_callback(res.data.get("data")))
+                        case Network(id, cid, CreateSubscriptionReq() as r):
+                            assert cmd.cid == cid
+                            assert len(reqs) == 1
+                            self.send_req("sim://uni@server", r, lambda res, cmd=cmd: create_subscription_callback(res.data.get("data"), cmd))
 
                         case _:
                             raise NotImplementedError
 
-        # heartbeat every 15s, the midpoint of the random ttl interval [0, 30s]
-        if self.time - self.last_heartbeat >= 15:
-            self.send_req("sim://uni@server", HeartbeatTasksReq(self.scheduler.pid), lambda _: None)
-            self.last_heartbeat = self.time
+    def droppable(self) -> bool:
+        return True
 
-    def drop(self) -> bool:
-        # Remove the worker when time exceeds the drop_at value.
-        # Tasks should be re-routed to a worker with the same anycast address.
-        return bool(self.drop_at and self.drop_at <= self.time)
-
-    def __invoke(self, res: CreatePromiseWithTaskRes) -> None:
+    def _create_promise_with_task(self, res: CreatePromiseWithTaskRes) -> None:
         if not res.task:
             return
 
-        _, func, version = self.registry.get(res.promise.param.data["func"])
-        self.tasks[res.promise.id] = res.task
+        self.commands.append((self._invoke(res.promise), res.task))
 
-        self.commands.append(
-            Invoke(
-                res.promise.id,
-                Base(
-                    res.promise.id,
-                    res.promise.rel_timeout,
-                    res.promise.ikey_for_create,
-                    res.promise.param.headers,
-                    res.promise.param.data,
-                    res.promise.tags,
-                ),
-                res.promise.abs_timeout,
-                func,
-                res.promise.param.data["args"],
-                res.promise.param.data["kwargs"],
-                Options(version=version),
-                res.promise,
-            )
+    def _invoke_message(self, result: Result[ClaimTaskRes]) -> None:
+        match result:
+            case Ok(res):
+                assert res.root
+                assert not res.leaf
+                self.commands.append((self._invoke(res.root), res.task))
+            case Ko():
+                # It's possible that is task is already claimed or completed, in that case just
+                # ignore.
+                pass
+
+    def _resume_message(self, result: Result[ClaimTaskRes]) -> None:
+        match result:
+            case Ok(res):
+                assert res.root
+                assert res.leaf
+                assert res.leaf.completed
+                self.commands.append((Resume(res.leaf.id, res.root.id, res.leaf, self._invoke(res.root)), res.task))
+            case Ko():
+                # It's possible that is task is already claimed or completed, in that case just
+                # ignore.
+                pass
+
+    def _invoke(self, promise: DurablePromise) -> Invoke:
+        assert isinstance(promise.param.data, dict)
+        assert "func" in promise.param.data
+        assert "args" in promise.param.data
+        assert "kwargs" in promise.param.data
+        _, func, version = self.registry.get(promise.param.data["func"])
+
+        return Invoke(
+            promise.id,
+            Base(
+                promise.id,
+                promise.rel_timeout,
+                promise.ikey_for_create,
+                promise.param.headers,
+                promise.param.data,
+                promise.tags,
+            ),
+            promise.abs_timeout,
+            func,
+            promise.param.data["args"],
+            promise.param.data["kwargs"],
+            Options(version=version),
+            promise,
         )
-
-    def _invoke(self, result: Result[ClaimTaskRes]) -> None:
-        match result:
-            case Ok(res):
-                assert res.root.pending, "Root promise must be pending."
-                assert isinstance(res.root.param.data, dict)
-                assert "func" in res.root.param.data, "Root param must have func."
-                assert "args" in res.root.param.data, "Root param must have args."
-                assert "kwargs" in res.root.param.data, "Root param must have kwargs."
-
-                _, func, version = self.registry.get(res.root.param.data["func"])
-                self.tasks[res.root.id] = res.task
-
-                self.commands.append(
-                    Invoke(
-                        res.root.id,
-                        Base(
-                            res.root.id,
-                            res.root.rel_timeout,
-                            res.root.ikey_for_create,
-                            res.root.param.headers,
-                            res.root.param.data,
-                            res.root.tags,
-                        ),
-                        res.root.abs_timeout,
-                        func,
-                        res.root.param.data["args"],
-                        res.root.param.data["kwargs"],
-                        Options(version=version),
-                        res.root,
-                    )
-                )
-
-            case Ko():
-                # It's possible that is task is already claimed or completed, in that case just
-                # ignore.
-                pass
-
-    def _resume(self, result: Result[ClaimTaskRes]) -> None:
-        match result:
-            case Ok(res):
-                assert res.leaf, "Leaf must be set."
-                assert res.leaf.completed, "Leaf promise must be completed."
-                assert isinstance(res.leaf.param.data, dict)
-                assert "func" in res.leaf.param.data, "Leaf param must have func."
-                assert "args" in res.leaf.param.data, "Leaf param must have args."
-                assert "kwargs" in res.leaf.param.data, "Leaf param must have kwargs."
-
-                _, func, version = self.registry.get(res.root.param.data["func"])
-                self.tasks[res.root.id] = res.task
-
-                self.commands.append(
-                    Resume(
-                        id=res.leaf.id,
-                        cid=res.root.id,
-                        promise=res.leaf,
-                        invoke=Invoke(
-                            res.root.id,
-                            Base(
-                                res.root.id,
-                                res.root.rel_timeout,
-                                res.root.ikey_for_create,
-                                res.root.param.headers,
-                                res.root.param.data,
-                                res.root.tags,
-                            ),
-                            res.root.abs_timeout,
-                            func,
-                            res.root.param.data["args"],
-                            res.root.param.data["kwargs"],
-                            Options(version=version),
-                            res.root,
-                        ),
-                    )
-                )
-
-            case Ko():
-                # It's possible that is task is already claimed or completed, in that case just
-                # ignore.
-                pass
 
     def freeze(self) -> str:
         return "worker"

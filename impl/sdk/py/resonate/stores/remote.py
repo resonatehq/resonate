@@ -256,17 +256,15 @@ class RemotePromiseStore:
 
     def callback(
         self,
-        id: str,
         promise_id: str,
         root_promise_id: str,
-        timeout: int,
         recv: str,
+        timeout: int,
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",
             url=f"{self._store.url}/callbacks",
             json={
-                "id": id,
                 "promiseId": promise_id,
                 "rootPromiseId": root_promise_id,
                 "timeout": timeout,
@@ -287,8 +285,8 @@ class RemotePromiseStore:
         self,
         id: str,
         promise_id: str,
-        timeout: int,
         recv: str,
+        timeout: int,
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",

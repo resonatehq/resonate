@@ -20,7 +20,7 @@ class Options:
     idempotency_key: str | Callable[[str], str] | None = lambda id: id
     non_retryable_exceptions: tuple[type[Exception], ...] = ()
     retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] = lambda f: Never() if isgeneratorfunction(f) else Exponential()
-    target: str = "poll://default"
+    target: str = "default"
     tags: dict[str, str] = field(default_factory=dict)
     timeout: float = 31536000  # relative time in seconds, default 1 year
     version: int = 0

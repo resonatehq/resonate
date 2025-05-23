@@ -275,7 +275,6 @@ class ResonateRunner:
 
                     case Network(_id, cid, CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv)):
                         promise, callback = self.store.promises.callback(
-                            id=id,
                             promise_id=promise_id,
                             root_promise_id=root_promise_id,
                             timeout=timeout,

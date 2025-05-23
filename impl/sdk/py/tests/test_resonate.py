@@ -39,6 +39,8 @@ def baz(ctx: Context, a: int, b: int) -> Generator[Any, Any, int]:
 @pytest.fixture
 def resonate() -> Resonate:
     resonate = Resonate()
+
+    # set private started to true so calls to run and rpc are noops
     resonate._started = True  # noqa: SLF001
     return resonate
 
@@ -645,7 +647,7 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             assert cmd.conv.headers is None
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
             assert cmd.conv.timeout == 31536000
-            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "global", "resonate:invoke": "poll://default"}
+            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "global", "resonate:invoke": "default"}
 
             cmd = cmd.options(tags=tags, timeout=timeout, version=version, target=target)
 

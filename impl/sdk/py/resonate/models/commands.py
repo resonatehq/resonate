@@ -107,6 +107,10 @@ class Delayed[T: Function | Retry]:
     item: T
     delay: float
 
+    @property
+    def id(self) -> str:
+        return self.item.id
+
 
 @dataclass
 class CreatePromiseReq:

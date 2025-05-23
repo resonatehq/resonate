@@ -29,15 +29,14 @@ def task(store: Store, message_source: MessageSource) -> Generator[TaskMesg]:
     store.promises.create(
         id=id,
         timeout=sys.maxsize,
-        tags={"resonate:invoke": "poll://default"},
+        tags={"resonate:invoke": "default"},
     )
 
-    msgs = message_source.step()
-    assert len(msgs) == 1
-    assert msgs[0]["type"] == "invoke"
+    mesg = message_source.next()
+    assert mesg
+    assert mesg["type"] == "invoke"
 
-    yield msgs[0]["task"]
-
+    yield mesg["task"]
     store.promises.resolve(id=id)
 
 

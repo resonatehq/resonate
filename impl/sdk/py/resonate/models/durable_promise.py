@@ -7,6 +7,8 @@ from resonate.errors.errors import ResonateCanceledError, ResonateTimedoutError
 from resonate.models.result import Ko, Ok, Result
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from resonate.models.callback import Callback
     from resonate.models.store import Store
 
@@ -107,11 +109,21 @@ class DurablePromise:
 
     def callback(self, id: str, root_promise_id: str, recv: str) -> Callback | None:
         promise, callback = self.store.promises.callback(
-            id=id,
             promise_id=self.id,
             root_promise_id=root_promise_id,
-            timeout=self.timeout,
             recv=recv,
+            timeout=self.timeout,
+        )
+        if callback is None:
+            self._complete(promise)
+        return callback
+
+    def subscribe(self, id: str, recv: str) -> Callback | None:
+        promise, callback = self.store.promises.subscribe(
+            id=id,
+            promise_id=self.id,
+            recv=recv,
+            timeout=self.timeout,
         )
         if callback is None:
             self._complete(promise)
@@ -125,9 +137,8 @@ class DurablePromise:
         self.completed_on = promise.completed_on
 
     @classmethod
-    def from_dict(cls, store: Store, data: dict[str, Any]) -> DurablePromise:
+    def from_dict(cls, store: Store, data: Mapping[str, Any]) -> DurablePromise:
         return cls(
-            store=store,
             id=data["id"],
             state=data["state"],
             timeout=data["timeout"],
@@ -138,6 +149,7 @@ class DurablePromise:
             tags=data.get("tags", {}),
             created_on=data["createdOn"],
             completed_on=data.get("completedOn"),
+            store=store,
         )
 
 

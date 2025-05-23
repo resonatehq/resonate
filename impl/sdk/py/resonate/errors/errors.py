@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime
 import json
 from typing import Any
 
@@ -62,8 +61,7 @@ class ResonateCanceledError(ResonateError):
 
 class ResonateTimedoutError(ResonateError):
     def __init__(self, promise_id: str, timeout: float) -> None:
-        formatted = datetime.datetime.fromtimestamp(timeout, tz=datetime.UTC).isoformat()
-        super().__init__(f"Promise {promise_id} timedout at {formatted}", "41")
+        super().__init__(f"Promise {promise_id} timedout at {timeout}", "41")
         self.promise_id = promise_id
         self.timeout = timeout
 

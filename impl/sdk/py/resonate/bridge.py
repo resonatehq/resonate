@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from concurrent.futures import Future
 from typing import TYPE_CHECKING, Any
 
 from resonate.conventions import Base
@@ -41,10 +42,8 @@ from resonate.utils import exit_on_exception
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from concurrent.futures import Future
 
     from resonate.models.convention import Convention
-    from resonate.models.message import Mesg
     from resonate.models.message_source import MessageSource
     from resonate.models.store import Store
     from resonate.registry import Registry
@@ -64,10 +63,9 @@ class Bridge:
         anycast: str,
     ) -> None:
         self._store = store
-        self._message_src = message_source
+        self._message_source = message_source
         self._registry = registry
-        self._cq: queue.Queue[Command | tuple[Command, Future] | None] = queue.Queue()
-        self._mq: queue.Queue[Mesg | None] = queue.Queue()
+        self._cq = queue.Queue[Command | tuple[Command, Future] | None]()
         self._unicast = unicast
         self._anycast = unicast
 
@@ -153,7 +151,7 @@ class Bridge:
 
     def start(self) -> None:
         if not self._messages_thread.is_alive():
-            self._message_src.start(MesgQueueAdapter(self._mq))
+            self._message_source.start()
             self._messages_thread.start()
 
         if not self._bridge_thread.is_alive():
@@ -177,27 +175,17 @@ class Bridge:
 
     def _stop_no_join(self) -> None:
         """Stop internal components and threads. Does not join the threads, to be able to call it from the bridge itself."""
-        self._message_src.stop()
+        self._message_source.stop()
         self._cq.put_nowait(None)
-        self._mq.put_nowait(None)
         self._heartbeat_active.clear()
         self._shutdown.set()
 
     @exit_on_exception("bridge")
     def _process_cq(self) -> None:
-        while True:
-            item = self._cq.get()
-
-            # shuting down
-            if item is None:
-                return
-
-            cid: str
-
+        while item := self._cq.get():
             cmd, future = item if isinstance(item, tuple) else (item, None)
-            action = self._scheduler.step(cmd, future)
 
-            match action:
+            match self._scheduler.step(cmd, future):
                 case More(reqs):
                     for req in reqs:
                         match req:
@@ -290,13 +278,8 @@ class Bridge:
                 root,
             )
 
-        while True:
-            msg = self._mq.get()
+        while msg := self._message_source.next():
             match msg:
-                case None:
-                    # None signals to stop
-                    return
-
                 case {"type": "invoke", "task": {"id": id, "counter": counter}}:
                     task = Task(id, counter, self._store)
                     root, _ = self._store.tasks.claim(id=task.id, counter=task.counter, pid=self._pid, ttl=self._ttl * 1000)
@@ -318,8 +301,8 @@ class Bridge:
                     self._promise_id_to_task[root.id] = task
                     self._cq.put_nowait(cmd)
 
-                case {"type": "notify", "promise": _promise}:
-                    durable_promise = DurablePromise.from_dict(self._store, _promise)
+                case {"type": "notify", "promise": promise}:
+                    durable_promise = DurablePromise.from_dict(self._store, promise)
                     self._cq.put_nowait(Notify(durable_promise.id, durable_promise))
 
     @exit_on_exception("bridge.delayq")
@@ -344,10 +327,8 @@ class Bridge:
                     match item:
                         case Function(id, cid, func):
                             self._cq.put_nowait(Return(id, cid, self._handle_function(func)))
-                        case Retry() as retry:
+                        case retry:
                             self._cq.put_nowait(retry)
-                        case _:
-                            raise NotImplementedError  # Unreachble
 
                 if self._shutdown.is_set():
                     return
@@ -425,7 +406,6 @@ class Bridge:
 
             case CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv):
                 promise, callback = self._store.promises.callback(
-                    id=id,
                     promise_id=promise_id,
                     root_promise_id=root_promise_id,
                     timeout=timeout,
@@ -446,11 +426,3 @@ class Bridge:
             return Ok(r)
         except Exception as e:
             return Ko(e)
-
-
-class MesgQueueAdapter:
-    def __init__(self, mq: queue.Queue[Mesg | None]) -> None:
-        self.mq = mq
-
-    def enqueue(self, mesg: Mesg) -> None:
-        self.mq.put(mesg)

@@ -12,6 +12,8 @@ from resonate.message_sources import Poller
 from resonate.stores import LocalStore, RemoteStore
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from resonate.models.message_source import MessageSource
     from resonate.models.store import Store
 
@@ -62,10 +64,19 @@ def store(request: pytest.FixtureRequest) -> Store:
     return request.param()
 
 
-@pytest.fixture(scope="module")
-def message_source(store: Store) -> MessageSource:
+@pytest.fixture
+def message_source(store: Store) -> Generator[MessageSource]:
     match store:
         case LocalStore():
-            return store.message_source(group="default", id="test")
+            ms = store.message_source(group="default", id="test")
         case _:
-            return Poller(group="default", id="test", timeout=3)
+            assert isinstance(store, RemoteStore)
+            ms = Poller(group="default", id="test")
+
+    # start the message source
+    ms.start()
+
+    yield ms
+
+    # stop the message source
+    ms.stop()

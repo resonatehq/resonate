@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from resonate.models.durable_promise import DurablePromise
     from resonate.models.store import Store
 
@@ -21,7 +23,7 @@ class Task:
         self._completed = self.store.tasks.complete(id=self.id, counter=self.counter)
 
     @classmethod
-    def from_dict(cls, store: Store, data: dict[str, Any]) -> Task:
+    def from_dict(cls, store: Store, data: Mapping[str, Any]) -> Task:
         return cls(
             id=data["id"],
             counter=data["counter"],

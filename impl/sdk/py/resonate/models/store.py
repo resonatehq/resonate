@@ -84,19 +84,18 @@ class PromiseStore(Protocol):
 
     def callback(
         self,
-        id: str,
         promise_id: str,
         root_promise_id: str,
-        timeout: int,
         recv: str,
+        timeout: int,
     ) -> tuple[DurablePromise, Callback | None]: ...
 
     def subscribe(
         self,
         id: str,
         promise_id: str,
-        timeout: int,
         recv: str,
+        timeout: int,
     ) -> tuple[DurablePromise, Callback | None]: ...
 
 
