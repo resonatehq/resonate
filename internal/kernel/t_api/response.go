@@ -126,7 +126,7 @@ func (r *CreateScheduleResponse) Kind() Kind { return CreateSchedule }
 type DeleteScheduleResponse struct{}
 
 func (r *DeleteScheduleResponse) String() string {
-	return fmt.Sprintf("DeleteSchedule()")
+	return fmt.Sprint("DeleteSchedule()")
 }
 
 func (r *DeleteScheduleResponse) Kind() Kind { return DeleteSchedule }
@@ -147,7 +147,7 @@ type ReleaseLockResponse struct {
 }
 
 func (r *ReleaseLockResponse) String() string {
-	return fmt.Sprintf("ReleaseLock()")
+	return fmt.Sprint("ReleaseLock()")
 }
 
 func (r *ReleaseLockResponse) Kind() Kind { return ReleaseLock }
@@ -192,7 +192,7 @@ type DropTaskResponse struct {
 }
 
 func (r *DropTaskResponse) String() string {
-	return fmt.Sprintf("DropTask()")
+	return fmt.Sprint("DropTask()")
 }
 
 func (r *DropTaskResponse) Kind() Kind { return DropTask }
