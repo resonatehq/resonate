@@ -13,7 +13,6 @@ from resonate.bridge import Bridge
 from resonate.conventions import Base, Local, Remote, Sleep
 from resonate.coroutine import LFC, LFI, RFC, RFI, Promise
 from resonate.dependencies import Dependencies
-from resonate.errors import ResonateValidationError
 from resonate.message_sources import LocalMessageSource, Poller
 from resonate.models.handle import Handle
 from resonate.options import Options
@@ -176,11 +175,10 @@ class Resonate:
         version: int = 1,
     ) -> Function[P, R] | Callable[[Callable[Concatenate[Context, P], R]], Function[P, R]]:
         def wrapper(func: Callable[..., Any]) -> Function[P, R]:
-            if not inspect.isfunction(func):
-                msg = "Can only register functions"
-                raise ResonateValidationError(msg)
+            if isinstance(func, Function):
+                func = func.func
 
-            self._registry.add(func, name or func.__name__, version)
+            self._registry.add(func, name, version)
             return Function(self, name or func.__name__, func, self._opts.merge(version=version))
 
         if args and args[0] is not None:
@@ -305,8 +303,15 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LFI[R]:
+        if isinstance(func, Function):
+            func = func.func
+
+        if not inspect.isfunction(func):
+            msg = "provided callable must be a function"
+            raise ValueError(msg)
+
         opts = Options(version=self._registry.latest(func))
-        return LFI(Local(self._next(), self._cid, self._id, opts), func.func if isinstance(func, Function) else func, args, kwargs, opts)
+        return LFI(Local(self._next(), self._cid, self._id, opts), func, args, kwargs, opts)
 
     def lfc[**P, R](
         self,
@@ -314,8 +319,15 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LFC[R]:
+        if isinstance(func, Function):
+            func = func.func
+
+        if not inspect.isfunction(func):
+            msg = "provided callable must be a function"
+            raise ValueError(msg)
+
         opts = Options(version=self._registry.latest(func))
-        return LFC(Local(self._next(), self._cid, self._id, opts), func.func if isinstance(func, Function) else func, args, kwargs, opts)
+        return LFC(Local(self._next(), self._cid, self._id, opts), func, args, kwargs, opts)
 
     @overload
     def rfi[**P, R](
@@ -515,7 +527,7 @@ class Function[**P, R]:
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
         target: str | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Function[P, R]:
         self._opts = self._opts.merge(

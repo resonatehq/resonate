@@ -13,7 +13,6 @@ from resonate import Context, Resonate
 from resonate.conventions import Remote
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
-from resonate.errors import ResonateValidationError
 from resonate.models.commands import Command, Invoke, Listen
 from resonate.models.handle import Handle
 from resonate.options import Options
@@ -31,6 +30,16 @@ def bar(ctx: Context, a: int, b: int) -> int: ...
 def baz(ctx: Context, a: int, b: int) -> Generator[Any, Any, int]:
     yield ctx.lfc(bar, a, b)
     raise NotImplementedError
+
+
+def qux(ctx: Context, a: int, b: int) -> int: ...
+
+
+class Qux:
+    def __call__(self, ctx: Context) -> None: ...
+    def foo(self, ctx: Context) -> None: ...
+    def bar(self, ctx: Context) -> None: ...
+    def baz(self, ctx: Context) -> None: ...
 
 
 # Fixtures
@@ -83,6 +92,38 @@ def test_register(func: Callable, name: str | None, version: int) -> None:
     for v in (0, version):
         assert registry.get(name or func.__name__, v) == registry.get(func, v) == registry.get(f, v) == (name or func.__name__, func, version)
 
+    # assert function instance
+    assert isinstance(f, Function)
+    assert f.func == func
+    assert f.name == name or func.__name__
+    assert f.__module__ == func.__module__
+    assert f.__name__ == func.__name__
+    assert f.__qualname__ == func.__qualname__
+    assert f.__doc__ == func.__doc__
+    assert f.__annotations__ == func.__annotations__
+    assert f.__type_params__ == func.__type_params__
+
+
+@pytest.mark.parametrize("func", [foo, bar, baz, lambda x: x])
+@pytest.mark.parametrize("name", ["foo", "bar", "baz"])
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_register_function(func: Callable, name: str, version: int) -> None:
+    registry = Registry()
+    resonate = Resonate(registry=registry)
+
+    f = resonate.register(Function(resonate, "", func, Options()), name=name, version=version)
+    assert f.func == func
+    assert f.name == name
+    assert f.__module__ == func.__module__
+    assert f.__name__ == func.__name__
+    assert f.__qualname__ == func.__qualname__
+    assert f.__doc__ == func.__doc__
+    assert f.__annotations__ == func.__annotations__
+    assert f.__type_params__ == func.__type_params__
+
+    for v in (0, version):
+        assert registry.get(name or func.__name__, v) == registry.get(func, v) == registry.get(f, v) == (name or func.__name__, func, version)
+
 
 @pytest.mark.parametrize("name", ["bar", "baz", None])
 @pytest.mark.parametrize("version", [1, 2, 3])
@@ -104,28 +145,32 @@ def test_register_decorator(name: str | None, version: int) -> None:
 
 
 @pytest.mark.parametrize(
-    ("func", "kwargs"),
+    ("func", "kwargs", "match"),
     [
-        (lambda x: x, {"name": "foo"}),
-        (lambda x: x, {"name": "foo", "version": 1}),
-        (lambda x: x, {"name": "foo", "version": 0}),
-        (lambda x: x, {"name": "bar", "version": 2}),
-        (lambda x: x, {"name": "bar", "version": 0}),
-        (lambda x: x, {"name": "baz", "version": 3}),
-        (lambda x: x, {"name": "baz", "version": 0}),
-        (lambda x: x, {}),
-        (lambda x: x, {"version": 1}),
-        (foo, {"name": "bar"}),
-        (bar, {"name": "baz"}),
-        (baz, {"name": "foo"}),
+        (lambda x: x, {"name": "foo"}, "function foo already registered"),
+        (lambda x: x, {"name": "foo", "version": 1}, "function foo already registered"),
+        (lambda x: x, {"name": "foo", "version": 0}, "provided version must be greater than zero"),
+        (lambda x: x, {"name": "bar", "version": 2}, "function bar already registered"),
+        (lambda x: x, {"name": "bar", "version": 0}, "provided version must be greater than zero"),
+        (lambda x: x, {"name": "baz", "version": 3}, "function baz already registered"),
+        (lambda x: x, {"name": "baz", "version": 0}, "provided version must be greater than zero"),
+        (lambda x: x, {}, "name required when registering a lambda function"),
+        (lambda x: x, {"version": 1}, "name required when registering a lambda function"),
+        (foo, {"name": "bar"}, "function bar already registered"),
+        (bar, {"name": "baz"}, "function baz already registered"),
+        (baz, {"name": "foo"}, "function foo already registered"),
+        (Qux(), {}, "provided callable must be a function"),
+        (Qux().foo, {}, "provided callable must be a function"),
+        (Qux().bar, {}, "provided callable must be a function"),
+        (Qux().baz, {}, "provided callable must be a function"),
     ],
 )
-def test_register_validations(registry: Registry, func: Callable, kwargs: dict) -> None:
+def test_register_validations(registry: Registry, func: Callable, kwargs: dict, match: str) -> None:
     resonate = Resonate(registry=registry)
-    with pytest.raises(ResonateValidationError):
+    with pytest.raises(ValueError, match=match):
         resonate.register(func, **kwargs)
 
-    with pytest.raises(ResonateValidationError):
+    with pytest.raises(ValueError, match=match):
         resonate.register(**kwargs)(func)
 
 
@@ -152,7 +197,7 @@ def test_run(
     retry_policy: RetryPolicy | None,
     target: str | None,
     tags: dict[str, str] | None,
-    timeout: int | None,
+    timeout: float | None,
     version: int | None,
     func: Callable,
     name: str,
@@ -192,80 +237,62 @@ def test_run(
         promise = resonate.promises.get(id=id)
         return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, updated_opts, promise)
 
-    resonate.run("f1", func, *args, **kwargs)
-    assert cmd(resonate) == invoke("f1")
+    for id, fn in [("f1", func), ("f2", name), ("f3", f)]:
+        resonate.run(id, fn, *args, **kwargs)
+        assert cmd(resonate) == invoke(id)
 
-    promise = resonate.promises.get(id="f1")
-    assert promise.id == "f1"
-    assert promise.ikey_for_create == "f1"
-    assert promise.param.headers == {}  # TODO(dfarr): this should be None
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
+        promise = resonate.promises.get(id=id)
+        assert promise.id == id
+        assert promise.ikey_for_create == id
+        assert promise.param.headers == {}
+        assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
+        assert (
+            promise.tags
+            == {**default_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {"resonate:invoke": default_opts.target, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+        )
 
-    resonate.run("f2", name, *args, **kwargs)
-    assert cmd(resonate) == invoke("f2")
+    for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
+        resonate.options(**opts).run(id, fn, *args, **kwargs)
+        assert cmd(resonate) == invoke_with_opts(id)
 
-    promise = resonate.promises.get(id="f2")
-    assert promise.id == "f2"
-    assert promise.ikey_for_create == "f2"
+        promise = resonate.promises.get(id=id)
+        assert promise.id == id
+        assert promise.ikey_for_create == idempotency_key if idempotency_key else id
+        assert promise.param.headers == {}
+        assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
+        assert (
+            promise.tags
+            == {**updated_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        )
+
+    f.run("f7", *args, **kwargs)
+    assert cmd(resonate) == invoke("f7")
+
+    promise = resonate.promises.get(id="f7")
+    assert promise.id == "f7"
+    assert promise.ikey_for_create == "f7"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
-        == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+        == {**default_conv.tags, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
-    resonate.options(**opts).run("f3", func, *args, **kwargs)
-    assert cmd(resonate) == invoke_with_opts("f3")
+    f.options(**opts).run("f8", *args, **kwargs)
+    assert cmd(resonate) == invoke_with_opts("f8")
 
-    promise = resonate.promises.get(id="f3")
-    assert promise.id == "f3"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
-
-    resonate.options(**opts).run("f4", name, *args, **kwargs)
-    assert cmd(resonate) == invoke_with_opts("f4")
-
-    promise = resonate.promises.get(id="f4")
-    assert promise.id == "f4"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
+    promise = resonate.promises.get(id="f8")
+    assert promise.id == "f8"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f8"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
-        == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
-    )
-
-    f.run("f5", *args, **kwargs)
-    assert cmd(resonate) == invoke("f5")
-
-    promise = resonate.promises.get(id="f5")
-    assert promise.id == "f5"
-    assert promise.ikey_for_create == "f5"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert (
-        promise.tags
-        == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
-    )
-
-    f.options(**opts).run("f6", *args, **kwargs)
-    assert cmd(resonate) == invoke_with_opts("f6")
-
-    promise = resonate.promises.get(id="f6")
-    assert promise.id == "f6"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert (
-        promise.tags
-        == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        == {**updated_conv.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
     )
 
 
@@ -292,7 +319,7 @@ def test_rpc(
     retry_policy: RetryPolicy | None,
     target: str | None,
     tags: dict[str, str] | None,
-    timeout: int | None,
+    timeout: float | None,
     version: int | None,
     func: Callable,
     name: str,
@@ -322,114 +349,92 @@ def test_rpc(
     assert updated_opts.timeout == (timeout or default_opts.timeout)
     assert updated_opts.tags == (tags or default_opts.tags)
 
-    resonate.rpc("f1", func, *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f1")
+    for id, fn in [("f1", func), ("f2", name), ("f3", f)]:
+        resonate.rpc(id, fn, *args, **kwargs)
+        assert cmd(resonate) == Listen(id=id)
 
-    promise = resonate.promises.get(id="f1")
-    assert promise.id == "f1"
-    assert promise.ikey_for_create == "f1"
-    assert promise.param.headers == {}  # TODO(dfarr): this should be None
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {"resonate:invoke": default_opts.target, "resonate:parent": "f1", "resonate:root": "f1", "resonate:scope": "global"}
+        promise = resonate.promises.get(id=id)
+        assert promise.id == id
+        assert promise.ikey_for_create == id
+        assert promise.param.headers == {}
+        assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
+        assert (
+            promise.tags
+            == {**default_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {"resonate:invoke": default_opts.target, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+        )
 
-    resonate.rpc("f2", name, *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f2")
+    for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
+        resonate.options(**opts).rpc(id, fn, *args, **kwargs)
+        assert cmd(resonate) == Listen(id=id)
 
-    promise = resonate.promises.get(id="f2")
-    assert promise.id == "f2"
-    assert promise.ikey_for_create == "f2"
+        promise = resonate.promises.get(id=id)
+        assert promise.id == id
+        assert promise.ikey_for_create == idempotency_key if idempotency_key else id
+        assert promise.param.headers == {}
+        assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
+        assert (
+            promise.tags
+            == {**updated_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        )
+
+    f.rpc("f7", *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f7")
+
+    promise = resonate.promises.get(id="f7")
+    assert promise.id == "f7"
+    assert promise.ikey_for_create == "f7"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
-        == {**default_conv.tags, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f2", "resonate:root": "f2", "resonate:scope": "global"}
+        == {**default_conv.tags, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
+        == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
-    resonate.options(**opts).rpc("f3", func, *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f3")
+    f.options(**opts).rpc("f8", *args, **kwargs)
+    assert cmd(resonate) == Listen(id="f8")
 
-    promise = resonate.promises.get(id="f3")
-    assert promise.id == "f3"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f3"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert promise.tags == {**updated_opts.tags, "resonate:parent": "f3", "resonate:root": "f3", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
-
-    resonate.options(**opts).rpc("f4", name, *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f4")
-
-    promise = resonate.promises.get(id="f4")
-    assert promise.id == "f4"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f4"
+    promise = resonate.promises.get(id="f8")
+    assert promise.id == "f8"
+    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f8"
     assert promise.param.headers == {}
     assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
     assert (
         promise.tags
-        == {**updated_conv.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f4", "resonate:root": "f4", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
-    )
-
-    f.rpc("f5", *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f5")
-
-    promise = resonate.promises.get(id="f5")
-    assert promise.id == "f5"
-    assert promise.ikey_for_create == "f5"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert (
-        promise.tags
-        == {**default_conv.tags, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f5", "resonate:root": "f5", "resonate:scope": "global"}
-    )
-
-    f.options(**opts).rpc("f6", *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f6")
-
-    promise = resonate.promises.get(id="f6")
-    assert promise.id == "f6"
-    assert promise.ikey_for_create == idempotency_key if idempotency_key else "f6"
-    assert promise.param.headers == {}
-    assert promise.param.data == {"func": name, "args": args, "kwargs": kwargs, "version": version or 1}
-    assert (
-        promise.tags
-        == {**updated_conv.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f6", "resonate:root": "f6", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        == {**updated_conv.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
     )
 
 
 @pytest.mark.parametrize(
-    ("func", "kwargs"),
+    ("func", "kwargs", "match"),
     [
-        (foo, {"version": 2}),
-        (bar, {"version": 3}),
-        (baz, {"version": 1}),
-        ("foo", {"version": 2}),
-        ("bar", {"version": 3}),
-        ("baz", {"version": 1}),
+        (foo, {"version": 2}, "function foo version 2 not found in registry"),
+        (bar, {"version": 3}, "function bar version 3 not found in registry"),
+        (baz, {"version": 1}, "function baz version 1 not found in registry"),
+        (qux, {}, "function qux not found in registry"),
+        (lambda: None, {}, "function <lambda> not found in registry"),
+        ("foo", {"version": 2}, "function foo version 2 not found in registry"),
+        ("bar", {"version": 3}, "function bar version 3 not found in registry"),
+        ("baz", {"version": 1}, "function baz version 1 not found in registry"),
+        ("qux", {}, "function qux not found in registry"),
+        (Qux(), {}, "function unknown not found in registry"),
+        (Qux().foo, {}, "function foo not found in registry"),
+        (Qux().bar, {}, "function bar not found in registry"),
+        (Qux().baz, {}, "function baz not found in registry"),
     ],
 )
-def test_run_validations(registry: Registry, func: Callable | str, kwargs: dict) -> None:
+def test_run_and_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict, match: str) -> None:
     resonate = Resonate(registry=registry)
 
-    with pytest.raises(ResonateValidationError):
+    with pytest.raises(ValueError, match=match):
         resonate.options(**kwargs).run("f", func)
 
-
-@pytest.mark.parametrize(
-    ("func", "kwargs"),
-    [
-        (foo, {"version": 2}),
-        (bar, {"version": 3}),
-        (baz, {"version": 1}),
-    ],
-)
-def test_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict) -> None:
-    resonate = Resonate(registry=registry)
-
-    with pytest.raises(ResonateValidationError):
-        resonate.options(**kwargs).rpc("f", func)
+    if not isinstance(func, str):
+        with pytest.raises(ValueError, match=match):
+            resonate.options(**kwargs).rpc("f", func)
 
 
 @pytest.mark.parametrize("id", ["foo", "bar", "baz"])
@@ -588,13 +593,51 @@ def test_context_type_annotations() -> None:
         assert_type(ctx.detached(f, 1, 2), RFI[int])
 
 
+@pytest.mark.parametrize(
+    ("func", "match"),
+    [
+        (Qux(), "provided callable must be a function"),
+        (Qux().foo, "provided callable must be a function"),
+        (Qux().bar, "provided callable must be a function"),
+        (Qux().baz, "provided callable must be a function"),
+    ],
+)
+def test_context_lfx_validations(registry: Registry, func: Callable, match: str) -> None:
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+
+    with pytest.raises(ValueError, match=match):
+        ctx.lfi(func)
+    with pytest.raises(ValueError, match=match):
+        ctx.lfc(func)
+
+
+@pytest.mark.parametrize(
+    ("func", "match"),
+    [
+        (qux, "function qux not found in registry"),
+        (lambda: None, "function <lambda> not found in registry"),
+        (Qux(), "function unknown not found in registry"),
+        (Qux().foo, "function foo not found in registry"),
+        (Qux().bar, "function bar not found in registry"),
+        (Qux().baz, "function baz not found in registry"),
+    ],
+)
+def test_context_rfx_validations(registry: Registry, func: Callable, match: str) -> None:
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+
+    with pytest.raises(ValueError, match=match):
+        ctx.rfi(func)
+    with pytest.raises(ValueError, match=match):
+        ctx.rfc(func)
+
+
 @pytest.mark.parametrize("funcs", [(foo, bar), (bar, baz), (baz, foo)])
 @pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
 @pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
 @pytest.mark.parametrize("timeout", [1, 2, 3, 101, 102, 103, None])
 @pytest.mark.parametrize("version", [1, 2, 3])
-def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | None, target: str | None, tags: dict[str, str] | None, timeout: int | None, version: int) -> None:
+def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | None, target: str | None, tags: dict[str, str] | None, timeout: float | None, version: int) -> None:
     f1, f2 = funcs
 
     registry = Registry()
@@ -662,3 +705,21 @@ def test_options(funcs: tuple[Callable, Callable], retry_policy: RetryPolicy | N
             if tags:
                 assert cmd.conv.tags
                 assert all(k in cmd.conv.tags and cmd.conv.tags[k] == v for k, v in tags.items())
+
+
+@pytest.mark.parametrize("value", [-1, -2, -3])
+def test_options_validations(registry: Registry, value: int) -> None:
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+
+    with pytest.raises(ValueError, match="timeout must be greater than or equal to zero"):
+        ctx.lfi(foo, 1, 2).options(timeout=value)  # no version for lfi
+
+    with pytest.raises(ValueError, match="timeout must be greater than or equal to zero"):
+        ctx.lfc(foo, 1, 2).options(timeout=value)  # no version for lfc
+
+    for timeout, version in [(value, None), (None, value)]:
+        with pytest.raises(ValueError, match=r"(timeout|version) must be greater than or equal to zero"):
+            ctx.rfi(foo, 1, 2).options(timeout=timeout, version=version)
+
+        with pytest.raises(ValueError, match=r"(timeout|version) must be greater than or equal to zero"):
+            ctx.rfc(foo, 1, 2).options(timeout=timeout, version=version)

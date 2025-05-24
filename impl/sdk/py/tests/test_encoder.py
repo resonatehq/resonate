@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 
 from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
-from resonate.errors.errors import ResonateCanceledError, ResonateShutdownError, ResonateStoreError, ResonateTimedoutError, ResonateValidationError
+from resonate.errors.errors import ResonateCanceledError, ResonateShutdownError, ResonateStoreError, ResonateTimedoutError
 
 
 @pytest.mark.parametrize(
@@ -40,7 +40,6 @@ class CustomError(Exception):
         CustomError(10, "abc"),
         TypeError("HERE"),
         None,
-        ResonateValidationError("foo"),
         ResonateShutdownError("foo"),
         ResonateStoreError(1213, 121),
         ResonateCanceledError("12"),

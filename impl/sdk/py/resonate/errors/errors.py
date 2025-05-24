@@ -21,20 +21,7 @@ class ResonateError(Exception):
         return (self.__class__, (self.mesg, self.code, self.details))
 
 
-class ResonateValidationError(ResonateError):
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg, "10")
-
-    def __reduce__(self) -> str | tuple[Any, ...]:
-        return (self.__class__, (self.mesg,))
-
-
-class ResonateShutdownError(ResonateError):
-    def __init__(self, mesg: str) -> None:
-        super().__init__(mesg, "20")
-
-    def __reduce__(self) -> str | tuple[Any, ...]:
-        return (self.__class__, (self.mesg,))
+# Error codes 100-199
 
 
 class ResonateStoreError(ResonateError):
@@ -44,15 +31,18 @@ class ResonateStoreError(ResonateError):
         mesg = kwargs.pop("message", "Unknown store error")
         code = kwargs.pop("code", "0")
         details = kwargs.pop("details", [])
-        super().__init__(mesg, f"30.{code}", details)
+        super().__init__(mesg, f"100.{code}", details)
 
     def __reduce__(self) -> str | tuple[Any, ...]:
         return (self.__class__, (self._args, self._kwargs))
 
 
+# Error codes 200-299
+
+
 class ResonateCanceledError(ResonateError):
     def __init__(self, promise_id: str) -> None:
-        super().__init__(f"Promise {promise_id} canceled", "40")
+        super().__init__(f"Promise {promise_id} canceled", "200")
         self.promise_id = promise_id
 
     def __reduce__(self) -> str | tuple[Any, ...]:
@@ -61,9 +51,20 @@ class ResonateCanceledError(ResonateError):
 
 class ResonateTimedoutError(ResonateError):
     def __init__(self, promise_id: str, timeout: float) -> None:
-        super().__init__(f"Promise {promise_id} timedout at {timeout}", "41")
+        super().__init__(f"Promise {promise_id} timedout at {timeout}", "201")
         self.promise_id = promise_id
         self.timeout = timeout
 
     def __reduce__(self) -> str | tuple[Any, ...]:
         return (self.__class__, (self.promise_id, self.timeout))
+
+
+# Error codes 300-399
+
+
+class ResonateShutdownError(ResonateError):
+    def __init__(self, mesg: str) -> None:
+        super().__init__(mesg, "300")
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        return (self.__class__, (self.mesg,))

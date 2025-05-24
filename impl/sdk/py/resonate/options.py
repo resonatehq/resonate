@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING
 
-from resonate.errors import ResonateValidationError
 from resonate.retry_policies import Exponential, Never
 
 if TYPE_CHECKING:
@@ -27,11 +26,11 @@ class Options:
 
     def __post_init__(self) -> None:
         if not (self.version >= 0):
-            msg = "version must be greater or equal than 0"
-            raise ResonateValidationError(msg)
+            msg = "version must be greater than or equal to zero"
+            raise ValueError(msg)
         if not (self.timeout >= 0):
-            msg = "timeout must be greater or equal than 0"
-            raise ResonateValidationError(msg)
+            msg = "timeout must be greater than or equal to zero"
+            raise ValueError(msg)
 
     def merge(
         self,
@@ -46,13 +45,6 @@ class Options:
         timeout: float | None = None,
         version: int | None = None,
     ) -> Options:
-        if version and not (version >= 0):
-            msg = "version must be greater or equal than 0"
-            raise ResonateValidationError(msg)
-        if timeout and not (timeout >= 0):
-            msg = "timeout mut be greater or equal than 0"
-            raise ResonateValidationError(msg)
-
         return Options(
             durable=durable if durable is not None else self.durable,
             id=id if id is not None else self.id,

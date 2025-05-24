@@ -180,7 +180,7 @@ class Component:
         self.outgoing.append(msg)
         return msg
 
-    def send_req(self, addr: str, data: Any, callback: Callable[[Message], None], timeout: int = 0) -> Message:
+    def send_req(self, addr: str, data: Any, callback: Callable[[Message], None]) -> Message:
         """Send a request and register a callback for handling the response."""
         self.msgcount += 1
         self.awaiting[self.msgcount] = callback

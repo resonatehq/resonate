@@ -26,7 +26,7 @@ class Poller:
         id: str,
         host: str | None = None,
         port: str | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         encoder: Encoder[Any, str] | None = None,
     ) -> None:
         self._messages = queue.Queue[Mesg | None]()

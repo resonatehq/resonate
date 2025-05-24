@@ -34,7 +34,7 @@ class LFX[T]:
         non_retryable_exceptions: tuple[type[Exception], ...] | None = None,
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Self:
         # Note: we deliberately ignore the version for LFX
@@ -69,7 +69,7 @@ class RFX[T]:
         idempotency_key: str | Callable[[str], str] | None = None,
         target: str | None = None,
         tags: dict[str, str] | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Self:
         self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, target=target, tags=tags, timeout=timeout, version=version)

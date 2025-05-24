@@ -436,7 +436,7 @@ class Coro:
         promise: DurablePromise | None = None,
         result: Result | None = None,
         suspends: Node[State] | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
     ) -> Coro:
         if attempt:
             assert attempt == self.attempt + 1, "Attempt must be monotonically incremented."

@@ -38,7 +38,7 @@ class Sleep:
         idempotency_key: str | Callable[[str], str] | None = None,
         tags: dict[str, str] | None = None,
         target: str | None = None,
-        timeout: int | None = None,
+        timeout: float | None = None,
         version: int | None = None,
     ) -> Sleep:
         self.id = id or self.id

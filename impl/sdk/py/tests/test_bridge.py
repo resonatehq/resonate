@@ -146,7 +146,7 @@ def info2(ctx: Context, *args: Any, **kwargs: Any) -> Generator[Yieldable, Any, 
     yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "default"}, 1))
 
 
-def parent_bound(ctx: Context, child_timeout_rel: int, mode: Literal["rfc", "lfc"]) -> Generator[Yieldable, Any, None]:
+def parent_bound(ctx: Context, child_timeout_rel: float, mode: Literal["rfc", "lfc"]) -> Generator[Yieldable, Any, None]:
     match mode:
         case "lfc":
             yield ctx.lfc(child_bounded, ctx.info.timeout).options(timeout=child_timeout_rel)
@@ -160,14 +160,14 @@ def child_bounded(ctx: Context, parent_timeout_abs: float) -> None:
 
 def unbound_detached(
     ctx: Context,
-    parent_timeout_rel: int,
-    child_timeout_rel: int,
+    parent_timeout_rel: float,
+    child_timeout_rel: float,
 ) -> Generator[Yieldable, Any, None]:
     p = yield ctx.detached(child_unbounded, parent_timeout_rel, child_timeout_rel, ctx.info.timeout).options(timeout=child_timeout_rel)
     yield p
 
 
-def child_unbounded(ctx: Context, parent_timeout_rel: int, child_timeout_rel: int, parent_timeout_abs: float) -> None:
+def child_unbounded(ctx: Context, parent_timeout_rel: float, child_timeout_rel: float, parent_timeout_abs: float) -> None:
     if parent_timeout_rel < child_timeout_rel:
         assert ctx.info.timeout > parent_timeout_abs
     elif parent_timeout_rel > child_timeout_rel:
@@ -251,7 +251,7 @@ def test_fail_immediately_coro(resonate: Resonate) -> None:
 
 @pytest.mark.parametrize("mode", ["rfc", "lfc"])
 @pytest.mark.parametrize(("parent_timeout", "child_timeout"), [(1100, 10), (10, 1100), (10, 10), (10, 11), (11, 10)])
-def test_timeout_bound_by_parent(resonate: Resonate, mode: Literal["rfc", "lfc"], parent_timeout: int, child_timeout: int) -> None:
+def test_timeout_bound_by_parent(resonate: Resonate, mode: Literal["rfc", "lfc"], parent_timeout: float, child_timeout: float) -> None:
     resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", parent_bound, child_timeout, mode).result()
 
 
@@ -265,7 +265,7 @@ def test_timeout_bound_by_parent(resonate: Resonate, mode: Literal["rfc", "lfc"]
         (11, 10),
     ],
 )
-def test_timeout_unbound_by_parent_detached(resonate: Resonate, parent_timeout: int, child_timeout: int) -> None:
+def test_timeout_unbound_by_parent_detached(resonate: Resonate, parent_timeout: float, child_timeout: float) -> None:
     resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", unbound_detached, parent_timeout, child_timeout).result()
 
 

@@ -25,7 +25,7 @@ class RemoteStore:
         host: str | None = None,
         port: str | None = None,
         encoder: Encoder[Any, str | None] | None = None,
-        timeout: int | tuple[int, int] = 5,
+        timeout: float | tuple[float, float] = 5,
         retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._host = host or os.getenv("RESONATE_HOST_STORE", os.getenv("RESONATE_HOST", "http://localhost"))
