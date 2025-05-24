@@ -33,8 +33,7 @@ func (s *server) readSchedule(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.ReadSchedule != nil, "result must not be nil")
-	c.JSON(s.code(res.ReadSchedule.Status), res.ReadSchedule.Schedule)
+	c.JSON(s.code(res.Status), res.AsReadScheduleResponse().Schedule)
 }
 
 // Search
@@ -88,10 +87,10 @@ func (s *server) searchSchedules(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.SearchSchedules != nil, "result must not be nil")
-	c.JSON(s.code(res.SearchSchedules.Status), gin.H{
-		"schedules": res.SearchSchedules.Schedules,
-		"cursor":    res.SearchSchedules.Cursor,
+	searchSchedules := res.AsSearchSchedulesResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"schedules": searchSchedules.Schedules,
+		"cursor":    searchSchedules.Cursor,
 	})
 }
 
@@ -151,8 +150,7 @@ func (s *server) createSchedule(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.CreateSchedule != nil, "result must not be nil")
-	c.JSON(s.code(res.CreateSchedule.Status), res.CreateSchedule.Schedule)
+	c.JSON(s.code(res.Status), res.AsCreateScheduleResponse().Schedule)
 }
 
 // Delete
@@ -179,6 +177,6 @@ func (s *server) deleteSchedule(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.DeleteSchedule != nil, "result must not be nil")
-	c.JSON(s.code(res.DeleteSchedule.Status), nil)
+	_ = res.AsDeleteScheduleResponse() // Serves as a type assertion
+	c.JSON(s.code(res.Status), nil)
 }

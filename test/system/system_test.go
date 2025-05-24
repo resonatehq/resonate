@@ -63,7 +63,7 @@ func TestSystemLoop(t *testing.T) {
 			Callback: func(res *t_api.Response, err error) {
 				received <- 1
 				assert.Nil(t, err)
-				assert.Equal(t, data, res.Echo.Data)
+				assert.Equal(t, data, res.AsEchoResponse().Data)
 			},
 		})
 	}

@@ -23,9 +23,8 @@ func (s *server) ReadSchedule(c context.Context, r *pb.ReadScheduleRequest) (*pb
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.ReadSchedule != nil, "result must not be nil")
 	return &pb.ReadScheduleResponse{
-		Schedule: protoSchedule(res.ReadSchedule.Schedule),
+		Schedule: protoSchedule(res.AsReadScheduleResponse().Schedule),
 	}, nil
 }
 
@@ -42,17 +41,16 @@ func (s *server) SearchSchedules(c context.Context, r *pb.SearchSchedulesRequest
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.SearchSchedules != nil, "result must not be nil")
-
-	schedules := make([]*pb.Schedule, len(res.SearchSchedules.Schedules))
-	for i, schedule := range res.SearchSchedules.Schedules {
+	searchSchedules := res.AsSearchSchedulesResponse()
+	schedules := make([]*pb.Schedule, len(searchSchedules.Schedules))
+	for i, schedule := range searchSchedules.Schedules {
 		schedules[i] = protoSchedule(schedule)
 	}
 
 	var cursor string
-	if res.SearchSchedules.Cursor != nil {
+	if searchSchedules.Cursor != nil {
 		var err error
-		cursor, err = res.SearchSchedules.Cursor.Encode()
+		cursor, err = searchSchedules.Cursor.Encode()
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -101,9 +99,8 @@ func (s *server) CreateSchedule(c context.Context, r *pb.CreateScheduleRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreateSchedule != nil, "result must not be nil")
 	return &pb.CreatedScheduleResponse{
-		Schedule: protoSchedule(res.CreateSchedule.Schedule),
+		Schedule: protoSchedule(res.AsCreateScheduleResponse().Schedule),
 	}, nil
 }
 
@@ -117,7 +114,7 @@ func (s *server) DeleteSchedule(c context.Context, r *pb.DeleteScheduleRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.DeleteSchedule != nil, "result must not be nil")
+	_ = res.AsDeleteScheduleResponse() // Serves as type assertion
 	return &pb.DeleteScheduleResponse{}, nil
 }
 

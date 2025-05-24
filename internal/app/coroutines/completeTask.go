@@ -115,11 +115,10 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	util.Assert(status != t_api.StatusCreated || t != nil, "task must be non nil if status created")
 
 	return &t_api.Response{
-		Kind: t_api.CompleteTask,
-		Tags: r.Metadata,
-		CompleteTask: &t_api.CompleteTaskResponse{
-			Status: status,
-			Task:   t,
+		Status:   status,
+		Metadata: r.Metadata,
+		Payload: &t_api.CompleteTaskResponse{
+			Task: t,
 		},
 	}, nil
 }

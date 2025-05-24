@@ -38,9 +38,9 @@ func (v *Validator) AddValidator(kind t_api.Kind, validator ResponseValidator) {
 }
 
 func (v *Validator) Validate(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	f, ok := v.validators[res.Kind]
+	f, ok := v.validators[res.Kind()]
 	if !ok {
-		return model, fmt.Errorf("unexpected response kind '%s'", res.Kind)
+		return model, fmt.Errorf("unexpected response kind '%s'", res.Kind())
 	}
 
 	return f(model, reqTime, resTime, req, res)
@@ -52,22 +52,23 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 	readPromiseReq := req.Payload.(*t_api.ReadPromiseRequest)
 	p := model.promises.get(readPromiseReq.Id)
 
-	switch res.ReadPromise.Status {
+	switch res.Status {
 	case t_api.StatusOK:
+		resPromise := res.Payload.(*t_api.ReadPromiseResponse).Promise
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", readPromiseReq.Id)
 		}
-		if res.ReadPromise.Promise.State == promise.Pending && reqTime > p.Timeout {
+		if resPromise.State == promise.Pending && reqTime > p.Timeout {
 			return model, fmt.Errorf("promise '%s' should be timedout", p.Id)
 		}
-		if p.State != res.ReadPromise.Promise.State {
+		if p.State != resPromise.State {
 			// the only way this can happen is if the promise timedout
-			if res.ReadPromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if resPromise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
-				model.promises.set(readPromiseReq.Id, res.ReadPromise.Promise)
+				model.promises.set(readPromiseReq.Id, resPromise)
 				completeRelatedTasks(model, p.Id, reqTime)
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.ReadPromise.Promise.State, readPromiseReq.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, readPromiseReq.Id)
 			}
 		}
 		return model, nil
@@ -77,17 +78,18 @@ func (v *Validator) ValidateReadPromise(model *Model, reqTime int64, resTime int
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.ReadPromise.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	searchPromisesReq := req.Payload.(*t_api.SearchPromisesRequest)
 
-	switch res.SearchPromises.Status {
+	switch res.Status {
 	case t_api.StatusOK:
 		regex := v.regexes[searchPromisesReq.Id]
+		promises := res.Payload.(*t_api.SearchPromisesResponse).Promises
 
-		for _, p := range res.SearchPromises.Promises {
+		for _, p := range promises {
 			// ignore scheduled promises
 			if _, ok := p.Tags["resonate:schedule"]; ok {
 				continue
@@ -121,40 +123,40 @@ func (v *Validator) ValidateSearchPromises(model *Model, reqTime int64, resTime 
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createPromiseReq := req.Payload.(*t_api.CreatePromiseRequest)
-	return v.validateCreatePromise(model, reqTime, resTime, createPromiseReq, res.CreatePromise)
+	return v.validateCreatePromise(model, reqTime, resTime, createPromiseReq, res.Status, res.Payload.(*t_api.CreatePromiseResponse))
 }
 
 func (v *Validator) ValidateCreatePromiseAndTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createPromiseAndTaskReq := req.Payload.(*t_api.CreatePromiseAndTaskRequest)
+	createPromiseAndTaskRes := res.Payload.(*t_api.CreatePromiseAndTaskResponse)
 
-	switch res.CreatePromiseAndTask.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
-		if model.tasks.get(res.CreatePromiseAndTask.Task.Id) != nil {
-			return model, fmt.Errorf("task '%s' exists", res.CreatePromiseAndTask.Task.Id)
+		if model.tasks.get(createPromiseAndTaskRes.Task.Id) != nil {
+			return model, fmt.Errorf("task '%s' exists", createPromiseAndTaskRes.Task.Id)
 		}
 
 		model = model.Copy()
-		model.tasks.set(res.CreatePromiseAndTask.Task.Id, res.CreatePromiseAndTask.Task)
+		model.tasks.set(createPromiseAndTaskRes.Task.Id, createPromiseAndTaskRes.Task)
 	}
 
 	promiseRes := &t_api.CreatePromiseResponse{
-		Status:  res.CreatePromiseAndTask.Status,
-		Promise: res.CreatePromiseAndTask.Promise,
+		Promise: createPromiseAndTaskRes.Promise,
 	}
 
-	return v.validateCreatePromise(model, reqTime, resTime, createPromiseAndTaskReq.Promise, promiseRes)
+	return v.validateCreatePromise(model, reqTime, resTime, createPromiseAndTaskReq.Promise, res.Status, promiseRes)
 }
 
-func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.CreatePromiseRequest, res *t_api.CreatePromiseResponse) (*Model, error) {
+func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime int64, req *t_api.CreatePromiseRequest, status t_api.StatusCode, res *t_api.CreatePromiseResponse) (*Model, error) {
 	p := model.promises.get(req.Id)
 
-	switch res.Status {
+	switch status {
 	case t_api.StatusCreated:
 		if p != nil {
 			return model, fmt.Errorf("promise '%s' exists", req.Id)
@@ -194,56 +196,57 @@ func (v *Validator) validateCreatePromise(model *Model, reqTime int64, resTime i
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", status)
 	}
 }
 
 func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	completePromiseReq := req.Payload.(*t_api.CompletePromiseRequest)
 	p := model.promises.get(completePromiseReq.Id)
+	resPromise := res.Payload.(*t_api.CompletePromiseResponse).Promise
 
-	switch res.CompletePromise.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
 		}
-		if p.State != promise.Pending || res.CompletePromise.Promise.State == promise.Pending || res.CompletePromise.Promise.State == promise.Timedout {
-			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.CompletePromise.Promise.State, completePromiseReq.Id)
+		if p.State != promise.Pending || resPromise.State == promise.Pending || resPromise.State == promise.Timedout {
+			return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Resolved && res.CompletePromise.Promise.State != promise.Resolved {
-			return model, fmt.Errorf("unexpected state '%s' after resolve for promise '%s'", res.CompletePromise.Promise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Resolved && resPromise.State != promise.Resolved {
+			return model, fmt.Errorf("unexpected state '%s' after resolve for promise '%s'", resPromise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Rejected && res.CompletePromise.Promise.State != promise.Rejected {
-			return model, fmt.Errorf("unexpected state '%s' after reject for promise '%s'", res.CompletePromise.Promise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Rejected && resPromise.State != promise.Rejected {
+			return model, fmt.Errorf("unexpected state '%s' after reject for promise '%s'", resPromise.State, completePromiseReq.Id)
 		}
-		if completePromiseReq.State == promise.Canceled && res.CompletePromise.Promise.State != promise.Canceled {
-			return model, fmt.Errorf("unexpected state '%s' after cancel for promise '%s'", res.CompletePromise.Promise.State, completePromiseReq.Id)
+		if completePromiseReq.State == promise.Canceled && resPromise.State != promise.Canceled {
+			return model, fmt.Errorf("unexpected state '%s' after cancel for promise '%s'", resPromise.State, completePromiseReq.Id)
 		}
 
 		// update model state
 		model = model.Copy()
-		model.promises.set(completePromiseReq.Id, res.CompletePromise.Promise)
+		model.promises.set(completePromiseReq.Id, resPromise)
 		completeRelatedTasks(model, p.Id, reqTime)
 		return model, nil
 	case t_api.StatusOK:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", completePromiseReq.Id)
 		}
-		if res.CompletePromise.Promise.State == promise.Pending {
-			return model, fmt.Errorf("unexpected state '%s' after complete for promise '%s'", res.CompletePromise.Promise.State, completePromiseReq.Id)
+		if resPromise.State == promise.Pending {
+			return model, fmt.Errorf("unexpected state '%s' after complete for promise '%s'", resPromise.State, completePromiseReq.Id)
 		}
-		if p.State != res.CompletePromise.Promise.State {
+		if p.State != resPromise.State {
 			// the only way this can happen is if the promise timedout
-			if res.CompletePromise.Promise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
+			if resPromise.State == promise.GetTimedoutState(p) && resTime >= p.Timeout {
 				model = model.Copy()
-				model.promises.set(completePromiseReq.Id, res.CompletePromise.Promise)
+				model.promises.set(completePromiseReq.Id, resPromise)
 				completeRelatedTasks(model, p.Id, reqTime)
 			} else {
-				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, res.CompletePromise.Promise.State, completePromiseReq.Id)
+				return model, fmt.Errorf("invalid state transition (%s -> %s) for promise '%s'", p.State, resPromise.State, completePromiseReq.Id)
 			}
 		}
-		if !p.IdempotencyKeyForComplete.Match(res.CompletePromise.Promise.IdempotencyKeyForComplete) && (completePromiseReq.Strict || res.CompletePromise.Promise.State != promise.Timedout) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, res.CompletePromise.Promise.IdempotencyKeyForCreate, completePromiseReq.Id)
+		if !p.IdempotencyKeyForComplete.Match(resPromise.IdempotencyKeyForComplete) && (completePromiseReq.Strict || resPromise.State != promise.Timedout) {
+			return model, fmt.Errorf("ikey mismatch (%s, %s) for promise '%s'", p.IdempotencyKeyForCreate, resPromise.IdempotencyKeyForCreate, completePromiseReq.Id)
 		} else if completePromiseReq.Strict && p.State != completePromiseReq.State {
 			return model, fmt.Errorf("unexpected prior state '%s' when strict true for promise '%s'", p.State, completePromiseReq.Id)
 		}
@@ -286,15 +289,16 @@ func (v *Validator) ValidateCompletePromise(model *Model, reqTime int64, resTime
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.CompletePromise.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createCallbackReq := req.Payload.(*t_api.CreateCallbackRequest)
+	createCallbackRes := res.Payload.(*t_api.CreateCallbackResponse)
 	p := model.promises.get(createCallbackReq.PromiseId)
 
-	switch res.CreateCallback.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if p == nil {
 			return model, fmt.Errorf("promise '%s' does not exist", createCallbackReq.PromiseId)
@@ -304,12 +308,12 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 			return model, fmt.Errorf("promise '%s' must be pending", createCallbackReq.PromiseId)
 		}
 
-		if model.callbacks.get(res.CreateCallback.Callback.Id) != nil {
-			return model, fmt.Errorf("callback '%s' exists", res.CreateCallback.Callback.Id)
+		if model.callbacks.get(createCallbackRes.Callback.Id) != nil {
+			return model, fmt.Errorf("callback '%s' exists", createCallbackRes.Callback.Id)
 		}
 
 		model = model.Copy()
-		model.callbacks.set(res.CreateCallback.Callback.Id, res.CreateCallback.Callback)
+		model.callbacks.set(createCallbackRes.Callback.Id, createCallbackRes.Callback)
 		return model, nil
 
 	case t_api.StatusOK:
@@ -327,7 +331,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		// if the promise is timedout we can handle it as if it was completed
 		if resTime >= p.Timeout {
 			model = model.Copy()
-			model.promises.set(p.Id, res.CreateCallback.Promise)
+			model.promises.set(p.Id, createCallbackRes.Promise)
 			completeRelatedTasks(model, p.Id, reqTime)
 			return model, nil
 		}
@@ -346,7 +350,7 @@ func (v *Validator) ValidateCreateCallback(model *Model, reqTime int64, resTime 
 		return model, nil
 
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.CreateCallback.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
@@ -354,7 +358,7 @@ func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime in
 	readScheduleReq := req.Payload.(*t_api.ReadScheduleRequest)
 	s := model.schedules.get(readScheduleReq.Id)
 
-	switch res.ReadSchedule.Status {
+	switch res.Status {
 	case t_api.StatusOK:
 		if s == nil {
 			return model, fmt.Errorf("schedule '%s' does not exist", readScheduleReq.Id)
@@ -366,18 +370,19 @@ func (v *Validator) ValidateReadSchedule(model *Model, reqTime int64, resTime in
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.ReadSchedule.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	searchSchedulesReq := req.Payload.(*t_api.SearchSchedulesRequest)
+	schedules := res.Payload.(*t_api.SearchSchedulesResponse).Schedules
 
-	switch res.SearchSchedules.Status {
+	switch res.Status {
 	case t_api.StatusOK:
 		regex := v.regexes[searchSchedulesReq.Id]
 
-		for _, s := range res.SearchSchedules.Schedules {
+		for _, s := range schedules {
 			if model.schedules.get(s.Id) == nil {
 				return model, fmt.Errorf("schedule '%s' does not exist", s.Id)
 			}
@@ -395,29 +400,30 @@ func (v *Validator) ValidateSearchSchedules(model *Model, reqTime int64, resTime
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.SearchPromises.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateCreateSchedule(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	createScheduleReq := req.Payload.(*t_api.CreateScheduleRequest)
+	createScheduleRes := res.Payload.(*t_api.CreateScheduleResponse)
 	s := model.schedules.get(createScheduleReq.Id)
 
-	switch res.CreateSchedule.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if s != nil {
 			return model, fmt.Errorf("schedule '%s' exists", createScheduleReq.Id)
 		}
 
 		model = model.Copy()
-		model.schedules.set(createScheduleReq.Id, res.CreateSchedule.Schedule)
+		model.schedules.set(createScheduleReq.Id, createScheduleRes.Schedule)
 		return model, nil
 	case t_api.StatusOK:
 		if s == nil {
 			return model, fmt.Errorf("schedule '%s' does not exist", createScheduleReq.Id)
 		}
-		if !s.IdempotencyKey.Match(res.CreateSchedule.Schedule.IdempotencyKey) {
-			return model, fmt.Errorf("ikey mismatch (%s, %s) for schedule '%s'", s.IdempotencyKey, res.CreateSchedule.Schedule.IdempotencyKey, createScheduleReq.IdempotencyKey)
+		if !s.IdempotencyKey.Match(createScheduleRes.Schedule.IdempotencyKey) {
+			return model, fmt.Errorf("ikey mismatch (%s, %s) for schedule '%s'", s.IdempotencyKey, createScheduleRes.Schedule.IdempotencyKey, createScheduleReq.IdempotencyKey)
 		}
 		return model, nil
 	case t_api.StatusScheduleAlreadyExists:
@@ -426,7 +432,7 @@ func (v *Validator) ValidateCreateSchedule(model *Model, reqTime int64, resTime 
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.CreateSchedule.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
@@ -434,7 +440,7 @@ func (v *Validator) ValidateDeleteSchedule(model *Model, reqTime int64, resTime 
 	deleteScheduleReq := req.Payload.(*t_api.DeleteScheduleRequest)
 	s := model.schedules.get(deleteScheduleReq.Id)
 
-	switch res.DeleteSchedule.Status {
+	switch res.Status {
 	case t_api.StatusNoContent:
 		if s == nil {
 			return model, fmt.Errorf("schedule '%s' does not exist", deleteScheduleReq.Id)
@@ -449,22 +455,23 @@ func (v *Validator) ValidateDeleteSchedule(model *Model, reqTime int64, resTime 
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected resonse status '%d'", res.DeleteSchedule.Status)
+		return model, fmt.Errorf("unexpected resonse status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateAcquireLock(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	acquireLockReq := req.Payload.(*t_api.AcquireLockRequest)
+	acquireLockRes := res.Payload.(*t_api.AcquireLockResponse)
 	l := model.locks.get(acquireLockReq.ResourceId)
 
-	switch res.AcquireLock.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if l != nil && l.ExecutionId != acquireLockReq.ExecutionId && l.ExpiresAt >= resTime {
 			return model, fmt.Errorf("lock '%s' exists", acquireLockReq.ResourceId)
 		}
 
 		model = model.Copy()
-		model.locks.set(acquireLockReq.ResourceId, res.AcquireLock.Lock)
+		model.locks.set(acquireLockReq.ResourceId, acquireLockRes.Lock)
 		return model, nil
 	case t_api.StatusLockAlreadyAcquired:
 		if l == nil {
@@ -476,7 +483,7 @@ func (v *Validator) ValidateAcquireLock(model *Model, reqTime int64, resTime int
 
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.AcquireLock.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
@@ -484,7 +491,7 @@ func (v *Validator) ValidateReleaseLock(model *Model, reqTime int64, resTime int
 	releaseLockReq := req.Payload.(*t_api.ReleaseLockRequest)
 	l := model.locks.get(releaseLockReq.ResourceId)
 
-	switch res.ReleaseLock.Status {
+	switch res.Status {
 	case t_api.StatusNoContent:
 		if l == nil {
 			return model, fmt.Errorf("lock '%s' does not exist", releaseLockReq.ResourceId)
@@ -502,17 +509,17 @@ func (v *Validator) ValidateReleaseLock(model *Model, reqTime int64, resTime int
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.ReleaseLock.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateHeartbeatLocks(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
-	switch res.HeartbeatLocks.Status {
+	switch res.Status {
 	case t_api.StatusOK:
 		// TODO(avillega): Disabling heartbeat locks validation until we find a better way to partition them
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatLocks.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
@@ -520,9 +527,10 @@ func (v *Validator) ValidateHeartbeatLocks(model *Model, reqTime int64, resTime 
 
 func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	claimTaskReq := req.Payload.(*t_api.ClaimTaskRequest)
+	claimTaskRes := res.Payload.(*t_api.ClaimTaskResponse)
 	t := model.tasks.get(claimTaskReq.Id)
 
-	switch res.ClaimTask.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", claimTaskReq.Id)
@@ -535,7 +543,7 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		}
 
 		model = model.Copy()
-		model.tasks.set(claimTaskReq.Id, res.ClaimTask.Task)
+		model.tasks.set(claimTaskReq.Id, claimTaskRes.Task)
 		return model, nil
 	case t_api.StatusTaskAlreadyClaimed:
 		if t == nil {
@@ -592,15 +600,16 @@ func (v *Validator) ValidateClaimTask(model *Model, reqTime int64, resTime int64
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.ClaimTask.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	completeTaskReq := req.Payload.(*t_api.CompleteTaskRequest)
+	completeTaskRes := res.Payload.(*t_api.CompleteTaskResponse)
 	t := model.tasks.get(completeTaskReq.Id)
 
-	switch res.CompleteTask.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", completeTaskReq.Id)
@@ -613,7 +622,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		}
 
 		model = model.Copy()
-		model.tasks.set(completeTaskReq.Id, res.CompleteTask.Task)
+		model.tasks.set(completeTaskReq.Id, completeTaskRes.Task)
 		return model, nil
 	case t_api.StatusOK:
 		if t == nil {
@@ -667,7 +676,7 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.CompleteTask.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
@@ -675,7 +684,7 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 	dropTaskReq := req.Payload.(*t_api.DropTaskRequest)
 	t := model.tasks.get(dropTaskReq.Id)
 
-	switch res.DropTask.Status {
+	switch res.Status {
 	case t_api.StatusCreated:
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", dropTaskReq.Id)
@@ -726,14 +735,15 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 		}
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.DropTask.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 
 func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime int64, req *t_api.Request, res *t_api.Response) (*Model, error) {
 	heartbeatTasksReq := req.Payload.(*t_api.HeartbeatTasksRequest)
+	heartbeatTasksRes := res.Payload.(*t_api.HeartbeatTasksResponse)
 
-	switch res.HeartbeatTasks.Status {
+	switch res.Status {
 	case t_api.StatusOK:
 		var tasks []*task.Task
 		var lb, ub int64
@@ -749,8 +759,8 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 			}
 		}
 
-		if res.HeartbeatTasks.TasksAffected < lb || res.HeartbeatTasks.TasksAffected > ub {
-			return model, fmt.Errorf("tasks affected (%d) must be between [%d, %d] for pid '%s'", res.HeartbeatTasks.TasksAffected, lb, ub, heartbeatTasksReq.ProcessId)
+		if heartbeatTasksRes.TasksAffected < lb || heartbeatTasksRes.TasksAffected > ub {
+			return model, fmt.Errorf("tasks affected (%d) must be between [%d, %d] for pid '%s'", heartbeatTasksRes.TasksAffected, lb, ub, heartbeatTasksReq.ProcessId)
 		}
 
 		for i, t := range tasks {
@@ -767,7 +777,7 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 
 		return model, nil
 	default:
-		return model, fmt.Errorf("unexpected response status '%d'", res.HeartbeatTasks.Status)
+		return model, fmt.Errorf("unexpected response status '%d'", res.Status)
 	}
 }
 

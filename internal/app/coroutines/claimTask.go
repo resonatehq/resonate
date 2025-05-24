@@ -179,10 +179,9 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	util.Assert(status != t_api.StatusCreated || t != nil, "task must be non nil if status created")
 
 	return &t_api.Response{
-		Kind: t_api.ClaimTask,
-		Tags: r.Metadata,
-		ClaimTask: &t_api.ClaimTaskResponse{
-			Status:          status,
+		Status:   status,
+		Metadata: r.Metadata,
+		Payload: &t_api.ClaimTaskResponse{
 			Task:            t,
 			RootPromise:     rp,
 			LeafPromise:     lp,

@@ -40,11 +40,9 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 	if result.RowsReturned == 0 {
 		res = &t_api.Response{
-			Kind: t_api.ReadSchedule,
-			Tags: r.Metadata,
-			ReadSchedule: &t_api.ReadScheduleResponse{
-				Status: t_api.StatusScheduleNotFound,
-			},
+			Status:   t_api.StatusScheduleNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.ReadScheduleResponse{},
 		}
 	} else {
 		s, err := result.Records[0].Schedule()
@@ -54,10 +52,9 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		}
 
 		res = &t_api.Response{
-			Kind: t_api.ReadSchedule,
-			Tags: r.Metadata,
-			ReadSchedule: &t_api.ReadScheduleResponse{
-				Status:   t_api.StatusOK,
+			Status:   t_api.StatusOK,
+			Metadata: r.Metadata,
+			Payload: &t_api.ReadScheduleResponse{
 				Schedule: s,
 			},
 		}

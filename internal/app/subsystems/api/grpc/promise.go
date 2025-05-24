@@ -27,9 +27,8 @@ func (s *server) ReadPromise(c context.Context, r *pb.ReadPromiseRequest) (*pb.R
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.ReadPromise != nil, "result must not be nil")
 	return &pb.ReadPromiseResponse{
-		Promise: protoPromise(res.ReadPromise.Promise),
+		Promise: protoPromise(res.AsReadPromiseResponse().Promise),
 	}, nil
 }
 
@@ -44,17 +43,16 @@ func (s *server) SearchPromises(c context.Context, r *pb.SearchPromisesRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.SearchPromises != nil, "result must not be nil")
-
-	promises := make([]*pb.Promise, len(res.SearchPromises.Promises))
-	for i, promise := range res.SearchPromises.Promises {
+	searchPromises := res.AsSearchPromisesResponse()
+	promises := make([]*pb.Promise, len(searchPromises.Promises))
+	for i, promise := range searchPromises.Promises {
 		promises[i] = protoPromise(promise)
 	}
 
 	var cursor string
-	if res.SearchPromises.Cursor != nil {
+	if searchPromises.Cursor != nil {
 		var err error
-		cursor, err = res.SearchPromises.Cursor.Encode()
+		cursor, err = searchPromises.Cursor.Encode()
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -96,10 +94,9 @@ func (s *server) CreatePromise(c context.Context, r *pb.CreatePromiseRequest) (*
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreatePromise != nil, "result must not be nil")
 	return &pb.CreatePromiseResponse{
-		Noop:    res.CreatePromise.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CreatePromise.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.AsCreatePromiseResponse().Promise),
 	}, nil
 }
 
@@ -152,10 +149,9 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreatePromiseAndTask != nil, "result must not be nil")
 	return &pb.CreatePromiseAndTaskResponse{
-		Noop:    res.CreatePromiseAndTask.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CreatePromiseAndTask.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.AsCreatePromiseAndTaskResponse().Promise),
 	}, nil
 }
 
@@ -188,10 +184,9 @@ func (s *server) ResolvePromise(c context.Context, r *pb.ResolvePromiseRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CompletePromise != nil, "result must not be nil")
 	return &pb.ResolvePromiseResponse{
-		Noop:    res.CompletePromise.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CompletePromise.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.AsCompletePromiseResponse().Promise),
 	}, nil
 }
 
@@ -224,10 +219,9 @@ func (s *server) RejectPromise(c context.Context, r *pb.RejectPromiseRequest) (*
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CompletePromise != nil, "result must not be nil")
 	return &pb.RejectPromiseResponse{
-		Noop:    res.CompletePromise.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CompletePromise.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.AsCompletePromiseResponse().Promise),
 	}, nil
 }
 
@@ -260,10 +254,9 @@ func (s *server) CancelPromise(c context.Context, r *pb.CancelPromiseRequest) (*
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CompletePromise != nil, "result must not be nil")
 	return &pb.CancelPromiseResponse{
-		Noop:    res.CompletePromise.Status == t_api.StatusOK,
-		Promise: protoPromise(res.CompletePromise.Promise),
+		Noop:    res.Status == t_api.StatusOK,
+		Promise: protoPromise(res.AsCompletePromiseResponse().Promise),
 	}, nil
 }
 
@@ -286,11 +279,11 @@ func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreateCallback != nil, "result must not be nil")
+	createCallback := res.AsCreateCallbackResponse()
 	return &pb.CreateCallbackResponse{
-		Noop:     res.CreateCallback.Status == t_api.StatusOK,
-		Callback: protoCallback(res.CreateCallback.Callback),
-		Promise:  protoPromise(res.CreateCallback.Promise),
+		Noop:     res.Status == t_api.StatusOK,
+		Callback: protoCallback(createCallback.Callback),
+		Promise:  protoPromise(createCallback.Promise),
 	}, nil
 }
 
@@ -313,11 +306,11 @@ func (s *server) CreateSubscription(c context.Context, r *pb.CreateSubscriptionR
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CreateCallback != nil, "result must not be nil")
+	createCallback := res.AsCreateCallbackResponse()
 	return &pb.CreateSubscriptionResponse{
-		Noop:     res.CreateCallback.Status == t_api.StatusOK,
-		Callback: protoCallback(res.CreateCallback.Callback),
-		Promise:  protoPromise(res.CreateCallback.Promise),
+		Noop:     res.Status == t_api.StatusOK,
+		Callback: protoCallback(createCallback.Callback),
+		Promise:  protoPromise(createCallback.Promise),
 	}, nil
 }
 

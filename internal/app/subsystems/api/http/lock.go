@@ -4,7 +4,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 // Acquire
@@ -48,8 +47,8 @@ func (s *server) acquireLock(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.AcquireLock != nil, "result must not be nil")
-	c.JSON(s.code(res.AcquireLock.Status), res.AcquireLock.Lock)
+	acquireLock := res.AsAcquireLockResponse()
+	c.JSON(s.code(res.Status), acquireLock.Lock)
 }
 
 // Release
@@ -89,8 +88,8 @@ func (s *server) releaseLock(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.ReleaseLock != nil, "result must not be nil")
-	c.JSON(s.code(res.ReleaseLock.Status), nil)
+	res.AsReleaseLockResponse() // Serves as a type assertion
+	c.JSON(s.code(res.Status), nil)
 }
 
 // Heartbeat
@@ -128,8 +127,8 @@ func (s *server) heartbeatLocks(c *gin.Context) {
 		return
 	}
 
-	util.Assert(res.HeartbeatLocks != nil, "result must not be nil")
-	c.JSON(s.code(res.HeartbeatLocks.Status), gin.H{
-		"locksAffected": res.HeartbeatLocks.LocksAffected,
+	heartbeatLocks := res.AsHeartbeatLocksResponse()
+	c.JSON(s.code(res.Status), gin.H{
+		"locksAffected": heartbeatLocks.LocksAffected,
 	})
 }

@@ -27,35 +27,35 @@ func (s *server) ClaimTask(c context.Context, r *pb.ClaimTaskRequest) (*pb.Claim
 		return nil, status.Error(codes.InvalidArgument, "The field ttl must be greater than or equal to zero")
 	}
 
-	util.Assert(res.ClaimTask != nil, "result must not be nil")
-	util.Assert(res.ClaimTask.Status != t_api.StatusCreated || (res.ClaimTask.Task != nil && res.ClaimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
+	claimTask := res.AsClaimTaskResponse()
+	util.Assert(res.Status != t_api.StatusCreated || (claimTask.Task != nil && claimTask.Task.Mesg != nil), "task and mesg must not be nil if created")
 
 	var mesg *pb.Mesg
-	if res.ClaimTask.Status == t_api.StatusCreated {
+	if res.Status == t_api.StatusCreated {
 		promises := map[string]*pb.MesgPromise{
 			"root": {
-				Id:   res.ClaimTask.Task.Mesg.Root,
-				Href: res.ClaimTask.RootPromiseHref,
-				Data: protoPromise(res.ClaimTask.RootPromise),
+				Id:   claimTask.Task.Mesg.Root,
+				Href: claimTask.RootPromiseHref,
+				Data: protoPromise(claimTask.RootPromise),
 			},
 		}
 
-		if res.ClaimTask.Task.Mesg.Type == message.Resume {
+		if claimTask.Task.Mesg.Type == message.Resume {
 			promises["leaf"] = &pb.MesgPromise{
-				Id:   res.ClaimTask.Task.Mesg.Leaf,
-				Href: res.ClaimTask.LeafPromiseHref,
-				Data: protoPromise(res.ClaimTask.LeafPromise),
+				Id:   claimTask.Task.Mesg.Leaf,
+				Href: claimTask.LeafPromiseHref,
+				Data: protoPromise(claimTask.LeafPromise),
 			}
 		}
 
 		mesg = &pb.Mesg{
-			Type:     string(res.ClaimTask.Task.Mesg.Type),
+			Type:     string(claimTask.Task.Mesg.Type),
 			Promises: promises,
 		}
 	}
 
 	return &pb.ClaimTaskResponse{
-		Claimed: res.ClaimTask.Status == t_api.StatusCreated,
+		Claimed: res.Status == t_api.StatusCreated,
 		Mesg:    mesg,
 	}, nil
 }
@@ -71,9 +71,9 @@ func (s *server) CompleteTask(c context.Context, r *pb.CompleteTaskRequest) (*pb
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.CompleteTask != nil, "result must not be nil")
+	_ = res.AsCompleteTaskResponse() // Serves as a type assertion
 	return &pb.CompleteTaskResponse{
-		Completed: res.CompleteTask.Status == t_api.StatusCreated,
+		Completed: res.Status == t_api.StatusCreated,
 	}, nil
 }
 
@@ -88,9 +88,9 @@ func (s *server) DropTask(c context.Context, r *pb.DropTaskRequest) (*pb.DropTas
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.DropTask != nil, "result must not be nil")
+	_ = res.AsDropTaskResponse() // Serves as a type assertion
 	return &pb.DropTaskResponse{
-		Dropped: res.DropTask.Status == t_api.StatusCreated,
+		Dropped: res.Status == t_api.StatusCreated,
 	}, nil
 }
 
@@ -104,8 +104,7 @@ func (s *server) HeartbeatTasks(c context.Context, r *pb.HeartbeatTasksRequest) 
 		return nil, status.Error(s.code(err.Code), err.Error())
 	}
 
-	util.Assert(res.HeartbeatTasks != nil, "result must not be nil")
 	return &pb.HeartbeatTasksResponse{
-		TasksAffected: res.HeartbeatTasks.TasksAffected,
+		TasksAffected: res.AsHeartbeatTasksResponse().TasksAffected,
 	}, nil
 }

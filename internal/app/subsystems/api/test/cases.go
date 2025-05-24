@@ -57,9 +57,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ReadPromise,
-			ReadPromise: &t_api.ReadPromiseResponse{
-				Status: t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.ReadPromiseResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Pending,
@@ -92,9 +91,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ReadPromise,
-			ReadPromise: &t_api.ReadPromiseResponse{
-				Status: t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.ReadPromiseResponse{
 				Promise: &promise.Promise{
 					Id:    "foo/bar",
 					State: promise.Pending,
@@ -127,9 +125,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ReadPromise,
-			ReadPromise: &t_api.ReadPromiseResponse{
-				Status:  t_api.StatusPromiseNotFound,
+			Status: t_api.StatusPromiseNotFound,
+			Payload: &t_api.ReadPromiseResponse{
 				Promise: nil,
 			},
 		},
@@ -169,9 +166,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -209,9 +205,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -248,9 +243,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -288,9 +282,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -330,9 +323,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -376,9 +368,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -464,9 +455,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchPromises,
-			SearchPromises: &t_api.SearchPromisesResponse{
-				Status:   t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchPromisesResponse{
 				Promises: []*promise.Promise{},
 				Cursor:   nil,
 			},
@@ -546,9 +536,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreatePromise,
-			CreatePromise: &t_api.CreatePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                      "foo",
 					State:                   promise.Pending,
@@ -624,9 +613,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreatePromise,
-			CreatePromise: &t_api.CreatePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                      "foo",
 					State:                   promise.Pending,
@@ -690,9 +678,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreatePromiseAndTask,
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseAndTaskResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -760,9 +747,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Resolved,
@@ -834,9 +820,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Resolved,
@@ -890,9 +875,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusPromiseAlreadyResolved,
+			Status: t_api.StatusPromiseAlreadyResolved,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Resolved,
@@ -938,9 +922,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Rejected,
@@ -1012,9 +995,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Rejected,
@@ -1068,9 +1050,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusPromiseAlreadyRejected,
+			Status: t_api.StatusPromiseAlreadyRejected,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Rejected,
@@ -1116,9 +1097,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Canceled,
@@ -1190,9 +1170,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:                        "foo",
 					State:                     promise.Canceled,
@@ -1246,9 +1225,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompletePromise,
-			CompletePromise: &t_api.CompletePromiseResponse{
-				Status: t_api.StatusPromiseAlreadyRejected,
+			Status: t_api.StatusPromiseAlreadyRejected,
+			Payload: &t_api.CompletePromiseResponse{
 				Promise: &promise.Promise{
 					Id:    "foo",
 					State: promise.Canceled,
@@ -1293,10 +1271,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1338,10 +1314,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1384,10 +1358,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1429,10 +1401,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1475,10 +1445,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:  t_api.StatusPromiseNotFound,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1521,10 +1489,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:  t_api.StatusPromiseNotFound,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1570,10 +1536,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1615,10 +1579,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1661,10 +1623,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1707,10 +1667,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1752,10 +1710,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:  t_api.StatusPromiseNotFound,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1798,10 +1754,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateCallback,
-			CreateCallback: &t_api.CreateCallbackResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:  t_api.StatusPromiseNotFound,
+			Payload: &t_api.CreateCallbackResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -1842,9 +1796,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ReadSchedule,
-			ReadSchedule: &t_api.ReadScheduleResponse{
-				Status: t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.ReadScheduleResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
@@ -1884,9 +1837,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchSchedules,
-			SearchSchedules: &t_api.SearchSchedulesResponse{
-				Status:    t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchSchedulesResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1923,9 +1875,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchSchedules,
-			SearchSchedules: &t_api.SearchSchedulesResponse{
-				Status:    t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchSchedulesResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -1961,9 +1912,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchSchedules,
-			SearchSchedules: &t_api.SearchSchedulesResponse{
-				Status:    t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchSchedulesResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2022,9 +1972,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.SearchSchedules,
-			SearchSchedules: &t_api.SearchSchedulesResponse{
-				Status:    t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.SearchSchedulesResponse{
 				Schedules: []*schedule.Schedule{},
 				Cursor:    nil,
 			},
@@ -2103,9 +2052,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreateSchedule,
-			CreateSchedule: &t_api.CreateScheduleResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreateScheduleResponse{
 				Schedule: &schedule.Schedule{
 					Id:             "foo",
 					Description:    "",
@@ -2169,10 +2117,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.DeleteSchedule,
-			DeleteSchedule: &t_api.DeleteScheduleResponse{
-				Status: t_api.StatusNoContent,
-			},
+			Status:  t_api.StatusNoContent,
+			Payload: &t_api.DeleteScheduleResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2207,9 +2153,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.AcquireLock,
-			AcquireLock: &t_api.AcquireLockResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.AcquireLockResponse{
 				Lock: &lock.Lock{
 					ResourceId:  "foo",
 					ProcessId:   "bar",
@@ -2256,10 +2201,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ReleaseLock,
-			ReleaseLock: &t_api.ReleaseLockResponse{
-				Status: t_api.StatusNoContent,
-			},
+			Status:  t_api.StatusNoContent,
+			Payload: &t_api.ReleaseLockResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2294,9 +2237,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.HeartbeatLocks,
-			HeartbeatLocks: &t_api.HeartbeatLocksResponse{
-				Status:        t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.HeartbeatLocksResponse{
 				LocksAffected: 1,
 			},
 		},
@@ -2336,10 +2278,9 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ClaimTask,
-			ClaimTask: &t_api.ClaimTaskResponse{
-				Status: t_api.StatusCreated,
-				Task:   &task.Task{Mesg: &message.Mesg{}},
+			Status: t_api.StatusCreated,
+			Payload: &t_api.ClaimTaskResponse{
+				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
 		Http: &httpTestCase{
@@ -2382,10 +2323,9 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ClaimTask,
-			ClaimTask: &t_api.ClaimTaskResponse{
-				Status: t_api.StatusCreated,
-				Task:   &task.Task{Mesg: &message.Mesg{}},
+			Status: t_api.StatusCreated,
+			Payload: &t_api.ClaimTaskResponse{
+				Task: &task.Task{Mesg: &message.Mesg{}},
 			},
 		},
 		Http: &httpTestCase{
@@ -2422,9 +2362,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ClaimTask,
-			ClaimTask: &t_api.ClaimTaskResponse{
-				Status:          t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.ClaimTaskResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Invoke, Root: "foo"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				RootPromiseHref: "http://localhost:8001/promises/foo",
@@ -2493,9 +2432,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.ClaimTask,
-			ClaimTask: &t_api.ClaimTaskResponse{
-				Status:          t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.ClaimTaskResponse{
 				Task:            &task.Task{Mesg: &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "bar"}},
 				RootPromise:     &promise.Promise{Id: "foo", State: promise.Pending},
 				LeafPromise:     &promise.Promise{Id: "bar", State: promise.Resolved},
@@ -2566,10 +2504,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompleteTask,
-			CompleteTask: &t_api.CompleteTaskResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CompleteTaskResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2605,10 +2541,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CompleteTask,
-			CompleteTask: &t_api.CompleteTaskResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CompleteTaskResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2640,10 +2574,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.DropTask,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.DropTaskResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2679,10 +2611,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.DropTask,
-			DropTask: &t_api.DropTaskResponse{
-				Status: t_api.StatusCreated,
-			},
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.DropTaskResponse{},
 		},
 		Http: &httpTestCase{
 			Req: &httpTestCaseRequest{
@@ -2713,9 +2643,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.HeartbeatTasks,
-			HeartbeatTasks: &t_api.HeartbeatTasksResponse{
-				Status:        t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.HeartbeatTasksResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -2750,9 +2679,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.HeartbeatTasks,
-			HeartbeatTasks: &t_api.HeartbeatTasksResponse{
-				Status:        t_api.StatusOK,
+			Status: t_api.StatusOK,
+			Payload: &t_api.HeartbeatTasksResponse{
 				TasksAffected: 1,
 			},
 		},
@@ -2794,9 +2722,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreatePromiseAndTask,
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseAndTaskResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,
@@ -2867,9 +2794,8 @@ var TestCases = []*testCase{
 			},
 		},
 		Res: &t_api.Response{
-			Kind: t_api.CreatePromiseAndTask,
-			CreatePromiseAndTask: &t_api.CreatePromiseAndTaskResponse{
-				Status: t_api.StatusCreated,
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseAndTaskResponse{
 				Promise: &promise.Promise{
 					Id:      "foo",
 					State:   promise.Pending,

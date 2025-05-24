@@ -70,10 +70,9 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			}
 
 			res = &t_api.Response{
-				Kind: t_api.ReadPromise,
-				Tags: r.Metadata,
-				ReadPromise: &t_api.ReadPromiseResponse{
-					Status: t_api.StatusOK,
+				Status:   t_api.StatusOK,
+				Metadata: r.Metadata,
+				Payload: &t_api.ReadPromiseResponse{
 					Promise: &promise.Promise{
 						Id:                        p.Id,
 						State:                     cmd.State,
@@ -90,21 +89,18 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 			}
 		} else {
 			res = &t_api.Response{
-				Kind: t_api.ReadPromise,
-				Tags: r.Metadata,
-				ReadPromise: &t_api.ReadPromiseResponse{
-					Status:  t_api.StatusOK,
+				Status:   t_api.StatusOK,
+				Metadata: r.Metadata,
+				Payload: &t_api.ReadPromiseResponse{
 					Promise: p,
 				},
 			}
 		}
 	} else {
 		res = &t_api.Response{
-			Kind: t_api.ReadPromise,
-			Tags: r.Metadata,
-			ReadPromise: &t_api.ReadPromiseResponse{
-				Status: t_api.StatusPromiseNotFound,
-			},
+			Status:   t_api.StatusPromiseNotFound,
+			Metadata: r.Metadata,
+			Payload:  &t_api.ReadPromiseResponse{},
 		}
 	}
 
