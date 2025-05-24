@@ -184,7 +184,6 @@ class Bridge:
     def _process_cq(self) -> None:
         while item := self._cq.get():
             cmd, future = item if isinstance(item, tuple) else (item, None)
-
             match self._scheduler.step(cmd, future):
                 case More(reqs):
                     for req in reqs:
@@ -207,8 +206,8 @@ class Bridge:
                             case Delayed() as item:
                                 self._handle_delay(item)
 
-                case Done(reqs) if reqs:
-                    cid = reqs[0].cid
+                case Done(reqs):
+                    cid = cmd.cid
                     task = self._promise_id_to_task.get(cid, None)
                     match reqs:
                         case [Network(_, cid, CreateSubscriptionReq(id, promise_id, timeout, recv))]:
@@ -246,8 +245,6 @@ class Bridge:
 
                             if task is not None:
                                 self._store.tasks.complete(id=task.id, counter=task.counter)
-                case Done(reqs=[]):
-                    continue
 
     @exit_on_exception("bridge.messages")
     def _process_msgs(self) -> None:
