@@ -30,12 +30,9 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadSchedule,
-						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadScheduleCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -47,7 +44,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].ReadSchedule
+	result := t_aio.AsQuerySchedules(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	var res *t_api.Response
@@ -65,22 +62,19 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			Tags: r.Metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.CreateSchedule,
-							CreateSchedule: &t_aio.CreateScheduleCommand{
-								Id:             req.Id,
-								Description:    req.Description,
-								Cron:           req.Cron,
-								Tags:           req.Tags,
-								PromiseId:      req.PromiseId,
-								PromiseTimeout: req.PromiseTimeout,
-								PromiseParam:   req.PromiseParam,
-								PromiseTags:    req.PromiseTags,
-								NextRunTime:    next,
-								IdempotencyKey: req.IdempotencyKey,
-								CreatedOn:      createdOn,
-							},
+					Commands: []t_aio.Command{
+						&t_aio.CreateScheduleCommand{
+							Id:             req.Id,
+							Description:    req.Description,
+							Cron:           req.Cron,
+							Tags:           req.Tags,
+							PromiseId:      req.PromiseId,
+							PromiseTimeout: req.PromiseTimeout,
+							PromiseParam:   req.PromiseParam,
+							PromiseTags:    req.PromiseTags,
+							NextRunTime:    next,
+							IdempotencyKey: req.IdempotencyKey,
+							CreatedOn:      createdOn,
 						},
 					},
 				},
@@ -92,7 +86,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
-		result := completion.Store.Results[0].CreateSchedule
+		result := t_aio.AsAlterSchedules(completion.Store.Results[0])
 		util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 		if result.RowsAffected == 1 {
@@ -123,7 +117,6 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 	} else {
 		// return resource conflict.
-
 		s, err := result.Records[0].Schedule()
 		if err != nil {
 			slog.Error("failed to parse schedule", "req", r, "err", err)

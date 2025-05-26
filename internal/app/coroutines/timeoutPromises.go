@@ -20,13 +20,10 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.ReadPromises,
-							ReadPromises: &t_aio.ReadPromisesCommand{
-								Time:  c.Time(),
-								Limit: config.PromiseBatchSize,
-							},
+					Commands: []t_aio.Command{
+						&t_aio.ReadPromisesCommand{
+							Time:  c.Time(),
+							Limit: config.PromiseBatchSize,
 						},
 					},
 				},
@@ -41,11 +38,9 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-		result := completion.Store.Results[0].ReadPromises
-		util.Assert(result != nil, "result must not be nil")
+		result := t_aio.AsQueryPromises(completion.Store.Results[0])
 
 		awaiting := make([]gocoroPromise.Awaitable[bool], len(result.Records))
-
 		for i, r := range result.Records {
 			util.Assert(r.State == promise.Pending, "promise must be pending")
 			util.Assert(r.Timeout <= c.Time(), "promise timeout must have elapsed")

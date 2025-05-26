@@ -21,12 +21,9 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadTask,
-						ReadTask: &t_aio.ReadTaskCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadTaskCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -38,7 +35,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].ReadTask
+	result := t_aio.AsQueryTasks(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
@@ -61,21 +58,18 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.UpdateTask,
-								UpdateTask: &t_aio.UpdateTaskCommand{
-									Id:             req.Id,
-									ProcessId:      nil,
-									State:          task.Completed,
-									Counter:        req.Counter,
-									Attempt:        0,
-									Ttl:            0,
-									ExpiresAt:      0,
-									CompletedOn:    &completedOn,
-									CurrentStates:  []task.State{task.Claimed},
-									CurrentCounter: req.Counter,
-								},
+						Commands: []t_aio.Command{
+							&t_aio.UpdateTaskCommand{
+								Id:             req.Id,
+								ProcessId:      nil,
+								State:          task.Completed,
+								Counter:        req.Counter,
+								Attempt:        0,
+								Ttl:            0,
+								ExpiresAt:      0,
+								CompletedOn:    &completedOn,
+								CurrentStates:  []task.State{task.Claimed},
+								CurrentCounter: req.Counter,
 							},
 						},
 					},
@@ -87,7 +81,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
-			result := completion.Store.Results[0].UpdateTask
+			result := t_aio.AsAlterTasks(completion.Store.Results[0])
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {

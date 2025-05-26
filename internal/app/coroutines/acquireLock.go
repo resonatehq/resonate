@@ -21,16 +21,13 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.AcquireLock,
-						AcquireLock: &t_aio.AcquireLockCommand{
-							ResourceId:  req.ResourceId,
-							ExecutionId: req.ExecutionId,
-							ProcessId:   req.ProcessId,
-							Ttl:         req.Ttl,
-							ExpiresAt:   expiresAt,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.AcquireLockCommand{
+						ResourceId:  req.ResourceId,
+						ExecutionId: req.ExecutionId,
+						ProcessId:   req.ProcessId,
+						Ttl:         req.Ttl,
+						ExpiresAt:   expiresAt,
 					},
 				},
 			},
@@ -42,7 +39,7 @@ func AcquireLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].AcquireLock
+	result := t_aio.AsAlterLocks(completion.Store.Results[0])
 	util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 	var res *t_api.Response

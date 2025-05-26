@@ -11,115 +11,6 @@ import (
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
-type StoreKind int
-
-const (
-	// PROMISES
-	ReadPromise StoreKind = iota
-	ReadPromises
-	SearchPromises
-	CreatePromise
-	UpdatePromise
-
-	// CALLBACKS
-	CreateCallback
-	DeleteCallbacks
-
-	// SCHEDULES
-	ReadSchedule
-	ReadSchedules
-	SearchSchedules
-	CreateSchedule
-	UpdateSchedule
-	DeleteSchedule
-
-	// TASKS
-	ReadTask
-	ReadEnqueueableTasks
-	ReadTasks
-	CreateTask
-	CreateTasks
-	CompleteTasks
-	UpdateTask
-	HeartbeatTasks
-	CreatePromiseAndTask
-
-	// LOCKS
-	ReadLock
-	AcquireLock
-	ReleaseLock
-	HeartbeatLocks
-	TimeoutLocks
-)
-
-func (k StoreKind) String() string {
-	switch k {
-	// PROMISES
-	case ReadPromise:
-		return "ReadPromise"
-	case ReadPromises:
-		return "ReadPromises"
-	case SearchPromises:
-		return "SearchPromises"
-	case CreatePromise:
-		return "CreatePromise"
-	case UpdatePromise:
-		return "UpdatePromise"
-	// CALLBACKS
-	case CreateCallback:
-		return "CreateCallback"
-	case DeleteCallbacks:
-		return "DeleteCallbacks"
-	// SCHEDULES
-	case ReadSchedule:
-		return "ReadSchedule"
-	case ReadSchedules:
-		return "ReadSchedules"
-	case SearchSchedules:
-		return "SearchSchedules"
-	case CreateSchedule:
-		return "CreateSchedule"
-	case UpdateSchedule:
-		return "UpdateSchedule"
-	case DeleteSchedule:
-		return "DeleteSchedule"
-	// TASKS
-	case ReadTask:
-		return "ReadTask"
-	case ReadEnqueueableTasks:
-		return "ReadEnqueueableTasks"
-	case ReadTasks:
-		return "ReadTasks"
-	case CreateTask:
-		return "CreateTask"
-	case CreateTasks:
-		return "CreateTasks"
-	case CompleteTasks:
-		return "CompleteTasks"
-	case UpdateTask:
-		return "UpdateTask"
-	case HeartbeatTasks:
-		return "HeartbeatTasks"
-	case CreatePromiseAndTask:
-		return "CreatePromiseAndTask"
-
-	// LOCKS
-	case ReadLock:
-		return "ReadLock"
-	case AcquireLock:
-		return "AcquireLock"
-	case ReleaseLock:
-		return "ReleaseLock"
-	case HeartbeatLocks:
-		return "HeartbeatLocks"
-	case TimeoutLocks:
-		return "TimeoutLocks"
-
-	default:
-		panic("invalid store kind")
-	}
-}
-
 type StoreSubmission struct {
 	Transaction *Transaction
 }
@@ -128,117 +19,30 @@ func (s *StoreSubmission) String() string {
 	return fmt.Sprintf("Store(transaction=Transaction(commands=%s))", s.Transaction.Commands)
 }
 
-type StoreCompletion struct {
-	Results []*Result
-}
-
-func (c *StoreCompletion) String() string {
-	return fmt.Sprintf("Store(results=%s)", c.Results)
-}
-
 type Transaction struct {
-	Commands []*Command
+	Commands []Command
 }
 
-type Command struct {
-	Kind StoreKind
-
-	// PROMISES
-	ReadPromise    *ReadPromiseCommand
-	ReadPromises   *ReadPromisesCommand
-	SearchPromises *SearchPromisesCommand
-	CreatePromise  *CreatePromiseCommand
-	UpdatePromise  *UpdatePromiseCommand
-
-	// CALLBACKS
-	CreateCallback  *CreateCallbackCommand
-	DeleteCallbacks *DeleteCallbacksCommand
-
-	// SCHEDULES
-	ReadSchedule    *ReadScheduleCommand
-	ReadSchedules   *ReadSchedulesCommand
-	SearchSchedules *SearchSchedulesCommand
-	CreateSchedule  *CreateScheduleCommand
-	UpdateSchedule  *UpdateScheduleCommand
-	DeleteSchedule  *DeleteScheduleCommand
-
-	// TASKS
-	ReadTask             *ReadTaskCommand
-	ReadTasks            *ReadTasksCommand
-	ReadEnquableTasks    *ReadEnqueueableTasksCommand
-	CreateTask           *CreateTaskCommand
-	CreateTasks          *CreateTasksCommand
-	CompleteTasks        *CompleteTasksCommand
-	UpdateTask           *UpdateTaskCommand
-	HeartbeatTasks       *HeartbeatTasksCommand
-	CreatePromiseAndTask *CreatePromiseAndTaskCommand
-
-	// LOCKS
-	ReadLock       *ReadLockCommand
-	AcquireLock    *AcquireLockCommand
-	ReleaseLock    *ReleaseLockCommand
-	HeartbeatLocks *HeartbeatLocksCommand
-	TimeoutLocks   *TimeoutLocksCommand
+type Command interface {
+	String() string
+	isCommand()
 }
-
-func (c *Command) String() string {
-	return c.Kind.String()
-}
-
-type Result struct {
-	Kind StoreKind
-
-	// PROMISES
-	ReadPromise    *QueryPromisesResult
-	ReadPromises   *QueryPromisesResult
-	SearchPromises *QueryPromisesResult
-	CreatePromise  *AlterPromisesResult
-	UpdatePromise  *AlterPromisesResult
-
-	// CALLBACKS
-	CreateCallback  *AlterCallbacksResult
-	DeleteCallbacks *AlterCallbacksResult
-
-	// SCHEDULES
-	ReadSchedule    *QuerySchedulesResult
-	ReadSchedules   *QuerySchedulesResult
-	SearchSchedules *QuerySchedulesResult
-	CreateSchedule  *AlterSchedulesResult
-	UpdateSchedule  *AlterSchedulesResult
-	DeleteSchedule  *AlterSchedulesResult
-
-	// TASKS
-	ReadTask             *QueryTasksResult
-	ReadTasks            *QueryTasksResult
-	ReadEnqueueableTasks *QueryTasksResult
-	CreateTask           *AlterTasksResult
-	CreateTasks          *AlterTasksResult
-	CompleteTasks        *AlterTasksResult
-	UpdateTask           *AlterTasksResult
-	HeartbeatTasks       *AlterTasksResult
-	CreatePromiseAndTask *AlterPromiseAndTaskResult
-
-	// LOCKS
-	ReadLock       *QueryLocksResult
-	AcquireLock    *AlterLocksResult
-	ReleaseLock    *AlterLocksResult
-	HeartbeatLocks *AlterLocksResult
-	TimeoutLocks   *AlterLocksResult
-}
-
-func (r *Result) String() string {
-	return r.Kind.String()
-}
-
-// Promise commands
 
 type ReadPromiseCommand struct {
 	Id string
 }
 
+func (c *ReadPromiseCommand) String() string {
+	return "ReadPromise"
+}
+
 type ReadPromisesCommand struct {
 	Time  int64
 	Limit int
+}
+
+func (c *ReadPromisesCommand) String() string {
+	return "ReadPromises"
 }
 
 type SearchPromisesCommand struct {
@@ -247,6 +51,10 @@ type SearchPromisesCommand struct {
 	Tags   map[string]string
 	Limit  int
 	SortId *int64
+}
+
+func (c *SearchPromisesCommand) String() string {
+	return "SearchPromises"
 }
 
 type CreatePromiseCommand struct {
@@ -258,6 +66,10 @@ type CreatePromiseCommand struct {
 	CreatedOn      int64
 }
 
+func (c *CreatePromiseCommand) String() string {
+	return "CreatePromise"
+}
+
 type UpdatePromiseCommand struct {
 	Id             string
 	State          promise.State
@@ -266,19 +78,9 @@ type UpdatePromiseCommand struct {
 	CompletedOn    int64
 }
 
-// Promise results
-
-type QueryPromisesResult struct {
-	RowsReturned int64
-	LastSortId   int64
-	Records      []*promise.PromiseRecord
+func (c *UpdatePromiseCommand) String() string {
+	return "UpdatePromise"
 }
-
-type AlterPromisesResult struct {
-	RowsAffected int64
-}
-
-// Callback commands
 
 type CreateCallbackCommand struct {
 	Id        string
@@ -289,20 +91,24 @@ type CreateCallbackCommand struct {
 	CreatedOn int64
 }
 
+func (c *CreateCallbackCommand) String() string {
+	return "CreateCallback"
+}
+
 type DeleteCallbacksCommand struct {
 	PromiseId string
 }
 
-// Callback results
-
-type AlterCallbacksResult struct {
-	RowsAffected int64
+func (c *DeleteCallbacksCommand) String() string {
+	return "DeleteCallbacks"
 }
-
-// Schedule commands
 
 type ReadScheduleCommand struct {
 	Id string
+}
+
+func (c *ReadScheduleCommand) String() string {
+	return "ReadSchedule"
 }
 
 type ReadSchedulesCommand struct {
@@ -310,11 +116,19 @@ type ReadSchedulesCommand struct {
 	Limit       int
 }
 
+func (c *ReadSchedulesCommand) String() string {
+	return "ReadSchedules"
+}
+
 type SearchSchedulesCommand struct {
 	Id     string
 	Tags   map[string]string
 	Limit  int
 	SortId *int64
+}
+
+func (c *SearchSchedulesCommand) String() string {
+	return "SearchSchedules"
 }
 
 type CreateScheduleCommand struct {
@@ -331,32 +145,34 @@ type CreateScheduleCommand struct {
 	CreatedOn      int64
 }
 
+func (c *CreateScheduleCommand) String() string {
+	return "CreateSchedule"
+}
+
 type UpdateScheduleCommand struct {
 	Id          string
 	LastRunTime *int64
 	NextRunTime int64
 }
 
+func (c *UpdateScheduleCommand) String() string {
+	return "UpdateSchedule"
+}
+
 type DeleteScheduleCommand struct {
 	Id string
 }
 
-// Schedule results
-
-type QuerySchedulesResult struct {
-	RowsReturned int64
-	LastSortId   int64
-	Records      []*schedule.ScheduleRecord
+func (c *DeleteScheduleCommand) String() string {
+	return "DeleteSchedule"
 }
-
-type AlterSchedulesResult struct {
-	RowsAffected int64
-}
-
-// Task commands
 
 type ReadTaskCommand struct {
 	Id string
+}
+
+func (c *ReadTaskCommand) String() string {
+	return "ReadTask"
 }
 
 type ReadTasksCommand struct {
@@ -365,9 +181,17 @@ type ReadTasksCommand struct {
 	Limit  int
 }
 
+func (c *ReadTasksCommand) String() string {
+	return "ReadTasks"
+}
+
 type ReadEnqueueableTasksCommand struct {
 	Time  int64
 	Limit int
+}
+
+func (c *ReadEnqueueableTasksCommand) String() string {
+	return "ReadEnqueueableTasks"
 }
 
 type CreateTaskCommand struct {
@@ -382,14 +206,26 @@ type CreateTaskCommand struct {
 	CreatedOn int64
 }
 
+func (c *CreateTaskCommand) String() string {
+	return "CreateTask"
+}
+
 type CreateTasksCommand struct {
 	PromiseId string
 	CreatedOn int64
 }
 
+func (c *CreateTasksCommand) String() string {
+	return "CreateTasks"
+}
+
 type CompleteTasksCommand struct {
 	RootPromiseId string
 	CompletedOn   int64
+}
+
+func (c *CompleteTasksCommand) String() string {
+	return "CompleteTasks"
 }
 
 type UpdateTaskCommand struct {
@@ -405,9 +241,17 @@ type UpdateTaskCommand struct {
 	CurrentCounter int
 }
 
+func (c *UpdateTaskCommand) String() string {
+	return "UpdateTask"
+}
+
 type HeartbeatTasksCommand struct {
 	ProcessId string
 	Time      int64
+}
+
+func (c *HeartbeatTasksCommand) String() string {
+	return "HeartbeatTasks"
 }
 
 type CreatePromiseAndTaskCommand struct {
@@ -415,26 +259,16 @@ type CreatePromiseAndTaskCommand struct {
 	TaskCommand    *CreateTaskCommand
 }
 
-// Task results
-
-type QueryTasksResult struct {
-	RowsReturned int64
-	Records      []*task.TaskRecord
+func (c *CreatePromiseAndTaskCommand) String() string {
+	return "CreatePromiseAndTask"
 }
-
-type AlterTasksResult struct {
-	RowsAffected int64
-}
-
-type AlterPromiseAndTaskResult struct {
-	PromiseRowsAffected int64
-	TaskRowsAffected    int64
-}
-
-// Lock commands
 
 type ReadLockCommand struct {
 	ResourceId string
+}
+
+func (c *ReadLockCommand) String() string {
+	return "ReadLock"
 }
 
 type AcquireLockCommand struct {
@@ -445,9 +279,17 @@ type AcquireLockCommand struct {
 	ExpiresAt   int64
 }
 
+func (c *AcquireLockCommand) String() string {
+	return "AcquireLock"
+}
+
 type ReleaseLockCommand struct {
 	ResourceId  string
 	ExecutionId string
+}
+
+func (c *ReleaseLockCommand) String() string {
+	return "ReleaseLock"
 }
 
 type HeartbeatLocksCommand struct {
@@ -455,17 +297,184 @@ type HeartbeatLocksCommand struct {
 	Time      int64
 }
 
+func (c *HeartbeatLocksCommand) String() string {
+	return "HeartbeatLocks"
+}
+
 type TimeoutLocksCommand struct {
 	Timeout int64
 }
 
-// Lock results
+func (c *TimeoutLocksCommand) String() string {
+	return "TimeoutLocks"
+}
+
+func (*ReadPromiseCommand) isCommand()          {}
+func (*ReadPromisesCommand) isCommand()         {}
+func (*SearchPromisesCommand) isCommand()       {}
+func (*CreatePromiseCommand) isCommand()        {}
+func (*UpdatePromiseCommand) isCommand()        {}
+func (*CreateCallbackCommand) isCommand()       {}
+func (*DeleteCallbacksCommand) isCommand()      {}
+func (*ReadScheduleCommand) isCommand()         {}
+func (*ReadSchedulesCommand) isCommand()        {}
+func (*SearchSchedulesCommand) isCommand()      {}
+func (*CreateScheduleCommand) isCommand()       {}
+func (*UpdateScheduleCommand) isCommand()       {}
+func (*DeleteScheduleCommand) isCommand()       {}
+func (*ReadTaskCommand) isCommand()             {}
+func (*ReadTasksCommand) isCommand()            {}
+func (*ReadEnqueueableTasksCommand) isCommand() {}
+func (*CreateTaskCommand) isCommand()           {}
+func (*CreateTasksCommand) isCommand()          {}
+func (*CompleteTasksCommand) isCommand()        {}
+func (*UpdateTaskCommand) isCommand()           {}
+func (*HeartbeatTasksCommand) isCommand()       {}
+func (*CreatePromiseAndTaskCommand) isCommand() {}
+func (*ReadLockCommand) isCommand()             {}
+func (*AcquireLockCommand) isCommand()          {}
+func (*ReleaseLockCommand) isCommand()          {}
+func (*HeartbeatLocksCommand) isCommand()       {}
+func (*TimeoutLocksCommand) isCommand()         {}
+
+type StoreCompletion struct {
+	Results []Result
+}
+
+func (c *StoreCompletion) String() string {
+	return fmt.Sprintf("Store(results=%s)", c.Results)
+}
+
+type Result interface {
+	String() string
+	isResult()
+}
+
+type QueryPromisesResult struct {
+	RowsReturned int64
+	LastSortId   int64
+	Records      []*promise.PromiseRecord
+}
+
+func (r *QueryPromisesResult) String() string {
+	return "QueryPromises"
+}
+
+type AlterPromisesResult struct {
+	RowsAffected int64
+}
+
+func (r *AlterPromisesResult) String() string {
+	return "AlterPromises"
+}
+
+type AlterCallbacksResult struct {
+	RowsAffected int64
+}
+
+func (r *AlterCallbacksResult) String() string {
+	return "AlterCallbacks"
+}
+
+type QuerySchedulesResult struct {
+	RowsReturned int64
+	LastSortId   int64
+	Records      []*schedule.ScheduleRecord
+}
+
+func (r *QuerySchedulesResult) String() string {
+	return "QuerySchedules"
+}
+
+type AlterSchedulesResult struct {
+	RowsAffected int64
+}
+
+func (r *AlterSchedulesResult) String() string {
+	return "AlterSchedules"
+}
+
+type QueryTasksResult struct {
+	RowsReturned int64
+	Records      []*task.TaskRecord
+}
+
+func (r *QueryTasksResult) String() string {
+	return "QueryTasks"
+}
+
+type AlterTasksResult struct {
+	RowsAffected int64
+}
+
+func (r *AlterTasksResult) String() string {
+	return "AlterTasks"
+}
+
+type AlterPromiseAndTaskResult struct {
+	PromiseRowsAffected int64
+	TaskRowsAffected    int64
+}
+
+func (r *AlterPromiseAndTaskResult) String() string {
+	return "AlterPromiseAndTask"
+}
 
 type QueryLocksResult struct {
 	RowsReturned int64
 	Records      []*lock.LockRecord
 }
 
+func (r *QueryLocksResult) String() string {
+	return "QueryLocks"
+}
+
 type AlterLocksResult struct {
 	RowsAffected int64
+}
+
+func (r *AlterLocksResult) String() string {
+	return "AlterLocks"
+}
+
+func (r *QueryPromisesResult) isResult()       {}
+func (r *AlterPromisesResult) isResult()       {}
+func (r *AlterCallbacksResult) isResult()      {}
+func (r *QuerySchedulesResult) isResult()      {}
+func (r *AlterSchedulesResult) isResult()      {}
+func (r *QueryTasksResult) isResult()          {}
+func (r *AlterTasksResult) isResult()          {}
+func (r *AlterPromiseAndTaskResult) isResult() {}
+func (r *QueryLocksResult) isResult()          {}
+func (r *AlterLocksResult) isResult()          {}
+
+func AsQueryPromises(r Result) *QueryPromisesResult {
+	return r.(*QueryPromisesResult)
+}
+func AsAlterPromises(r Result) *AlterPromisesResult {
+	return r.(*AlterPromisesResult)
+}
+func AsAlterCallbacks(r Result) *AlterCallbacksResult {
+	return r.(*AlterCallbacksResult)
+}
+func AsQuerySchedules(r Result) *QuerySchedulesResult {
+	return r.(*QuerySchedulesResult)
+}
+func AsAlterSchedules(r Result) *AlterSchedulesResult {
+	return r.(*AlterSchedulesResult)
+}
+func AsQueryTasks(r Result) *QueryTasksResult {
+	return r.(*QueryTasksResult)
+}
+func AsAlterTasks(r Result) *AlterTasksResult {
+	return r.(*AlterTasksResult)
+}
+func AsAlterPromiseAndTask(r Result) *AlterPromiseAndTaskResult {
+	return r.(*AlterPromiseAndTaskResult)
+}
+func AsQueryLocks(r Result) *QueryLocksResult {
+	return r.(*QueryLocksResult)
+}
+func AsAlterLocks(r Result) *AlterLocksResult {
+	return r.(*AlterLocksResult)
 }

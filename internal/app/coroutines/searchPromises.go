@@ -26,16 +26,13 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.SearchPromises,
-						SearchPromises: &t_aio.SearchPromisesCommand{
-							Id:     req.Id,
-							States: req.States,
-							Tags:   req.Tags,
-							Limit:  req.Limit,
-							SortId: req.SortId,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.SearchPromisesCommand{
+						Id:     req.Id,
+						States: req.States,
+						Tags:   req.Tags,
+						Limit:  req.Limit,
+						SortId: req.SortId,
 					},
 				},
 			},
@@ -48,9 +45,9 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	util.Assert(len(completion.Store.Results) == 1, "must have two results")
+	util.Assert(len(completion.Store.Results) == 1, "must have one result")
 
-	result := completion.Store.Results[0].SearchPromises
+	result := t_aio.AsQueryPromises(completion.Store.Results[0])
 	promises := []*promise.Promise{}
 	awaiting := []gocoroPromise.Awaitable[bool]{}
 

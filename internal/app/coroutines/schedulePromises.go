@@ -23,13 +23,10 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.ReadSchedules,
-							ReadSchedules: &t_aio.ReadSchedulesCommand{
-								NextRunTime: c.Time(),
-								Limit:       config.ScheduleBatchSize,
-							},
+					Commands: []t_aio.Command{
+						&t_aio.ReadSchedulesCommand{
+							NextRunTime: c.Time(),
+							Limit:       config.ScheduleBatchSize,
 						},
 					},
 				},
@@ -43,7 +40,7 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-		result := completion.Store.Results[0].ReadSchedules
+		result := t_aio.AsQuerySchedules(completion.Store.Results[0])
 		util.Assert(result != nil, "result must not be nil")
 
 		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(result.Records))
@@ -86,13 +83,10 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				CreatedOn: c.Time(),
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, commands[i], nil, &t_aio.Command{
-				Kind: t_aio.UpdateSchedule,
-				UpdateSchedule: &t_aio.UpdateScheduleCommand{
-					Id:          s.Id,
-					LastRunTime: &s.NextRunTime,
-					NextRunTime: next,
-				},
+			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, commands[i], nil, &t_aio.UpdateScheduleCommand{
+				Id:          s.Id,
+				LastRunTime: &s.NextRunTime,
+				NextRunTime: next,
 			}))
 		}
 
@@ -107,7 +101,9 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				continue
 			}
 
-			if completion.Store.Results[0].CreatePromise.RowsAffected == 0 {
+			createPromiseRes := t_aio.AsAlterPromises(completion.Store.Results[0])
+
+			if createPromiseRes.RowsAffected == 0 {
 				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 			}
 		}

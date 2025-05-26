@@ -16,12 +16,9 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadSchedule,
-						ReadSchedule: &t_aio.ReadScheduleCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadScheduleCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -33,33 +30,29 @@ func ReadSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].ReadSchedule
+	result := t_aio.AsQuerySchedules(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
-	var res *t_api.Response
-
 	if result.RowsReturned == 0 {
-		res = &t_api.Response{
+		return &t_api.Response{
 			Status:   t_api.StatusScheduleNotFound,
 			Metadata: r.Metadata,
 			Payload:  &t_api.ReadScheduleResponse{},
-		}
-	} else {
-		s, err := result.Records[0].Schedule()
-		if err != nil {
-			slog.Error("failed to parse schedule record", "record", result.Records[0], "err", err)
-			return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
-		}
-
-		res = &t_api.Response{
-			Status:   t_api.StatusOK,
-			Metadata: r.Metadata,
-			Payload: &t_api.ReadScheduleResponse{
-				Schedule: s,
-			},
-		}
+		}, nil
 	}
 
-	util.Assert(res != nil, "response must not be nil")
-	return res, nil
+	s, err := result.Records[0].Schedule()
+	if err != nil {
+		slog.Error("failed to parse schedule record", "record", result.Records[0], "err", err)
+		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+	}
+
+	return &t_api.Response{
+		Status:   t_api.StatusOK,
+		Metadata: r.Metadata,
+		Payload: &t_api.ReadScheduleResponse{
+			Schedule: s,
+		},
+	}, nil
+
 }

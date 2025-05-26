@@ -26,12 +26,9 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadPromise,
-						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: req.PromiseId,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadPromiseCommand{
+						Id: req.PromiseId,
 					},
 				},
 			},
@@ -46,8 +43,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	util.Assert(completion.Store != nil, "completion must not be nil")
 	util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-	result := completion.Store.Results[0].ReadPromise
-	util.Assert(result != nil, "result must not be nil")
+	result := t_aio.AsQueryPromises(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
@@ -69,17 +65,14 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.CreateCallback,
-								CreateCallback: &t_aio.CreateCallbackCommand{
-									Id:        req.Id,
-									PromiseId: req.PromiseId,
-									Recv:      req.Recv,
-									Mesg:      req.Mesg,
-									Timeout:   req.Timeout,
-									CreatedOn: createdOn,
-								},
+						Commands: []t_aio.Command{
+							&t_aio.CreateCallbackCommand{
+								Id:        req.Id,
+								PromiseId: req.PromiseId,
+								Recv:      req.Recv,
+								Mesg:      req.Mesg,
+								Timeout:   req.Timeout,
+								CreatedOn: createdOn,
 							},
 						},
 					},
@@ -94,8 +87,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			util.Assert(completion.Store != nil, "completion must not be nil")
 			util.Assert(len(completion.Store.Results) == 1, "completion must have one result")
 
-			result := completion.Store.Results[0].CreateCallback
-			util.Assert(result != nil, "result must not be nil")
+			result := t_aio.AsAlterCallbacks(completion.Store.Results[0])
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
@@ -112,15 +104,14 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		}
 
 		res = &t_api.Response{
+			// Status could be StatusOk or StatusCreated if the Callback Id was already present
 			Status:   status,
 			Metadata: r.Metadata,
 			Payload: &t_api.CreateCallbackResponse{
-				// Status could be StatusOk or StatusCreated if the Callback Id was already present
 				Callback: cb,
 				Promise:  p,
 			},
 		}
-
 	} else {
 		res = &t_api.Response{
 			Status:   t_api.StatusPromiseNotFound,

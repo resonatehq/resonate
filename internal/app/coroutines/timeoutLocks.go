@@ -19,12 +19,9 @@ func TimeoutLocks(config *system.Config, metadata map[string]string) gocoro.Coro
 			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.TimeoutLocks,
-							TimeoutLocks: &t_aio.TimeoutLocksCommand{
-								Timeout: c.Time(),
-							},
+					Commands: []t_aio.Command{
+						&t_aio.TimeoutLocksCommand{
+							Timeout: c.Time(),
 						},
 					},
 				},

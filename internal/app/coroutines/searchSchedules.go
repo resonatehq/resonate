@@ -24,15 +24,12 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.SearchSchedules,
-						SearchSchedules: &t_aio.SearchSchedulesCommand{
-							Id:     req.Id,
-							Tags:   req.Tags,
-							Limit:  req.Limit,
-							SortId: req.SortId,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.SearchSchedulesCommand{
+						Id:     req.Id,
+						Tags:   req.Tags,
+						Limit:  req.Limit,
+						SortId: req.SortId,
 					},
 				},
 			},
@@ -46,7 +43,7 @@ func SearchSchedules(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
 
-	result := completion.Store.Results[0].SearchSchedules
+	result := t_aio.AsQuerySchedules(completion.Store.Results[0])
 	schedules := []*schedule.Schedule{}
 
 	for _, record := range result.Records {

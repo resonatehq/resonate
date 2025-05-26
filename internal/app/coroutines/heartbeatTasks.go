@@ -16,13 +16,10 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.HeartbeatTasks,
-						HeartbeatTasks: &t_aio.HeartbeatTasksCommand{
-							ProcessId: req.ProcessId,
-							Time:      c.Time(),
-						},
+				Commands: []t_aio.Command{
+					&t_aio.HeartbeatTasksCommand{
+						ProcessId: req.ProcessId,
+						Time:      c.Time(),
 					},
 				},
 			},
@@ -34,7 +31,7 @@ func HeartbeatTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].HeartbeatTasks
+	result := t_aio.AsAlterTasks(completion.Store.Results[0])
 	util.Assert(result != nil, "result must not be nil")
 
 	return &t_api.Response{
