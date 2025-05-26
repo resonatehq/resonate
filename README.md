@@ -42,7 +42,7 @@ Because developing distributed applications should be a delightful experience â€
 
 ## SDKs
 
-Resonate provides client SDKs for different programming languages to write elegant Distributed Async Await applications.
+Add reliablity and scalability to the language you love.
 
 |                                                      Language                                                       | Source Code                                   | Package                                              | Developer docs                                        |
 | :-----------------------------------------------------------------------------------------------------------------: | --------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
