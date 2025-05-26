@@ -39,10 +39,11 @@ Resonate implements the Distributed Async Await specification — [Learn more](h
 
 Because developing distributed applications should be a delightful experience — [Learn more](https://docs.resonatehq.io/evaluate/why-resonate)
 
-## Other SDKs
+## Available SDKs
 
 Add reliablity and scalability to the language you love.
 
 |                                                      Language                                                       | Source Code                                   | Package                                              | Developer docs                                        |
 | :-----------------------------------------------------------------------------------------------------------------: | --------------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------- |
 |  <img alt="py sdk" src="https://upload.wikimedia.org/wikipedia/commons/c/c3/Python-logo-notext.svg" width="40px"/>  | https://github.com/resonatehq/resonate-sdk-py | [pypi](https://pypi.org/project/resonate-sdk/)       | [docs](https://docs.resonatehq.io/develop/python)     |
+| <img alt="ts sdk" src="https://upload.wikimedia.org/wikipedia/commons/4/4c/Typescript_logo_2020.svg" width="40px"/> | https://github.com/resonatehq/resonate-sdk-ts | [npm](https://www.npmjs.com/package/@resonatehq/sdk) | [docs](https://docs.resonatehq.io/develop/typescript) |
