@@ -13,6 +13,13 @@
 
 </div>
 
+## About this component
+
+The Resonate Server acts as a supervisor and orchestrator for Resonate Application Nodes — that is, it provides reliability and scalability to applications built with a Resonate SDK.
+
+- [Contribute to the Resonate Server](./CONTRIBUTING.md)
+- [License](./LICENSE)
+
 ## Directory
 
 - [Get started with Resonate](https://docs.resonatehq.io/get-started)
@@ -22,13 +29,6 @@
   - [Follow on Twitter / X](https://twitter.com/resonatehqio)
   - [Follow on LinkedIn](https://www.linkedin.com/company/resonatehqio)
   - [Subscribe on YouTube](https://www.youtube.com/@resonatehqio)
-
-## About this component
-
-The Resonate Server acts as a supervisor and orchestrator for Resonate Application Nodes — that is, it provides reliability and scalability to applications built with a Resonate SDK.
-
-- [Contribute to the Resonate Server](./CONTRIBUTING.md)
-- [License](./LICENSE)
 
 ## Distributed Async Await
 
