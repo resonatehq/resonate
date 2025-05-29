@@ -36,8 +36,6 @@ Resonate implements the Distributed Async Await specification — [Learn more](h
 
 ## Why Resonate
 
-**Why Resonate?**
-
 Because developing distributed applications should be a delightful experience — [Learn more](https://docs.resonatehq.io/evaluate/why-resonate)
 
 ## Available SDKs
