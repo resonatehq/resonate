@@ -18,13 +18,10 @@ func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.HeartbeatLocks,
-						HeartbeatLocks: &t_aio.HeartbeatLocksCommand{
-							ProcessId: req.ProcessId,
-							Time:      c.Time(),
-						},
+				Commands: []t_aio.Command{
+					&t_aio.HeartbeatLocksCommand{
+						ProcessId: req.ProcessId,
+						Time:      c.Time(),
 					},
 				},
 			},
@@ -36,7 +33,7 @@ func HeartbeatLocks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].HeartbeatLocks
+	result := t_aio.AsAlterLocks(completion.Store.Results[0])
 
 	return &t_api.Response{
 		Status:   t_api.StatusOK,

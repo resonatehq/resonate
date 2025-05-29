@@ -23,13 +23,10 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			Tags: metadata,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: []*t_aio.Command{
-						{
-							Kind: t_aio.ReadEnqueueableTasks,
-							ReadEnquableTasks: &t_aio.ReadEnqueueableTasksCommand{
-								Time:  c.Time(),
-								Limit: config.TaskBatchSize,
-							},
+					Commands: []t_aio.Command{
+						&t_aio.ReadEnqueueableTasksCommand{
+							Time:  c.Time(),
+							Limit: config.TaskBatchSize,
 						},
 					},
 				},
@@ -44,21 +41,16 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		util.Assert(tasksCompletion.Store != nil, "completion must not be nil")
 		util.Assert(len(tasksCompletion.Store.Results) == 1, "completion must have one result")
 
-		tasksResult := tasksCompletion.Store.Results[0].ReadEnqueueableTasks
+		tasksResult := t_aio.AsQueryTasks(tasksCompletion.Store.Results[0])
 		util.Assert(tasksResult != nil, "tasksResult must not be nil")
 
 		if len(tasksResult.Records) == 0 {
 			return nil, nil
 		}
 
-		promiseCmds := make([]*t_aio.Command, len(tasksResult.Records))
+		promiseCmds := make([]t_aio.Command, len(tasksResult.Records))
 		for i, r := range tasksResult.Records {
-			promiseCmds[i] = &t_aio.Command{
-				Kind: t_aio.ReadPromise,
-				ReadPromise: &t_aio.ReadPromiseCommand{
-					Id: r.RootPromiseId,
-				},
-			}
+			promiseCmds[i] = &t_aio.ReadPromiseCommand{Id: r.RootPromiseId}
 		}
 		util.Assert(len(promiseCmds) > 0, "there must be more that 0 promiseCmds")
 
@@ -82,7 +74,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 
 		promisesResults := promisesCompletion.Store.Results
 
-		commands := []*t_aio.Command{}
+		commands := []t_aio.Command{}
 		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
 
 		expiresAt := c.Time() + config.TaskEnqueueDelay.Milliseconds()
@@ -94,11 +86,11 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 					continue
 				}
 
-				util.Assert(promisesResults[i].ReadPromise != nil, "ReadPromise must not be nil")
+				pResult := t_aio.AsQueryPromises(promisesResults[i])
 
 				var promise *promise.Promise
-				if promisesResults[i].ReadPromise.RowsReturned > 0 {
-					promise, err = promisesResults[i].ReadPromise.Records[0].Promise()
+				if pResult.RowsReturned > 0 {
+					promise, err = pResult.Records[0].Promise()
 					if err != nil {
 						slog.Warn("failed to parse promise", "err", err)
 						continue
@@ -132,20 +124,17 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 				})
 			} else {
 				// go straight to jail, do not collect $200
-				commands = append(commands, &t_aio.Command{
-					Kind: t_aio.UpdateTask,
-					UpdateTask: &t_aio.UpdateTaskCommand{
-						Id:             r.Id,
-						ProcessId:      nil,
-						State:          task.Timedout,
-						Counter:        r.Counter,
-						Attempt:        r.Attempt,
-						Ttl:            0,
-						ExpiresAt:      0,
-						CompletedOn:    &r.Timeout,
-						CurrentStates:  []task.State{task.Init},
-						CurrentCounter: r.Counter,
-					},
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             r.Id,
+					ProcessId:      nil,
+					State:          task.Timedout,
+					Counter:        r.Counter,
+					Attempt:        r.Attempt,
+					Ttl:            0,
+					ExpiresAt:      0,
+					CompletedOn:    &r.Timeout,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: r.Counter,
 				})
 			}
 		}
@@ -167,48 +156,39 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			}
 
 			if decodedT.Mesg.Type == message.Notify {
-				commands = append(commands, &t_aio.Command{
-					Kind: t_aio.UpdateTask,
-					UpdateTask: &t_aio.UpdateTaskCommand{
-						Id:             t.Id,
-						ProcessId:      nil,
-						State:          task.Completed,
-						Counter:        t.Counter,
-						Attempt:        0,
-						Ttl:            0,
-						ExpiresAt:      0,
-						CurrentStates:  []task.State{task.Init},
-						CurrentCounter: t.Counter,
-					},
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             t.Id,
+					ProcessId:      nil,
+					State:          task.Completed,
+					Counter:        t.Counter,
+					Attempt:        0,
+					Ttl:            0,
+					ExpiresAt:      0,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: t.Counter,
 				})
 			} else if err == nil && completion.Sender.Success {
-				commands = append(commands, &t_aio.Command{
-					Kind: t_aio.UpdateTask,
-					UpdateTask: &t_aio.UpdateTaskCommand{
-						Id:             t.Id,
-						ProcessId:      nil,
-						State:          task.Enqueued,
-						Counter:        t.Counter,
-						Attempt:        t.Attempt,
-						Ttl:            0,
-						ExpiresAt:      expiresAt, // time to be claimed
-						CurrentStates:  []task.State{task.Init},
-						CurrentCounter: t.Counter,
-					},
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             t.Id,
+					ProcessId:      nil,
+					State:          task.Enqueued,
+					Counter:        t.Counter,
+					Attempt:        t.Attempt,
+					Ttl:            0,
+					ExpiresAt:      expiresAt, // time to be claimed
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: t.Counter,
 				})
 			} else {
-				commands = append(commands, &t_aio.Command{
-					Kind: t_aio.UpdateTask,
-					UpdateTask: &t_aio.UpdateTaskCommand{
-						Id:             t.Id,
-						State:          task.Init,
-						Counter:        t.Counter,
-						Attempt:        t.Attempt + 1,
-						Ttl:            0,
-						ExpiresAt:      expiresAt, // time until reenqueued
-						CurrentStates:  []task.State{task.Init},
-						CurrentCounter: t.Counter,
-					},
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             t.Id,
+					State:          task.Init,
+					Counter:        t.Counter,
+					Attempt:        t.Attempt + 1,
+					Ttl:            0,
+					ExpiresAt:      expiresAt, // time until reenqueued
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: t.Counter,
 				})
 			}
 		}

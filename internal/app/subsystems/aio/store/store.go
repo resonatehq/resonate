@@ -11,7 +11,7 @@ import (
 )
 
 type Store interface {
-	Execute([]*t_aio.Transaction) ([][]*t_aio.Result, error)
+	Execute([]*t_aio.Transaction) ([][]t_aio.Result, error)
 }
 
 func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {

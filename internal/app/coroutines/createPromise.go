@@ -56,12 +56,9 @@ func createPromiseAndTask(
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadPromise,
-						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadPromiseCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -75,7 +72,7 @@ func createPromiseAndTask(
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
 
-	result := completion.Store.Results[0].ReadPromise
+	result := t_aio.AsQueryPromises(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 0 {
@@ -95,12 +92,14 @@ func createPromiseAndTask(
 		}
 		var promiseRowsAffected int64
 
-		// CreatePromise could be merged with a task command in `createPromise`
-		if completion.Store.Results[0].Kind == t_aio.CreatePromise {
-			promiseRowsAffected = completion.Store.Results[0].CreatePromise.RowsAffected
-		} else {
-			promiseRowsAffected = completion.Store.Results[0].CreatePromiseAndTask.PromiseRowsAffected
-			util.Assert(promiseRowsAffected == completion.Store.Results[0].CreatePromiseAndTask.TaskRowsAffected, "number of promises and tasks affected must be equal.")
+		switch v := completion.Store.Results[0].(type) {
+		case *t_aio.AlterPromisesResult:
+			promiseRowsAffected = v.RowsAffected
+		case *t_aio.AlterPromiseAndTaskResult:
+			promiseRowsAffected = v.PromiseRowsAffected
+			util.Assert(promiseRowsAffected == v.TaskRowsAffected, "number of promises and tasks affected must be equal.")
+		default:
+			panic("invalid type.")
 		}
 
 		if promiseRowsAffected == 0 {
@@ -125,8 +124,6 @@ func createPromiseAndTask(
 
 		if r.Kind() == t_api.CreatePromiseAndTask {
 			util.Assert(taskCmd != nil, "create task cmd must not be nil")
-			util.Assert(completion.Store.Results[0].Kind == t_aio.CreatePromiseAndTask, "completion must be createPromiseAndTask")
-
 			t = &task.Task{
 				Id:            taskCmd.Id,
 				ProcessId:     taskCmd.ProcessId,
@@ -142,7 +139,6 @@ func createPromiseAndTask(
 				CreatedOn:     &taskCmd.CreatedOn,
 			}
 		}
-
 	} else {
 		p, err = result.Records[0].Promise()
 		if err != nil {
@@ -202,7 +198,7 @@ func createPromiseAndTask(
 	return res, nil
 }
 
-func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...*t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *t_aio.Completion] {
+func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *t_aio.Completion] {
 	if promiseCmd.Param.Headers == nil {
 		promiseCmd.Param.Headers = map[string]string{}
 	}
@@ -214,7 +210,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, *t_aio.Completion]) (*t_aio.Completion, error) {
-		commands := []*t_aio.Command{}
+		commands := []t_aio.Command{}
 
 		// check router to see if a task needs to be created
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -242,10 +238,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 			return nil, t_api.NewError(t_api.StatusPromiseRecvNotFound, err)
 		}
 
-		cmd := &t_aio.Command{
-			Kind:          t_aio.CreatePromise,
-			CreatePromise: promiseCmd,
-		}
+		var cmd t_aio.Command = promiseCmd
 
 		if err == nil && completion.Router.Matched {
 			util.Assert(completion.Router.Recv != nil, "recv must not be nil")
@@ -265,12 +258,9 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 				}
 			}
 
-			cmd = &t_aio.Command{
-				Kind: t_aio.CreatePromiseAndTask,
-				CreatePromiseAndTask: &t_aio.CreatePromiseAndTaskCommand{
-					PromiseCommand: promiseCmd,
-					TaskCommand:    taskCmd,
-				},
+			cmd = &t_aio.CreatePromiseAndTaskCommand{
+				PromiseCommand: promiseCmd,
+				TaskCommand:    taskCmd,
 			}
 		}
 
@@ -298,14 +288,12 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
 
-		switch completion.Store.Results[0].Kind {
-		case t_aio.CreatePromiseAndTask:
-			promiseAndTaskResult := completion.Store.Results[0].CreatePromiseAndTask
-			util.Assert(promiseAndTaskResult.PromiseRowsAffected == 0 || promiseAndTaskResult.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
-			util.Assert(promiseAndTaskResult.TaskRowsAffected == promiseAndTaskResult.PromiseRowsAffected, "If not promise was created a task must have not been created")
-		case t_aio.CreatePromise:
-			createPromiseResult := completion.Store.Results[0].CreatePromise
-			util.Assert(createPromiseResult.RowsAffected == 0 || createPromiseResult.RowsAffected == 1, "CreatePromise result must return 0 or 1 rows")
+		switch v := completion.Store.Results[0].(type) {
+		case *t_aio.AlterPromiseAndTaskResult:
+			util.Assert(v.PromiseRowsAffected == 0 || v.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
+			util.Assert(v.TaskRowsAffected == v.PromiseRowsAffected, "If not promise was created a task must have not been created")
+		case *t_aio.AlterPromisesResult:
+			util.Assert(v.RowsAffected == 0 || v.RowsAffected == 1, "CreatePromise result must return 0 or 1 rows")
 		default:
 			panic("First result must be CreatePromise or CreatePromiseAndTask")
 		}

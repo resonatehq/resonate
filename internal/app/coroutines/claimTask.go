@@ -35,12 +35,9 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadTask,
-						ReadTask: &t_aio.ReadTaskCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadTaskCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -52,7 +49,7 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].ReadTask
+	result := t_aio.AsQueryTasks(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if result.RowsReturned == 1 {
@@ -75,20 +72,17 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						Commands: []*t_aio.Command{
-							{
-								Kind: t_aio.UpdateTask,
-								UpdateTask: &t_aio.UpdateTaskCommand{
-									Id:             req.Id,
-									ProcessId:      &req.ProcessId,
-									State:          task.Claimed,
-									Counter:        req.Counter,
-									Attempt:        t.Attempt,
-									Ttl:            req.Ttl,
-									ExpiresAt:      expiresAt, // time to expire unless heartbeated
-									CurrentStates:  []task.State{task.Init, task.Enqueued},
-									CurrentCounter: req.Counter,
-								},
+						Commands: []t_aio.Command{
+							&t_aio.UpdateTaskCommand{
+								Id:             req.Id,
+								ProcessId:      &req.ProcessId,
+								State:          task.Claimed,
+								Counter:        req.Counter,
+								Attempt:        t.Attempt,
+								Ttl:            req.Ttl,
+								ExpiresAt:      expiresAt, // time to expire unless heartbeated
+								CurrentStates:  []task.State{task.Init, task.Enqueued},
+								CurrentCounter: req.Counter,
 							},
 						},
 					},
@@ -100,20 +94,16 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
-			result := completion.Store.Results[0].UpdateTask
+			result := t_aio.AsAlterTasks(completion.Store.Results[0])
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if result.RowsAffected == 1 {
-				commands := []*t_aio.Command{{
-					Kind:        t_aio.ReadPromise,
-					ReadPromise: &t_aio.ReadPromiseCommand{Id: t.Mesg.Root},
-				}}
+				commands := []t_aio.Command{
+					&t_aio.ReadPromiseCommand{Id: t.Mesg.Root},
+				}
 
 				if t.Mesg.Type == message.Resume {
-					commands = append(commands, &t_aio.Command{
-						Kind:        t_aio.ReadPromise,
-						ReadPromise: &t_aio.ReadPromiseCommand{Id: t.Mesg.Leaf},
-					})
+					commands = append(commands, &t_aio.ReadPromiseCommand{Id: t.Mesg.Leaf})
 				}
 
 				completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
@@ -133,8 +123,12 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 
 				util.Assert(completion.Store != nil, "completion must not be nil")
 				util.Assert(len(completion.Store.Results) == len(commands), "number of results must match number of commands")
-				util.Assert(completion.Store.Results[0].ReadPromise != nil, "result must not be nil")
-				util.Assert(t.Mesg.Type != message.Resume || completion.Store.Results[1].ReadPromise != nil, "if resume, result must not be nil")
+
+				rootPromiseRes := t_aio.AsQueryPromises(completion.Store.Results[0])
+				var leafPromiseRes *t_aio.QueryPromisesResult
+				if t.Mesg.Type == message.Resume {
+					leafPromiseRes = t_aio.AsQueryPromises(completion.Store.Results[1])
+				}
 
 				// set promises
 				rh = fmt.Sprintf("%s/promises/%s", config.Url, t.Mesg.Root)
@@ -143,15 +137,15 @@ func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r 
 					lh = fmt.Sprintf("%s/promises/%s", config.Url, t.Mesg.Leaf)
 				}
 
-				if completion.Store.Results[0].ReadPromise.RowsReturned == 1 {
-					rp, err = completion.Store.Results[0].ReadPromise.Records[0].Promise()
+				if rootPromiseRes.RowsReturned == 1 {
+					rp, err = rootPromiseRes.Records[0].Promise()
 					if err != nil {
 						slog.Error("failed to parse promise", "err", err)
 					}
 				}
 
-				if t.Mesg.Type == message.Resume && completion.Store.Results[1].ReadPromise.RowsReturned == 1 {
-					lp, err = completion.Store.Results[1].ReadPromise.Records[0].Promise()
+				if t.Mesg.Type == message.Resume && leafPromiseRes.RowsReturned == 1 {
+					lp, err = leafPromiseRes.Records[0].Promise()
 					if err != nil {
 						slog.Error("failed to parse promise", "err", err)
 					}

@@ -507,7 +507,7 @@ func (w *SqliteStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Comp
 	return store.Process(w, sqes)
 }
 
-func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
+func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]t_aio.Result, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
 	defer cancel()
 
@@ -531,7 +531,7 @@ func (w *SqliteStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]*t_a
 	return results, nil
 }
 
-func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]*t_aio.Result, error) {
+func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]t_aio.Result, error) {
 	// lazily instantiate prepared statements
 	var promiseInsertStmt *sql.Stmt
 	var promiseUpdateStmt *sql.Stmt
@@ -551,252 +551,189 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 	var taskHeartbeatStmt *sql.Stmt
 
 	// Results
-	results := make([][]*t_aio.Result, len(transactions))
+	results := make([][]t_aio.Result, len(transactions))
 
 	for i, transaction := range transactions {
 		util.Assert(len(transaction.Commands) > 0, "expected a command")
-		results[i] = make([]*t_aio.Result, len(transaction.Commands))
+		results[i] = make([]t_aio.Result, len(transaction.Commands))
 
 		for j, command := range transaction.Commands {
 			var err error
 
-			switch command.Kind {
+			switch v := command.(type) {
 			// Promises
-			case t_aio.ReadPromise:
-				util.Assert(command.ReadPromise != nil, "command must not be nil")
-				results[i][j], err = w.readPromise(tx, command.ReadPromise)
-			case t_aio.ReadPromises:
-				util.Assert(command.ReadPromises != nil, "command must not be nil")
-				results[i][j], err = w.readPromises(tx, command.ReadPromises)
-			case t_aio.SearchPromises:
-				util.Assert(command.SearchPromises != nil, "command must not be nil")
-				results[i][j], err = w.searchPromises(tx, command.SearchPromises)
-			case t_aio.CreatePromise:
+			case *t_aio.ReadPromiseCommand:
+				results[i][j], err = w.readPromise(tx, v)
+			case *t_aio.ReadPromisesCommand:
+				results[i][j], err = w.readPromises(tx, v)
+			case *t_aio.SearchPromisesCommand:
+				results[i][j], err = w.searchPromises(tx, v)
+			case *t_aio.CreatePromiseCommand:
 				if promiseInsertStmt == nil {
 					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
-
-				util.Assert(command.CreatePromise != nil, "command must not be nil")
-				results[i][j], err = w.createPromise(tx, promiseInsertStmt, command.CreatePromise)
-			case t_aio.UpdatePromise:
+				results[i][j], err = w.createPromise(tx, promiseInsertStmt, v)
+			case *t_aio.UpdatePromiseCommand:
 				if promiseUpdateStmt == nil {
 					promiseUpdateStmt, err = tx.Prepare(PROMISE_UPDATE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(promiseUpdateStmt.Close)
 				}
-
-				util.Assert(command.UpdatePromise != nil, "command must not be nil")
-				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, command.UpdatePromise)
-
+				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, v)
 			// Callbacks
-			case t_aio.CreateCallback:
+			case *t_aio.CreateCallbackCommand:
 				if callbackInsertStmt == nil {
 					callbackInsertStmt, err = tx.Prepare(CALLBACK_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(callbackInsertStmt.Close)
 				}
-
-				util.Assert(command.CreateCallback != nil, "command must not be nil")
-				results[i][j], err = w.createCallback(tx, callbackInsertStmt, command.CreateCallback)
-			case t_aio.DeleteCallbacks:
+				results[i][j], err = w.createCallback(tx, callbackInsertStmt, v)
+			case *t_aio.DeleteCallbacksCommand:
 				if callbackDeleteStmt == nil {
 					callbackDeleteStmt, err = tx.Prepare(CALLBACK_DELETE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(callbackDeleteStmt.Close)
 				}
-
-				util.Assert(command.DeleteCallbacks != nil, "command must not be nil")
-				results[i][j], err = w.deleteCallbacks(tx, callbackDeleteStmt, command.DeleteCallbacks)
+				results[i][j], err = w.deleteCallbacks(tx, callbackDeleteStmt, v)
 
 			// Schedules
-			case t_aio.ReadSchedule:
-				util.Assert(command.ReadSchedule != nil, "command must not be nil")
-				results[i][j], err = w.readSchedule(tx, command.ReadSchedule)
-			case t_aio.ReadSchedules:
-				util.Assert(command.ReadSchedules != nil, "command must not be nil")
-				results[i][j], err = w.readSchedules(tx, command.ReadSchedules)
-			case t_aio.SearchSchedules:
-				util.Assert(command.SearchSchedules != nil, "command must not be nil")
-				results[i][j], err = w.searchSchedules(tx, command.SearchSchedules)
-			case t_aio.CreateSchedule:
+			case *t_aio.ReadScheduleCommand:
+				results[i][j], err = w.readSchedule(tx, v)
+			case *t_aio.ReadSchedulesCommand:
+				results[i][j], err = w.readSchedules(tx, v)
+			case *t_aio.SearchSchedulesCommand:
+				results[i][j], err = w.searchSchedules(tx, v)
+			case *t_aio.CreateScheduleCommand:
 				if scheduleInsertStmt == nil {
 					scheduleInsertStmt, err = tx.Prepare(SCHEDULE_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(scheduleInsertStmt.Close)
 				}
-
-				util.Assert(command.CreateSchedule != nil, "command must not be nil")
-				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, command.CreateSchedule)
-			case t_aio.UpdateSchedule:
+				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, v)
+			case *t_aio.UpdateScheduleCommand:
 				if scheduleUpdateStmt == nil {
 					scheduleUpdateStmt, err = tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(scheduleUpdateStmt.Close)
 				}
-
-				util.Assert(command.UpdateSchedule != nil, "command must not be nil")
-				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, command.UpdateSchedule)
-			case t_aio.DeleteSchedule:
+				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, v)
+			case *t_aio.DeleteScheduleCommand:
 				if scheduleDeleteStmt == nil {
 					scheduleDeleteStmt, err = tx.Prepare(SCHEDULE_DELETE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(scheduleDeleteStmt.Close)
 				}
-
-				util.Assert(command.DeleteSchedule != nil, "command must not be nil")
-				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, command.DeleteSchedule)
+				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, v)
 
 			// Locks
-			case t_aio.ReadLock:
-				util.Assert(command.ReadLock != nil, "command must not be nil")
-				results[i][j], err = w.readLock(tx, command.ReadLock)
-			case t_aio.AcquireLock:
+			case *t_aio.ReadLockCommand:
+				results[i][j], err = w.readLock(tx, v)
+			case *t_aio.AcquireLockCommand:
 				if lockAcquireStmt == nil {
 					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(lockAcquireStmt.Close)
 				}
-
-				util.Assert(command.AcquireLock != nil, "command must not be nil")
-				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, command.AcquireLock)
-			case t_aio.ReleaseLock:
+				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, v)
+			case *t_aio.ReleaseLockCommand:
 				if lockReleaseStmt == nil {
 					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(lockReleaseStmt.Close)
 				}
-
-				util.Assert(command.ReleaseLock != nil, "command must not be nil")
-				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, command.ReleaseLock)
-			case t_aio.HeartbeatLocks:
+				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, v)
+			case *t_aio.HeartbeatLocksCommand:
 				if lockHeartbeatStmt == nil {
 					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(lockHeartbeatStmt.Close)
 				}
-
-				util.Assert(command.HeartbeatLocks != nil, "command must not be nil")
-				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, command.HeartbeatLocks)
-			case t_aio.TimeoutLocks:
+				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, v)
+			case *t_aio.TimeoutLocksCommand:
 				if lockTimeoutStmt == nil {
 					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(lockTimeoutStmt.Close)
 				}
-
-				util.Assert(command.TimeoutLocks != nil, "command must not be nil")
-				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, command.TimeoutLocks)
+				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, v)
 
 			// Tasks
-			case t_aio.ReadTask:
-				util.Assert(command.ReadTask != nil, "command must not be nil")
-				results[i][j], err = w.readTask(tx, command.ReadTask)
-			case t_aio.ReadTasks:
-				util.Assert(command.ReadTasks != nil, "command must not be nil")
-				results[i][j], err = w.readTasks(tx, command.ReadTasks)
-			case t_aio.ReadEnqueueableTasks:
-				util.Assert(command.ReadEnquableTasks != nil, "command must not be nil")
-				results[i][j], err = w.readEnqueueableTasks(tx, command.ReadEnquableTasks)
-			case t_aio.CreateTask:
+			case *t_aio.ReadTaskCommand:
+				results[i][j], err = w.readTask(tx, v)
+			case *t_aio.ReadTasksCommand:
+				results[i][j], err = w.readTasks(tx, v)
+			case *t_aio.ReadEnqueueableTasksCommand:
+				results[i][j], err = w.readEnqueueableTasks(tx, v)
+			case *t_aio.CreateTaskCommand:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
-
-				util.Assert(command.CreateTask != nil, "command must not be nil")
-				results[i][j], err = w.createTask(tx, taskInsertStmt, command.CreateTask)
-			case t_aio.CreateTasks:
+				results[i][j], err = w.createTask(tx, taskInsertStmt, v)
+			case *t_aio.CreateTasksCommand:
 				if tasksInsertStmt == nil {
 					tasksInsertStmt, err = tx.Prepare(TASK_INSERT_ALL_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(tasksInsertStmt.Close)
 				}
-
-				util.Assert(command.CreateTasks != nil, "command must not be nil")
-				results[i][j], err = w.createTasks(tx, tasksInsertStmt, command.CreateTasks)
-			case t_aio.CompleteTasks:
+				results[i][j], err = w.createTasks(tx, tasksInsertStmt, v)
+			case *t_aio.CompleteTasksCommand:
 				if tasksCompleteStmt == nil {
 					tasksCompleteStmt, err = tx.Prepare(TASK_COMPLETE_BY_ROOT_ID_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(tasksCompleteStmt.Close)
 				}
-
-				util.Assert(command.CompleteTasks != nil, "command must not be nil")
-				results[i][j], err = w.completeTasks(tx, tasksCompleteStmt, command.CompleteTasks)
-			case t_aio.UpdateTask:
+				results[i][j], err = w.completeTasks(tx, tasksCompleteStmt, v)
+			case *t_aio.UpdateTaskCommand:
 				if taskUpdateStmt == nil {
 					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(taskUpdateStmt.Close)
 				}
-
-				util.Assert(command.UpdateTask != nil, "command must not be nil")
-				results[i][j], err = w.updateTask(tx, taskUpdateStmt, command.UpdateTask)
-			case t_aio.HeartbeatTasks:
+				results[i][j], err = w.updateTask(tx, taskUpdateStmt, v)
+			case *t_aio.HeartbeatTasksCommand:
 				if taskHeartbeatStmt == nil {
 					taskHeartbeatStmt, err = tx.Prepare(TASK_HEARTBEAT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(taskHeartbeatStmt.Close)
 				}
-
-				util.Assert(command.HeartbeatTasks != nil, "command must not be nil")
-				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, command.HeartbeatTasks)
-			case t_aio.CreatePromiseAndTask:
+				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, v)
+			case *t_aio.CreatePromiseAndTaskCommand:
 				if promiseInsertStmt == nil {
 					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(promiseInsertStmt.Close)
 				}
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
 					if err != nil {
 						return nil, err
 					}
-					defer util.DeferAndLog(taskInsertStmt.Close)
 				}
-
-				util.Assert(command.CreatePromiseAndTask != nil, "createPromiseAndTask command must bot be nil")
-				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, command.CreatePromiseAndTask)
+				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, v)
 
 			default:
-				panic(fmt.Sprintf("invalid command: %s", command.Kind.String()))
+				panic(fmt.Sprintf("invalid command: %s", command.String()))
 			}
 
 			if err != nil {
@@ -810,7 +747,7 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 
 // Promises
 
-func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseCommand) (*t_aio.QueryPromisesResult, error) {
 	// select
 	row := tx.QueryRow(PROMISE_SELECT_STATEMENT, cmd.Id)
 	record := &promise.PromiseRecord{}
@@ -842,16 +779,13 @@ func (w *SqliteStoreWorker) readPromise(tx *sql.Tx, cmd *t_aio.ReadPromiseComman
 		records = append(records, record)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadPromise,
-		ReadPromise: &t_aio.QueryPromisesResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QueryPromisesResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesCommand) (*t_aio.QueryPromisesResult, error) {
 	// select
 	rows, err := tx.Query(PROMISE_SELECT_ALL_STATEMENT, cmd.Time, cmd.Limit)
 	if err != nil {
@@ -888,17 +822,14 @@ func (w *SqliteStoreWorker) readPromises(tx *sql.Tx, cmd *t_aio.ReadPromisesComm
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadPromises,
-		ReadPromises: &t_aio.QueryPromisesResult{
-			RowsReturned: rowsReturned,
-			LastSortId:   lastSortId,
-			Records:      records,
-		},
+	return &t_aio.QueryPromisesResult{
+		RowsReturned: rowsReturned,
+		LastSortId:   lastSortId,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromisesCommand) (*t_aio.QueryPromisesResult, error) {
 	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.States != nil, "states cannot be empty")
 	util.Assert(cmd.Tags != nil, "tags cannot be empty")
@@ -973,17 +904,14 @@ func (w *SqliteStoreWorker) searchPromises(tx *sql.Tx, cmd *t_aio.SearchPromises
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.SearchPromises,
-		SearchPromises: &t_aio.QueryPromisesResult{
-			RowsReturned: rowsReturned,
-			LastSortId:   lastSortId,
-			Records:      records,
-		},
+	return &t_aio.QueryPromisesResult{
+		RowsReturned: rowsReturned,
+		LastSortId:   lastSortId,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreatePromiseCommand) (*t_aio.AlterPromisesResult, error) {
 	util.Assert(cmd.Param.Headers != nil, "headers must not be nil")
 	util.Assert(cmd.Param.Data != nil, "data must not be nil")
 	util.Assert(cmd.Tags != nil, "tags must not be nil")
@@ -1008,28 +936,22 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreatePromise,
-		CreatePromise: &t_aio.AlterPromisesResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterPromisesResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, TaskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, TaskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromiseAndTaskResult, error) {
 	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
 	if err != nil {
 		return nil, err
 	}
 
 	// Couldn't create a promise
-	if promiseResult.CreatePromise.RowsAffected == 0 {
-		return &t_aio.Result{
-			Kind: t_aio.CreatePromiseAndTask,
-			CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
-				PromiseRowsAffected: 0,
-				TaskRowsAffected:    0,
-			},
+	if promiseResult.RowsAffected == 0 {
+		return &t_aio.AlterPromiseAndTaskResult{
+			PromiseRowsAffected: 0,
+			TaskRowsAffected:    0,
 		}, nil
 	}
 
@@ -1038,16 +960,13 @@ func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.St
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreatePromiseAndTask,
-		CreatePromiseAndTask: &t_aio.AlterPromiseAndTaskResult{
-			PromiseRowsAffected: promiseResult.CreatePromise.RowsAffected,
-			TaskRowsAffected:    taskResult.CreateTask.RowsAffected,
-		},
+	return &t_aio.AlterPromiseAndTaskResult{
+		PromiseRowsAffected: promiseResult.RowsAffected,
+		TaskRowsAffected:    taskResult.RowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdatePromiseCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdatePromiseCommand) (*t_aio.AlterPromisesResult, error) {
 	util.Assert(cmd.State.In(promise.Resolved|promise.Rejected|promise.Canceled|promise.Timedout), "state must be canceled, resolved, rejected, or timedout")
 	util.Assert(cmd.Value.Headers != nil, "value headers must not be nil")
 	util.Assert(cmd.Value.Data != nil, "value data must not be nil")
@@ -1068,17 +987,14 @@ func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.UpdatePromise,
-		UpdatePromise: &t_aio.AlterPromisesResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterPromisesResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
 // Callbacks
 
-func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateCallbackCommand) (*t_aio.AlterCallbacksResult, error) {
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
 
@@ -1108,15 +1024,12 @@ func (w *SqliteStoreWorker) createCallback(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreateCallback,
-		CreateCallback: &t_aio.AlterCallbacksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterCallbacksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteCallbacks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteCallbacksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) deleteCallbacks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteCallbacksCommand) (*t_aio.AlterCallbacksResult, error) {
 	res, err := stmt.Exec(cmd.PromiseId)
 	if err != nil {
 		return nil, err
@@ -1127,17 +1040,14 @@ func (w *SqliteStoreWorker) deleteCallbacks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_a
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.DeleteCallbacks,
-		DeleteCallbacks: &t_aio.AlterCallbacksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterCallbacksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
 // Schedules
 
-func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleCommand) (*t_aio.QuerySchedulesResult, error) {
 	row := tx.QueryRow(SCHEDULE_SELECT_STATEMENT, cmd.Id)
 	record := &schedule.ScheduleRecord{}
 	rowsReturned := int64(1)
@@ -1169,16 +1079,13 @@ func (w *SqliteStoreWorker) readSchedule(tx *sql.Tx, cmd *t_aio.ReadScheduleComm
 		records = append(records, record)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadSchedule,
-		ReadSchedule: &t_aio.QuerySchedulesResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QuerySchedulesResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCommand) (*t_aio.QuerySchedulesResult, error) {
 	rows, err := tx.Query(SCHEDULE_SELECT_ALL_STATEMENT, cmd.NextRunTime, cmd.Limit)
 	if err != nil {
 		return nil, err
@@ -1208,16 +1115,13 @@ func (w *SqliteStoreWorker) readSchedules(tx *sql.Tx, cmd *t_aio.ReadSchedulesCo
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadSchedules,
-		ReadSchedules: &t_aio.QuerySchedulesResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QuerySchedulesResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedulesCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedulesCommand) (*t_aio.QuerySchedulesResult, error) {
 	util.Assert(cmd.Id != "", "query cannot be empty")
 	util.Assert(cmd.Tags != nil, "tags cannot be empty")
 
@@ -1278,17 +1182,14 @@ func (w *SqliteStoreWorker) searchSchedules(tx *sql.Tx, cmd *t_aio.SearchSchedul
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.SearchSchedules,
-		SearchSchedules: &t_aio.QuerySchedulesResult{
-			RowsReturned: rowsReturned,
-			LastSortId:   lastSortId,
-			Records:      records,
-		},
+	return &t_aio.QuerySchedulesResult{
+		RowsReturned: rowsReturned,
+		LastSortId:   lastSortId,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateScheduleCommand) (*t_aio.AlterSchedulesResult, error) {
 	tags, err := json.Marshal(cmd.Tags)
 	if err != nil {
 		return nil, err
@@ -1327,15 +1228,12 @@ func (w *SqliteStoreWorker) createSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreateSchedule,
-		CreateSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterSchedulesResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateScheduleCommand) (*t_aio.AlterSchedulesResult, error) {
 	res, err := stmt.Exec(cmd.NextRunTime, cmd.Id, cmd.LastRunTime)
 	if err != nil {
 		return nil, err
@@ -1346,15 +1244,12 @@ func (w *SqliteStoreWorker) updateSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.UpdateSchedule,
-		UpdateSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterSchedulesResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.DeleteScheduleCommand) (*t_aio.AlterSchedulesResult, error) {
 	res, err := stmt.Exec(cmd.Id)
 	if err != nil {
 		return nil, err
@@ -1365,17 +1260,14 @@ func (w *SqliteStoreWorker) deleteSchedule(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.DeleteSchedule,
-		DeleteSchedule: &t_aio.AlterSchedulesResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterSchedulesResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
 // Locks
 
-func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t_aio.QueryLocksResult, error) {
 	// select
 	row := tx.QueryRow(LOCK_READ_STATEMENT, cmd.ResourceId)
 	record := &lock.LockRecord{}
@@ -1400,16 +1292,13 @@ func (w *SqliteStoreWorker) readLock(tx *sql.Tx, cmd *t_aio.ReadLockCommand) (*t
 		records = append(records, record)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadLock,
-		ReadLock: &t_aio.QueryLocksResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QueryLocksResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.AcquireLockCommand) (*t_aio.AlterLocksResult, error) {
 	// insert
 	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId, cmd.ProcessId, cmd.Ttl, cmd.ExpiresAt)
 	if err != nil {
@@ -1421,15 +1310,12 @@ func (w *SqliteStoreWorker) acquireLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.A
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.AcquireLock,
-		AcquireLock: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterLocksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.ReleaseLockCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.ReleaseLockCommand) (*t_aio.AlterLocksResult, error) {
 	// delete
 	res, err := stmt.Exec(cmd.ResourceId, cmd.ExecutionId)
 	if err != nil {
@@ -1441,15 +1327,12 @@ func (w *SqliteStoreWorker) releaseLock(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.R
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReleaseLock,
-		ReleaseLock: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterLocksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatLocksCommand) (*t_aio.AlterLocksResult, error) {
 	// update
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
@@ -1461,15 +1344,12 @@ func (w *SqliteStoreWorker) hearbeatLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.HeartbeatLocks,
-		HeartbeatLocks: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterLocksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutLocksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.TimeoutLocksCommand) (*t_aio.AlterLocksResult, error) {
 	// delete
 	res, err := stmt.Exec(cmd.Timeout)
 	if err != nil {
@@ -1481,17 +1361,14 @@ func (w *SqliteStoreWorker) timeoutLocks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.
 		return nil, err
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.TimeoutLocks,
-		TimeoutLocks: &t_aio.AlterLocksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterLocksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
 // Tasks
 
-func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t_aio.QueryTasksResult, error) {
 	row := tx.QueryRow(TASK_SELECT_STATEMENT, cmd.Id)
 	record := &task.TaskRecord{}
 	rowsReturned := int64(1)
@@ -1523,16 +1400,13 @@ func (w *SqliteStoreWorker) readTask(tx *sql.Tx, cmd *t_aio.ReadTaskCommand) (*t
 		records = append(records, record)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadTask,
-		ReadTask: &t_aio.QueryTasksResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QueryTasksResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (*t_aio.QueryTasksResult, error) {
 	util.Assert(len(cmd.States) > 0, "must provide at least one state")
 
 	var states task.State
@@ -1573,16 +1447,13 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadTasks,
-		ReadTasks: &t_aio.QueryTasksResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QueryTasksResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.QueryTasksResult, error) {
 	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
@@ -1616,16 +1487,13 @@ func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqu
 		rowsReturned++
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.ReadEnqueueableTasks,
-		ReadEnqueueableTasks: &t_aio.QueryTasksResult{
-			RowsReturned: rowsReturned,
-			Records:      records,
-		},
+	return &t_aio.QueryTasksResult{
+		RowsReturned: rowsReturned,
+		Records:      records,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTaskCommand) (*t_aio.AlterTasksResult, error) {
 	util.Assert(cmd.Recv != nil, "recv must not be nil")
 	util.Assert(cmd.Mesg != nil, "mesg must not be nil")
 	util.Assert(cmd.State.In(task.Init|task.Claimed), "state must be init or claimed")
@@ -1646,15 +1514,12 @@ func (w *SqliteStoreWorker) createTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Cr
 		return nil, store.StoreErr(err)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreateTask,
-		CreateTask: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterTasksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTasksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CreateTasksCommand) (*t_aio.AlterTasksResult, error) {
 	res, err := stmt.Exec(cmd.CreatedOn, cmd.PromiseId)
 	if err != nil {
 		return nil, store.StoreErr(err)
@@ -1665,15 +1530,12 @@ func (w *SqliteStoreWorker) createTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.C
 		return nil, store.StoreErr(err)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CreateTasks,
-		CreateTasks: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterTasksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) completeTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CompleteTasksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) completeTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.CompleteTasksCommand) (*t_aio.AlterTasksResult, error) {
 	res, err := stmt.Exec(cmd.CompletedOn, cmd.RootPromiseId)
 	if err != nil {
 		return nil, store.StoreErr(err)
@@ -1684,15 +1546,12 @@ func (w *SqliteStoreWorker) completeTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 		return nil, store.StoreErr(err)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.CompleteTasks,
-		CompleteTasks: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterTasksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateTaskCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdateTaskCommand) (*t_aio.AlterTasksResult, error) {
 	util.Assert(len(cmd.CurrentStates) > 0, "must provide at least one current state")
 
 	var currentStates task.State
@@ -1721,15 +1580,12 @@ func (w *SqliteStoreWorker) updateTask(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.Up
 		return nil, store.StoreErr(err)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.UpdateTask,
-		UpdateTask: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterTasksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }
 
-func (w *SqliteStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.Result, error) {
+func (w *SqliteStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.HeartbeatTasksCommand) (*t_aio.AlterTasksResult, error) {
 	res, err := stmt.Exec(cmd.Time, cmd.ProcessId)
 	if err != nil {
 		return nil, store.StoreErr(err)
@@ -1740,10 +1596,7 @@ func (w *SqliteStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 		return nil, store.StoreErr(err)
 	}
 
-	return &t_aio.Result{
-		Kind: t_aio.HeartbeatTasks,
-		HeartbeatTasks: &t_aio.AlterTasksResult{
-			RowsAffected: rowsAffected,
-		},
+	return &t_aio.AlterTasksResult{
+		RowsAffected: rowsAffected,
 	}, nil
 }

@@ -18,12 +18,9 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadPromise,
-						ReadPromise: &t_aio.ReadPromiseCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadPromiseCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -37,7 +34,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
 
-	result := completion.Store.Results[0].ReadPromise
+	result := t_aio.AsQueryPromises(completion.Store.Results[0])
 	util.Assert(result.RowsReturned == 0 || result.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	var res *t_api.Response
@@ -138,39 +135,27 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	return res, nil
 }
 
-func completePromise(tags map[string]string, cmd *t_aio.UpdatePromiseCommand, additionalCmds ...*t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
-	if cmd.Value.Headers == nil {
-		cmd.Value.Headers = map[string]string{}
+func completePromise(tags map[string]string, updatePromiseCmd *t_aio.UpdatePromiseCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
+	if updatePromiseCmd.Value.Headers == nil {
+		updatePromiseCmd.Value.Headers = map[string]string{}
 	}
-	if cmd.Value.Data == nil {
-		cmd.Value.Data = []byte{}
+	if updatePromiseCmd.Value.Data == nil {
+		updatePromiseCmd.Value.Data = []byte{}
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
-		commands := []*t_aio.Command{
-			{
-				Kind:          t_aio.UpdatePromise,
-				UpdatePromise: cmd,
+		commands := []t_aio.Command{
+			updatePromiseCmd,
+			&t_aio.CompleteTasksCommand{
+				RootPromiseId: updatePromiseCmd.Id,
+				CompletedOn:   c.Time(),
 			},
-			{
-				Kind: t_aio.CompleteTasks,
-				CompleteTasks: &t_aio.CompleteTasksCommand{
-					RootPromiseId: cmd.Id,
-					CompletedOn:   c.Time(),
-				},
+			&t_aio.CreateTasksCommand{
+				PromiseId: updatePromiseCmd.Id,
+				CreatedOn: c.Time(),
 			},
-			{
-				Kind: t_aio.CreateTasks,
-				CreateTasks: &t_aio.CreateTasksCommand{
-					PromiseId: cmd.Id,
-					CreatedOn: c.Time(),
-				},
-			},
-			{
-				Kind: t_aio.DeleteCallbacks,
-				DeleteCallbacks: &t_aio.DeleteCallbacksCommand{
-					PromiseId: cmd.Id,
-				},
+			&t_aio.DeleteCallbacksCommand{
+				PromiseId: updatePromiseCmd.Id,
 			},
 		}
 
@@ -194,14 +179,17 @@ func completePromise(tags map[string]string, cmd *t_aio.UpdatePromiseCommand, ad
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
-		util.Assert(completion.Store.Results[0].UpdatePromise != nil, "result must not be nil")
-		util.Assert(completion.Store.Results[0].UpdatePromise.RowsAffected == 0 || completion.Store.Results[0].UpdatePromise.RowsAffected == 1, "result must return 0 or 1 rows")
-		util.Assert(completion.Store.Results[1].CompleteTasks != nil, "result must not be nil")
-		util.Assert(completion.Store.Results[2].CreateTasks != nil, "result must not be nil")
-		util.Assert(completion.Store.Results[3].DeleteCallbacks != nil, "result must not be nil")
-		util.Assert(completion.Store.Results[2].CreateTasks.RowsAffected == completion.Store.Results[3].DeleteCallbacks.RowsAffected, "created rows must equal deleted rows")
 
-		return completion.Store.Results[0].UpdatePromise.RowsAffected == 1, nil
+		updatePromiseResult := t_aio.AsAlterPromises(completion.Store.Results[0])
+		_ = t_aio.AsAlterTasks(completion.Store.Results[1]) // serves as type assertion
+		createTasksResult := t_aio.AsAlterTasks(completion.Store.Results[2])
+		deleteCallbacksRusult := t_aio.AsAlterCallbacks(completion.Store.Results[3])
+
+		util.Assert(updatePromiseResult != nil, "result must not be nil")
+		util.Assert(updatePromiseResult.RowsAffected == 0 || updatePromiseResult.RowsAffected == 1, "result must return 0 or 1 rows")
+		util.Assert(createTasksResult.RowsAffected == deleteCallbacksRusult.RowsAffected, "created rows must equal deleted rows")
+
+		return updatePromiseResult.RowsAffected == 1, nil
 	}
 }
 

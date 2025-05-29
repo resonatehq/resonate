@@ -16,12 +16,9 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.DeleteSchedule,
-						DeleteSchedule: &t_aio.DeleteScheduleCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.DeleteScheduleCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -33,7 +30,7 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].DeleteSchedule
+	result := t_aio.AsAlterSchedules(completion.Store.Results[0])
 	util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 	var status t_api.StatusCode

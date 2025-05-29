@@ -17,12 +17,9 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReadTask,
-						ReadTask: &t_aio.ReadTaskCommand{
-							Id: req.Id,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReadTaskCommand{
+						Id: req.Id,
 					},
 				},
 			},
@@ -33,8 +30,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
 	}
 
-	util.Assert(completion.Store != nil, "completion must not be nil")
-	readResult := completion.Store.Results[0].ReadTask
+	readResult := t_aio.AsQueryTasks(completion.Store.Results[0])
 	util.Assert(readResult.RowsReturned == 0 || readResult.RowsReturned == 1, "result must return 0 or 1 rows")
 
 	if readResult.RowsReturned == 0 {
@@ -78,20 +74,17 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.UpdateTask,
-						UpdateTask: &t_aio.UpdateTaskCommand{
-							Id:             req.Id,
-							ProcessId:      nil,
-							State:          task.Init,
-							Counter:        req.Counter + 1,
-							Attempt:        0,
-							Ttl:            0,
-							ExpiresAt:      0,
-							CurrentStates:  []task.State{task.Claimed},
-							CurrentCounter: req.Counter,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.UpdateTaskCommand{
+						Id:             req.Id,
+						ProcessId:      nil,
+						State:          task.Init,
+						Counter:        req.Counter + 1,
+						Attempt:        0,
+						Ttl:            0,
+						ExpiresAt:      0,
+						CurrentStates:  []task.State{task.Claimed},
+						CurrentCounter: req.Counter,
 					},
 				},
 			},
@@ -104,7 +97,7 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	updateResult := completion.Store.Results[0].UpdateTask
+	updateResult := t_aio.AsAlterTasks(completion.Store.Results[0])
 	util.Assert(updateResult.RowsAffected == 0 || updateResult.RowsAffected == 1, "result must return 0 or 1 rows")
 
 	if updateResult.RowsAffected == 1 {

@@ -18,13 +18,10 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				Commands: []*t_aio.Command{
-					{
-						Kind: t_aio.ReleaseLock,
-						ReleaseLock: &t_aio.ReleaseLockCommand{
-							ResourceId:  req.ResourceId,
-							ExecutionId: req.ExecutionId,
-						},
+				Commands: []t_aio.Command{
+					&t_aio.ReleaseLockCommand{
+						ResourceId:  req.ResourceId,
+						ExecutionId: req.ExecutionId,
 					},
 				},
 			},
@@ -36,7 +33,7 @@ func ReleaseLock(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
-	result := completion.Store.Results[0].ReleaseLock
+	result := t_aio.AsAlterLocks(completion.Store.Results[0])
 	util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 	var res *t_api.Response
