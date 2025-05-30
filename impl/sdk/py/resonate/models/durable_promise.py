@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from resonate.errors.errors import ResonateCanceledError, ResonateTimedoutError
+from resonate.errors import ResonateCanceledError, ResonateTimedoutError
 from resonate.models.result import Ko, Ok, Result
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from resonate.models.callback import Callback
+    from resonate.models.encoder import Encoder
     from resonate.models.store import Store
 
 
@@ -27,23 +28,6 @@ class DurablePromise:
     completed_on: int | None
 
     store: Store = field(repr=False)
-
-    @property
-    def params(self) -> Any:
-        return self.param.data
-
-    @property
-    def result(self) -> Result:
-        assert self.completed, "Promise must be completed"
-
-        if self.rejected:
-            return Ko(self.value.data)
-        if self.canceled:
-            return Ko(ResonateCanceledError(self.id))
-        if self.timedout:
-            return Ko(ResonateTimedoutError(self.id, self.abs_timeout))
-
-        return Ok(self.value.data)
 
     @property
     def pending(self) -> bool:
@@ -136,6 +120,22 @@ class DurablePromise:
         self.value = promise.value
         self.completed_on = promise.completed_on
 
+    def result(self, encoder: Encoder[Any, tuple[dict[str, str] | None, str | None]]) -> Result[Any]:
+        assert self.completed, "Promise must be completed"
+
+        if self.rejected:
+            v = encoder.decode(self.value.to_tuple())
+
+            # In python, only exceptions may be raised. Here, we are converting
+            # a value that is not an exception into an exception.
+            return Ko(v) if isinstance(v, BaseException) else Ko(Exception(v))
+        if self.canceled:
+            return Ko(ResonateCanceledError(self.id))
+        if self.timedout:
+            return Ko(ResonateTimedoutError(self.id, self.abs_timeout))
+
+        return Ok(encoder.decode(self.value.to_tuple()))
+
     @classmethod
     def from_dict(cls, store: Store, data: Mapping[str, Any]) -> DurablePromise:
         return cls(
@@ -144,8 +144,8 @@ class DurablePromise:
             timeout=data["timeout"],
             ikey_for_create=data.get("idempotencyKeyForCreate"),
             ikey_for_complete=data.get("idempotencyKeyForComplete"),
-            param=DurablePromiseValue(data["param"].get("headers"), store.encoder.decode(data["param"].get("data"))),
-            value=DurablePromiseValue(data["value"].get("headers"), store.encoder.decode(data["value"].get("data"))),
+            param=DurablePromiseValue.from_dict(store, data.get("param", {})),
+            value=DurablePromiseValue.from_dict(store, data.get("value", {})),
             tags=data.get("tags", {}),
             created_on=data["createdOn"],
             completed_on=data.get("completedOn"),
@@ -156,4 +156,14 @@ class DurablePromise:
 @dataclass
 class DurablePromiseValue:
     headers: dict[str, str] | None
-    data: Any
+    data: str | None
+
+    def to_tuple(self) -> tuple[dict[str, str] | None, Any]:
+        return self.headers, self.data
+
+    @classmethod
+    def from_dict(cls, store: Store, data: Mapping[str, Any]) -> DurablePromiseValue:
+        return cls(
+            headers=data.get("headers"),
+            data=store.encoder.decode(data.get("data")),
+        )

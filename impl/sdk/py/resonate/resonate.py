@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Sequence
 
     from resonate.models.context import Info
+    from resonate.models.encoder import Encoder
     from resonate.models.message_source import MessageSource
     from resonate.models.retry_policy import RetryPolicy
     from resonate.models.store import PromiseStore, Store
@@ -61,14 +62,15 @@ class Resonate:
             self._message_source = self._store.message_source(self._group, self._pid)
 
         self._bridge = Bridge(
-            ctx=lambda id, cid, info: Context(id, cid, info, self._registry, self._dependencies),
-            pid=self._pid,
-            ttl=ttl,
-            anycast=self._message_source.anycast,
-            unicast=self._message_source.unicast,
-            registry=self._registry,
-            store=self._store,
-            message_source=self._message_source,
+            lambda id, cid, info: Context(id, cid, info, self._registry, self._dependencies),
+            self._pid,
+            self._ttl,
+            self._opts,
+            self._message_source.anycast,
+            self._message_source.unicast,
+            self._registry,
+            self._store,
+            self._message_source,
         )
 
     @classmethod
@@ -133,6 +135,7 @@ class Resonate:
     def options(
         self,
         *,
+        encoder: Encoder[Any, str | None] | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
@@ -142,6 +145,7 @@ class Resonate:
     ) -> Resonate:
         copied: Resonate = copy.copy(self)
         copied._opts = self._opts.merge(
+            encoder=encoder,
             idempotency_key=idempotency_key,
             retry_policy=retry_policy,
             tags=tags,
@@ -250,14 +254,15 @@ class Resonate:
         else:
             name, _, version = self._registry.get(func, self._opts.version)
 
-        self._bridge.rpc(Remote(id, id, id, name, args, kwargs, self._opts.merge(version=version)), future)
+        opts = self._opts.merge(version=version)
+        self._bridge.rpc(Remote(id, id, id, name, args, kwargs, opts), opts, future)
         return Handle(future)
 
     def get(self, id: str) -> Handle[Any]:
         self.start()
         future = Future()
 
-        self._bridge.get(id, future)
+        self._bridge.get(id, self._opts, future)
         return Handle(future)
 
     def set_dependency(self, name: str, obj: Any) -> None:
@@ -414,7 +419,6 @@ class Context:
         id: str | None = None,
         timeout: float | None = None,
         idempotency_key: str | None = None,
-        headers: dict[str, str] | None = None,
         data: Any = None,
         tags: dict[str, str] | None = None,
     ) -> RFI:
@@ -426,7 +430,6 @@ class Context:
                 id,
                 timeout or 31536000,
                 idempotency_key or id,
-                headers,
                 data,
                 tags,
             ),
@@ -523,6 +526,7 @@ class Function[**P, R]:
     def options(
         self,
         *,
+        encoder: Encoder[Any, str | None] | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
@@ -531,6 +535,7 @@ class Function[**P, R]:
         version: int | None = None,
     ) -> Function[P, R]:
         self._opts = self._opts.merge(
+            encoder=encoder,
             idempotency_key=idempotency_key,
             retry_policy=retry_policy,
             tags=tags,
@@ -542,6 +547,7 @@ class Function[**P, R]:
 
     def run[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
         resonate = self._resonate.options(
+            encoder=self._opts.encoder,
             idempotency_key=self._opts.idempotency_key,
             retry_policy=self._opts.retry_policy,
             tags=self._opts.tags,
@@ -553,6 +559,7 @@ class Function[**P, R]:
 
     def rpc[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
         resonate = self._resonate.options(
+            encoder=self._opts.encoder,
             idempotency_key=self._opts.idempotency_key,
             retry_policy=self._opts.retry_policy,
             tags=self._opts.tags,

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import requests
 from requests import PreparedRequest, Request, Session
 
-from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
+from resonate.encoders import Base64Encoder
 from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
@@ -24,13 +24,13 @@ class RemoteStore:
         self,
         host: str | None = None,
         port: str | None = None,
-        encoder: Encoder[Any, str | None] | None = None,
+        encoder: Encoder[str | None, str | None] | None = None,
         timeout: float | tuple[float, float] = 5,
         retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._host = host or os.getenv("RESONATE_HOST_STORE", os.getenv("RESONATE_HOST", "http://localhost"))
         self._port = port or os.getenv("RESONATE_PORT_STORE", "8001")
-        self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
+        self._encoder = encoder or Base64Encoder()
         self._timeout = timeout
         self._retry_policy = retry_policy or Constant(delay=1, max_retries=3)
 
@@ -42,7 +42,7 @@ class RemoteStore:
         return f"{self._host}:{self._port}"
 
     @property
-    def encoder(self) -> Encoder[Any, str | None]:
+    def encoder(self) -> Encoder[str | None, str | None]:
         return self._encoder
 
     @property
@@ -116,19 +116,22 @@ class RemotePromiseStore:
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> DurablePromise:
+        param = {}
+        if headers is not None:
+            param["headers"] = headers
+        if data is not None:
+            param["data"] = self._store.encoder.encode(data)
+
         req = Request(
             method="post",
             url=f"{self._store.url}/promises",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "id": id,
-                "param": {
-                    "headers": headers or {},
-                    "data": self._store.encoder.encode(data),
-                },
+                "param": param,
                 "timeout": timeout,
                 "tags": tags or {},
             },
@@ -146,9 +149,15 @@ class RemotePromiseStore:
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> tuple[DurablePromise, Task | None]:
+        param = {}
+        if headers is not None:
+            param["headers"] = headers
+        if data is not None:
+            param["data"] = self._store.encoder.encode(data)
+
         req = Request(
             method="post",
             url=f"{self._store.url}/promises/task",
@@ -156,10 +165,7 @@ class RemotePromiseStore:
             json={
                 "promise": {
                     "id": id,
-                    "param": {
-                        "headers": headers or {},
-                        "data": self._store.encoder.encode(data),
-                    },
+                    "param": param,
                     "timeout": timeout,
                     "tags": tags or {},
                 },
@@ -186,18 +192,21 @@ class RemotePromiseStore:
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
     ) -> DurablePromise:
+        value = {}
+        if headers is not None:
+            value["headers"] = headers
+        if data is not None:
+            value["data"] = self._store.encoder.encode(data)
+
         req = Request(
             method="patch",
             url=f"{self._store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "RESOLVED",
-                "value": {
-                    "headers": headers or {},
-                    "data": self._store.encoder.encode(data),
-                },
+                "value": value,
             },
         )
 
@@ -211,18 +220,21 @@ class RemotePromiseStore:
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
     ) -> DurablePromise:
+        value = {}
+        if headers is not None:
+            value["headers"] = headers
+        if data is not None:
+            value["data"] = self._store.encoder.encode(data)
+
         req = Request(
             method="patch",
             url=f"{self._store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "REJECTED",
-                "value": {
-                    "headers": headers or {},
-                    "data": self._store.encoder.encode(data),
-                },
+                "value": value,
             },
         )
 
@@ -236,18 +248,21 @@ class RemotePromiseStore:
         ikey: str | None = None,
         strict: bool = False,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
     ) -> DurablePromise:
+        value = {}
+        if headers is not None:
+            value["headers"] = headers
+        if data is not None:
+            value["data"] = self._store.encoder.encode(data)
+
         req = Request(
             method="patch",
             url=f"{self._store.url}/promises/{id}",
             headers=self._headers(strict=strict, ikey=ikey),
             json={
                 "state": "REJECTED_CANCELED",
-                "value": {
-                    "headers": headers or {},
-                    "data": self._store.encoder.encode(data),
-                },
+                "value": value,
             },
         )
 

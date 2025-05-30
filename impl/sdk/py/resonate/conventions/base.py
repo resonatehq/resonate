@@ -12,7 +12,6 @@ class Base:
     id: str
     timeout: float
     idempotency_key: str | None = None
-    headers: dict[str, str] | None = None
     data: Any = None
     tags: dict[str, str] | None = None
 

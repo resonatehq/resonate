@@ -21,11 +21,7 @@ class Remote:
 
     @property
     def idempotency_key(self) -> str | None:
-        return self.opts.idempotency_key(self.id) if callable(self.opts.idempotency_key) else self.opts.idempotency_key
-
-    @property
-    def headers(self) -> None:
-        return None
+        return self.opts.get_idempotency_key(self.id)
 
     @property
     def data(self) -> dict[str, Any]:

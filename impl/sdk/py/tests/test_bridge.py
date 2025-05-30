@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from resonate.errors.errors import ResonateShutdownError, ResonateStoreError
+from resonate.errors import ResonateShutdownError, ResonateStoreError
 from resonate.resonate import Resonate
 from resonate.retry_policies import Constant, Never
 from resonate.stores.local import LocalStore
@@ -281,7 +281,7 @@ def test_hitl(resonate: Resonate, id: str | None) -> None:
     uid = uuid.uuid4()
     handle = resonate.run(f"hitl-{uid}", hitl, id)
     time.sleep(1)
-    resonate.promises.resolve(id=id or f"hitl-{uid}.1", data=1)
+    resonate.promises.resolve(id=id or f"hitl-{uid}.1", data="1")
     assert handle.result() == 1
 
 
@@ -437,7 +437,7 @@ def test_info(
 def test_resonate_get(resonate: Resonate) -> None:
     def resolve_promise_slow(id: str) -> None:
         time.sleep(1)
-        resonate.promises.resolve(id=id, data=42)
+        resonate.promises.resolve(id=id, data="42")
 
     timestamp = int(time.time())
     id = f"get.{timestamp}"
@@ -445,6 +445,7 @@ def test_resonate_get(resonate: Resonate) -> None:
     thread = threading.Thread(target=resolve_promise_slow, args=(id,))  # Do this in a different thread to simulate concurrency
 
     handle = resonate.get(id)
+
     thread.start()
     res = handle.result()
     assert res == 42

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, final
 
-from resonate.encoders import Base64Encoder, ChainEncoder, JsonEncoder
+from resonate.encoders import Base64Encoder
 from resonate.errors import ResonateStoreError
 from resonate.message_sources import LocalMessageSource
 from resonate.models.callback import Callback
@@ -25,8 +25,8 @@ if TYPE_CHECKING:
 
 
 class LocalStore:
-    def __init__(self, encoder: Encoder[Any, str | None] | None = None, clock: Clock | None = None) -> None:
-        self._encoder = encoder or ChainEncoder(JsonEncoder(), Base64Encoder())
+    def __init__(self, encoder: Encoder[str | None, str | None] | None = None, clock: Clock | None = None) -> None:
+        self._encoder = encoder or Base64Encoder()
         self._promises = LocalPromiseStore(self)
         self._tasks = LocalTaskStore(self)
 
@@ -41,7 +41,7 @@ class LocalStore:
         self._stopped = False
 
     @property
-    def encoder(self) -> Encoder[Any, str | None]:
+    def encoder(self) -> Encoder[str | None, str | None]:
         return self._encoder
 
     @property
@@ -170,13 +170,13 @@ class LocalStore:
         time = int(self._clock.time() * 1000)
 
         # transition promises to timedout
-        for promise in self._promises.scan():
+        for promise in self.promises.scan():
             if promise.state == "PENDING" and time >= promise.timeout:
                 _, _, applied = self.promises.transition(id=promise.id, to="REJECTED_TIMEDOUT")
                 assert applied
 
         # transition tasks to init
-        for task in self._tasks.scan():
+        for task in self.tasks.scan():
             if task.state in ("ENQUEUED", "CLAIMED"):
                 assert task.expiry is not None
 
@@ -185,7 +185,7 @@ class LocalStore:
                     assert applied
 
         # send all outstanding messages
-        for task in self._tasks.scan():
+        for task in self.tasks.scan():
             if task.state != "INIT":
                 continue
 
@@ -202,7 +202,10 @@ class LocalStore:
             else:
                 assert task.type == "notify"
 
-                promise = self._promises.get(task.root_promise_id)
+                # promise param and value are already decoded, therefore we
+                # must re-encode below them before sending
+                promise = self.promises.get(task.root_promise_id)
+
                 mesg = NotifyMesg(
                     type="notify",
                     promise=DurablePromiseMesg(
@@ -223,7 +226,7 @@ class LocalStore:
             # store or the simulator) can let us know if the message is
             # deliverable
             if (yield task.recv, mesg):
-                # notify tasks go stratight completed, otherwise enqueued
+                # notify tasks go straight to completed, otherwise enqueued
                 _, applied = self.tasks.transition(task.id, to="COMPLETED" if task.type == "notify" else "ENQUEUED")
                 assert applied
             else:
@@ -429,7 +432,7 @@ class LocalPromiseStore:
             # interrupt the control loop
             self._store.notify()
 
-        return (DurablePromise.from_dict(self._store, promise.to_dict()), Task.from_dict(self._store, task.to_dict()) if task else None)
+        return DurablePromise.from_dict(self._store, promise.to_dict()), Task.from_dict(self._store, task.to_dict()) if task else None
 
     def _complete(
         self,
@@ -458,7 +461,7 @@ class LocalPromiseStore:
         timeout: int | None = None,
         ikey: str | None = None,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> tuple[DurablePromiseRecord, TaskRecord | None, bool]:
         promise, applied = self._transition(
@@ -511,7 +514,7 @@ class LocalPromiseStore:
         timeout: int | None = None,
         ikey: str | None = None,
         headers: dict[str, str] | None = None,
-        data: Any = None,
+        data: str | None = None,
         tags: dict[str, str] | None = None,
     ) -> tuple[DurablePromiseRecord, bool]:
         time = int(self._store.clock.time() * 1000)
@@ -526,8 +529,8 @@ class LocalPromiseStore:
                     timeout=timeout,
                     ikey_for_create=ikey,
                     ikey_for_complete=None,
-                    param=DurablePromiseRecordValue(headers=headers or {}, data=self._store.encoder.encode(data)),
-                    value=DurablePromiseRecordValue(headers={}, data=None),
+                    param=DurablePromiseRecordValue(headers=headers, data=self._store.encoder.encode(data)),
+                    value=DurablePromiseRecordValue(headers=None, data=None),
                     tags=tags,
                     created_on=time,
                     completed_on=None,
@@ -581,7 +584,7 @@ class LocalPromiseStore:
                     ikey_for_create=record.ikey_for_create,
                     ikey_for_complete=None,
                     param=record.param,
-                    value=DurablePromiseRecordValue(headers={}, data=None),
+                    value=DurablePromiseRecordValue(headers=None, data=None),
                     tags=record.tags,
                     created_on=record.created_on,
                     completed_on=record.completed_on,

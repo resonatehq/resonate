@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from resonate import Context
 from resonate.conventions import Base
+from resonate.encoders import HeaderEncoder, JsonEncoder, JsonPickleEncoder, PairEncoder
 from resonate.errors import ResonateStoreError
 from resonate.models.commands import (
     CancelPromiseReq,
@@ -301,7 +302,7 @@ class Server(Component):
                 )
                 self.send_msg(msg.send, {"type": "res", "uuid": msg.data.get("uuid"), "data": CancelPromiseRes(promise)})
 
-            case CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv):
+            case CreateCallbackReq(promise_id, root_promise_id, timeout, recv):
                 promise, callback = self.store.promises.callback(
                     promise_id=promise_id,
                     root_promise_id=root_promise_id,
@@ -385,6 +386,10 @@ class Worker(Component):
         self.tasks: dict[str, Task] = {}
         self.last_heartbeat = 0.0
 
+        self.encoder = PairEncoder(
+            HeaderEncoder("resonate:format-py", JsonPickleEncoder()),
+            JsonEncoder(),
+        )
         self.scheduler = Scheduler(
             lambda id, cid, info: Context(id, cid, info, self.registry, self.dependencies),
             pid=self.uni,
@@ -396,6 +401,7 @@ class Worker(Component):
         match msg.data:
             case Invoke(id, conv):
                 assert id == conv.id
+                headers, data = self.encoder.encode(conv.data)
 
                 self.send_req(
                     "sim://uni@server",
@@ -403,8 +409,8 @@ class Worker(Component):
                         id=id,
                         timeout=int((self.time + conv.timeout) * 1000),
                         ikey=conv.idempotency_key,
-                        headers=conv.headers,
-                        data=conv.data,
+                        headers=headers,
+                        data=data,
                         tags=conv.tags,
                         pid=self.scheduler.pid,
                         ttl=self.r.randint(0, 30000),  # TODO(dfarr): make this configurable
@@ -605,11 +611,12 @@ class Worker(Component):
                 pass
 
     def _invoke(self, promise: DurablePromise) -> Invoke:
-        assert isinstance(promise.param.data, dict)
-        assert "func" in promise.param.data
-        assert "args" in promise.param.data
-        assert "kwargs" in promise.param.data
-        _, func, version = self.registry.get(promise.param.data["func"])
+        data = self.encoder.decode(promise.param.to_tuple())
+        assert isinstance(data, dict)
+        assert "func" in data
+        assert "args" in data
+        assert "kwargs" in data
+        _, func, version = self.registry.get(data["func"])
 
         return Invoke(
             promise.id,
@@ -617,14 +624,13 @@ class Worker(Component):
                 promise.id,
                 promise.rel_timeout,
                 promise.ikey_for_create,
-                promise.param.headers,
                 promise.param.data,
                 promise.tags,
             ),
             promise.abs_timeout,
             func,
-            promise.param.data["args"],
-            promise.param.data["kwargs"],
+            data["args"],
+            data["kwargs"],
             Options(version=version),
             promise,
         )

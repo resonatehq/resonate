@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -405,7 +406,7 @@ def func(f: Init | Lfnc | Rfnc | Coro | None) -> str:
         case Lfnc(func=fn) | Coro(func=fn):
             return fn.__name__
         case Rfnc(conv=conv):
-            return conv.data["func"]
+            return json.loads(conv.data)["func"]
         case None:
             return ""
 

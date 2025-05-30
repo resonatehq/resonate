@@ -119,7 +119,7 @@ class CreatePromiseReq:
     ikey: str | None = None
     strict: bool = False
     headers: dict[str, str] | None = None
-    data: Any = None
+    data: str | None = None
     tags: dict[str, str] | None = None
 
 
@@ -137,7 +137,7 @@ class CreatePromiseWithTaskReq:
     ikey: str | None = None
     strict: bool = False
     headers: dict[str, str] | None = None
-    data: Any = None
+    data: str | None = None
     tags: dict[str, str] | None = None
 
 
@@ -153,7 +153,7 @@ class ResolvePromiseReq:
     ikey: str | None = None
     strict: bool = False
     headers: dict[str, str] | None = None
-    data: Any = None
+    data: str | None = None
 
 
 @dataclass
@@ -167,7 +167,7 @@ class RejectPromiseReq:
     ikey: str | None = None
     strict: bool = False
     headers: dict[str, str] | None = None
-    data: Any = None
+    data: str | None = None
 
 
 @dataclass
@@ -181,7 +181,7 @@ class CancelPromiseReq:
     ikey: str | None = None
     strict: bool = False
     headers: dict[str, str] | None = None
-    data: Any = None
+    data: str | None = None
 
 
 @dataclass
@@ -191,7 +191,6 @@ class CancelPromiseRes:
 
 @dataclass
 class CreateCallbackReq:
-    id: str
     promise_id: str
     root_promise_id: str
     timeout: int

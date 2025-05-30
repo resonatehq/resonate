@@ -17,10 +17,6 @@ class Sleep:
         return self.id
 
     @property
-    def headers(self) -> dict[str, str] | None:
-        return None
-
-    @property
     def data(self) -> Any:
         return None
 

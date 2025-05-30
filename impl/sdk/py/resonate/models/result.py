@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Final
 
 type Result[T] = Ok[T] | Ko
 
@@ -13,4 +13,4 @@ class Ok[T]:
 
 @dataclass
 class Ko:
-    value: Final[Any]
+    value: Final[BaseException]

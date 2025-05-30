@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from resonate.conventions import Base
 from resonate.delay_q import DelayQ
-from resonate.errors.errors import ResonateShutdownError
+from resonate.errors import ResonateShutdownError
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -54,30 +54,35 @@ class Bridge:
     def __init__(
         self,
         ctx: Callable[[str, str, Info], Context],
-        store: Store,
-        message_source: MessageSource,
-        registry: Registry,
         pid: str,
         ttl: int,
+        opts: Options,
         unicast: str,
         anycast: str,
+        registry: Registry,
+        store: Store,
+        message_source: MessageSource,
     ) -> None:
-        self._store = store
-        self._message_source = message_source
-        self._registry = registry
         self._cq = queue.Queue[Command | tuple[Command, Future] | None]()
+        self._promise_id_to_task: dict[str, Task] = {}
+
+        self._ctx = ctx
+        self._pid = pid
+        self._ttl = ttl
+        self._opts = opts
         self._unicast = unicast
         self._anycast = unicast
 
-        self._pid = pid
-        self._ttl = ttl
+        self._registry = registry
+        self._store = store
+        self._message_source = message_source
+
         self._scheduler = Scheduler(
-            ctx=ctx,
-            pid=self._pid,
-            unicast=unicast,
-            anycast=anycast,
+            self._ctx,
+            self._pid,
+            self._unicast,
+            self._anycast,
         )
-        self._promise_id_to_task: dict[str, Task] = {}
 
         self._messages_thread = threading.Thread(target=self._process_msgs, name="bridge_msg_processor", daemon=True)
         self._bridge_thread = threading.Thread(target=self._process_cq, name="bridge_main_thread", daemon=True)
@@ -91,12 +96,15 @@ class Bridge:
         self._delay_thread = threading.Thread(target=self._process_delayed_events, name="delay_thread", daemon=True)
 
     def run(self, conv: Convention, func: Callable, args: tuple, kwargs: dict, opts: Options, future: Future) -> DurablePromise:
+        encoder = opts.get_encoder()
+
+        headers, data = encoder.encode(conv.data)
         promise, task = self._store.promises.create_with_task(
             id=conv.id,
             ikey=conv.idempotency_key,
             timeout=int((time.time() + conv.timeout) * 1000),
-            headers=conv.headers,
-            data=conv.data,
+            headers=headers,
+            data=data,
             tags=conv.tags,
             pid=self._pid,
             ttl=self._ttl * 1000,
@@ -104,7 +112,7 @@ class Bridge:
 
         if promise.completed:
             assert not task
-            match promise.result:
+            match promise.result(encoder):
                 case Ok(v):
                     future.set_result(v)
                 case Ko(e):
@@ -118,18 +126,21 @@ class Bridge:
 
         return promise
 
-    def rpc(self, conv: Convention, future: Future) -> DurablePromise:
+    def rpc(self, conv: Convention, opts: Options, future: Future) -> DurablePromise:
+        encoder = opts.get_encoder()
+
+        headers, data = encoder.encode(conv.data)
         promise = self._store.promises.create(
             id=conv.id,
             ikey=conv.idempotency_key,
             timeout=int((time.time() + conv.timeout) * 1000),
-            headers=conv.headers,
-            data=conv.data,
+            headers=headers,
+            data=data,
             tags=conv.tags,
         )
 
         if promise.completed:
-            match promise.result:
+            match promise.result(encoder):
                 case Ok(v):
                     future.set_result(v)
                 case Ko(e):
@@ -139,15 +150,19 @@ class Bridge:
 
         return promise
 
-    def get(self, id: str, future: Future) -> DurablePromise:
-        durable_promise = self._store.promises.get(id=id)
+    def get(self, id: str, opts: Options, future: Future) -> DurablePromise:
+        promise = self._store.promises.get(id=id)
 
-        if durable_promise.completed:
-            future.set_result(durable_promise.value.data)
-            return durable_promise
+        if promise.completed:
+            match promise.result(opts.get_encoder()):
+                case Ok(v):
+                    future.set_result(v)
+                case Ko(e):
+                    future.set_exception(e)
+        else:
+            self._cq.put_nowait((Listen(id), future))
 
-        self._cq.put_nowait((Listen(id), future))
-        return durable_promise
+        return promise
 
     def start(self) -> None:
         if not self._messages_thread.is_alive():
@@ -248,29 +263,31 @@ class Bridge:
 
     @exit_on_exception("bridge.messages")
     def _process_msgs(self) -> None:
+        encoder = self._opts.get_encoder()
+
         def _invoke(root: DurablePromise) -> Invoke:
-            assert "func" in root.param.data
-            assert "version" in root.param.data
+            data = encoder.decode(root.param.to_tuple())
+            assert isinstance(data, dict)
 
-            f, v = root.param.data["func"], root.param.data["version"]
-            assert isinstance(f, str)
-            assert isinstance(v, int)
+            assert "func" in data
+            assert "version" in data
+            assert isinstance(data["func"], str)
+            assert isinstance(data["version"], int)
 
-            _, func, version = self._registry.get(f, v)
+            _, func, version = self._registry.get(data["func"], data["version"])
             return Invoke(
                 root.id,
                 Base(
                     root.id,
                     root.rel_timeout,
                     root.ikey_for_create,
-                    root.param.headers,
                     root.param.data,
                     root.tags,
                 ),
                 root.abs_timeout,
                 func,
-                root.param.data.get("args", ()),
-                root.param.data.get("kwargs", {}),
+                data.get("args", ()),
+                data.get("kwargs", {}),
                 Options(version=version),
                 root,
             )
@@ -401,7 +418,7 @@ class Bridge:
                 )
                 return Receive(cmd_id, cid, CancelPromiseRes(promise))
 
-            case CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv):
+            case CreateCallbackReq(promise_id, root_promise_id, timeout, recv):
                 promise, callback = self._store.promises.callback(
                     promise_id=promise_id,
                     root_promise_id=root_promise_id,

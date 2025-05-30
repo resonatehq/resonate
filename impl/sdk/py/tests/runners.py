@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from resonate.conventions import Base, Local
 from resonate.coroutine import LFC, LFI, RFC, RFI
+from resonate.encoders import JsonEncoder, NoopEncoder, PairEncoder
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -182,6 +183,9 @@ class ResonateRunner:
         # store
         self.store = LocalStore()
 
+        # encoder
+        self.encoder = PairEncoder(NoopEncoder(), JsonEncoder())
+
         # create scheduler and connect store
         self.scheduler = Scheduler(ctx=lambda id, cid, *_: Context(id, cid))
 
@@ -191,12 +195,14 @@ class ResonateRunner:
         conv = Remote(id, id, id, func.__name__, args, kwargs)
         future = Future[R]()
 
+        headers, data = self.encoder.encode(conv.data)
+        assert headers is None
+
         promise, _ = self.store.promises.create_with_task(
             id=conv.id,
             ikey=conv.idempotency_key,
             timeout=int((time.time() + conv.timeout) * 1000),
-            headers=conv.headers,
-            data=conv.data,
+            data=data,
             tags=conv.tags,
             pid=self.scheduler.pid,
             ttl=sys.maxsize,
@@ -273,12 +279,12 @@ class ResonateRunner:
                         )
                         cmds.append(Receive(_id, cid, CancelPromiseRes(promise)))
 
-                    case Network(_id, cid, CreateCallbackReq(id, promise_id, root_promise_id, timeout, recv)):
+                    case Network(_id, cid, CreateCallbackReq(promise_id, root_promise_id, timeout, recv)):
                         promise, callback = self.store.promises.callback(
                             promise_id=promise_id,
                             root_promise_id=root_promise_id,
-                            timeout=timeout,
                             recv=recv,
+                            timeout=timeout,
                         )
                         if promise.completed:
                             assert not callback
@@ -295,7 +301,13 @@ class ResonateRunner:
                         assert root.pending
                         assert not leaf
 
-                        _, func, version = self.registry.get(root.param.data["func"])
+                        data = self.encoder.decode(root.param.to_tuple())
+                        assert isinstance(data, dict)
+                        assert "func" in data
+                        assert "args" in data
+                        assert "kwargs" in data
+
+                        _, func, version = self.registry.get(data["func"])
 
                         cmds.append(
                             Invoke(
@@ -304,14 +316,13 @@ class ResonateRunner:
                                     root.id,
                                     root.rel_timeout,
                                     root.ikey_for_create,
-                                    root.param.headers,
                                     root.param.data,
                                     root.tags,
                                 ),
                                 root.abs_timeout,
                                 func,
-                                root.param.data["args"],
-                                root.param.data["kwargs"],
+                                data["args"],
+                                data["kwargs"],
                                 Options(version=version),
                                 root,
                             )
@@ -345,8 +356,11 @@ class ResonateLFXRunner(ResonateRunner):
         # create store
         self.store = LocalStore()
 
+        # create encoder
+        self.encoder = PairEncoder(NoopEncoder(), JsonEncoder())
+
         # create scheduler
-        self.scheduler = Scheduler(ctx=lambda id, cid, *_: Context(id, cid))
+        self.scheduler = Scheduler(ctx=lambda id, cid, *_: LocalContext(id, cid))
 
 
 class ResonateRFXRunner(ResonateRunner):
@@ -356,5 +370,8 @@ class ResonateRFXRunner(ResonateRunner):
         # create store
         self.store = LocalStore()
 
+        # create encoder
+        self.encoder = PairEncoder(NoopEncoder(), JsonEncoder())
+
         # create scheduler and connect store
-        self.scheduler = Scheduler(ctx=lambda id, cid, *_: Context(id, cid))
+        self.scheduler = Scheduler(ctx=lambda id, cid, *_: RemoteContext(id, cid))

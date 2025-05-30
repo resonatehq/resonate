@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
     from resonate.models.convention import Convention
+    from resonate.models.encoder import Encoder
     from resonate.models.retry_policy import RetryPolicy
 
 
@@ -29,6 +30,7 @@ class LFX[T]:
         self,
         *,
         durable: bool | None = None,
+        encoder: Encoder[Any, str | None] | None = None,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
         non_retryable_exceptions: tuple[type[Exception], ...] | None = None,
@@ -38,8 +40,18 @@ class LFX[T]:
         version: int | None = None,
     ) -> Self:
         # Note: we deliberately ignore the version for LFX
-        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, tags=tags, timeout=timeout)
-        self.opts = self.opts.merge(durable=durable, retry_policy=retry_policy, non_retryable_exceptions=non_retryable_exceptions)
+        self.conv = self.conv.options(
+            id=id,
+            idempotency_key=idempotency_key,
+            tags=tags,
+            timeout=timeout,
+        )
+        self.opts = self.opts.merge(
+            durable=durable,
+            encoder=encoder,
+            non_retryable_exceptions=non_retryable_exceptions,
+            retry_policy=retry_policy,
+        )
         return self
 
 
@@ -56,7 +68,7 @@ class LFC[T](LFX[T]):
 @dataclass
 class RFX[T]:
     conv: Convention
-    opts: Options = field(default_factory=Options)  # unused for the time being
+    opts: Options = field(default_factory=Options)
 
     @property
     def id(self) -> str:
@@ -65,6 +77,7 @@ class RFX[T]:
     def options(
         self,
         *,
+        encoder: Encoder[Any, str | None] | None = None,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
         target: str | None = None,
@@ -72,7 +85,17 @@ class RFX[T]:
         timeout: float | None = None,
         version: int | None = None,
     ) -> Self:
-        self.conv = self.conv.options(id=id, idempotency_key=idempotency_key, target=target, tags=tags, timeout=timeout, version=version)
+        self.conv = self.conv.options(
+            id=id,
+            idempotency_key=idempotency_key,
+            target=target,
+            tags=tags,
+            timeout=timeout,
+            version=version,
+        )
+        self.opts = self.opts.merge(
+            encoder=encoder,
+        )
         return self
 
 

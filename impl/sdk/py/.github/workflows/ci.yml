@@ -52,6 +52,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.23.0"
+          cache: false # turn caching off to avoid warning
 
       - name: Get latest Resonate release tag (if needed)
         if: matrix.server-version == 'latest'
