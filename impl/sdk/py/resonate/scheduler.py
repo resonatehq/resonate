@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any, Final, Literal
 
+from resonate import utils
 from resonate.conventions import Base
 from resonate.coroutine import AWT, LFI, RFI, TRM, Coroutine
 from resonate.graph import Graph, Node
@@ -48,26 +47,6 @@ if TYPE_CHECKING:
     from resonate.models.durable_promise import DurablePromise
     from resonate.models.encoder import Encoder
     from resonate.models.retry_policy import RetryPolicy
-
-
-class LogRecordFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        record.computation_id = getattr(record, "computation_id", "none")
-        record.id = getattr(record, "id", "")
-        record.attempt = f"(attempt={attempt})" if (attempt := getattr(record, "attempt", 1)) > 1 else ""
-        return super().format(record)
-
-
-logger = logging.getLogger(__package__)
-logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
-handler = logging.StreamHandler()
-handler.setFormatter(
-    LogRecordFormatter(
-        fmt="%(asctime)s %(levelname)s [%(name)s] %(computation_id)s::%(id)s %(message)s %(attempt)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    ),
-)
-logger.addHandler(handler)
 
 
 class Scheduler:
@@ -498,7 +477,7 @@ class Computation:
 
         self.graph = Graph[State](id, Enabled(Suspended(Init())))
         self.futures: PoppableList[Future] = PoppableList()
-        self.history: list[Command | Function | Delayed | Network | tuple[str, None | AWT | Result, LFI | RFI | AWT | TRM]] = []
+        self.max_len: Final[int] = 100
 
     def __repr__(self) -> str:
         return f"Computation(id={self.id}, runnable={self.runnable()}, suspendable={self.suspendable()})"
@@ -521,8 +500,6 @@ class Computation:
                 return None
 
     def apply(self, cmd: Command) -> None:
-        self.history.append(cmd)
-
         match cmd, self.graph.root.value.func:
             case Invoke(id, conv, timeout, func, args, kwargs, opts, promise), Init(next=None):
                 assert id == conv.id == self.id == (promise.id if promise else id), "Ids must match."
@@ -751,7 +728,6 @@ class Computation:
                     case Ko(e):
                         future.set_exception(e)
 
-        self.history.extend(done if self.suspendable() else more)
         return Done(done) if self.suspendable() else More(more)
 
     def _eval(self, node: Node[State]) -> list[Function | Delayed[Function | Retry] | Network[CreatePromiseReq | ResolvePromiseReq | RejectPromiseReq | CancelPromiseReq]]:
@@ -810,7 +786,11 @@ class Computation:
 
                 match f.result, opts.durable, f.retry_policy.next(f.attempt):
                     case None, _, _:
-                        logger.debug("enqueued", extra={"computation_id": self.id, "id": id})
+                        f.ctx.logger.debug(
+                            "Running function %s(%s)",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                        )
                         node.transition(Blocked(Running(f)))
 
                         return [
@@ -818,7 +798,12 @@ class Computation:
                         ]
 
                     case Ok(v), True, _:
-                        logger.debug("completed successfully", extra={"computation_id": self.id, "id": id})
+                        f.ctx.logger.debug(
+                            "Function %s(%s) succeeded with %s",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                            utils.truncate(repr(v), self.max_len),
+                        )
                         node.transition(Blocked(Running(f)))
                         headers, data = f.encoder.encode(v)
 
@@ -826,14 +811,24 @@ class Computation:
                             Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, headers=headers, data=data)),
                         ]
 
-                    case Ok(), False, _:
-                        logger.debug("completed successfully", extra={"computation_id": self.id, "id": id})
+                    case Ok(v), False, _:
+                        f.ctx.logger.debug(
+                            "Function %s(%s) succeeded with %s",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                            utils.truncate(repr(v), self.max_len),
+                        )
                         node.transition(Enabled(Completed(f)))
                         self._unblock(f.suspends, f.result)
                         return []
 
                     case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                        logger.debug("completed unsuccessfully", extra={"computation_id": self.id, "id": id})
+                        f.ctx.logger.warning(
+                            "Function %s(%s) failed with %s",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                            utils.truncate(repr(e), self.max_len),
+                        )
                         node.transition(Blocked(Running(f)))
                         headers, data = f.encoder.encode(e)
 
@@ -842,14 +837,25 @@ class Computation:
                         ]
 
                     case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                        logger.debug("completed unsuccessfully", extra={"computation_id": self.id, "id": id})
+                        f.ctx.logger.warning(
+                            "Function %s(%s) failed with %s",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                            utils.truncate(repr(e), self.max_len),
+                        )
                         node.transition(Enabled(Completed(f)))
                         self._unblock(f.suspends, f.result)
                         return []
 
-                    case Ko(), _, d:
+                    case Ko(e), _, d:
                         assert d is not None, "Delay must be set."
-                        logger.debug("enqueued (attempt=%s)", f.attempt + 1, extra={"computation_id": self.id, "id": id})
+                        f.ctx.logger.warning(
+                            "Function %s(%s) failed with %s (retrying in %.1fs)",
+                            f.func.__name__,
+                            utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
+                            utils.truncate(repr(e), self.max_len),
+                            d,
+                        )
                         node.transition(Blocked(Running(f.map(attempt=f.attempt + 1))))
 
                         return [
@@ -857,27 +863,22 @@ class Computation:
                         ]
 
             case Enabled(Running(Coro(id=id, timeout=timeout, coro=coro, next=next, opts=opts) as c)):
-                match next:
-                    case None:
-                        logger.debug("spawned", extra={"computation_id": self.id, "id": id, "attempt": c.attempt})
-
-                    case Ok() | Ko():
-                        logger.debug("resumed", extra={"computation_id": self.id, "id": id, "attempt": c.attempt})
-
-                    case AWT():
-                        pass
+                if next is None:
+                    c.ctx.logger.debug(
+                        "Running function %s(%s)%s",
+                        c.func.__name__,
+                        utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                        f" (attempt {c.attempt})" if c.attempt > 1 else "",
+                    )
 
                 cmd = coro.send(next)
                 child = self.graph.find(lambda n: n.id == cmd.id) or Node(cmd.id, Enabled(Suspended(Init())))
-                self.history.append((id, next, cmd))
 
                 clock = c.ctx.get_dependency("resonate:time", time)
                 assert isinstance(clock, Clock), "resonate:time must be an instance of clock"
 
                 match cmd, child.value:
                     case LFI(conv, func, args, kwargs, opts), Enabled(Suspended(Init(next=None))):
-                        logger.debug("invoked %s", conv.id, extra={"computation_id": self.id, "id": id})
-
                         cls = Coro if isgeneratorfunction(func) else Lfnc
                         next = cls(conv.id, self.id, conv, min(clock.time() + conv.timeout, c.timeout), func, args, kwargs, opts, self.ctx)
                         node.add_edge(child)
@@ -887,8 +888,6 @@ class Computation:
                         return []
 
                     case RFI(conv, opts, mode=mode), Enabled(Suspended(Init(next=None))):
-                        logger.debug("invoked %s", conv.id, extra={"computation_id": self.id, "id": id})
-
                         next = Rfnc(
                             conv.id,
                             self.id,
@@ -903,8 +902,6 @@ class Computation:
                         return []
 
                     case LFI(conv) | RFI(conv), Enabled(Running(Init() as f)):
-                        logger.debug("invoked %s", conv.id, extra={"computation_id": self.id, "id": id})
-
                         node.add_edge(child)
                         node.add_edge(child, "waiting[p]")
                         node.transition(Enabled(Suspended(c)))
@@ -912,8 +909,6 @@ class Computation:
                         return []
 
                     case LFI(conv) | RFI(conv), Blocked(Running(Init() as f)):
-                        logger.debug("invoked %s", conv.id, extra={"computation_id": self.id, "id": id})
-
                         node.add_edge(child)
                         node.add_edge(child, "waiting[p]")
                         node.transition(Enabled(Suspended(c)))
@@ -921,37 +916,30 @@ class Computation:
                         return []
 
                     case LFI(conv) | RFI(conv), _:
-                        logger.debug("invoked %s", conv.id, extra={"computation_id": self.id, "id": id})
-
                         node.add_edge(child)
                         node.transition(Enabled(Running(c.map(next=AWT(conv.id)))))
                         return []
 
-                    case AWT(aid), Enabled(Running(f)):
-                        logger.debug("awaiting %s", aid, extra={"computation_id": self.id, "id": id})
-
+                    case AWT(), Enabled(Running(f)):
                         node.add_edge(child, "waiting[v]")
                         node.transition(Enabled(Suspended(c)))
                         child.transition(Enabled(Running(f.map(suspends=node))))
                         return []
 
-                    case AWT(aid), Blocked(Running(f)):
-                        logger.debug("awaiting %s", aid, extra={"computation_id": self.id, "id": id})
+                    case AWT(), Blocked(Running(f)):
                         node.add_edge(child, "waiting[v]")
                         node.transition(Enabled(Suspended(c)))
                         child.transition(Blocked(Running(f.map(suspends=node))))
                         return []
 
-                    case AWT(aid), Enabled(Suspended(f)):
-                        logger.debug("awaiting %s", aid, extra={"computation_id": self.id, "id": id})
+                    case AWT(), Enabled(Suspended(f)):
                         node.add_edge(child, "waiting[v]")
                         node.transition(Enabled(Suspended(c)))
                         child.transition(Enabled(Suspended(f.map(suspends=node))))
                         return []
 
-                    case AWT(aid), Enabled(Completed(Lfnc(result=result) | Rfnc(result=result) | Coro(result=result))):
+                    case AWT(), Enabled(Completed(Lfnc(result=result) | Rfnc(result=result) | Coro(result=result))):
                         assert result is not None, "Completed result must be set."
-                        logger.debug("awaiting %s", aid, extra={"computation_id": self.id, "id": id})
                         node.transition(Enabled(Running(c.map(next=result))))
                         return []
 
@@ -960,7 +948,12 @@ class Computation:
 
                         match result, opts.durable, c.retry_policy.next(c.attempt):
                             case Ok(v), True, _:
-                                logger.debug("completed successfully", extra={"computation_id": self.id, "id": id})
+                                c.ctx.logger.debug(
+                                    "Function %s(%s) succeeded with %s",
+                                    c.func.__name__,
+                                    utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                                    utils.truncate(repr(v), self.max_len),
+                                )
                                 node.transition(Blocked(Running(c)))
                                 headers, data = c.encoder.encode(v)
 
@@ -968,14 +961,24 @@ class Computation:
                                     Network(id, self.id, ResolvePromiseReq(id=id, ikey=id, headers=headers, data=data)),
                                 ]
 
-                            case Ok(), False, _:
-                                logger.debug("completed successfully", extra={"computation_id": self.id, "id": id})
+                            case Ok(v), False, _:
+                                c.ctx.logger.debug(
+                                    "Function %s(%s) succeeded with %s",
+                                    c.func.__name__,
+                                    utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                                    utils.truncate(repr(v), self.max_len),
+                                )
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
 
                             case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                                logger.debug("completed unsuccessfully", extra={"computation_id": self.id, "id": id})
+                                c.ctx.logger.debug(
+                                    "Function %s(%s) failed with %s",
+                                    c.func.__name__,
+                                    utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                                    utils.truncate(repr(e), self.max_len),
+                                )
                                 node.transition(Blocked(Running(c)))
                                 headers, data = c.encoder.encode(e)
 
@@ -984,13 +987,25 @@ class Computation:
                                 ]
 
                             case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                                logger.debug("completed unsuccessfully", extra={"computation_id": self.id, "id": id})
+                                c.ctx.logger.debug(
+                                    "Function %s(%s) failed with %s",
+                                    c.func.__name__,
+                                    utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                                    utils.truncate(repr(e), self.max_len),
+                                )
                                 node.transition(Enabled(Completed(c.map(result=result))))
                                 self._unblock(c.suspends, result)
                                 return []
 
-                            case Ko(), _, d:
+                            case Ko(e), _, d:
                                 assert d is not None, "Delay must be set."
+                                c.ctx.logger.warning(
+                                    "Function %s(%s) failed with %s (retrying in %.1fs)",
+                                    c.func.__name__,
+                                    utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
+                                    utils.truncate(repr(e), self.max_len),
+                                    d,
+                                )
                                 node.transition(Blocked(Running(c.map(attempt=c.attempt + 1))))
 
                                 return [
@@ -1015,23 +1030,3 @@ class Computation:
                     node.transition(Enabled(Running(c.map(next=next))))
                 case _:
                     raise NotImplementedError
-
-    def print(self) -> None:
-        format = """
-========================================
-Computation: %s
-========================================
-
-Graph:
-  %s
-
-History:
-  %s
-"""
-
-        logger.info(
-            format,
-            self.id,
-            "\n  ".join(f"{'  ' * level}{node}" for node, level in self.graph.traverse_with_level()),
-            "\n  ".join(str(event) for event in self.history) if self.history else "None",
-        )

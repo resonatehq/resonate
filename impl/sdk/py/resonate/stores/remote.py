@@ -73,16 +73,19 @@ class RemoteStore:
 
                     # Only a 500 response code should be retried
                     if delay is None or e.response.status_code != 500:
-                        raise ResonateStoreError(**error) from e
+                        mesg = error.get("message", "Unknown exception")
+                        code = error.get("code", 0)
+                        details = error.get("details", None)
+                        raise ResonateStoreError(mesg=mesg, code=code, details=details) from e
                 except requests.exceptions.Timeout as e:
                     if delay is None:
-                        raise ResonateStoreError(message="Request timed out", code=0) from e
+                        raise ResonateStoreError(mesg="Request timed out", code=0) from e
                 except requests.exceptions.ConnectionError as e:
                     if delay is None:
-                        raise ResonateStoreError(message="Failed to connect", code=0) from e
+                        raise ResonateStoreError(mesg="Failed to connect", code=0) from e
                 except Exception as e:
                     if delay is None:
-                        raise ResonateStoreError(message="Unknown exception", code=0) from e
+                        raise ResonateStoreError(mesg="Unknown exception", code=0) from e
                 else:
                     return data
 

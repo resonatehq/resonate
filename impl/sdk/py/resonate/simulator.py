@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import urllib.parse
 from typing import TYPE_CHECKING, Any
 
@@ -7,6 +8,7 @@ from resonate import Context
 from resonate.conventions import Base
 from resonate.encoders import HeaderEncoder, JsonEncoder, JsonPickleEncoder, PairEncoder
 from resonate.errors import ResonateStoreError
+from resonate.loggers import DSTLogger
 from resonate.models.commands import (
     CancelPromiseReq,
     CancelPromiseRes,
@@ -378,10 +380,12 @@ class Server(Component):
 
 
 class Worker(Component):
-    def __init__(self, r: Random, uni: str, any: str, registry: Registry, dependencies: Dependencies) -> None:
+    def __init__(self, r: Random, uni: str, any: str, clock: Clock, registry: Registry, dependencies: Dependencies, log_level: int = logging.INFO) -> None:
         super().__init__(r, uni, any)
+        self.clock = clock
         self.registry = registry
         self.dependencies = dependencies
+        self.log_level = log_level
         self.commands: list[tuple[Command, Task | None]] = []
         self.tasks: dict[str, Task] = {}
         self.last_heartbeat = 0.0
@@ -391,7 +395,7 @@ class Worker(Component):
             JsonEncoder(),
         )
         self.scheduler = Scheduler(
-            lambda id, cid, info: Context(id, cid, info, self.registry, self.dependencies),
+            lambda id, cid, info: Context(id, cid, info, self.registry, self.dependencies, DSTLogger(cid, id, clock, level=log_level)),
             pid=self.uni,
             unicast=self.uni,
             anycast=self.any,

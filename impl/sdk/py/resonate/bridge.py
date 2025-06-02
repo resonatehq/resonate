@@ -76,6 +76,7 @@ class Bridge:
         self._registry = registry
         self._store = store
         self._message_source = message_source
+        self._delay_q = DelayQ[Function | Retry]()
 
         self._scheduler = Scheduler(
             self._ctx,
@@ -84,16 +85,16 @@ class Bridge:
             self._anycast,
         )
 
-        self._messages_thread = threading.Thread(target=self._process_msgs, name="bridge_msg_processor", daemon=True)
-        self._bridge_thread = threading.Thread(target=self._process_cq, name="bridge_main_thread", daemon=True)
+        self._bridge_thread = threading.Thread(target=self._process_cq, name="bridge", daemon=True)
+        self._message_source_thread = threading.Thread(target=self._process_msgs, name="message-source", daemon=True)
 
-        self._heartbeat_thread = threading.Thread(target=self._heartbeat, name="bridge_hearthbeat", daemon=True)
+        self._delay_q_thread = threading.Thread(target=self._process_delayed_events, name="delay-q", daemon=True)
+        self._delay_q_condition = threading.Condition()
+
+        self._heartbeat_thread = threading.Thread(target=self._heartbeat, name="heartbeat", daemon=True)
         self._heartbeat_active = threading.Event()
-        self._shutdown = threading.Event()
 
-        self._delay_queue = DelayQ[Function | Retry]()
-        self._delay_condition = threading.Condition()
-        self._delay_thread = threading.Thread(target=self._process_delayed_events, name="delay_thread", daemon=True)
+        self._shutdown = threading.Event()
 
     def run(self, conv: Convention, func: Callable, args: tuple, kwargs: dict, opts: Options, future: Future) -> DurablePromise:
         encoder = opts.get_encoder()
@@ -165,9 +166,9 @@ class Bridge:
         return promise
 
     def start(self) -> None:
-        if not self._messages_thread.is_alive():
+        if not self._message_source_thread.is_alive():
             self._message_source.start()
-            self._messages_thread.start()
+            self._message_source_thread.start()
 
         if not self._bridge_thread.is_alive():
             self._bridge_thread.start()
@@ -175,16 +176,16 @@ class Bridge:
         if not self._heartbeat_thread.is_alive():
             self._heartbeat_thread.start()
 
-        if not self._delay_thread.is_alive():
-            self._delay_thread.start()
+        if not self._delay_q_thread.is_alive():
+            self._delay_q_thread.start()
 
     def stop(self) -> None:
         """Stop internal components and threads. Intended for use only within the resonate class."""
         self._stop_no_join()
         if self._bridge_thread.is_alive():
             self._bridge_thread.join()
-        if self._messages_thread.is_alive():
-            self._messages_thread.join()
+        if self._message_source_thread.is_alive():
+            self._message_source_thread.join()
         if self._heartbeat_thread.is_alive():
             self._heartbeat_thread.join()
 
@@ -195,7 +196,7 @@ class Bridge:
         self._heartbeat_active.clear()
         self._shutdown.set()
 
-    @exit_on_exception("bridge")
+    @exit_on_exception
     def _process_cq(self) -> None:
         while item := self._cq.get():
             cmd, future = item if isinstance(item, tuple) else (item, None)
@@ -208,7 +209,7 @@ class Bridge:
                                     cmd = self._handle_network_request(id, cid, n_req)
                                     self._cq.put_nowait(cmd)
                                 except Exception as e:
-                                    err = ResonateShutdownError(mesg="Store error occurred, shutting down")
+                                    err = ResonateShutdownError(mesg="An unexpected store error has occurred, shutting down")
                                     err.__cause__ = e  # bind original error
 
                                     # bypass the cq and shutdown right away
@@ -261,7 +262,7 @@ class Bridge:
                             if task is not None:
                                 self._store.tasks.complete(id=task.id, counter=task.counter)
 
-    @exit_on_exception("bridge.messages")
+    @exit_on_exception
     def _process_msgs(self) -> None:
         encoder = self._opts.get_encoder()
 
@@ -319,23 +320,23 @@ class Bridge:
                     durable_promise = DurablePromise.from_dict(self._store, promise)
                     self._cq.put_nowait(Notify(durable_promise.id, durable_promise))
 
-    @exit_on_exception("bridge.delayq")
+    @exit_on_exception
     def _process_delayed_events(self) -> None:
         while not self._shutdown.is_set():
-            with self._delay_condition:
-                while not self._delay_queue.empty():
+            with self._delay_q_condition:
+                while not self._delay_q.empty():
                     if self._shutdown.is_set():
-                        self._delay_condition.release()
+                        self._delay_q_condition.release()
                         return
 
-                    self._delay_condition.wait()
+                    self._delay_q_condition.wait()
 
                 now = time.time()
-                events, next_time = self._delay_queue.get(now)
+                events, next_time = self._delay_q.get(now)
 
                 # Release the lock so more event can be added to the delay queue while
                 # the ones just pulled get processed.
-                self._delay_condition.release()
+                self._delay_q_condition.release()
 
                 for item in events:
                     match item:
@@ -348,13 +349,13 @@ class Bridge:
                     return
 
                 timeout = max(0.0, next_time - now)
-                self._delay_condition.acquire()
-                self._delay_condition.wait(timeout=timeout)
+                self._delay_q_condition.acquire()
+                self._delay_q_condition.wait(timeout=timeout)
 
     def start_heartbeat(self) -> None:
         self._heartbeat_active.set()
 
-    @exit_on_exception("bridge.heartbeat")
+    @exit_on_exception
     def _heartbeat(self) -> None:
         while not self._shutdown.is_set():
             # If this timeout don't execute the heartbeat
@@ -370,9 +371,9 @@ class Bridge:
 
         Uses a threading.condition to synchronize access to the underlaying delay_q.
         """
-        with self._delay_condition:
-            self._delay_queue.add(delay.item, time.time() + delay.delay)
-            self._delay_condition.notify()
+        with self._delay_q_condition:
+            self._delay_q.add(delay.item, time.time() + delay.delay)
+            self._delay_q_condition.notify()
 
     def _handle_network_request(self, cmd_id: str, cid: str, req: CreatePromiseReq | ResolvePromiseReq | RejectPromiseReq | CancelPromiseReq | CreateCallbackReq) -> Command:
         match req:

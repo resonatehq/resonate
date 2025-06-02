@@ -2,42 +2,96 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import traceback
 import urllib.parse
 from functools import wraps
 from importlib.metadata import version
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-
-def exit_on_exception[R, **P](component: str) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    def _exit_on_exception(func: Callable[P, R]) -> Callable[P, R]:
-        logger = logging.getLogger(f"{__package__}.{component}")
-
-        @wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            try:
-                return func(*args, **kwargs)
-            except Exception:
-                try:
-                    v = version("resonate-sdk")
-                except Exception:
-                    v = "unknown"
-
-                logger.exception(
-                    "An unexpected error happened.\n\nPlease report this issue so we can fix it as fast a possible:\n - https://github.com/resonatehq/resonate-sdk-py/issues/new?body=%s\n\n",
-                    urllib.parse.quote(f"Resonate (version {v}) process exited with error:\n```bash\n{traceback.format_exc()}```"),
-                )
-                os._exit(1)
-
-        return wrapper
-
-    return _exit_on_exception
+logger = logging.getLogger(__name__)
 
 
-def merge_optional_dicts[K, V](d1: dict[K, V] | None, d2: dict[K, V] | None) -> dict[K, V] | None:
-    if d1 is None and d2 is None:
-        return None
-    return {**(d1 or {}), **(d2 or {})}
+def exit_on_exception[**P, R](func: Callable[P, R]) -> Callable[P, R]:
+    @wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            body = f"""
+An exception occurred in the resonate python sdk.
+
+**Version**
+```
+{resonate_version()}
+```
+
+**Thread**
+```
+{threading.current_thread().name}
+```
+
+**Exception**
+```
+{e!r}
+```
+
+**Stacktrace**
+```
+{traceback.format_exc()}
+```
+
+**Additional context**
+Please provide any additional context that might help us debug this issue.
+"""
+
+            format = """
+Resonate encountered an unexpected exception and had to shut down.
+
+📦 Version:     %s
+🧵 Thread:      %s
+❌ Exception:   %s
+📄 Stacktrace:
+─────────────────────────────────────────────────────────────────────
+%s
+─────────────────────────────────────────────────────────────────────
+
+🔗 Please help us make resonate better by reporting this issue:
+https://github.com/resonatehq/resonate-sdk-py/issues/new?body=%s
+"""
+            logger.critical(
+                format,
+                resonate_version(),
+                threading.current_thread().name,
+                repr(e),
+                traceback.format_exc(),
+                urllib.parse.quote(body),
+            )
+
+            # Exit the process with a non-zero exit code, this kills all
+            # threads
+            os._exit(1)
+
+    return wrapper
+
+
+def resonate_version() -> str:
+    try:
+        return version("resonate-sdk")
+    except Exception:
+        return "unknown"
+
+
+def format_args_and_kwargs(args: tuple[Any, ...], kwargs: dict[str, Any]) -> str:
+    parts = [repr(arg) for arg in args]
+    parts += [f"{k}={v!r}" for k, v in kwargs.items()]
+    return ", ".join(parts)
+
+
+def truncate(s: str, n: int) -> str:
+    if len(s) > n:
+        return s[:n] + "..."
+    return s

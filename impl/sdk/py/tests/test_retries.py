@@ -7,6 +7,7 @@ import pytest
 
 from resonate.conventions import Base
 from resonate.dependencies import Dependencies
+from resonate.loggers import ContextLogger
 from resonate.models.commands import Delayed, Function, Invoke, Retry, Return
 from resonate.models.result import Ko, Ok
 from resonate.options import Options
@@ -35,7 +36,7 @@ def bar_ko(ctx: Context):  # noqa: ANN201
 
 @pytest.fixture
 def scheduler() -> Scheduler:
-    return Scheduler(lambda id, cid, info: Context(id, cid, info, Registry(), Dependencies()))
+    return Scheduler(lambda id, cid, info: Context(id, cid, info, Registry(), Dependencies(), ContextLogger("f", "f")))
 
 
 @pytest.mark.parametrize(

@@ -12,7 +12,7 @@ import pytest
 from resonate.errors import ResonateShutdownError, ResonateStoreError
 from resonate.resonate import Resonate
 from resonate.retry_policies import Constant, Never
-from resonate.stores.local import LocalStore
+from resonate.stores import LocalStore
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -442,7 +442,7 @@ def test_resonate_get(resonate: Resonate) -> None:
     timestamp = int(time.time())
     id = f"get.{timestamp}"
     resonate.promises.create(id=id, timeout=sys.maxsize)
-    thread = threading.Thread(target=resolve_promise_slow, args=(id,))  # Do this in a different thread to simulate concurrency
+    thread = threading.Thread(target=resolve_promise_slow, args=(id,), daemon=True)  # Do this in a different thread to simulate concurrency
 
     handle = resonate.get(id)
 
@@ -467,7 +467,7 @@ def test_resonate_platform_errors() -> None:
     def side_effect(*args: Any, **kwargs: Any) -> Any:
         if raise_flag[0]:
             msg = "Got an error from server"
-            raise ResonateStoreError(msg, "UNKNOWN")
+            raise ResonateStoreError(msg, 0)
 
         return original_transition(*args[1:], **kwargs)
 

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from resonate.models.logger import Logger
 
 
 class Context(Protocol):
@@ -8,6 +11,8 @@ class Context(Protocol):
     def id(self) -> str: ...
     @property
     def info(self) -> Info: ...
+    @property
+    def logger(self) -> Logger: ...
 
     def get_dependency(self, key: str, default: Any = None) -> Any: ...
 

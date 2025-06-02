@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import time
 import uuid
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from resonate.models.context import Info
+    from resonate.models.logger import Logger
     from resonate.registry import Registry
 
 
@@ -53,6 +55,10 @@ class Context:
     @property
     def info(self) -> Info:
         raise NotImplementedError
+
+    @property
+    def logger(self) -> Logger:
+        return logging.getLogger("test")
 
     def get_dependency(self, key: str, default: Any = None) -> Any:
         return default
@@ -87,6 +93,10 @@ class LocalContext:
     def info(self) -> Info:
         raise NotImplementedError
 
+    @property
+    def logger(self) -> Logger:
+        return logging.getLogger("test")
+
     def get_dependency(self, key: str, default: Any = None) -> Any:
         return default
 
@@ -119,6 +129,10 @@ class RemoteContext:
     @property
     def info(self) -> Info:
         raise NotImplementedError
+
+    @property
+    def logger(self) -> Logger:
+        return logging.getLogger("test")
 
     def get_dependency(self, key: str, default: Any = None) -> Any:
         return default

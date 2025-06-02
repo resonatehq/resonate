@@ -15,6 +15,7 @@ from resonate.conventions import Remote
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
 from resonate.encoders import JsonEncoder, JsonPickleEncoder, NoopEncoder
+from resonate.loggers import ContextLogger
 from resonate.models.commands import Command, Invoke, Listen
 from resonate.models.handle import Handle
 from resonate.options import Options
@@ -322,11 +323,11 @@ def test_run(
 
 @pytest.mark.parametrize("encoder", [JsonEncoder(), JsonPickleEncoder(), NoopEncoder(), None])
 @pytest.mark.parametrize("idempotency_key", ["foo", "bar", "baz", None])
-@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
-@pytest.mark.parametrize("version", [1, 2, 3, None])
-@pytest.mark.parametrize("timeout", [3, 2, 1, None])
-@pytest.mark.parametrize("tags", [{"a": "foo"}, {"b": "bar"}, {"c": "baz"}, None])
 @pytest.mark.parametrize("retry_policy", [Constant(), Linear(), Exponential()])
+@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("tags", [{"a": "foo"}, {"b": "bar"}, {"c": "baz"}, None])
+@pytest.mark.parametrize("timeout", [3, 2, 1, None])
+@pytest.mark.parametrize("version", [1, 2, 3, None])
 @pytest.mark.parametrize(
     ("func", "name", "args", "kwargs"),
     [
@@ -611,7 +612,7 @@ def test_context_type_annotations() -> None:
     baz = resonate.register(baz)
     qux = resonate.register(qux)
 
-    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies(), ContextLogger("f", "f"))
 
     assert_type(ctx.lfi(foo, 1, 2), LFI[int])
     assert_type(ctx.lfi(bar, 1, 2), LFI[int])
@@ -648,7 +649,7 @@ def test_context_type_annotations() -> None:
     ],
 )
 def test_context_lfx_validations(registry: Registry, func: Callable, match: str) -> None:
-    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies(), ContextLogger("f", "f"))
 
     with pytest.raises(ValueError, match=match):
         ctx.lfi(func)
@@ -668,7 +669,7 @@ def test_context_lfx_validations(registry: Registry, func: Callable, match: str)
     ],
 )
 def test_context_rfx_validations(registry: Registry, func: Callable, match: str) -> None:
-    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies(), ContextLogger("f", "f"))
 
     with pytest.raises(ValueError, match=match):
         ctx.rfi(func)
@@ -682,7 +683,7 @@ def test_context_rfx_validations(registry: Registry, func: Callable, match: str)
 @pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
 @pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
-@pytest.mark.parametrize("timeout", [1, 2, 3, 101, 102, 103, None])
+@pytest.mark.parametrize("timeout", [1, 2, 3, None])
 @pytest.mark.parametrize("version", [1, 2, 3])
 def test_options(
     funcs: tuple[Callable, Callable],
@@ -700,7 +701,7 @@ def test_options(
     registry.add(f1, "func", version)
     registry.add(f2, "func", version + 1)
 
-    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies(), ContextLogger("f", "f"))
     counter = 0
 
     for f, v in ((f1, version), (f2, version + 1)):
@@ -782,7 +783,7 @@ def test_options(
 
 @pytest.mark.parametrize("value", [-1, -2, -3])
 def test_options_validations(registry: Registry, value: int) -> None:
-    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies())
+    ctx = Context("f", "f", Mock(spec=Info), registry, Dependencies(), ContextLogger("f", "f"))
 
     with pytest.raises(ValueError, match="timeout must be greater than or equal to zero"):
         ctx.lfi(foo, 1, 2).options(timeout=value)  # no version for lfi

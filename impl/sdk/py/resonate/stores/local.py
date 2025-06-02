@@ -89,7 +89,7 @@ class LocalStore:
     def start(self) -> None:
         if not self._thread or not self._thread.is_alive():
             self._stopped = False
-            self._thread = threading.Thread(target=self.loop, name="local_store", daemon=True)
+            self._thread = threading.Thread(target=self.loop, name="store", daemon=True)
             self._thread.start()
 
     def stop(self) -> None:
@@ -103,7 +103,7 @@ class LocalStore:
         with self._cond:
             self._cond.notify()
 
-    @exit_on_exception("store")
+    @exit_on_exception
     def loop(self) -> None:
         # set initial timeout to zero to prime the control loop
         timeout = 0.0
@@ -244,7 +244,7 @@ class LocalPromiseStore:
     def get(self, id: str) -> DurablePromise:
         promise = self._promises.get(id)
         if promise is None:
-            raise ResonateStoreError(message="The specified promise was not found", code=40400)
+            raise ResonateStoreError(mesg="The specified promise was not found", code=40400)
 
         return DurablePromise.from_dict(self._store, promise.to_dict())
 
@@ -339,7 +339,7 @@ class LocalPromiseStore:
 
         promise = self._promises.get(promise_id)
         if promise is None:
-            raise ResonateStoreError(message="The specified promise was not found", code=40400)
+            raise ResonateStoreError(mesg="The specified promise was not found", code=40400)
 
         durable_promise = DurablePromise.from_dict(
             self._store,
@@ -373,7 +373,7 @@ class LocalPromiseStore:
 
         promise = self._promises.get(promise_id)
         if promise is None:
-            raise ResonateStoreError(message="The specified promise was not found", code=40400)
+            raise ResonateStoreError(mesg="The specified promise was not found", code=40400)
 
         durable_promise = DurablePromise.from_dict(
             self._store,
@@ -539,7 +539,7 @@ class LocalPromiseStore:
                 return record, True
 
             case None, "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", _:
-                raise ResonateStoreError(message="The specified promise was not found", code=40400)
+                raise ResonateStoreError(mesg="The specified promise was not found", code=40400)
 
             case DurablePromiseRecord(state="PENDING"), "PENDING", _ if time < record.timeout and ikey_match(record.ikey_for_create, ikey):
                 return record, False
@@ -572,7 +572,7 @@ class LocalPromiseStore:
             case DurablePromiseRecord(state="PENDING"), "RESOLVED" | "REJECTED" | "REJECTED_CANCELED", True if time >= record.timeout:
                 # do not transition to timedout because we need the control
                 # loop to do the transition
-                raise ResonateStoreError(message="The promise has already timedout", code=40303)
+                raise ResonateStoreError(mesg="The promise has already timedout", code=40303)
 
             case DurablePromiseRecord(state="PENDING"), "REJECTED_TIMEDOUT", _:
                 assert time >= record.timeout
@@ -609,7 +609,7 @@ class LocalPromiseStore:
 
             case record, to, strict:
                 # TODO(dfarr): match server error messages
-                raise ResonateStoreError(message=f"Unexpected transition ({record.state if record else 'None'} -> {to}, strict={strict})", code=403)
+                raise ResonateStoreError(mesg=f"Unexpected transition ({record.state if record else 'None'} -> {to}, strict={strict})", code=40399)
 
 
 class LocalTaskStore:
@@ -869,10 +869,10 @@ class LocalTaskStore:
                 return record, False
 
             case None, _:
-                raise ResonateStoreError(message="The specified task was not found", code=40403)
+                raise ResonateStoreError(mesg="The specified task was not found", code=40403)
 
             case _:
-                raise ResonateStoreError(message="The task is already claimed, completed, or an invalid counter was provided", code=40305)
+                raise ResonateStoreError(mesg="The task is already claimed, completed, or an invalid counter was provided", code=40305)
 
 
 @final
