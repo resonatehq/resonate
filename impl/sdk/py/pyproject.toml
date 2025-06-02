@@ -34,3 +34,7 @@ addopts = ["--import-mode=importlib"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["resonate"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
