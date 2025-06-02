@@ -283,6 +283,7 @@ class RemotePromiseStore:
             method="post",
             url=f"{self._store.url}/callbacks",
             json={
+                "id": " ",  # TODO(dfarr): remove eventually, for backwards compatibility
                 "promiseId": promise_id,
                 "rootPromiseId": root_promise_id,
                 "timeout": timeout,
