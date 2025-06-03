@@ -14,8 +14,8 @@ func CreateProjectCmd() *cobra.Command {
 	)
 
 	exampleCMD := `
-resonate projects create --template py
-resonate projects create --template py --name my-app`
+resonate projects create --template basic-workflow-py
+resonate projects create --template basic-workflow-py --name my-app`
 
 	cmd := &cobra.Command{
 		Use:     "create",
