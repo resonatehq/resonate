@@ -56,7 +56,7 @@ func ServerError(err error) *Error {
 			Message: message,
 			Domain:  "server",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/server-errors#%d", error.Code()),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", error.Code()),
 			},
 		}},
 	}
