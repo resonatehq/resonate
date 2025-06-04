@@ -87,7 +87,7 @@ func RequestValidationError(err error) *Error {
 			Message: err,
 			Domain:  "request",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/server-errors#%d", code),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", code),
 			},
 		})
 	}
