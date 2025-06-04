@@ -71,7 +71,7 @@ func RequestError(status t_api.StatusCode) *Error {
 			Message: "Request errors are not retryable since they are caused by invalid client requests",
 			Domain:  "request",
 			Metadata: map[string]string{
-				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/server-errors#%d", status),
+				"url": fmt.Sprintf("https://docs.resonatehq.io/operate/errors#%d", status),
 			},
 		}},
 	}
