@@ -8,7 +8,7 @@ import random
 import time
 import uuid
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, TypeVarTuple, overload
+from typing import TYPE_CHECKING, Any, Concatenate, Literal, ParamSpec, TypeVar, TypeVarTuple, overload
 
 from resonate.bridge import Bridge
 from resonate.conventions import Base, Local, Remote, Sleep
@@ -41,7 +41,7 @@ class Resonate:
         group: str = "default",
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
-        log_level: int = logging.NOTSET,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.NOTSET,
         store: Store | None = None,
         message_source: MessageSource | None = None,
     ) -> None:

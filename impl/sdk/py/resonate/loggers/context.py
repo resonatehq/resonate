@@ -5,7 +5,7 @@ from typing import Any
 
 
 class ContextLogger:
-    def __init__(self, cid: str, id: str, level: int = logging.NOTSET) -> None:
+    def __init__(self, cid: str, id: str, level: int | str = logging.NOTSET) -> None:
         self.cid = cid
         self.id = id
 

@@ -823,7 +823,7 @@ class Computation:
                         return []
 
                     case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                        f.ctx.logger.warning(
+                        f.ctx.logger.error(
                             "Function %s(%s) failed with %s",
                             f.func.__name__,
                             utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
@@ -837,7 +837,7 @@ class Computation:
                         ]
 
                     case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                        f.ctx.logger.warning(
+                        f.ctx.logger.error(
                             "Function %s(%s) failed with %s",
                             f.func.__name__,
                             utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
@@ -973,7 +973,7 @@ class Computation:
                                 return []
 
                             case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                                c.ctx.logger.debug(
+                                c.ctx.logger.error(
                                     "Function %s(%s) failed with %s",
                                     c.func.__name__,
                                     utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
@@ -987,7 +987,7 @@ class Computation:
                                 ]
 
                             case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
-                                c.ctx.logger.debug(
+                                c.ctx.logger.error(
                                     "Function %s(%s) failed with %s",
                                     c.func.__name__,
                                     utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
