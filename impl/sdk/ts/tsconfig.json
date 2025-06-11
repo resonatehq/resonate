@@ -14,8 +14,5 @@
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": [
-    "lib/**/*",
-    "test/**/*"
-  ]
+  "include": ["src/**/*", "tests/**/*"]
 }
