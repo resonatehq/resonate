@@ -1,3 +1,4 @@
+import type { Yieldable } from "./context";
 import { Coroutine } from "./coroutine";
 import type { Handler } from "./handler";
 import type { InternalAsync, Value } from "./types";
@@ -7,45 +8,50 @@ export type Suspended = {
   todos: InternalAsync<any>[];
 };
 
-export type Completed = {
+export type Completed<T> = {
   type: "completed";
-  value: any;
+  value: T;
 };
 
 export class Computation<T> {
-  private decorator: Coroutine<T>;
+  private coroutine: Coroutine<T>;
   private handler: Handler;
 
-  constructor(decorator: Coroutine<T>, handler: Handler) {
-    this.decorator = decorator;
+  constructor(coroutine: Coroutine<T>, handler: Handler) {
+    this.coroutine = coroutine;
     this.handler = handler;
   }
 
-  public static exec(uuid: string, func: Function, args: any[], handler: Handler): Suspended | Completed {
-    const durable = handler.createPromise(uuid);
+  public static exec<T>(
+    uuid: string,
+    func: (...args: any[]) => Generator<Yieldable, T, any>, // TODO: support any function as well
+    args: any[],
+    handler: Handler,
+  ): Suspended | Completed<T> {
+    const durable = handler.createPromise<T>(uuid);
     if (durable.state === "pending") {
-      const c = new Computation(new Coroutine(uuid, func(...args)), handler);
+      const c = new Computation(new Coroutine<T>(uuid, func(...args)), handler);
       const r = c.exec();
 
       if (r.type === "completed") {
         handler.resolvePromise(uuid, r.value);
       }
       return r;
-    } else {
-      return { type: "completed", value: durable.value };
     }
+
+    return { type: "completed", value: durable.value! };
   }
 
-  public exec(): Suspended | Completed {
+  public exec(): Suspended | Completed<T> {
     const todos: InternalAsync<any>[] = [];
     let input: Value<any> = {
       type: "internal.nothing",
-      uuid: this.decorator["uuid"] + ".nothing",
+      uuid: `${this.coroutine.uuid}.nothing`,
     };
 
     // Exahust the generator until it can not make more progress.
     while (true) {
-      const action = this.decorator.next(input);
+      const action = this.coroutine.next(input);
 
       // Handle int-async with lfi/lfc kind
       if (action.type === "internal.async" && action.kind === "lfi") {
@@ -76,7 +82,7 @@ export class Computation<T> {
               uuid: action.uuid,
               value: {
                 type: "internal.literal",
-                uuid: action.uuid + ".completed",
+                uuid: `${action.uuid}.completed`,
                 value: r.value, // TODO: Return the value as encoded
               },
             };
@@ -89,7 +95,7 @@ export class Computation<T> {
             uuid: action.uuid,
             value: {
               type: "internal.literal",
-              uuid: action.uuid + ".completed",
+              uuid: `${action.uuid}.completed`,
               value: durable.value,
             },
           };
@@ -115,7 +121,7 @@ export class Computation<T> {
             uuid: action.uuid,
             value: {
               type: "internal.literal",
-              uuid: action.uuid + ".completed",
+              uuid: `${action.uuid}.completed`,
               value: durable.value,
             },
           };
@@ -127,7 +133,7 @@ export class Computation<T> {
       if (action.type === "internal.await" && action.promise.state === "completed") {
         input = {
           type: "internal.literal",
-          uuid: action.promise.uuid + ".literal",
+          uuid: `${action.promise.uuid}.literal`,
           value:
             action.promise.value && action.promise.value.type === "internal.literal"
               ? action.promise.value.value

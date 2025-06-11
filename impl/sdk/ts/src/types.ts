@@ -2,12 +2,14 @@
 
 export type InternalExpr<T> = InternalAsync<T> | InternalAwait<T> | InternalReturn<T>;
 
+type F<T> = ((...args: any[]) => T) | ((...args: any[]) => Generator<any, T, any>);
+
 export type InternalAsync<T> = {
   type: "internal.async";
   uuid: string;
   kind: "lfi" | "rfi";
   mode: "eager" | "defer";
-  func: Function;
+  func: F<T>;
   args: Value<any>[];
 };
 

@@ -1,13 +1,15 @@
-import { Future, Invoke } from "./context";
+import { Future, Invoke, type Yieldable } from "./context";
 import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
 
+// TODO(avillega): to support any function (not only generators) we could make this type take
+// any function and make it look as a coroutine for the Computation type
 export class Coroutine<TRet> {
-  private uuid: string;
+  public uuid: string;
   private sequ: number;
   private invokes: string[];
 
   private generator: Generator<Invoke<any> | Future<any>, any, TRet>;
-  constructor(uuid: string, generator: Generator<Invoke<any> | Future<any>, any, TRet>) {
+  constructor(uuid: string, generator: Generator<Yieldable, any, TRet>) {
     this.uuid = uuid;
     this.sequ = 0;
     this.generator = generator;
@@ -18,14 +20,14 @@ export class Coroutine<TRet> {
     const result = this.generator.next(this.toExternal(value));
     if (result.done) {
       if (this.invokes.length > 0) {
-        const val = this.invokes.pop();
+        const val = this.invokes.pop() ?? "";
         return {
           type: "internal.await",
-          uuid: val!,
+          uuid: val,
           promise: {
             type: "internal.promise",
             state: "pending",
-            uuid: val!,
+            uuid: val,
           },
         };
       }
@@ -34,9 +36,8 @@ export class Coroutine<TRet> {
         uuid: this.uuidsequ(),
         value: this.toLiteral(result.value),
       };
-    } else {
-      return this.toInternal(result.value);
     }
+    return this.toInternal(result.value);
   }
 
   // From internal type to external type
@@ -50,9 +51,9 @@ export class Coroutine<TRet> {
           // explicitly we might need to await it as part of the structured concurrency
           this.invokes.push(value.uuid);
           return new Future<T>(value.uuid, "pending", undefined);
-        } else if (value.state === "completed") {
-          return new Future<T>(value.uuid, "completed", value.value.value);
         }
+        // promise === "complete"
+        return new Future<T>(value.uuid, "completed", value.value.value);
       case "internal.literal":
         return value.value;
     }
@@ -88,24 +89,23 @@ export class Coroutine<TRet> {
             value: {
               type: "internal.literal",
               uuid: `${event.uuid}.completed`,
-              value: event["value"]!,
+              value: event.value!,
             },
           },
         };
-      } else {
-        // Only pop from invokes if the future was not completed before
-        // The user await the future we remove it from the invokes
-        this.invokes = this.invokes.filter((uuid) => uuid !== event.uuid);
-        return {
-          type: "internal.await",
-          uuid: event.uuid,
-          promise: {
-            type: "internal.promise",
-            state: "pending",
-            uuid: event.uuid,
-          },
-        };
       }
+      // Only pop from invokes if the future was not completed before
+      // The user await the future we remove it from the invokes
+      this.invokes = this.invokes.filter((uuid) => uuid !== event.uuid);
+      return {
+        type: "internal.await",
+        uuid: event.uuid,
+        promise: {
+          type: "internal.promise",
+          state: "pending",
+          uuid: event.uuid,
+        },
+      };
     }
     throw new Error("Unexpected input to extToInt");
   }

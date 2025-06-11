@@ -2,6 +2,7 @@ export type AnyGen<T> = (...args: any[]) => Generator<any, T, any>;
 export type AnyFun<T> = (...args: any[]) => T;
 
 export type Invocable<T> = AnyGen<T> | AnyFun<T>;
+export type Yieldable = Invoke<any> | Future<any>;
 
 export class Invoke<T> implements Iterable<Invoke<T>> {
   public type: "lfi" | "rfi";
@@ -21,7 +22,7 @@ export class Invoke<T> implements Iterable<Invoke<T>> {
 }
 
 export class Future<T> implements Iterable<Future<T>> {
-  private value?: T;
+  public readonly value?: T;
   private state: "pending" | "completed";
 
   constructor(

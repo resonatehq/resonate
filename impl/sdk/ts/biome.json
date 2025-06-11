@@ -7,6 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
+    "include": ["src/**/*.js", "src/**/*.ts", "tests/**/*.js", "tests/**/*.ts"],
     "ignore": []
   },
   "formatter": {
@@ -20,10 +21,17 @@
   },
   "linter": {
     "enabled": true,
+    "ignore": ["tests/**"],
     "rules": {
       "recommended": true,
       "suspicious": {
         "noExplicitAny": "off"
+      },
+      "correctness": {
+        "useYield": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off"
       }
     }
   },
