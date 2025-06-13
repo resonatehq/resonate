@@ -1,5 +1,5 @@
 import { Computation, type Suspended } from "../src/computation";
-import { invoke, rpc } from "../src/context";
+import { lfc, lfi, rfc, rfi } from "../src/context";
 import { Coroutine } from "../src/coroutine";
 import { Handler } from "../src/handler";
 
@@ -10,7 +10,7 @@ describe("Computation", () => {
     }
 
     function* foo() {
-      const p = yield* invoke(bar);
+      const p = yield* lfi(bar);
       const v = yield* p;
       return v;
     }
@@ -27,8 +27,8 @@ describe("Computation", () => {
     }
 
     function* foo() {
-      const p1 = yield* invoke(bar);
-      const p2 = yield* rpc(bar);
+      const p1 = yield* lfi(bar);
+      const p2 = yield* rfi(bar);
       const v1 = yield* p1;
       const vx = yield* p1;
       const v2 = yield* p2;
@@ -53,8 +53,8 @@ describe("Computation", () => {
     }
 
     function* foo() {
-      yield* rpc(bar);
-      yield* rpc(bar);
+      yield* rfi(bar);
+      yield* rfi(bar);
       return 99;
     }
 
@@ -74,5 +74,27 @@ describe("Computation", () => {
     h.resolvePromise("foo.1.0", 42);
     r = Computation.exec("foo.1", foo, [], h);
     expect(r).toEqual({ type: "completed", value: 99 });
+  });
+
+  test("lfc/rfc", () => {
+    function* bar() {
+      return 42;
+    }
+
+    function* foo() {
+      const v1: number = yield* lfc(bar);
+      const v2: number = yield* rfc(bar);
+      return v1 + v2;
+    }
+
+    const h = new Handler();
+    let r = Computation.exec("foo.1", foo, [], h);
+    expect(r.type).toBe("suspended");
+    r = r as Suspended;
+    expect(r.todos).toHaveLength(1);
+
+    h.resolvePromise("foo.1.1", 42);
+    r = Computation.exec("foo.1", foo, [], h);
+    expect(r).toEqual({ type: "completed", value: 84 });
   });
 });

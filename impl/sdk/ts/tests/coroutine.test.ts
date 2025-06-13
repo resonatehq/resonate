@@ -1,6 +1,6 @@
 import { Coroutine } from "../src/coroutine";
 
-import { Future, Invoke } from "../src/context";
+import { Call, Future, Invoke } from "../src/context";
 
 describe("Coroutine", () => {
   it("returns internal.return when generator is done", () => {
@@ -47,6 +47,69 @@ describe("Coroutine", () => {
       type: "internal.await",
       promise: {
         uuid: "future-1",
+        state: "pending",
+      },
+    });
+  });
+
+  it("handles lfc/rfc correctly", () => {
+    function* foo(): Generator<any, any, any> {
+      let v1 = yield new Call("lfc", (x: number) => x + 1, 1);
+      let v2 = yield new Call("rfc", (x: number) => x, 2);
+      return v1 + v2;
+    }
+
+    const d = new Coroutine("abc", foo());
+    let r = d.next({ type: "internal.nothing", uuid: "abc" });
+    expect(r).toMatchObject({
+      type: "internal.async",
+      kind: "lfi",
+    });
+
+    r = d.next({
+      type: "internal.promise",
+      state: "completed",
+      uuid: "abc",
+      value: {
+        type: "internal.literal",
+        uuid: "abc",
+        value: 2,
+      },
+    });
+
+    expect(r).toMatchObject({
+      type: "internal.await",
+      promise: {
+        type: "internal.promise",
+        state: "completed",
+        value: {
+          type: "internal.literal",
+          value: 2,
+        },
+      },
+    });
+
+    r = d.next({
+      type: "internal.literal",
+      value: 2,
+      uuid: "abc",
+    });
+
+    expect(r).toMatchObject({
+      type: "internal.async",
+      kind: "rfi",
+    });
+
+    r = d.next({
+      type: "internal.promise",
+      state: "pending",
+      uuid: "abc",
+    });
+
+    expect(r).toMatchObject({
+      type: "internal.await",
+      promise: {
+        type: "internal.promise",
         state: "pending",
       },
     });

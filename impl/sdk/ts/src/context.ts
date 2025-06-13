@@ -2,7 +2,7 @@ export type AnyGen<T> = (...args: any[]) => Generator<any, T, any>;
 export type AnyFun<T> = (...args: any[]) => T;
 
 export type Invocable<T> = AnyGen<T> | AnyFun<T>;
-export type Yieldable = Invoke<any> | Future<any>;
+export type Yieldable = Invoke<any> | Future<any> | Call<any>;
 
 export class Invoke<T> implements Iterable<Invoke<T>> {
   public type: "lfi" | "rfi";
@@ -16,8 +16,25 @@ export class Invoke<T> implements Iterable<Invoke<T>> {
   }
 
   *[Symbol.iterator](): Generator<Invoke<T>, Future<T>, any> {
-    const future = yield this;
-    return future as Future<T>;
+    const v = yield this;
+    return v as Future<T>;
+  }
+}
+
+export class Call<T> implements Iterable<Call<T>> {
+  public type: "lfc" | "rfc";
+  public func: Invocable<T>;
+  public args: any[];
+
+  constructor(type: "lfc" | "rfc", func: Invocable<T>, ...args: any[]) {
+    this.type = type;
+    this.func = func;
+    this.args = args;
+  }
+
+  *[Symbol.iterator](): Generator<Call<T>, T, any> {
+    const v = yield this;
+    return v as T;
   }
 }
 
@@ -48,10 +65,18 @@ export class Future<T> implements Iterable<Future<T>> {
   }
 }
 
-export function invoke<R>(func: Invocable<R>, ...args: any[]): Invoke<R> {
+export function lfi<R>(func: Invocable<R>, ...args: any[]): Invoke<R> {
   return new Invoke<R>("lfi", func, ...args);
 }
 
-export function rpc<R>(func: Invocable<R>, ...args: any[]): Invoke<R> {
+export function rfi<R>(func: Invocable<R>, ...args: any[]): Invoke<R> {
   return new Invoke<R>("rfi", func, ...args);
+}
+
+export function lfc<R>(func: Invocable<R>, ...args: any[]): Call<R> {
+  return new Call<R>("lfc", func, ...args);
+}
+
+export function rfc<R>(func: Invocable<R>, ...args: any[]): Call<R> {
+  return new Call<R>("rfc", func, ...args);
 }

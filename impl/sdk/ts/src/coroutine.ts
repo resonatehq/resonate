@@ -1,14 +1,14 @@
-import { Future, Invoke, type Yieldable } from "./context";
+import { Call, Future, Invoke, type Yieldable } from "./context";
 import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
 
-// TODO(avillega): to support any function (not only generators) we could make this type take
-// any function and make it look as a coroutine for the Computation type
+// TODO(avillega): to support any function (not only generators) we could make this Class take
+// any function and make it look as a Coroutine for the Computation type
 export class Coroutine<TRet> {
   public uuid: string;
   private sequ: number;
-  private invokes: string[];
+  private invokes: { kind: "call" | "invoke"; uuid: string }[];
+  private generator: Generator<Yieldable, any, TRet>;
 
-  private generator: Generator<Invoke<any> | Future<any>, any, TRet>;
   constructor(uuid: string, generator: Generator<Yieldable, any, TRet>) {
     this.uuid = uuid;
     this.sequ = 0;
@@ -17,17 +17,31 @@ export class Coroutine<TRet> {
   }
 
   public next(value: Value<any>): InternalExpr<any> {
+    // Handle rfc/lfc by either returning an await if the promise is not completed
+    // or replacing the promise with a literal value if the promise was completed
+    if (value.type === "internal.promise" && this.invokes.length > 0) {
+      const prevInvoke = this.invokes.at(-1)!;
+      if (prevInvoke.kind === "call") {
+        this.invokes.pop();
+        return {
+          type: "internal.await",
+          uuid: prevInvoke.uuid,
+          promise: value,
+        };
+      }
+    }
+
     const result = this.generator.next(this.toExternal(value));
     if (result.done) {
       if (this.invokes.length > 0) {
-        const val = this.invokes.pop() ?? "";
+        const val = this.invokes.pop()!;
         return {
           type: "internal.await",
-          uuid: val,
+          uuid: val.uuid,
           promise: {
             type: "internal.promise",
             state: "pending",
-            uuid: val,
+            uuid: val.uuid,
           },
         };
       }
@@ -47,12 +61,11 @@ export class Coroutine<TRet> {
         return undefined;
       case "internal.promise":
         if (value.state === "pending") {
-          // We have invoked somethings and is pending, if the user don't await it
-          // explicitly we might need to await it as part of the structured concurrency
-          this.invokes.push(value.uuid);
           return new Future<T>(value.uuid, "pending", undefined);
         }
         // promise === "complete"
+        // We know for sure this promise relates to the last invoke inserted
+        this.invokes.pop();
         return new Future<T>(value.uuid, "completed", value.value.value);
       case "internal.literal":
         return value.value;
@@ -60,13 +73,14 @@ export class Coroutine<TRet> {
   }
 
   // From external type to internal type
-  private toInternal<T>(event: Invoke<T> | Future<T>): InternalAsync<T> | InternalAwait<T> {
-    if (event instanceof Invoke) {
+  private toInternal<T>(event: Invoke<T> | Future<T> | Call<T>): InternalAsync<T> | InternalAwait<T> {
+    if (event instanceof Invoke || event instanceof Call) {
       const uuid = this.uuidsequ();
+      this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", uuid });
       return {
         type: "internal.async",
         uuid,
-        kind: event.type,
+        kind: this.mapKind(event.type),
         mode: "eager", // default, adjust if needed
         func: event.func,
         args: (event.args || []).map((arg: any, i: number) => ({
@@ -94,9 +108,9 @@ export class Coroutine<TRet> {
           },
         };
       }
-      // Only pop from invokes if the future was not completed before
-      // The user await the future we remove it from the invokes
-      this.invokes = this.invokes.filter((uuid) => uuid !== event.uuid);
+      // If the Future was completed (the promise was completed) we already poped the related invoke
+      // when the user awaits the future we remove it from the invokes
+      this.invokes = this.invokes.filter(({ uuid }) => uuid !== event.uuid);
       return {
         type: "internal.await",
         uuid: event.uuid,
@@ -121,5 +135,12 @@ export class Coroutine<TRet> {
       uuid: this.uuidsequ(),
       value: value === undefined ? (null as any as T) : value,
     };
+  }
+
+  private mapKind(k: "lfi" | "rfi" | "lfc" | "rfc"): "lfi" | "rfi" {
+    if (k === "lfi" || k === "rfi") return k;
+    if (k === "lfc") return "lfi";
+    if (k === "rfc") return "rfi";
+    throw new Error(`Unknown value ${k}`);
   }
 }
