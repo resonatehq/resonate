@@ -1,3 +1,4 @@
+import * as util from "./util";
 export type AnyGen<T> = (...args: any[]) => Generator<any, T, any>;
 export type AnyFun<T> = (...args: any[]) => T;
 
@@ -17,6 +18,7 @@ export class Invoke<T> implements Iterable<Invoke<T>> {
 
   *[Symbol.iterator](): Generator<Invoke<T>, Future<T>, any> {
     const v = yield this;
+    util.assert(v instanceof Future, "expected Future");
     return v as Future<T>;
   }
 }
@@ -34,6 +36,7 @@ export class Call<T> implements Iterable<Call<T>> {
 
   *[Symbol.iterator](): Generator<Call<T>, T, any> {
     const v = yield this;
+    util.assert(!(v instanceof Future), "expected a value other than Future");
     return v as T;
   }
 }

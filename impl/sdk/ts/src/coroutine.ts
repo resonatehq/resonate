@@ -1,5 +1,6 @@
 import { Call, Future, Invoke, type Yieldable } from "./context";
 import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
+import * as util from "./util";
 
 // TODO(avillega): to support any function (not only generators) we could make this Class take
 // any function and make it look as a Coroutine for the Computation type
@@ -8,6 +9,7 @@ export class Coroutine<TRet> {
   private sequ: number;
   private invokes: { kind: "call" | "invoke"; uuid: string }[];
   private generator: Generator<Yieldable, any, TRet>;
+  private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
 
   constructor(uuid: string, generator: Generator<Yieldable, any, TRet>) {
     this.uuid = uuid;
@@ -17,12 +19,18 @@ export class Coroutine<TRet> {
   }
 
   public next(value: Value<any>): InternalExpr<any> {
-    // Handle rfc/lfc by either returning an await if the promise is not completed
-    // or replacing the promise with a literal value if the promise was completed
+    // If nextState was set to over, is becasue we shouldn't have been called
+    util.assert(
+      this.nextState !== "over" && value.type === this.nextState,
+      `Coroutine called wit type "${value.type}" expected "${this.nextState}"`,
+    );
+
+    // Handle rfc/lfc by returning an await if the previous invocation was a call
     if (value.type === "internal.promise" && this.invokes.length > 0) {
       const prevInvoke = this.invokes.at(-1)!;
       if (prevInvoke.kind === "call") {
         this.invokes.pop();
+        this.nextState = value.state === "completed" ? "internal.literal" : "over";
         return {
           type: "internal.await",
           uuid: prevInvoke.uuid,
@@ -33,6 +41,7 @@ export class Coroutine<TRet> {
 
     const result = this.generator.next(this.toExternal(value));
     if (result.done) {
+      this.nextState = "over";
       if (this.invokes.length > 0) {
         const val = this.invokes.pop()!;
         return {
@@ -77,6 +86,7 @@ export class Coroutine<TRet> {
     if (event instanceof Invoke || event instanceof Call) {
       const uuid = this.uuidsequ();
       this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", uuid });
+      this.nextState = "internal.promise";
       return {
         type: "internal.async",
         uuid,
@@ -93,6 +103,7 @@ export class Coroutine<TRet> {
     if (event instanceof Future) {
       // Map Future to InternalPromise union
       if (event.isCompleted()) {
+        this.nextState = "internal.literal";
         return {
           type: "internal.await",
           uuid: event.uuid,
@@ -111,6 +122,7 @@ export class Coroutine<TRet> {
       // If the Future was completed (the promise was completed) we already poped the related invoke
       // when the user awaits the future we remove it from the invokes
       this.invokes = this.invokes.filter(({ uuid }) => uuid !== event.uuid);
+      this.nextState = "over";
       return {
         type: "internal.await",
         uuid: event.uuid,

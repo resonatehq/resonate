@@ -2,6 +2,7 @@ import type { Yieldable } from "./context";
 import { Coroutine } from "./coroutine";
 import type { Handler } from "./handler";
 import type { InternalAsync, Value } from "./types";
+import * as util from "./util";
 
 export type Suspended = {
   type: "suspended";
@@ -53,7 +54,7 @@ export class Computation<T> {
     while (true) {
       const action = this.coroutine.next(input);
 
-      // Handle int-async with lfi/lfc kind
+      // Handle int-async with lfi kind
       if (action.type === "internal.async" && action.kind === "lfi") {
         const durable = this.handler.createPromise(action.uuid);
         if (durable.state === "pending") {
@@ -75,7 +76,7 @@ export class Computation<T> {
               uuid: action.uuid,
             };
           } else {
-            this.handler.resolvePromise(action.uuid, r.value);
+            const durable = this.handler.resolvePromise(action.uuid, r.value);
             input = {
               type: "internal.promise",
               state: "completed",
@@ -83,7 +84,7 @@ export class Computation<T> {
               value: {
                 type: "internal.literal",
                 uuid: `${action.uuid}.completed`,
-                value: r.value, // TODO: Return the value as encoded
+                value: durable.value,
               },
             };
           }
@@ -131,13 +132,14 @@ export class Computation<T> {
 
       // Handle await
       if (action.type === "internal.await" && action.promise.state === "completed") {
+        util.assert(
+          action.promise.value && action.promise.value.type === "internal.literal",
+          "Promise value must be an 'internal.literal' type",
+        );
         input = {
           type: "internal.literal",
           uuid: `${action.promise.uuid}.literal`,
-          value:
-            action.promise.value && action.promise.value.type === "internal.literal"
-              ? action.promise.value.value
-              : undefined,
+          value: action.promise.value.value,
         };
         continue;
       }
@@ -150,9 +152,13 @@ export class Computation<T> {
 
       // Handle return
       if (action.type === "internal.return") {
+        util.assert(
+          action.value && action.value.type === "internal.literal",
+          "Promise value must be an 'internal.literal' type",
+        );
         return {
           type: "completed",
-          value: action?.value?.type === "internal.literal" ? action.value.value : undefined,
+          value: action?.value?.type === "internal.literal" ? action.value.value : undefined, // Even with the assertion on top it is neccesary to have the ternary condition to make the typesystem happy
         };
       }
     }
