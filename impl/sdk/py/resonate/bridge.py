@@ -4,7 +4,7 @@ import queue
 import threading
 import time
 from concurrent.futures import Future
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from resonate.conventions import Base
 from resonate.delay_q import DelayQ
@@ -34,9 +34,10 @@ from resonate.models.commands import (
     Return,
 )
 from resonate.models.durable_promise import DurablePromise
-from resonate.models.result import Ko, Ok, Result
+from resonate.models.result import Ko, Ok
 from resonate.models.task import Task
 from resonate.options import Options
+from resonate.processor import Processor
 from resonate.scheduler import Done, Info, More, Scheduler
 from resonate.utils import exit_on_exception
 
@@ -84,6 +85,7 @@ class Bridge:
             self._unicast,
             self._anycast,
         )
+        self._processor = Processor()
 
         self._bridge_thread = threading.Thread(target=self._process_cq, name="bridge", daemon=True)
         self._message_source_thread = threading.Thread(target=self._process_msgs, name="message-source", daemon=True)
@@ -166,6 +168,8 @@ class Bridge:
         return promise
 
     def start(self) -> None:
+        self._processor.start()
+
         if not self._message_source_thread.is_alive():
             self._message_source.start()
             self._message_source_thread.start()
@@ -191,6 +195,7 @@ class Bridge:
 
     def _stop_no_join(self) -> None:
         """Stop internal components and threads. Does not join the threads, to be able to call it from the bridge itself."""
+        self._processor.stop()
         self._message_source.stop()
         self._cq.put_nowait(None)
         self._heartbeat_active.clear()
@@ -218,7 +223,7 @@ class Bridge:
                                     return
 
                             case Function(id, cid, func):
-                                self._cq.put_nowait(Return(id, cid, self._handle_function(func)))
+                                self._processor.enqueue(func, lambda r, id=id, cid=cid: self._cq.put_nowait(Return(id, cid, r)))
                             case Delayed() as item:
                                 self._handle_delay(item)
 
@@ -341,7 +346,7 @@ class Bridge:
                 for item in events:
                     match item:
                         case Function(id, cid, func):
-                            self._cq.put_nowait(Return(id, cid, self._handle_function(func)))
+                            self._processor.enqueue(func, lambda r, id=id, cid=cid: self._cq.put_nowait(Return(id, cid, r)))
                         case retry:
                             self._cq.put_nowait(retry)
 
@@ -434,10 +439,3 @@ class Bridge:
 
             case _:
                 raise NotImplementedError
-
-    def _handle_function(self, func: Callable[[], Any]) -> Result:
-        try:
-            r = func()
-            return Ok(r)
-        except Exception as e:
-            return Ko(e)
