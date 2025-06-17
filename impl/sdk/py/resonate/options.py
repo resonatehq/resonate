@@ -5,13 +5,12 @@ from inspect import isgeneratorfunction
 from typing import TYPE_CHECKING, Any
 
 from resonate.encoders import HeaderEncoder, JsonEncoder, JsonPickleEncoder, NoopEncoder, PairEncoder
+from resonate.models.encoder import Encoder
+from resonate.models.retry_policy import RetryPolicy
 from resonate.retry_policies import Exponential, Never
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from resonate.models.encoder import Encoder
-    from resonate.models.retry_policy import RetryPolicy
 
 
 @dataclass(frozen=True)
@@ -28,6 +27,46 @@ class Options:
     version: int = 0
 
     def __post_init__(self) -> None:
+        if not isinstance(self.durable, bool):
+            msg = f"durable must be `bool`, got {type(self.durable).__name__}"
+            raise TypeError(msg)
+
+        if self.encoder is not None and not isinstance(self.encoder, Encoder):
+            msg = f"encoder must be `Encoder | None`, got {type(self.encoder).__name__}"
+            raise TypeError(msg)
+
+        if self.id is not None and not isinstance(self.id, str):
+            msg = f"id must be `str | None`, got {type(self.id).__name__}"
+            raise TypeError(msg)
+
+        if self.idempotency_key is not None and not (isinstance(self.idempotency_key, str) or callable(self.idempotency_key)):
+            msg = f"idempotency_key must be `Callable | str | None`, got {type(self.idempotency_key).__name__}"
+            raise TypeError(msg)
+
+        if not isinstance(self.non_retryable_exceptions, tuple):
+            msg = f"non_retryable_exceptions must be `tuple`, got {type(self.non_retryable_exceptions).__name__}"
+            raise TypeError(msg)
+
+        if not (isinstance(self.retry_policy, RetryPolicy) or callable(self.retry_policy)):
+            msg = f"retry_policy must be `Callable | RetryPolicy | None`, got {type(self.retry_policy).__name__}"
+            raise TypeError(msg)
+
+        if not isinstance(self.target, str):
+            msg = f"target must be `str`, got {type(self.target).__name__}"
+            raise TypeError(msg)
+
+        if not isinstance(self.tags, dict):
+            msg = f"tags must be `dict`, got {type(self.tags).__name__}"
+            raise TypeError(msg)
+
+        if not isinstance(self.timeout, int | float):
+            msg = f"timeout must be `float`, got {type(self.timeout).__name__}"
+            raise TypeError(msg)
+
+        if not isinstance(self.version, int):
+            msg = f"version must be `int`, got {type(self.version).__name__}"
+            raise TypeError(msg)
+
         if not (self.version >= 0):
             msg = "version must be greater than or equal to zero"
             raise ValueError(msg)
