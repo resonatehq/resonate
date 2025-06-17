@@ -17,14 +17,17 @@ on:
 jobs:
   run:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 25
+
+    env:
+      RESONATE_HOST: http://localhost
 
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
-        python-version: ["3.12", "3.13"]
-        server-version: ["main", "latest"]
+        python-version: [3.12, 3.13]
+        server-version: [main, latest]
 
     steps:
       - uses: actions/checkout@v4
@@ -77,8 +80,17 @@ jobs:
         run: ./resonate serve --system-signal-timeout 0.1s &
         working-directory: server
 
-      - name: run tests
-        env:
-          RESONATE_HOST: http://localhost
+      - name: run tests with coverage
+        id: coverage
+        if: ${{ matrix.server-version == 'latest' && matrix.python-version == '3.13' && matrix.os == 'ubuntu-latest' && github.ref == 'refs/heads/main' }}
+        run: uv run pytest --cov --cov-branch --cov-report=xml
 
+      - name: Upload coverage reports to Codecov
+        if: ${{ steps.coverage.outcome != 'skipped' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: run tests
+        if: ${{ steps.coverage.outcome == 'skipped' }}
         run: uv run pytest
