@@ -342,6 +342,65 @@ func TestPollPlugin(t *testing.T) {
 	}
 }
 
+func TestPollPluginAuth(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+
+	config := &Config{
+		Size:           10,
+		BufferSize:     10,
+		MaxConnections: 1,
+		Addr:           ":0",
+		Timeout:        1 * time.Second,
+		Auth:           map[string]string{"user": "pass"},
+	}
+
+	poll, err := New(nil, metrics, config)
+	assert.Nil(t, err)
+
+	errors := make(chan error, 10)
+	assert.Nil(t, poll.Start(errors))
+
+	client := &http.Client{Timeout: 1 * time.Second}
+
+	tests := []struct {
+		name     string
+		username string
+		password string
+		code     int
+	}{
+		{"CorrectCredentials", "user", "pass", http.StatusOK},
+		{"IncorrectCredentials", "user", "wrong", http.StatusUnauthorized},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/foo/a", poll.Addr()), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			req.SetBasicAuth(tc.username, tc.password)
+
+			res, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer util.DeferAndLog(res.Body.Close)
+
+			assert.Equal(t, tc.code, res.StatusCode)
+		})
+	}
+
+	if err := poll.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	close(errors)
+	for err := range errors {
+		assert.Fail(t, err.Error())
+	}
+}
+
 func contains[T comparable](arr []T, val T) bool {
 	for _, v := range arr {
 		if v == val {

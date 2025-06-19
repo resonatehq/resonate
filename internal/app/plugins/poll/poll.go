@@ -20,12 +20,13 @@ import (
 )
 
 type Config struct {
-	Size           int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	BufferSize     int           `flag:"buffer-size" desc:"connection buffer size" default:"100"`
-	MaxConnections int           `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
-	Addr           string        `flag:"addr" desc:"http server address" default:":8002"`
-	Cors           Cors          `flag:"cors" desc:"http cors settings"`
-	Timeout        time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	Size           int               `flag:"size" desc:"submission buffered channel size" default:"100"`
+	BufferSize     int               `flag:"buffer-size" desc:"connection buffer size" default:"100"`
+	MaxConnections int               `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
+	Addr           string            `flag:"addr" desc:"http server address" default:":8002"`
+	Cors           Cors              `flag:"cors" desc:"http cors settings"`
+	Timeout        time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	Auth           map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
 }
 
 type Cors struct {
@@ -357,6 +358,22 @@ type PollHandler struct {
 }
 
 func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// authentication
+	if len(h.config.Auth) > 0 {
+		username, password, ok := r.BasicAuth()
+		if !ok {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		if p, ok := h.config.Auth[username]; !ok || p != password {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+	}
+
 	// only GET requests are allowed
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
