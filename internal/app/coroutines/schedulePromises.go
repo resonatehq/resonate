@@ -60,11 +60,11 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				slog.Error("failed to calculate next run time for schedule, skipping", "err", err)
 				continue
 			}
-
 			id, err := generatePromiseId(s.PromiseId, map[string]string{
 				"id":        s.Id,
 				"timestamp": fmt.Sprintf("%d", s.NextRunTime),
 			})
+
 			if err != nil {
 				slog.Error("failed to generate promise id for scheduled promise, skipping", "err", err)
 				continue
@@ -101,13 +101,23 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				continue
 			}
 
-			createPromiseRes := t_aio.AsAlterPromises(completion.Store.Results[0])
-
-			if createPromiseRes.RowsAffected == 0 {
-				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
+			r := completion.Store.Results[0]
+			switch r.String() {
+			case "AlterPromiseAndTask":
+				createPromiseAndTaskRes := t_aio.AsAlterPromiseAndTask(r)
+				if createPromiseAndTaskRes.PromiseRowsAffected == 0 {
+					slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
+				}
+			case "AlterPromises":
+				createPromiseRes := t_aio.AsAlterPromises(r)
+				if createPromiseRes.RowsAffected == 0 {
+					slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
+				}
+			default:
+				panic("First result must be AlterPromises or AlterPromiseAndTask")
 			}
-		}
 
+		}
 		return nil, nil
 	}
 }
