@@ -114,7 +114,7 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 					slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 				}
 			default:
-				panic("First result must be AlterPromises or AlterPromiseAndTask")
+				panic("First result must be CreatePromise or CreatePromiseAndTask")
 			}
 
 		}
