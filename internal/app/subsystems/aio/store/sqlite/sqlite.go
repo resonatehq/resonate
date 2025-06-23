@@ -941,7 +941,7 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, TaskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromiseAndTaskResult, error) {
+func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, TaskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromisesAndTasksResult, error) {
 	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
 	if err != nil {
 		return nil, err
@@ -949,7 +949,7 @@ func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.St
 
 	// Couldn't create a promise
 	if promiseResult.RowsAffected == 0 {
-		return &t_aio.AlterPromiseAndTaskResult{
+		return &t_aio.AlterPromisesAndTasksResult{
 			PromiseRowsAffected: 0,
 			TaskRowsAffected:    0,
 		}, nil
@@ -960,7 +960,7 @@ func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.St
 		return nil, err
 	}
 
-	return &t_aio.AlterPromiseAndTaskResult{
+	return &t_aio.AlterPromisesAndTasksResult{
 		PromiseRowsAffected: promiseResult.RowsAffected,
 		TaskRowsAffected:    taskResult.RowsAffected,
 	}, nil

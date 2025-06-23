@@ -2142,7 +2142,7 @@ var TestCases = []*testCase{
 			},
 		},
 		expected: []t_aio.Result{
-			&t_aio.AlterPromiseAndTaskResult{
+			&t_aio.AlterPromisesAndTasksResult{
 				PromiseRowsAffected: 1,
 				TaskRowsAffected:    1,
 			},
@@ -2220,7 +2220,7 @@ var TestCases = []*testCase{
 			&t_aio.AlterPromisesResult{
 				RowsAffected: 1,
 			},
-			&t_aio.AlterPromiseAndTaskResult{
+			&t_aio.AlterPromisesAndTasksResult{
 				PromiseRowsAffected: 0,
 				TaskRowsAffected:    0,
 			},

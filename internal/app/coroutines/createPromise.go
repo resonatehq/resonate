@@ -95,7 +95,7 @@ func createPromiseAndTask(
 		switch v := completion.Store.Results[0].(type) {
 		case *t_aio.AlterPromisesResult:
 			promiseRowsAffected = v.RowsAffected
-		case *t_aio.AlterPromiseAndTaskResult:
+		case *t_aio.AlterPromisesAndTasksResult:
 			promiseRowsAffected = v.PromiseRowsAffected
 			util.Assert(promiseRowsAffected == v.TaskRowsAffected, "number of promises and tasks affected must be equal.")
 		default:
@@ -289,7 +289,7 @@ func createPromise(tags map[string]string, promiseCmd *t_aio.CreatePromiseComman
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
 
 		switch v := completion.Store.Results[0].(type) {
-		case *t_aio.AlterPromiseAndTaskResult:
+		case *t_aio.AlterPromisesAndTasksResult:
 			util.Assert(v.PromiseRowsAffected == 0 || v.PromiseRowsAffected == 1, "Creating promise result must return 0 or 1 rows")
 			util.Assert(v.TaskRowsAffected == v.PromiseRowsAffected, "If not promise was created a task must have not been created")
 		case *t_aio.AlterPromisesResult:
