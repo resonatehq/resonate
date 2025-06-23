@@ -101,19 +101,9 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				continue
 			}
 
-			switch r := completion.Store.Results[0].(type) {
-			case *t_aio.AlterPromisesAndTasksResult:
-				createPromiseAndTaskRes := t_aio.AsAlterPromiseAndTask(r)
-				if createPromiseAndTaskRes.PromiseRowsAffected == 0 {
-					slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
-				}
-			case *t_aio.AlterPromisesResult:
-				createPromiseRes := t_aio.AsAlterPromises(r)
-				if createPromiseRes.RowsAffected == 0 {
-					slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
-				}
-			default:
-				panic("First result must be CreatePromise or CreatePromiseAndTask")
+			createPromiseRes := t_aio.AsAlterPromises(completion.Store.Results[0])
+			if createPromiseRes.RowsAffected == 0 {
+				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 			}
 		}
 		return nil, nil
