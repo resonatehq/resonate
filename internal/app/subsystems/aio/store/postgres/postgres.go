@@ -984,26 +984,19 @@ func (w *PostgresStoreWorker) createPromise(_ *sql.Tx, stmt *sql.Stmt, cmd *t_ai
 	}, nil
 }
 
-func (w *PostgresStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, taskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromisesAndTasksResult, error) {
-	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
+func (w *PostgresStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, taskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromisesResult, error) {
+	res, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
 	if err != nil {
 		return nil, err
 	}
 
-	// Couldn't create a promise
-	if promiseResult.RowsAffected == 0 {
-		return &t_aio.AlterPromisesAndTasksResult{}, nil
+	if res.RowsAffected == 1 {
+		if _, err := w.createTask(tx, taskStmt, cmd.TaskCommand); err != nil {
+			return nil, err
+		}
 	}
 
-	taskResult, err := w.createTask(tx, taskStmt, cmd.TaskCommand)
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterPromisesAndTasksResult{
-		PromiseRowsAffected: promiseResult.RowsAffected,
-		TaskRowsAffected:    taskResult.RowsAffected,
-	}, nil
+	return res, nil
 }
 
 func (w *PostgresStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdatePromiseCommand) (*t_aio.AlterPromisesResult, error) {

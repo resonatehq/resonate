@@ -576,6 +576,20 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					}
 				}
 				results[i][j], err = w.createPromise(tx, promiseInsertStmt, v)
+			case *t_aio.CreatePromiseAndTaskCommand:
+				if promiseInsertStmt == nil {
+					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+				}
+				if taskInsertStmt == nil {
+					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
+					if err != nil {
+						return nil, err
+					}
+				}
+				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, v)
 			case *t_aio.UpdatePromiseCommand:
 				if promiseUpdateStmt == nil {
 					promiseUpdateStmt, err = tx.Prepare(PROMISE_UPDATE_STATEMENT)
@@ -717,20 +731,6 @@ func (w *SqliteStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Tr
 					}
 				}
 				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, v)
-			case *t_aio.CreatePromiseAndTaskCommand:
-				if promiseInsertStmt == nil {
-					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				if taskInsertStmt == nil {
-					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
-					if err != nil {
-						return nil, err
-					}
-				}
-				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, v)
 
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.String()))
@@ -941,29 +941,19 @@ func (w *SqliteStoreWorker) createPromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio
 	}, nil
 }
 
-func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, TaskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromisesAndTasksResult, error) {
-	promiseResult, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
+func (w *SqliteStoreWorker) createPromiseAndTask(tx *sql.Tx, promiseStmt *sql.Stmt, taskStmt *sql.Stmt, cmd *t_aio.CreatePromiseAndTaskCommand) (*t_aio.AlterPromisesResult, error) {
+	res, err := w.createPromise(tx, promiseStmt, cmd.PromiseCommand)
 	if err != nil {
 		return nil, err
 	}
 
-	// Couldn't create a promise
-	if promiseResult.RowsAffected == 0 {
-		return &t_aio.AlterPromisesAndTasksResult{
-			PromiseRowsAffected: 0,
-			TaskRowsAffected:    0,
-		}, nil
+	if res.RowsAffected == 1 {
+		if _, err := w.createTask(tx, taskStmt, cmd.TaskCommand); err != nil {
+			return nil, err
+		}
 	}
 
-	taskResult, err := w.createTask(tx, TaskStmt, cmd.TaskCommand)
-	if err != nil {
-		return nil, err
-	}
-
-	return &t_aio.AlterPromisesAndTasksResult{
-		PromiseRowsAffected: promiseResult.RowsAffected,
-		TaskRowsAffected:    taskResult.RowsAffected,
-	}, nil
+	return res, nil
 }
 
 func (w *SqliteStoreWorker) updatePromise(tx *sql.Tx, stmt *sql.Stmt, cmd *t_aio.UpdatePromiseCommand) (*t_aio.AlterPromisesResult, error) {

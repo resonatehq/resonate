@@ -2142,9 +2142,8 @@ var TestCases = []*testCase{
 			},
 		},
 		expected: []t_aio.Result{
-			&t_aio.AlterPromisesAndTasksResult{
-				PromiseRowsAffected: 1,
-				TaskRowsAffected:    1,
+			&t_aio.AlterPromisesResult{
+				RowsAffected: 1,
 			},
 			&t_aio.QueryPromisesResult{
 				RowsReturned: 1,
@@ -2220,9 +2219,8 @@ var TestCases = []*testCase{
 			&t_aio.AlterPromisesResult{
 				RowsAffected: 1,
 			},
-			&t_aio.AlterPromisesAndTasksResult{
-				PromiseRowsAffected: 0,
-				TaskRowsAffected:    0,
+			&t_aio.AlterPromisesResult{
+				RowsAffected: 0,
 			},
 			&t_aio.QueryPromisesResult{
 				RowsReturned: 1,

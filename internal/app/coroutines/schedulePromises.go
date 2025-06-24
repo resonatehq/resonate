@@ -43,7 +43,7 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 		result := t_aio.AsQuerySchedules(completion.Store.Results[0])
 		util.Assert(result != nil, "result must not be nil")
 
-		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(result.Records))
+		awaiting := make([]gocoroPromise.Awaitable[*promiseAndTask], len(result.Records))
 		commands := make([]*t_aio.CreatePromiseCommand, len(result.Records))
 
 		for i, r := range result.Records {
@@ -101,8 +101,7 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				continue
 			}
 
-			createPromiseRes := t_aio.AsAlterPromises(completion.Store.Results[0])
-			if createPromiseRes.RowsAffected == 0 {
+			if !completion.created {
 				slog.Warn("promise to be scheduled already exists", "promise", commands[i].Id, "schedule", result.Records[i].Id)
 			}
 		}
