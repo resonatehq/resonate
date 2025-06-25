@@ -16,5 +16,6 @@ EXPOSE 8001
 EXPOSE 8002
 EXPOSE 50051
 
-USER non-root ENTRYPOINT ["./resonate"]
+#nosemgrep
+ENTRYPOINT ["./resonate"]
 
