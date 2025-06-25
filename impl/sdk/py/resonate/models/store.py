@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from resonate.models.callback import Callback
     from resonate.models.durable_promise import DurablePromise
     from resonate.models.encoder import Encoder
+    from resonate.models.schedules import Schedule
     from resonate.models.task import Task
 
 
+@runtime_checkable
 class Store(Protocol):
     @property
     def encoder(self) -> Encoder[str | None, str | None]: ...
@@ -18,6 +20,9 @@ class Store(Protocol):
 
     @property
     def tasks(self) -> TaskStore: ...
+
+    @property
+    def schedules(self) -> ScheduleStore: ...
 
 
 class PromiseStore(Protocol):
@@ -118,3 +123,24 @@ class TaskStore(Protocol):
         self,
         pid: str,
     ) -> int: ...
+
+
+class ScheduleStore(Protocol):
+    def create(
+        self,
+        id: str,
+        cron: str,
+        promise_id: str,
+        promise_timeout: int,
+        *,
+        ikey: str | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
+        promise_headers: dict[str, str] | None = None,
+        promise_data: str | None = None,
+        promise_tags: dict[str, str] | None = None,
+    ) -> Schedule: ...
+
+    def get(self, id: str) -> Schedule: ...
+
+    def delete(self, id: str) -> None: ...

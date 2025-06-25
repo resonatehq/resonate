@@ -17,6 +17,8 @@ from resonate.dependencies import Dependencies
 from resonate.loggers import ContextLogger
 from resonate.message_sources import LocalMessageSource, Poller
 from resonate.models.handle import Handle
+from resonate.models.message_source import MessageSource
+from resonate.models.store import Store
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.stores import LocalStore, RemoteStore
@@ -27,9 +29,10 @@ if TYPE_CHECKING:
     from resonate.models.context import Info
     from resonate.models.encoder import Encoder
     from resonate.models.logger import Logger
-    from resonate.models.message_source import MessageSource
     from resonate.models.retry_policy import RetryPolicy
-    from resonate.models.store import PromiseStore, Store
+    from resonate.models.store import PromiseStore, ScheduleStore
+
+ALLOWED_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 class Resonate:
@@ -41,14 +44,67 @@ class Resonate:
         group: str = "default",
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
-        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.NOTSET,
         store: Store | None = None,
         message_source: MessageSource | None = None,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.NOTSET,
     ) -> None:
+        """Create a Resonate client."""
+        # pid
+        if pid is not None and not isinstance(pid, str):
+            msg = f"pid must be `str | None`, got {type(pid).__name__}"
+            raise TypeError(msg)
+
+        # ttl
+        if not isinstance(ttl, int):
+            msg = f"ttl must be `int`, got {type(ttl).__name__}"
+            raise TypeError(msg)
+
+        # group
+        if not isinstance(group, str):
+            msg = f"group must be `str`, got {type(group).__name__}"
+            raise TypeError(msg)
+
+        # registry
+        if registry is not None and not isinstance(registry, Registry):
+            msg = f"registry must be `Registry | None`, got {type(registry).__name__}"
+            raise TypeError(msg)
+
+        # dependencies
+        if dependencies is not None and not isinstance(dependencies, Dependencies):
+            msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
+            raise TypeError(msg)
+
+        # log_level
+        if not isinstance(log_level, (int, str)):
+            msg = f"log_level must be an int or a str, got {type(log_level).__name__}"
+            raise TypeError(msg)
+
+        if isinstance(log_level, str) and log_level not in ALLOWED_LOG_LEVELS:
+            msg = f"string log_level must be one of {ALLOWED_LOG_LEVELS}, got {log_level!r}"
+            raise ValueError(msg)
+
+        # store
+        if store is not None and not isinstance(store, Store):
+            msg = f"store must be `Store | None`, got {type(registry).__name__}"
+            raise TypeError(msg)
+
+        # message_source
+        if message_source is not None and not isinstance(message_source, MessageSource):
+            msg = f"message_source must be `MessageSource | None`, got {type(dependencies).__name__}"
+            raise TypeError(msg)
+
         # enforce mutual inclusion/exclusion of store and message source
-        assert (store is None) == (message_source is None), "store and message source must both be set or both be unset"
-        assert not isinstance(store, LocalStore) or isinstance(message_source, LocalMessageSource), "message source must be local message source"
-        assert not isinstance(store, RemoteStore) or not isinstance(message_source, LocalMessageSource), "message source must not be local message source"
+        if (store is None) != (message_source is None):
+            msg = "store and message source must both be set or both be unset"
+            raise ValueError(msg)
+
+        if isinstance(store, LocalStore) and not isinstance(message_source, LocalMessageSource):
+            msg = "message source must be LocalMessageSource when store is LocalStore"
+            raise TypeError(msg)
+
+        if isinstance(store, RemoteStore) and isinstance(message_source, LocalMessageSource):
+            msg = "message source must not be LocalMessageSource when store is RemoteStore"
+            raise TypeError(msg)
 
         self._started = False
         self._pid = pid or uuid.uuid4().hex
@@ -86,38 +142,15 @@ class Resonate:
         group: str = "default",
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
-        log_level: int = logging.INFO,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
     ) -> Resonate:
-        # pid
-        if pid is not None and not isinstance(pid, str):
-            msg = f"pid must be `str | None`, got {type(pid).__name__}"
-            raise TypeError(msg)
+        """Create a local Resonate client.
 
-        # ttl
-        if not isinstance(ttl, int):
-            msg = f"ttl must be `int`, got {type(ttl).__name__}"
-            raise TypeError(msg)
-
-        # group
-        if not isinstance(group, str):
-            msg = f"group must be `str`, got {type(group).__name__}"
-            raise TypeError(msg)
-
-        # registry
-        if registry is not None and not isinstance(registry, Registry):
-            msg = f"registry must be `Registry | None`, got {type(registry).__name__}"
-            raise TypeError(msg)
-
-        # dependencies
-        if dependencies is not None and not isinstance(dependencies, Dependencies):
-            msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
-            raise TypeError(msg)
-
-        # log_level
-        if not isinstance(log_level, int):
-            msg = f"log_level must be `int`, got {type(log_level).__name__}"
-            raise TypeError(msg)
-
+        This configuration stores all state in memory, with no external
+        persistence or network I/O. The in memory store implements the same
+        API as the remote store, making it perfect for rapid development,
+        local testing, and experimentation.
+        """
         pid = pid or uuid.uuid4().hex
         store = LocalStore()
 
@@ -143,53 +176,16 @@ class Resonate:
         group: str = "default",
         registry: Registry | None = None,
         dependencies: Dependencies | None = None,
-        log_level: int = logging.INFO,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
     ) -> Resonate:
-        # host
-        if host is not None and not isinstance(host, str):
-            msg = f"host must be `str | None`, got {type(host).__name__}"
-            raise TypeError(msg)
+        """Create a remote Resonate client.
 
-        # store_port
-        if store_port is not None and not isinstance(store_port, str):
-            msg = f"store_port must be `str | None`, got {type(store_port).__name__}"
-            raise TypeError(msg)
+        This configuration persists all state to a remote store, enabling
+        full durability, coordination, and recovery protocols across processes.
 
-        # message_source_port
-        if message_source_port is not None and not isinstance(message_source_port, str):
-            msg = f"message_source_port must be `str | None`, got {type(message_source_port).__name__}"
-            raise TypeError(msg)
-
-        # pid
-        if pid is not None and not isinstance(pid, str):
-            msg = f"pid must be `str | None`, got {type(pid).__name__}"
-            raise TypeError(msg)
-
-        # ttl
-        if not isinstance(ttl, int):
-            msg = f"ttl must be `int`, got {type(ttl).__name__}"
-            raise TypeError(msg)
-
-        # group
-        if not isinstance(group, str):
-            msg = f"group must be `str`, got {type(group).__name__}"
-            raise TypeError(msg)
-
-        # registry
-        if registry is not None and not isinstance(registry, Registry):
-            msg = f"registry must be `Registry | None`, got {type(registry).__name__}"
-            raise TypeError(msg)
-
-        # dependencies
-        if dependencies is not None and not isinstance(dependencies, Dependencies):
-            msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
-            raise TypeError(msg)
-
-        # log_level
-        if not isinstance(log_level, int):
-            msg = f"log_level must be `int`, got {type(log_level).__name__}"
-            raise TypeError(msg)
-
+        The remote store implementation is ideal for production workloads, fault-tolerant scheduling,
+        and distributed execution.
+        """
         pid = pid or uuid.uuid4().hex
 
         return cls(
@@ -206,6 +202,10 @@ class Resonate:
     @property
     def promises(self) -> PromiseStore:
         return self._store.promises
+
+    @property
+    def schedules(self) -> ScheduleStore:
+        return self._store.schedules
 
     def start(self) -> None:
         if not self._started:
@@ -261,6 +261,18 @@ class Resonate:
         name: str | None = None,
         version: int = 1,
     ) -> Function[P, R] | Callable[[Callable[Concatenate[Context, P], R]], Function[P, R]]:
+        """Register function with Resonate.
+
+        This method makes the provided function available for top level
+        execution under the specified name and version.
+
+        It can be used directly by passing the target function, or as a decorator.
+
+        When used without arguments, the function itself is decorated and
+        registered with the default name (derived from the function) and version.
+        Providing a `name` or `version` allows explicit control over the
+        function identifier and its versioning for subsequent invocations.
+        """
         if name is not None and not isinstance(name, str):
             msg = f"name must be `str | None`, got {type(name).__name__}"
             raise TypeError(msg)
@@ -308,6 +320,17 @@ class Resonate:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
+        """Run a function with Resonate.
+
+        If a durable promise with the same `id` already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same `id`.
+
+        - Function must be registered.
+        - Function *args and **kwargs must be serializable.
+        """
         # id
         if not isinstance(id, str):
             msg = f"id must be `str`, got {type(id).__name__}"
@@ -357,6 +380,17 @@ class Resonate:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> Handle[R]:
+        """Run a function with Resonate remotely.
+
+        If a durable promise with the same `id` already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same `id`.
+
+        - Function must be registered.
+        - Function *args and **kwargs must be serializable.
+        """
         # id
         if not isinstance(id, str):
             msg = f"id must be `str`, got {type(id).__name__}"
@@ -388,6 +422,11 @@ class Resonate:
         return Handle(future)
 
     def get(self, id: str) -> Handle[Any]:
+        """Subscribe to an execution.
+
+        A durable promise with the same `id` must exist. Returns immediately
+        if the promise has been completed.
+        """
         # id
         if not isinstance(id, str):
             msg = f"id must be `str`, got {type(id).__name__}"
@@ -400,6 +439,11 @@ class Resonate:
         return Handle(future)
 
     def set_dependency(self, name: str, obj: Any) -> None:
+        """Store a named dependency for use with `Context`.
+
+        The dependency is made available to all functions via
+        their execution `Context`.
+        """
         # name
         if not isinstance(name, str):
             msg = f"name must be `str`, got {type(name).__name__}"
@@ -444,6 +488,12 @@ class Context:
         return self._time
 
     def get_dependency[T](self, key: str, default: T = None) -> Any | T:
+        """Retrieve a dependency by its name.
+
+        If the dependency identified by `key` exists, its value is returned;
+        otherwise, the specified `default` value is returned. A TypeError is
+        raised if `key` is not a string.
+        """
         if not isinstance(key, str):
             msg = f"key must be `str`, got {type(key).__name__}"
             raise TypeError(msg)
@@ -456,6 +506,13 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LFI[R]:
+        """Schedule a function for local execution.
+
+        The function is executed in the current process, and the returned promise
+        can be awaited for the final result.
+
+        By default, execution is durable; non durable behavior can be configured if needed.
+        """
         if isinstance(func, Function):
             func = func.func
 
@@ -472,6 +529,12 @@ class Context:
         *args: P.args,
         **kwargs: P.kwargs,
     ) -> LFC[R]:
+        """Schedule a function for local execution and await its result.
+
+        The function is executed in the current process.
+
+        By default, execution is durable; non durable behavior can be configured if needed.
+        """
         if isinstance(func, Function):
             func = func.func
 
@@ -502,6 +565,15 @@ class Context:
         *args: Any,
         **kwargs: Any,
     ) -> RFI:
+        """Schedule a function for remote execution`.
+
+        The function is scheduled on the global event loop and potentially executed
+        in a different process, the returned promise can be awaited for the final
+        result.
+
+        - Function must be registered.
+        - Function *args and **kwargs must be serializable.
+        """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFI(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)))
 
@@ -525,6 +597,14 @@ class Context:
         *args: Any,
         **kwargs: Any,
     ) -> RFC:
+        """Schedule a function for remote execution and await its result.
+
+        The function is scheduled on the global event loop and potentially executed
+        in a different process.
+
+        - Function must be registered.
+        - Function *args and **kwargs must be serializable.
+        """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFC(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)))
 
@@ -548,6 +628,15 @@ class Context:
         *args: Any,
         **kwargs: Any,
     ) -> RFI:
+        """Schedule a function for remote (detached) execution.
+
+        The function is scheduled on the global event loop and potentially executed
+        in a different process, and the returned promise can be awaited for the final
+        result.
+
+        - Function must be registered.
+        - Function *args and **kwargs must be serializable.
+        """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFI(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)), mode="detached")
 

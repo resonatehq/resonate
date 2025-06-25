@@ -11,6 +11,7 @@ from resonate.encoders import Base64Encoder
 from resonate.errors import ResonateStoreError
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
+from resonate.models.schedules import Schedule
 from resonate.models.task import Task
 from resonate.retry_policies import Constant
 
@@ -36,6 +37,7 @@ class RemoteStore:
 
         self._promises = RemotePromiseStore(self)
         self._tasks = RemoteTaskStore(self)
+        self._schedules = RemoteScheduleStore(self)
 
     @property
     def url(self) -> str:
@@ -53,6 +55,10 @@ class RemoteStore:
     def tasks(self) -> RemoteTaskStore:
         return self._tasks
 
+    @property
+    def schedules(self) -> RemoteScheduleStore:
+        return self._schedules
+
     def call(self, req: PreparedRequest) -> Any:
         attempt = 0
 
@@ -63,6 +69,9 @@ class RemoteStore:
 
                 try:
                     res = s.send(req, timeout=self._timeout)
+                    if res.status_code == 204:
+                        return None
+
                     res.raise_for_status()
                     data = res.json()
                 except requests.exceptions.HTTPError as e:
@@ -390,3 +399,61 @@ class RemoteTaskStore:
 
         res = self._store.call(req.prepare())
         return res["tasksAffected"]
+
+
+class RemoteScheduleStore:
+    def __init__(self, store: RemoteStore) -> None:
+        self._store = store
+
+    def create(
+        self,
+        id: str,
+        cron: str,
+        promise_id: str,
+        promise_timeout: int,
+        *,
+        ikey: str | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
+        promise_headers: dict[str, str] | None = None,
+        promise_data: str | None = None,
+        promise_tags: dict[str, str] | None = None,
+    ) -> Schedule:
+        promise_param = {}
+        if promise_headers is not None:
+            promise_param["headers"] = promise_headers
+        if promise_data is not None:
+            promise_param["data"] = self._store.encoder.encode(promise_data)
+
+        req = Request(
+            method="post",
+            url=f"{self._store.url}/schedules",
+            headers=self._headers(ikey=ikey),
+            json={
+                "id": id,
+                "description": description or "",
+                "cron": cron,
+                "tags": tags or {},
+                "promiseId": promise_id,
+                "promiseTimeout": promise_timeout,
+                "promiseParam": promise_param,
+                "promiseTags": promise_tags or {},
+            },
+        )
+        res = self._store.call(req.prepare())
+        return Schedule.from_dict(self._store, res)
+
+    def get(self, id: str) -> Schedule:
+        req = Request(method="get", url=f"{self._store.url}/schedules/{id}")
+        res = self._store.call(req.prepare())
+        return Schedule.from_dict(self._store, res)
+
+    def delete(self, id: str) -> None:
+        req = Request(method="delete", url=f"{self._store.url}/schedules/{id}")
+        self._store.call(req.prepare())
+
+    def _headers(self, *, ikey: str | None) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if ikey is not None:
+            headers["idempotency-Key"] = ikey
+        return headers

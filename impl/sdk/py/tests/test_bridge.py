@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
@@ -223,6 +224,25 @@ def resonate(store: Store, message_source: MessageSource) -> Generator[Resonate,
 
     # stop resonate (and the bridge)
     resonate.stop()
+
+
+def test_run_on_schedule(resonate: Resonate) -> None:
+    e = threading.Event()
+
+    @resonate.register
+    def on_schedule(ctx: Context) -> None:
+        e.set()
+
+    id = f"on-schedule-{uuid.uuid4().hex}"
+    resonate.schedules.create(
+        id,
+        "* * * * *",
+        f"{id}.{{{{.timestamp}}}}",
+        (60 * 60) * 1000,  # input in milliseconds
+        promise_data=json.dumps({"func": "on_schedule", "args": [], "kwargs": {}, "version": 1}),
+        promise_tags={"resonate:invoke": "default"},
+    )
+    e.wait()
 
 
 def test_local_invocations_with_registered_functions(resonate: Resonate) -> None:

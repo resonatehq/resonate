@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from resonate.models.message import Mesg
 
 
+@runtime_checkable
 class MessageSource(Protocol):
     @property
     def unicast(self) -> str: ...

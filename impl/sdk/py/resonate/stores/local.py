@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import random
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, final
+
+from croniter import croniter
 
 from resonate.encoders import Base64Encoder
 from resonate.errors import ResonateStoreError
@@ -12,6 +15,7 @@ from resonate.message_sources import LocalMessageSource
 from resonate.models.callback import Callback
 from resonate.models.durable_promise import DurablePromise
 from resonate.models.message import DurablePromiseMesg, DurablePromiseValueMesg, InvokeMesg, Mesg, NotifyMesg, ResumeMesg, TaskMesg
+from resonate.models.schedules import Schedule
 from resonate.models.task import Task
 from resonate.routers import TagRouter
 from resonate.utils import exit_on_exception
@@ -29,6 +33,7 @@ class LocalStore:
         self._encoder = encoder or Base64Encoder()
         self._promises = LocalPromiseStore(self)
         self._tasks = LocalTaskStore(self)
+        self._schedules = LocalScheduleStore(self)
 
         self._routers: list[Router] = [TagRouter()]
         self._targets: dict[str, str] = {"default": "local://any@default"}
@@ -51,6 +56,10 @@ class LocalStore:
     @property
     def tasks(self) -> LocalTaskStore:
         return self._tasks
+
+    @property
+    def schedules(self) -> LocalScheduleStore:
+        return self._schedules
 
     @property
     def routers(self) -> list[Router]:
@@ -153,6 +162,7 @@ class LocalStore:
                 # The next timeout time is the minimum of:
                 # all promise timeouts
                 # all task expirations
+                # all schedule next runtime
                 for promise in self.promises.scan():
                     if promise.state == "PENDING":
                         timeout = promise.timeout if timeout is None else min(promise.timeout, timeout)
@@ -161,6 +171,9 @@ class LocalStore:
                         assert task.expiry is not None
                         timeout = task.expiry if timeout is None else min(task.expiry, timeout)
 
+                for schedule in self.schedules.scan():
+                    timeout = schedule.next_run_time if timeout is None else min(timeout, schedule.next_run_time)
+
                 # convert to relative time in seconds while respecting max
                 # timeout
                 if timeout is not None:
@@ -168,6 +181,25 @@ class LocalStore:
 
     def step(self) -> Generator[tuple[str, Mesg], bool | None, None]:
         time = int(self._clock.time() * 1000)
+
+        # create scheduled promises
+        for schedule in self.schedules.scan():
+            if time < schedule.next_run_time:
+                continue
+
+            with contextlib.suppress(ResonateStoreError):
+                self.promises.create(
+                    id=schedule.promise_id.replace("{{.timestamp}}", str(time)),
+                    timeout=time + schedule.promise_timeout,
+                    ikey=None,
+                    strict=False,
+                    headers=schedule.promise_param.headers,
+                    data=schedule.promise_param.data,
+                    tags=schedule.promise_tags,
+                )
+            # update schedule
+            _, applied = self.schedules.transition(id=schedule.id, to="CREATED", updating=True)
+            assert applied
 
         # transition promises to timedout
         for promise in self.promises.scan():
@@ -875,6 +907,132 @@ class LocalTaskStore:
                 raise ResonateStoreError(mesg="The task is already claimed, completed, or an invalid counter was provided", code=40305)
 
 
+class LocalScheduleStore:
+    def __init__(self, store: LocalStore) -> None:
+        self._schedules: dict[str, ScheduleRecord] = {}
+        self._store = store
+
+    def create(
+        self,
+        id: str,
+        cron: str,
+        promise_id: str,
+        promise_timeout: int,
+        *,
+        ikey: str | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
+        promise_headers: dict[str, str] | None = None,
+        promise_data: str | None = None,
+        promise_tags: dict[str, str] | None = None,
+    ) -> Schedule:
+        record, applied = self.transition(
+            id=id,
+            to="CREATED",
+            cron=cron,
+            promise_id=promise_id,
+            promise_timeout=promise_timeout,
+            ikey=ikey,
+            description=description,
+            tags=tags,
+            promise_headers=promise_headers,
+            promise_data=promise_data,
+            promise_tags=promise_tags,
+        )
+        if applied:
+            self._store.notify()
+        return Schedule.from_dict(self._store, record.to_dict())
+
+    def get(self, id: str) -> Schedule:
+        record = self._schedules.get(id)
+        if record is None:
+            msg = "The specified schedule was not found"
+            raise ResonateStoreError(msg, code=40403)
+        return Schedule.from_dict(self._store, record.to_dict())
+
+    def delete(self, id: str) -> None:
+        _, applied = self.transition(id=id, to="DELETED")
+        assert applied
+
+    def transition(
+        self,
+        id: str,
+        to: Literal["CREATED", "DELETED"],
+        *,
+        cron: str | None = None,
+        promise_id: str | None = None,
+        promise_timeout: int | None = None,
+        ikey: str | None = None,
+        description: str | None = None,
+        tags: dict[str, str] | None = None,
+        promise_headers: dict[str, str] | None = None,
+        promise_data: str | None = None,
+        promise_tags: dict[str, str] | None = None,
+        updating: bool = False,
+    ) -> tuple[ScheduleRecord, bool]:
+        time = int(self._store.clock.time() * 1000)
+
+        match record := self._schedules.get(id), to:
+            case None, "CREATED":
+                assert cron is not None, "cron must be set"
+                assert promise_id is not None, "promiseId must be set"
+                assert promise_timeout is not None, "promiseTimeout must be set"
+                assert promise_timeout >= 0, "promiseTimeout must be positive"
+
+                record = ScheduleRecord(
+                    id=id,
+                    description=description,
+                    cron=cron,
+                    tags=tags,
+                    promise_id=promise_id,
+                    promise_timeout=promise_timeout,
+                    promise_param=DurablePromiseRecordValue(
+                        headers=promise_headers,
+                        data=promise_data,
+                    ),
+                    promise_tags=promise_tags,
+                    last_run_time=None,
+                    next_run_time=next_runtime(cron, time),
+                    idempotency_key=ikey,
+                    created_on=time,
+                )
+
+                self._schedules[record.id] = record
+                return record, True
+            case ScheduleRecord(), "CREATED" if ikey_match(ikey, record.idempotency_key):
+                return record, False
+            case ScheduleRecord(), "CREATED" if updating:
+                record = ScheduleRecord(
+                    id=id,
+                    description=record.description,
+                    cron=record.cron,
+                    tags=record.tags,
+                    promise_id=record.promise_id,
+                    promise_timeout=record.promise_timeout,
+                    promise_param=record.promise_param,
+                    promise_tags=record.promise_tags,
+                    last_run_time=record.next_run_time,
+                    next_run_time=next_runtime(record.cron, time),
+                    idempotency_key=record.idempotency_key,
+                    created_on=record.created_on,
+                )
+                self._schedules[id] = record
+                return record, True
+            case ScheduleRecord(), "CREATED":
+                raise ResonateStoreError(mesg="Schedule already exists", code=40400)
+            case None, "DELETED":
+                msg = "The specified schedule was not found"
+                raise ResonateStoreError(msg, code=40403)
+            case ScheduleRecord(), "DELETED":
+                self._schedules.pop(id)
+                return record, True
+            case _:
+                raise ResonateStoreError(mesg=f"Unexpected transition ({'created' if record else 'None'} -> {to})", code=40399)
+
+    def scan(self) -> Generator[ScheduleRecord]:
+        yield from self._schedules.values()
+
+
 @final
 @dataclass(frozen=True)
 class DurablePromiseRecord:
@@ -937,6 +1095,39 @@ class CallbackRecord:
 
 @final
 @dataclass(frozen=True)
+class ScheduleRecord:
+    id: str
+    description: str | None
+    cron: str
+    tags: dict[str, str] | None
+    promise_id: str
+    promise_timeout: int
+    promise_param: DurablePromiseRecordValue
+    promise_tags: dict[str, str] | None
+    last_run_time: int | None
+    next_run_time: int
+    idempotency_key: str | None
+    created_on: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "description": self.description,
+            "cron": self.cron,
+            "tags": self.tags or {},
+            "promiseId": self.promise_id,
+            "promiseTimeout": self.promise_timeout,
+            "promiseParam": self.promise_param.to_dict(),
+            "promiseTags": self.promise_tags or {},
+            "idempotencyKey": self.idempotency_key,
+            "lastRunTime": self.last_run_time,
+            "nextRunTime": self.next_run_time,
+            "createdOn": self.created_on,
+        }
+
+
+@final
+@dataclass(frozen=True)
 class TaskRecord:
     id: str
     counter: int
@@ -953,6 +1144,11 @@ class TaskRecord:
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "counter": self.counter}
+
+
+def next_runtime(cron: str, base: int) -> int:
+    # base is milliconds. cronitier works with seconds
+    return int(croniter(cron, base / 1000).next() * 1000)
 
 
 def ikey_match(left: str | None, right: str | None) -> bool:
