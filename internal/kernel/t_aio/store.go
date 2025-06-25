@@ -411,15 +411,6 @@ func (r *AlterTasksResult) String() string {
 	return "AlterTasks"
 }
 
-type AlterPromiseAndTaskResult struct {
-	PromiseRowsAffected int64
-	TaskRowsAffected    int64
-}
-
-func (r *AlterPromiseAndTaskResult) String() string {
-	return "AlterPromiseAndTask"
-}
-
 type QueryLocksResult struct {
 	RowsReturned int64
 	Records      []*lock.LockRecord
@@ -437,16 +428,16 @@ func (r *AlterLocksResult) String() string {
 	return "AlterLocks"
 }
 
-func (r *QueryPromisesResult) isResult()       {}
-func (r *AlterPromisesResult) isResult()       {}
-func (r *AlterCallbacksResult) isResult()      {}
-func (r *QuerySchedulesResult) isResult()      {}
-func (r *AlterSchedulesResult) isResult()      {}
-func (r *QueryTasksResult) isResult()          {}
-func (r *AlterTasksResult) isResult()          {}
-func (r *AlterPromiseAndTaskResult) isResult() {}
-func (r *QueryLocksResult) isResult()          {}
-func (r *AlterLocksResult) isResult()          {}
+func (r *QueryPromisesResult) isResult()  {}
+func (r *AlterPromisesResult) isResult()  {}
+func (r *AlterCallbacksResult) isResult() {}
+func (r *QuerySchedulesResult) isResult() {}
+func (r *AlterSchedulesResult) isResult() {}
+func (r *QueryTasksResult) isResult()     {}
+func (r *AlterTasksResult) isResult()     {}
+
+func (r *QueryLocksResult) isResult() {}
+func (r *AlterLocksResult) isResult() {}
 
 func AsQueryPromises(r Result) *QueryPromisesResult {
 	return r.(*QueryPromisesResult)
@@ -469,9 +460,7 @@ func AsQueryTasks(r Result) *QueryTasksResult {
 func AsAlterTasks(r Result) *AlterTasksResult {
 	return r.(*AlterTasksResult)
 }
-func AsAlterPromiseAndTask(r Result) *AlterPromiseAndTaskResult {
-	return r.(*AlterPromiseAndTaskResult)
-}
+
 func AsQueryLocks(r Result) *QueryLocksResult {
 	return r.(*QueryLocksResult)
 }

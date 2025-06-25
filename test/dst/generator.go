@@ -299,15 +299,12 @@ func (g *Generator) GenerateCreateSchedule(r *rand.Rand, t int64) *t_api.Request
 	id := g.scheduleId(r)
 	cron := fmt.Sprintf("%d * * * *", r.Intn(60))
 	tags := g.tags(r)
-	// do not create schedules that can invoke promises.
-	delete(tags, "resonate:invoke")
 	idempotencyKey := g.idempotencyKey(r)
 
 	promiseTimeout := RangeInt63n(r, t, g.ticks*g.timeElapsedPerTick)
 	promiseHeaders := g.headers(r)
 	promiseData := g.dataSet[r.Intn(len(g.dataSet))]
 	promiseTags := g.tags(r)
-	delete(promiseTags, "resonate:invoke")
 
 	return &t_api.Request{
 		Metadata: map[string]string{"partitionId": id},
