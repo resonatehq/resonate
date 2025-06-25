@@ -2,8 +2,6 @@ import { Call, Future, Invoke, type Yieldable } from "./context";
 import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
 import * as util from "./util";
 
-// TODO(avillega): to support any function (not only generators) we could make this Class take
-// any function and make it look as a Coroutine for the Computation type
 export class Coroutine<TRet> {
   public uuid: string;
   private sequ: number;

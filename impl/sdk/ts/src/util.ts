@@ -8,3 +8,10 @@ export function assert(cond: boolean, msg?: string): void {
     process.exit(1);
   }
 }
+
+// biome-ignore lint/complexity/noBannedTypes: We need to check all possible functions
+export function isGeneratorFunction(fn: Function): boolean {
+  const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
+  const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
+  return fn instanceof GeneratorFunction || fn instanceof AsyncGeneratorFunction;
+}

@@ -58,6 +58,16 @@ export class Computation<T> {
       if (action.type === "internal.async" && action.kind === "lfi") {
         const durable = this.handler.createPromise(action.uuid);
         if (durable.state === "pending") {
+          if (!util.isGeneratorFunction(action.func)) {
+            todos.push(action);
+            input = {
+              type: "internal.promise",
+              state: "pending",
+              uuid: action.uuid,
+            };
+            continue; // Go back to the top of the loop
+          }
+
           const c = new Computation(
             new Coroutine(
               action.uuid,

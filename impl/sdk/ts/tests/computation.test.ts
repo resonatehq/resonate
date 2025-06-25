@@ -21,6 +21,68 @@ describe("Computation", () => {
     expect(r).toEqual({ type: "completed", value: 42 });
   });
 
+  test("basic computation with function suspends after first await", () => {
+    function bar() {
+      return 42;
+    }
+    function baz() {
+      return 31416;
+    }
+
+    function* foo() {
+      const p = yield* lfi(bar);
+      const p2 = yield* lfi(baz);
+      const v = yield* p;
+      const v2 = yield* p2;
+      return v + v2;
+    }
+    const h = new Handler();
+    let r = Computation.exec("foo.1", foo, [], h);
+
+    expect(r).toMatchObject({ type: "suspended" });
+    r = r as Suspended;
+    expect(r.todos).toHaveLength(2);
+
+    h.resolvePromise("foo.1.0", 42);
+    h.resolvePromise("foo.1.1", 31416);
+
+    r = Computation.exec("foo.1", foo, [], h);
+    expect(r).toMatchObject({ type: "completed", value: 42 + 31416 });
+  });
+
+  test("basic computation with function suspends after lfc", () => {
+    function bar() {
+      return 42;
+    }
+    function baz() {
+      return 31416;
+    }
+
+    function* foo() {
+      const v = yield* lfc(bar);
+      const p2 = yield* lfi(baz);
+      const v2 = yield* p2;
+      return v + v2;
+    }
+    const h = new Handler();
+    let r = Computation.exec("foo.1", foo, [], h);
+
+    expect(r).toMatchObject({ type: "suspended" });
+    r = r as Suspended;
+    expect(r.todos).toHaveLength(1);
+    h.resolvePromise("foo.1.0", 42);
+
+    r = Computation.exec("foo.1", foo, [], h);
+    expect(r).toMatchObject({ type: "suspended" });
+    r = r as Suspended;
+    expect(r.todos).toHaveLength(1);
+
+    h.resolvePromise("foo.1.1", 31416);
+
+    r = Computation.exec("foo.1", foo, [], h);
+    expect(r).toMatchObject({ type: "completed", value: 42 + 31416 });
+  });
+
   test("computation with a suspension point suspends if can not make more progress", () => {
     function* bar() {
       return 42;
