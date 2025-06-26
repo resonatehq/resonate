@@ -270,7 +270,7 @@ class Resonate:
 
         When used without arguments, the function itself is decorated and
         registered with the default name (derived from the function) and version.
-        Providing a `name` or `version` allows explicit control over the
+        Providing a name or version allows explicit control over the
         function identifier and its versioning for subsequent invocations.
         """
         if name is not None and not isinstance(name, str):
@@ -322,14 +322,14 @@ class Resonate:
     ) -> Handle[R]:
         """Run a function with Resonate.
 
-        If a durable promise with the same `id` already exists, the method
+        If a durable promise with the same id already exists, the method
         will subscribe to its result or return the value immediately if
         the promise has been completed.
 
-        Resonate will prevent duplicate executions for the same `id`.
+        Resonate will prevent duplicate executions for the same id.
 
-        - Function must be registered.
-        - Function *args and **kwargs must be serializable.
+        - Function must be registered
+        - Function args and kwargs must be serializable
         """
         # id
         if not isinstance(id, str):
@@ -382,14 +382,14 @@ class Resonate:
     ) -> Handle[R]:
         """Run a function with Resonate remotely.
 
-        If a durable promise with the same `id` already exists, the method
+        If a durable promise with the same id already exists, the method
         will subscribe to its result or return the value immediately if
         the promise has been completed.
 
-        Resonate will prevent duplicate executions for the same `id`.
+        Resonate will prevent duplicate executions for the same id.
 
-        - Function must be registered.
-        - Function *args and **kwargs must be serializable.
+        - Function must be registered
+        - Function args and kwargs must be serializable
         """
         # id
         if not isinstance(id, str):
@@ -424,7 +424,7 @@ class Resonate:
     def get(self, id: str) -> Handle[Any]:
         """Subscribe to an execution.
 
-        A durable promise with the same `id` must exist. Returns immediately
+        A durable promise with the same id must exist. Returns immediately
         if the promise has been completed.
         """
         # id
@@ -490,9 +490,9 @@ class Context:
     def get_dependency[T](self, key: str, default: T = None) -> Any | T:
         """Retrieve a dependency by its name.
 
-        If the dependency identified by `key` exists, its value is returned;
-        otherwise, the specified `default` value is returned. A TypeError is
-        raised if `key` is not a string.
+        If the dependency identified by key exists, its value is returned;
+        otherwise, the specified default value is returned. A TypeError is
+        raised if key is not a string.
         """
         if not isinstance(key, str):
             msg = f"key must be `str`, got {type(key).__name__}"
@@ -571,8 +571,8 @@ class Context:
         in a different process, the returned promise can be awaited for the final
         result.
 
-        - Function must be registered.
-        - Function *args and **kwargs must be serializable.
+        - Function must be registered
+        - Function args and kwargs must be serializable
         """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFI(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)))
@@ -602,8 +602,8 @@ class Context:
         The function is scheduled on the global event loop and potentially executed
         in a different process.
 
-        - Function must be registered.
-        - Function *args and **kwargs must be serializable.
+        - Function must be registered
+        - Function args and kwargs must be serializable
         """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFC(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)))
@@ -634,8 +634,8 @@ class Context:
         in a different process, and the returned promise can be awaited for the final
         result.
 
-        - Function must be registered.
-        - Function *args and **kwargs must be serializable.
+        - Function must be registered
+        - Function args and kwargs must be serializable
         """
         name, _, version = (func, None, self._registry.latest(func)) if isinstance(func, str) else self._registry.get(func)
         return RFI(Remote(self._next(), self._cid, self._id, name, args, kwargs, Options(version=version)), mode="detached")
