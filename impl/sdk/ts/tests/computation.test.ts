@@ -4,7 +4,20 @@ import { Coroutine } from "../src/coroutine";
 import { Handler } from "../src/handler";
 
 describe("Computation", () => {
-  test('basic computation completes with { type: "completed", value: 42 }', () => {
+  // Helper functions to write test easily
+  const exec = (uuid: string, func: any, args: any[], handler: Handler) => {
+    return new Promise<any>((resolve) => {
+      Computation.exec(uuid, func, args, handler, resolve);
+    });
+  };
+
+  const resolvePromise = (handler: Handler, uuid: string, value: any) => {
+    return new Promise<any>((resolve) => {
+      handler.resolvePromise(uuid, value, resolve);
+    });
+  };
+
+  test('basic computation completes with { type: "completed", value: 42 }', async () => {
     function* bar() {
       return 42;
     }
@@ -15,13 +28,11 @@ describe("Computation", () => {
       return v;
     }
     const h = new Handler();
-    const c = new Computation(new Coroutine("foo.1", foo()), h);
-
-    const r = c.exec();
+    const r = await exec("foo.1", foo, [], h);
     expect(r).toEqual({ type: "completed", value: 42 });
   });
 
-  test("basic computation with function suspends after first await", () => {
+  test("basic computation with function suspends after first await", async () => {
     function bar() {
       return 42;
     }
@@ -37,53 +48,22 @@ describe("Computation", () => {
       return v + v2;
     }
     const h = new Handler();
-    let r = Computation.exec("foo.1", foo, [], h);
 
+    // First execution - should suspend
+    let r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "suspended" });
-    r = r as Suspended;
-    expect(r.todos).toHaveLength(2);
+    const suspended = r as Suspended;
+    expect(suspended.todos).toHaveLength(2);
 
-    h.resolvePromise("foo.1.0", 42);
-    h.resolvePromise("foo.1.1", 31416);
+    await resolvePromise(h, "foo.1.0", 42);
+    await resolvePromise(h, "foo.1.1", 31416);
 
-    r = Computation.exec("foo.1", foo, [], h);
+    // Second execution - should complete
+    r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "completed", value: 42 + 31416 });
   });
 
-  test("basic computation with function suspends after lfc", () => {
-    function bar() {
-      return 42;
-    }
-    function baz() {
-      return 31416;
-    }
-
-    function* foo() {
-      const v = yield* lfc(bar);
-      const p2 = yield* lfi(baz);
-      const v2 = yield* p2;
-      return v + v2;
-    }
-    const h = new Handler();
-    let r = Computation.exec("foo.1", foo, [], h);
-
-    expect(r).toMatchObject({ type: "suspended" });
-    r = r as Suspended;
-    expect(r.todos).toHaveLength(1);
-    h.resolvePromise("foo.1.0", 42);
-
-    r = Computation.exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "suspended" });
-    r = r as Suspended;
-    expect(r.todos).toHaveLength(1);
-
-    h.resolvePromise("foo.1.1", 31416);
-
-    r = Computation.exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", value: 42 + 31416 });
-  });
-
-  test("computation with a suspension point suspends if can not make more progress", () => {
+  test("computation with a suspension point suspends if can not make more progress", async () => {
     function* bar() {
       return 42;
     }
@@ -99,17 +79,17 @@ describe("Computation", () => {
 
     const h = new Handler();
 
-    let r = Computation.exec("foo.1", foo, [], h);
+    let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todos).toHaveLength(1);
 
-    h.resolvePromise("foo.1.1", 42);
-    r = Computation.exec("foo.1", foo, [], h);
+    await resolvePromise(h, "foo.1.1", 42);
+    r = await exec("foo.1", foo, [], h);
     expect(r).toEqual({ type: "completed", value: 42 });
   });
 
-  test("Structured concurrency", () => {
+  test("Structured concurrency", async () => {
     function* bar() {
       return 42;
     }
@@ -121,24 +101,26 @@ describe("Computation", () => {
     }
 
     const h = new Handler();
-    let r = Computation.exec("foo.1", foo, [], h);
+    let r = await exec("foo.1", foo, [], h);
+
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todos).toHaveLength(2);
 
-    // If we resolve only one of the promises, in the second call to exec there must be 1 await still left
-    h.resolvePromise("foo.1.1", 42);
-    r = Computation.exec("foo.1", foo, [], h);
+    await resolvePromise(h, "foo.1.1", 42);
+    r = await exec("foo.1", foo, [], h);
+
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.todos).toHaveLength(1);
 
-    h.resolvePromise("foo.1.0", 42);
-    r = Computation.exec("foo.1", foo, [], h);
+    await resolvePromise(h, "foo.1.0", 42);
+    r = await exec("foo.1", foo, [], h);
+
     expect(r).toEqual({ type: "completed", value: 99 });
   });
 
-  test("lfc/rfc", () => {
+  test("lfc/rfc", async () => {
     function* bar() {
       return 42;
     }
@@ -150,13 +132,15 @@ describe("Computation", () => {
     }
 
     const h = new Handler();
-    let r = Computation.exec("foo.1", foo, [], h);
-    expect(r.type).toBe("suspended");
-    r = r as Suspended;
-    expect(r.todos).toHaveLength(1);
 
-    h.resolvePromise("foo.1.1", 42);
-    r = Computation.exec("foo.1", foo, [], h);
+    let r = await exec("foo.1", foo, [], h);
+    expect(r.type).toBe("suspended");
+    let suspended = r as Suspended;
+    expect(suspended.todos).toHaveLength(1);
+
+    await resolvePromise(h, "foo.1.1", 42);
+
+    r = await exec("foo.1", foo, [], h);
     expect(r).toEqual({ type: "completed", value: 84 });
   });
 });

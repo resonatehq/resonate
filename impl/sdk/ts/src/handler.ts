@@ -15,7 +15,7 @@ export class Handler {
     }
   }
 
-  public eCreatePromise<T>(uuid: string, callback: (promise: DurablePromise<T>) => void): void {
+  public createPromise<T>(uuid: string, callback: (res: DurablePromise<T>) => void): void {
     if (!this.promises[uuid]) {
       this.promises[uuid] = {
         uuid,
@@ -26,18 +26,7 @@ export class Handler {
     callback(this.promises[uuid]);
   }
 
-  public createPromise<T>(uuid: string): DurablePromise<T> {
-    if (!this.promises[uuid]) {
-      this.promises[uuid] = {
-        uuid,
-        state: "pending",
-      };
-    }
-
-    return this.promises[uuid];
-  }
-
-  public resolvePromise<T>(uuid: string, value: T): DurablePromise<T> {
+  public resolvePromise<T>(uuid: string, value: T, callback: (res: DurablePromise<T>) => void): void {
     const promise = this.promises[uuid];
 
     if (promise.state === "pending") {
@@ -45,6 +34,6 @@ export class Handler {
       promise.state = "completed";
     }
 
-    return promise;
+    callback(promise);
   }
 }
