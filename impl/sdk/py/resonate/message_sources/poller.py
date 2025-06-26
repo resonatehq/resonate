@@ -26,6 +26,7 @@ class Poller:
         id: str,
         host: str | None = None,
         port: str | None = None,
+        auth: tuple[str, str] | None = None,
         timeout: float | None = None,
         encoder: Encoder[Any, str] | None = None,
     ) -> None:
@@ -34,6 +35,7 @@ class Poller:
         self._id = id
         self._host = host or os.getenv("RESONATE_HOST_MESSAGE_SOURCE", os.getenv("RESONATE_HOST", "http://localhost"))
         self._port = port or os.getenv("RESONATE_PORT_MESSAGE_SOURCE", "8002")
+        self._auth = auth or ((os.getenv("RESONATE_USERNAME", ""), os.getenv("RESONATE_PASSWORD", "")) if "RESONATE_USERNAME" in os.environ else None)
         self._timeout = timeout
         self._encoder = encoder or JsonEncoder()
         self._thread = Thread(name="message-source::poller", target=self.loop, daemon=True)
@@ -78,7 +80,7 @@ class Poller:
     def loop(self) -> None:
         while not self._stopped:
             try:
-                with requests.get(self.url, stream=True, timeout=self._timeout) as res:
+                with requests.get(self.url, auth=self._auth, stream=True, timeout=self._timeout) as res:
                     res.raise_for_status()
 
                     for line in res.iter_lines(chunk_size=None, decode_unicode=True):

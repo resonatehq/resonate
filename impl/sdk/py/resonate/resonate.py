@@ -39,24 +39,19 @@ class Resonate:
     def __init__(
         self,
         *,
-        pid: str | None = None,
-        ttl: int = 10,
-        group: str = "default",
-        registry: Registry | None = None,
         dependencies: Dependencies | None = None,
-        store: Store | None = None,
-        message_source: MessageSource | None = None,
+        group: str = "default",
         log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.NOTSET,
+        message_source: MessageSource | None = None,
+        pid: str | None = None,
+        registry: Registry | None = None,
+        store: Store | None = None,
+        ttl: int = 10,
     ) -> None:
         """Create a Resonate client."""
-        # pid
-        if pid is not None and not isinstance(pid, str):
-            msg = f"pid must be `str | None`, got {type(pid).__name__}"
-            raise TypeError(msg)
-
-        # ttl
-        if not isinstance(ttl, int):
-            msg = f"ttl must be `int`, got {type(ttl).__name__}"
+        # dependencies
+        if dependencies is not None and not isinstance(dependencies, Dependencies):
+            msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
             raise TypeError(msg)
 
         # group
@@ -64,56 +59,58 @@ class Resonate:
             msg = f"group must be `str`, got {type(group).__name__}"
             raise TypeError(msg)
 
+        # log level
+        if not isinstance(log_level, (int, str)):
+            msg = f"log_level must be an int or a str, got {type(log_level).__name__}"
+            raise TypeError(msg)
+        if isinstance(log_level, str) and log_level not in ALLOWED_LOG_LEVELS:
+            msg = f"string log_level must be one of {ALLOWED_LOG_LEVELS}, got {log_level!r}"
+            raise ValueError(msg)
+
+        # message source
+        if message_source is not None and not isinstance(message_source, MessageSource):
+            msg = f"message_source must be `MessageSource | None`, got {type(dependencies).__name__}"
+            raise TypeError(msg)
+
+        # pid
+        if pid is not None and not isinstance(pid, str):
+            msg = f"pid must be `str | None`, got {type(pid).__name__}"
+            raise TypeError(msg)
+
         # registry
         if registry is not None and not isinstance(registry, Registry):
             msg = f"registry must be `Registry | None`, got {type(registry).__name__}"
             raise TypeError(msg)
 
-        # dependencies
-        if dependencies is not None and not isinstance(dependencies, Dependencies):
-            msg = f"dependencies must be `Dependencies | None`, got {type(dependencies).__name__}"
-            raise TypeError(msg)
-
-        # log_level
-        if not isinstance(log_level, (int, str)):
-            msg = f"log_level must be an int or a str, got {type(log_level).__name__}"
-            raise TypeError(msg)
-
-        if isinstance(log_level, str) and log_level not in ALLOWED_LOG_LEVELS:
-            msg = f"string log_level must be one of {ALLOWED_LOG_LEVELS}, got {log_level!r}"
-            raise ValueError(msg)
-
         # store
         if store is not None and not isinstance(store, Store):
             msg = f"store must be `Store | None`, got {type(registry).__name__}"
             raise TypeError(msg)
-
-        # message_source
-        if message_source is not None and not isinstance(message_source, MessageSource):
-            msg = f"message_source must be `MessageSource | None`, got {type(dependencies).__name__}"
-            raise TypeError(msg)
-
-        # enforce mutual inclusion/exclusion of store and message source
-        if (store is None) != (message_source is None):
-            msg = "store and message source must both be set or both be unset"
-            raise ValueError(msg)
-
         if isinstance(store, LocalStore) and not isinstance(message_source, LocalMessageSource):
             msg = "message source must be LocalMessageSource when store is LocalStore"
             raise TypeError(msg)
-
         if isinstance(store, RemoteStore) and isinstance(message_source, LocalMessageSource):
             msg = "message source must not be LocalMessageSource when store is RemoteStore"
             raise TypeError(msg)
 
-        self._started = False
-        self._pid = pid or uuid.uuid4().hex
-        self._ttl = ttl
-        self._group = group
-        self._opts = Options()
-        self._registry = registry or Registry()
+        # ttl
+        if not isinstance(ttl, int):
+            msg = f"ttl must be `int`, got {type(ttl).__name__}"
+            raise TypeError(msg)
+
+        # store / message source
+        if (store is None) != (message_source is None):
+            msg = "store and message source must both be set or both be unset"
+            raise ValueError(msg)
+
         self._dependencies = dependencies or Dependencies()
+        self._group = group
         self._log_level = log_level
+        self._opts = Options()
+        self._pid = pid or uuid.uuid4().hex
+        self._registry = registry or Registry()
+        self._started = False
+        self._ttl = ttl
 
         if store and message_source:
             self._store = store
@@ -137,12 +134,12 @@ class Resonate:
     @classmethod
     def local(
         cls,
-        pid: str | None = None,
-        ttl: int = 10,
-        group: str = "default",
-        registry: Registry | None = None,
         dependencies: Dependencies | None = None,
+        group: str = "default",
         log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
+        pid: str | None = None,
+        registry: Registry | None = None,
+        ttl: int = 10,
     ) -> Resonate:
         """Create a local Resonate client.
 
@@ -168,15 +165,16 @@ class Resonate:
     @classmethod
     def remote(
         cls,
+        auth: tuple[str, str] | None = None,
+        dependencies: Dependencies | None = None,
+        group: str = "default",
         host: str | None = None,
-        store_port: str | None = None,
+        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
         message_source_port: str | None = None,
         pid: str | None = None,
-        ttl: int = 10,
-        group: str = "default",
         registry: Registry | None = None,
-        dependencies: Dependencies | None = None,
-        log_level: int | Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = logging.INFO,
+        store_port: str | None = None,
+        ttl: int = 10,
     ) -> Resonate:
         """Create a remote Resonate client.
 
@@ -195,8 +193,8 @@ class Resonate:
             registry=registry,
             dependencies=dependencies,
             log_level=log_level,
-            store=RemoteStore(host=host, port=store_port),
-            message_source=Poller(group=group, id=pid, host=host, port=message_source_port),
+            store=RemoteStore(host=host, port=store_port, auth=auth),
+            message_source=Poller(group=group, id=pid, host=host, port=message_source_port, auth=auth),
         )
 
     @property
