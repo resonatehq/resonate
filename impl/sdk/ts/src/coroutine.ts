@@ -31,7 +31,7 @@ export class Coroutine<TRet> {
         this.nextState = value.state === "completed" ? "internal.literal" : "over";
         return {
           type: "internal.await",
-          uuid: prevInvoke.uuid,
+          id: prevInvoke.uuid,
           promise: value,
         };
       }
@@ -44,17 +44,17 @@ export class Coroutine<TRet> {
         const val = this.invokes.pop()!;
         return {
           type: "internal.await",
-          uuid: val.uuid,
+          id: val.uuid,
           promise: {
             type: "internal.promise",
             state: "pending",
-            uuid: val.uuid,
+            id: val.uuid,
           },
         };
       }
       return {
         type: "internal.return",
-        uuid: this.uuidsequ(),
+        id: this.uuidsequ(),
         value: this.toLiteral(result.value),
       };
     }
@@ -68,12 +68,12 @@ export class Coroutine<TRet> {
         return undefined;
       case "internal.promise":
         if (value.state === "pending") {
-          return new Future<T>(value.uuid, "pending", undefined);
+          return new Future<T>(value.id, "pending", undefined);
         }
         // promise === "complete"
         // We know for sure this promise relates to the last invoke inserted
         this.invokes.pop();
-        return new Future<T>(value.uuid, "completed", value.value.value);
+        return new Future<T>(value.id, "completed", value.value.value);
       case "internal.literal":
         return value.value;
     }
@@ -87,7 +87,7 @@ export class Coroutine<TRet> {
       this.nextState = "internal.promise";
       return {
         type: "internal.async",
-        uuid,
+        id: uuid,
         kind: this.mapKind(event.type),
         mode: "eager", // default, adjust if needed
         func: event.func,
@@ -104,14 +104,14 @@ export class Coroutine<TRet> {
         this.nextState = "internal.literal";
         return {
           type: "internal.await",
-          uuid: event.uuid,
+          id: event.uuid,
           promise: {
             type: "internal.promise",
             state: "completed",
-            uuid: event.uuid,
+            id: event.uuid,
             value: {
               type: "internal.literal",
-              uuid: `${event.uuid}.completed`,
+              id: `${event.uuid}.completed`,
               value: event.value!,
             },
           },
@@ -123,11 +123,11 @@ export class Coroutine<TRet> {
       this.nextState = "over";
       return {
         type: "internal.await",
-        uuid: event.uuid,
+        id: event.uuid,
         promise: {
           type: "internal.promise",
           state: "pending",
-          uuid: event.uuid,
+          id: event.uuid,
         },
       };
     }
@@ -142,7 +142,7 @@ export class Coroutine<TRet> {
     // If value is undefined, use null as a fallback to avoid type error
     return {
       type: "internal.literal",
-      uuid: this.uuidsequ(),
+      id: this.uuidsequ(),
       value: value === undefined ? (null as any as T) : value,
     };
   }
