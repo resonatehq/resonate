@@ -53,7 +53,7 @@ This contract is intentionally minimal and collapses the uncertainty of networke
 
 ## Dimensionality Reduction
 
-This design follows the principle of Dimensionality Reduction, externalizing a minimal amount of information to ensure minimal branching at the callsite.
+This design follows the principle of [Dimensionality Reduction](https://tigerstyle.dev), externalizing a minimal amount of information to ensure minimal branching at the callsite.
 
 To understand the principle of Dimensionality Reduction, let's consider the TCP error codes connection refused (`ECONNREFUSED`) and connection reset (`ECONNRESET`): Connection refused indicates that a connection was not established, while connection reset indicates that a connection was established and subsequently closed. In the first case, the message was not received and processed, while in the second case, the message may have been received and processed.
 
