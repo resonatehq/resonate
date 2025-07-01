@@ -1,4 +1,4 @@
-import { DurablePromiseRecord } from "./network/network";
+import { CallbackRecord, DurablePromiseRecord } from "./network/network";
 
 export class Store {
   public promises: PromiseStore;
@@ -15,6 +15,16 @@ export class PromiseStore {
   constructor(store: Store) {
     this.promises = new Map();
     this.store = store;
+  }
+
+  async get(id: string): Promise<DurablePromiseRecord> {
+    const record = this.promises.get(id);
+
+    if (!record) {
+      throw new Error("not found");
+    }
+
+    return record;
   }
 
   async create(
@@ -58,28 +68,34 @@ export class PromiseStore {
     return record;
   }
 
-  private timeout(record: DurablePromiseRecord): DurablePromiseRecord {
-    if (record.state === "pending" && Date.now() >= record.timeout) {
-      record = {
-        id: record.id,
-        state:
-          record.tags?.["resonate:timeout"] === "true"
-            ? "resolved"
-            : "rejected_timedout",
-        timeout: record.timeout,
-        param: record.param,
-        value: undefined,
-        createdOn: record.createdOn,
-        completedOn: record.timeout,
-        iKeyForCreate: record.iKeyForCreate,
-        iKeyForComplete: undefined,
-        tags: record.tags,
-      };
+  async resolve(
+    id: string,
+    ikey: string | undefined,
+    strict: boolean,
+    headers: Record<string, string> | undefined,
+    data: any | undefined,
+  ): Promise<DurablePromiseRecord> {
+    return this.complete(id, ikey, strict, headers, data, "resolved");
+  }
 
-      this.promises.set(record.id, record);
-      return record;
-    }
-    return record;
+  async reject(
+    id: string,
+    ikey: string | undefined,
+    strict: boolean,
+    headers: Record<string, string> | undefined,
+    data: any | undefined,
+  ): Promise<DurablePromiseRecord> {
+    return this.complete(id, ikey, strict, headers, data, "rejected");
+  }
+
+  async cancel(
+    id: string,
+    ikey: string | undefined,
+    strict: boolean,
+    headers: Record<string, string> | undefined,
+    data: any | undefined,
+  ): Promise<DurablePromiseRecord> {
+    return this.complete(id, ikey, strict, headers, data, "rejected_canceled");
   }
 
   private async complete(
@@ -132,43 +148,98 @@ export class PromiseStore {
     return record;
   }
 
-  async resolve(
+  async subscribe(
     id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "resolved");
-  }
-
-  async reject(
-    id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "rejected");
-  }
-
-  async cancel(
-    id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "rejected_canceled");
-  }
-
-  async get(id: string): Promise<DurablePromiseRecord> {
-    const record = this.promises.get(id);
+    promiseId: string,
+    recv: string,
+    timeout: number,
+  ): Promise<[DurablePromiseRecord, CallbackRecord | undefined]> {
+    var record = this.promises.get(id);
 
     if (!record) {
       throw new Error("not found");
     }
 
+    const cbId = `__notify:${promiseId}:${id}`;
+
+    if (record.state !== "pending" || record.callbacks?.has(cbId)) {
+      return [record, undefined];
+    }
+
+    const callback: CallbackRecord = {
+      id: cbId,
+      type: "notify",
+      promiseId: promiseId,
+      rootPromiseId: promiseId,
+      recv,
+      timeout,
+      createdOn: Date.now(),
+    };
+
+    if (!record.callbacks) {
+      record.callbacks = new Map<string, CallbackRecord>();
+    }
+
+    // register and return
+    record.callbacks.set(cbId, callback);
+    return [record, callback];
+  }
+
+  async callback(
+    id: string,
+    rootId: string,
+    recv: string,
+    timeout: number,
+  ): Promise<[DurablePromiseRecord, CallbackRecord | undefined]> {
+    var record = this.promises.get(id);
+
+    if (!record) {
+      throw new Error("not found");
+    }
+
+    if (record.state !== "pending" || record.callbacks?.has(id)) {
+      return [record, undefined];
+    }
+
+    const callback: CallbackRecord = {
+      id: `__resume:${rootId}:${id}`,
+      type: "resume",
+      promiseId: id,
+      rootPromiseId: rootId,
+      recv,
+      timeout,
+      createdOn: Date.now(),
+    };
+
+    if (!record.callbacks) {
+      record.callbacks = new Map<string, CallbackRecord>();
+    }
+
+    record.callbacks.set(callback.id, callback);
+    return [record, callback];
+  }
+
+  private timeout(record: DurablePromiseRecord): DurablePromiseRecord {
+    if (record.state === "pending" && Date.now() >= record.timeout) {
+      record = {
+        id: record.id,
+        state:
+          record.tags?.["resonate:timeout"] === "true"
+            ? "resolved"
+            : "rejected_timedout",
+        timeout: record.timeout,
+        param: record.param,
+        value: undefined,
+        createdOn: record.createdOn,
+        completedOn: record.timeout,
+        iKeyForCreate: record.iKeyForCreate,
+        iKeyForComplete: undefined,
+        tags: record.tags,
+      };
+
+      this.promises.set(record.id, record);
+      return record;
+    }
     return record;
   }
 }
