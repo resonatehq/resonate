@@ -98,14 +98,14 @@ export class PromiseStore {
     return this.complete(id, ikey, strict, headers, data, "rejected_canceled");
   }
 
-  private async complete(
+  private complete(
     id: string,
     ikey: string | undefined,
     strict: boolean,
     headers: Record<string, string> | undefined,
     data: any | undefined,
     to: "resolved" | "rejected" | "rejected_canceled",
-  ): Promise<DurablePromiseRecord> {
+  ): DurablePromiseRecord {
     var record = this.promises.get(id);
 
     if (!record) {
