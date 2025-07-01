@@ -5,7 +5,12 @@ export interface Value {
 
 export interface DurablePromiseRecord {
   id: string;
-  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
+  state:
+    | "pending"
+    | "resolved"
+    | "rejected"
+    | "rejected_canceled"
+    | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -14,6 +19,32 @@ export interface DurablePromiseRecord {
   iKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
+  callbacks?: Map<string, CallbackRecord>;
+}
+
+export interface CallbackRecord {
+  id: string;
+  type: "resume" | "notify";
+  promiseId: string;
+  rootPromiseId: string;
+  recv: string;
+  timeout: number;
+  createdOn: number;
+}
+
+export interface TaskRecord {
+  id: string;
+  counter: number;
+  state: "init" | "enqueued" | "claimed" | "completed";
+  type: "invoke" | "resume" | "notify";
+  recv: string;
+  rootPromiseId: string;
+  leafPromiseId: string;
+  pid: string | undefined;
+  ttl: number | undefined;
+  expiry: number | undefined;
+  createdOn: number;
+  completedOn: number | undefined;
 }
 
 export interface Schedule {
@@ -277,6 +308,9 @@ export type ResponseMsg =
 export type RecvMsg = any;
 
 export interface Network {
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void;
+  send(
+    request: RequestMsg,
+    callback: (timeout: boolean, response: ResponseMsg) => void,
+  ): void;
   recv(msg: RecvMsg): void;
 }
