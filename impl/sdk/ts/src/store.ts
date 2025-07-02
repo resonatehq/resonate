@@ -1,23 +1,65 @@
-import { CallbackRecord, DurablePromiseRecord } from "./network/network";
+import {
+  CallbackRecord,
+  CompletePromiseReq,
+  CompletePromiseRes,
+  CreatePromiseReq,
+  CreatePromiseRes,
+  DurablePromiseRecord,
+  ReadPromiseReq,
+  ReadPromiseRes,
+} from "./network/network";
 
-export class Store {
-  public promises: PromiseStore;
+export class Server {
+  private promises: PromiseStore;
 
   constructor() {
     this.promises = new PromiseStore(this);
+  }
+
+  process(
+    req: CreatePromiseReq | ReadPromiseReq | CompletePromiseReq,
+  ): CreatePromiseRes | ReadPromiseRes | CompletePromiseRes {
+    if (req.kind === "createPromise") {
+      const resp = this.promises.create(
+        req.id,
+        req.timeout,
+        req.iKey,
+        req.strict ?? false,
+        req.param,
+        req.tags,
+      );
+
+      return { kind: "createPromise", promise: resp };
+    } else if (req.kind === "readPromise") {
+      const resp = this.promises.get(req.id);
+
+      return { kind: "readPromise", promise: resp };
+    } else if (req.kind === "completePromise") {
+      const resp = this.promises.complete(
+        req.id,
+        req.iKey,
+        req.strict ?? false,
+        req.value,
+        req.state,
+      );
+
+      return { kind: "completePromise", promise: resp };
+    } else {
+      throw new Error(`Unhandled kind`);
+    }
   }
 }
 
 export class PromiseStore {
   private promises: Map<string, DurablePromiseRecord>;
-  private store: Store;
+  private store: Server;
 
-  constructor(store: Store) {
+  constructor(store: Server) {
     this.promises = new Map();
     this.store = store;
   }
 
-  async get(id: string): Promise<DurablePromiseRecord> {
+  get(id: string): DurablePromiseRecord {
     const record = this.promises.get(id);
 
     if (!record) {
@@ -27,15 +69,14 @@ export class PromiseStore {
     return record;
   }
 
-  async create(
+  create(
     id: string,
     timeout: number,
     ikey: string | undefined,
     strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-    tags: Record<string, string>,
-  ): Promise<DurablePromiseRecord> {
+    param: any | undefined,
+    tags: Record<string, string> | undefined,
+  ): DurablePromiseRecord {
     var record = this.promises.get(id);
 
     if (!record) {
@@ -43,12 +84,9 @@ export class PromiseStore {
         id: id,
         state: "pending",
         timeout: timeout,
-        param: {
-          headers: headers,
-          data: data,
-        },
+        param: param,
         value: undefined,
-        tags: tags,
+        tags: tags ?? {},
         iKeyForCreate: ikey,
         createdOn: Date.now(),
       };
@@ -68,42 +106,11 @@ export class PromiseStore {
     return record;
   }
 
-  async resolve(
+  complete(
     id: string,
     ikey: string | undefined,
     strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "resolved");
-  }
-
-  async reject(
-    id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "rejected");
-  }
-
-  async cancel(
-    id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
-  ): Promise<DurablePromiseRecord> {
-    return this.complete(id, ikey, strict, headers, data, "rejected_canceled");
-  }
-
-  private complete(
-    id: string,
-    ikey: string | undefined,
-    strict: boolean,
-    headers: Record<string, string> | undefined,
-    data: any | undefined,
+    value: any | undefined,
     to: "resolved" | "rejected" | "rejected_canceled",
   ): DurablePromiseRecord {
     var record = this.promises.get(id);
@@ -120,10 +127,7 @@ export class PromiseStore {
         state: to,
         timeout: record.timeout,
         param: record.param,
-        value: {
-          headers: headers,
-          data: data,
-        },
+        value: value,
         createdOn: record.createdOn,
         completedOn: Date.now(),
         iKeyForCreate: record.iKeyForCreate,
@@ -148,12 +152,12 @@ export class PromiseStore {
     return record;
   }
 
-  async subscribe(
+  subscribe(
     id: string,
     promiseId: string,
     recv: string,
     timeout: number,
-  ): Promise<[DurablePromiseRecord, CallbackRecord | undefined]> {
+  ): [DurablePromiseRecord, CallbackRecord | undefined] {
     var record = this.promises.get(id);
 
     if (!record) {
@@ -185,12 +189,12 @@ export class PromiseStore {
     return [record, callback];
   }
 
-  async callback(
+  callback(
     id: string,
     rootId: string,
     recv: string,
     timeout: number,
-  ): Promise<[DurablePromiseRecord, CallbackRecord | undefined]> {
+  ): [DurablePromiseRecord, CallbackRecord | undefined] {
     var record = this.promises.get(id);
 
     if (!record) {
