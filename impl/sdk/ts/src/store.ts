@@ -1,62 +1,167 @@
+import { Heapq } from "./heapq";
+import * as util from "./util";
 import {
   CallbackRecord,
   CompletePromiseReq,
   CompletePromiseRes,
+  CreateCallbackReq,
+  CreateCallbackRes,
   CreatePromiseReq,
   CreatePromiseRes,
+  CreateSubscriptionReq,
+  CreateSubscriptionRes,
   DurablePromiseRecord,
   ReadPromiseReq,
   ReadPromiseRes,
+  TaskRecord,
 } from "./network/network";
+
+interface Router {
+  route(promise: DurablePromiseRecord): any;
+}
+class TagRouter implements Router {
+  private tag: string;
+
+  constructor(tag: string = "resonate:invoke") {
+    this.tag = tag;
+  }
+
+  route(promise: DurablePromiseRecord): any {
+    return promise.tags?.[this.tag];
+  }
+}
 
 export class Server {
   private promises: PromiseStore;
+  private timeouts: Heapq<number>;
+  private routers: Array<Router>;
 
   constructor() {
-    this.promises = new PromiseStore(this);
+    this.promises = new PromiseStore();
+    this.timeouts = new Heapq();
+    this.routers = new Array(new TagRouter());
+  }
+
+  next(): [() => void, number] {
+    return [this.step, this.timeouts.top()];
+  }
+
+  step() {
+    const now = Date.now();
+
+    for (const promise of this.promises.scan()) {
+      if (promise.state === "pending" && now >= promise.timeout) {
+        var applied = this.promises.expire(promise.id);
+        util.assert(applied, "expected promise to be timedout");
+      }
+    }
   }
 
   process(
-    req: CreatePromiseReq | ReadPromiseReq | CompletePromiseReq,
-  ): CreatePromiseRes | ReadPromiseRes | CompletePromiseRes {
-    if (req.kind === "createPromise") {
-      const resp = this.promises.create(
-        req.id,
-        req.timeout,
-        req.iKey,
-        req.strict ?? false,
-        req.param,
-        req.tags,
-      );
+    req:
+      | CreatePromiseReq
+      | ReadPromiseReq
+      | CompletePromiseReq
+      | CreateSubscriptionReq
+      | CreateCallbackReq,
+  ):
+    | CreatePromiseRes
+    | ReadPromiseRes
+    | CompletePromiseRes
+    | CreateSubscriptionRes
+    | CreateCallbackRes {
+    switch (req.kind) {
+      case "createPromise":
+        this.timeouts.push(req.timeout);
+        var [promise, _] = this.promises.create(
+          req.id,
+          req.timeout,
+          req.iKey,
+          req.strict ?? false,
+          req.param,
+          req.tags,
+        );
 
-      return { kind: "createPromise", promise: resp };
-    } else if (req.kind === "readPromise") {
-      const resp = this.promises.get(req.id);
+        return {
+          kind: "createPromise",
+          promise: promise,
+        };
+      case "readPromise":
+        return { kind: "readPromise", promise: this.promises.get(req.id) };
+      case "completePromise":
+        var [promise, _] = this.promises.complete(
+          req.id,
+          req.iKey,
+          req.strict ?? false,
+          req.value,
+          req.state,
+        );
+        return {
+          kind: "completePromise",
+          promise: promise,
+        };
+      case "createSubscription":
+        var [promise, callback] = this.promises.subscribe(
+          req.id,
+          req.id,
+          req.recv,
+          req.timeout,
+        );
 
-      return { kind: "readPromise", promise: resp };
-    } else if (req.kind === "completePromise") {
-      const resp = this.promises.complete(
-        req.id,
-        req.iKey,
-        req.strict ?? false,
-        req.value,
-        req.state,
-      );
+        return {
+          kind: "createSubscription",
+          promise: promise,
+          callback: callback,
+        };
+      case "createCallback":
+        var [promise, callback] = this.promises.callback(
+          req.id,
+          req.rootPromiseId,
+          req.recv,
+          req.timeout,
+        );
 
-      return { kind: "completePromise", promise: resp };
-    } else {
-      throw new Error(`Unhandled kind`);
+        return { kind: "createCallback", promise: promise, callback: callback };
+      default:
+        throw new Error(`Network request not processed: ${(req as any).kind}`);
     }
   }
 }
 
+export class TaskStore {
+  private tasks: Map<string, TaskRecord>;
+
+  constructor() {
+    this.tasks = new Map();
+  }
+
+  transition(
+    id: string,
+    to: "init" | "enqueued" | "claimed" | "completed",
+    type: "invoke" | "resume" | "notify" | undefined,
+    recv: string | undefined,
+    rootPromiseId: string | undefined,
+    leafPromiseId: string | undefined,
+    counter: number | undefined,
+    pid: string | undefined,
+    ttl: number | undefined,
+    force: boolean = false,
+  ): [TaskRecord, boolean] {
+    const time = Date.now();
+    var record = this.tasks.get(id);
+
+    throw new Error("hos");
+  }
+}
 export class PromiseStore {
   private promises: Map<string, DurablePromiseRecord>;
-  private store: Server;
 
-  constructor(store: Server) {
+  constructor() {
     this.promises = new Map();
-    this.store = store;
+  }
+
+  scan(): IterableIterator<DurablePromiseRecord> {
+    return this.promises.values();
   }
 
   get(id: string): DurablePromiseRecord {
@@ -76,7 +181,8 @@ export class PromiseStore {
     strict: boolean,
     param: any | undefined,
     tags: Record<string, string> | undefined,
-  ): DurablePromiseRecord {
+  ): [DurablePromiseRecord, boolean] {
+    var applied: boolean;
     var record = this.promises.get(id);
 
     if (!record) {
@@ -91,10 +197,10 @@ export class PromiseStore {
         createdOn: Date.now(),
       };
       this.promises.set(id, record);
-      return record;
+      return [record, true];
     }
 
-    record = this.timeout(record);
+    [record, applied] = this.timeout(record);
 
     if (strict && !(record.state === "pending")) {
       throw new Error("Durable promise previously created");
@@ -103,7 +209,7 @@ export class PromiseStore {
       throw new Error("missing idempotency key for create");
     }
 
-    return record;
+    return [record, applied];
   }
 
   complete(
@@ -112,14 +218,15 @@ export class PromiseStore {
     strict: boolean,
     value: any | undefined,
     to: "resolved" | "rejected" | "rejected_canceled",
-  ): DurablePromiseRecord {
+  ): [DurablePromiseRecord, boolean] {
+    var applied: boolean;
     var record = this.promises.get(id);
 
     if (!record) {
       throw new Error("not found");
     }
 
-    record = this.timeout(record);
+    [record, applied] = this.timeout(record);
 
     if (record.state === "pending") {
       record = {
@@ -135,7 +242,7 @@ export class PromiseStore {
         tags: record.tags,
       };
       this.promises.set(id, record);
-      return record;
+      return [record, true];
     }
 
     if (strict && !(record.state === to)) {
@@ -149,7 +256,7 @@ export class PromiseStore {
       throw new Error("forbidden");
     }
 
-    return record;
+    return [record, applied];
   }
 
   subscribe(
@@ -223,7 +330,23 @@ export class PromiseStore {
     return [record, callback];
   }
 
-  private timeout(record: DurablePromiseRecord): DurablePromiseRecord {
+  expire(id: string): boolean {
+    var applied: boolean;
+    var record = this.promises.get(id);
+
+    if (!record) {
+      throw new Error("not found");
+    }
+    [record, applied] = this.timeout(record);
+    if (record.state === "pending") {
+      throw new Error("unexpected state");
+    }
+    return applied;
+  }
+
+  private timeout(
+    record: DurablePromiseRecord,
+  ): [DurablePromiseRecord, boolean] {
     if (record.state === "pending" && Date.now() >= record.timeout) {
       record = {
         id: record.id,
@@ -242,8 +365,8 @@ export class PromiseStore {
       };
 
       this.promises.set(record.id, record);
-      return record;
+      return [record, true];
     }
-    return record;
+    return [record, false];
   }
 }
