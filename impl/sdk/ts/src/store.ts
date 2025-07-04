@@ -716,7 +716,6 @@ export class PromiseStore {
     var record = this.promises.get(id);
 
     if (record === undefined && to === "pending") {
-      console.log("HERE", timeout);
       if (timeout === undefined) {
         throw new Error("timeout not set");
       }
