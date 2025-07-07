@@ -46,7 +46,7 @@ export class Future<T> implements Iterable<Future<T>> {
   private state: "pending" | "completed";
 
   constructor(
-    public uuid: string,
+    public id: string,
     state: "pending" | "completed",
     value?: T,
   ) {

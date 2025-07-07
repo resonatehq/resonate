@@ -15,3 +15,7 @@ export function isGeneratorFunction(fn: Function): boolean {
   const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
   return fn instanceof GeneratorFunction || fn instanceof AsyncGeneratorFunction;
 }
+
+export function assertDefined<T>(val: T | undefined | null): asserts val is T {
+  assert(val !== null && val !== undefined, "value must not be null");
+}

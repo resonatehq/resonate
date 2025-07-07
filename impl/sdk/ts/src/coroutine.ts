@@ -24,18 +24,18 @@ export class Coroutine<T> {
   }
 
   public static exec<T>(
-    uuid: string,
+    id: string,
     func: (...args: any[]) => Generator<Yieldable, T, any>, // TODO: support any function as well
     args: any[],
     handler: Handler,
     callback: (result: Suspended | Completed<T>) => void,
   ): void {
-    handler.createPromise<T>(uuid, (durable) => {
+    handler.createPromise<T>({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, fn: func.name, args }, (durable) => {
       if (durable.state === "pending") {
-        const c = new Coroutine(new Decorator<T>(uuid, func(...args)), handler);
+        const c = new Coroutine(new Decorator<T>(id, func(...args)), handler);
         c.exec((r) => {
           if (r.type === "completed") {
-            handler.resolvePromise(uuid, r.value, () => {
+            handler.resolvePromise(id, r.value, () => {
               callback(r);
             });
           } else {
@@ -52,7 +52,7 @@ export class Coroutine<T> {
     const todos: InternalAsync<any>[] = [];
     let input: Value<any> = {
       type: "internal.nothing",
-      uuid: `${this.decorator.uuid}.nothing`,
+      id: `${this.decorator.id}.nothing`,
     };
 
     // next needs to be called when we want to go to the top of the loop but are inside a callback
@@ -62,14 +62,14 @@ export class Coroutine<T> {
 
         // Handle internal.async with lfi kind
         if (action.type === "internal.async" && action.kind === "lfi") {
-          this.handler.createPromise(action.uuid, (durable) => {
+          this.handler.createPromise({ id: action.id, timeout: Number.MAX_SAFE_INTEGER, tags: {} }, (durable) => {
             if (durable.state === "pending") {
               if (!util.isGeneratorFunction(action.func)) {
                 todos.push(action);
                 input = {
                   type: "internal.promise",
                   state: "pending",
-                  uuid: action.uuid,
+                  id: action.id,
                 };
                 next(); // Go back to the top of the loop
                 return;
@@ -77,7 +77,7 @@ export class Coroutine<T> {
 
               const c = new Coroutine(
                 new Decorator(
-                  action.uuid,
+                  action.id,
                   action.func(
                     ...(action.args?.map((arg) => (arg.type === "internal.literal" ? arg.value : undefined)) ?? []),
                   ),
@@ -90,18 +90,18 @@ export class Coroutine<T> {
                   input = {
                     type: "internal.promise",
                     state: "pending",
-                    uuid: action.uuid,
+                    id: action.id,
                   };
                   next();
                 } else {
-                  this.handler.resolvePromise(action.uuid, r.value, (durable) => {
+                  this.handler.resolvePromise(action.id, r.value, (durable) => {
                     input = {
                       type: "internal.promise",
                       state: "completed",
-                      uuid: action.uuid,
+                      id: action.id,
                       value: {
                         type: "internal.literal",
-                        uuid: `${action.uuid}.completed`,
+                        id: `${action.id}.completed`,
                         value: durable.value,
                       },
                     };
@@ -114,10 +114,10 @@ export class Coroutine<T> {
               input = {
                 type: "internal.promise",
                 state: "completed",
-                uuid: action.uuid,
+                id: action.id,
                 value: {
                   type: "internal.literal",
-                  uuid: `${action.uuid}.completed`,
+                  id: `${action.id}.completed`,
                   value: durable.value,
                 },
               };
@@ -129,28 +129,37 @@ export class Coroutine<T> {
 
         // Handle internal.async with rfi kind
         if (action.type === "internal.async" && action.kind === "rfi") {
-          this.handler.createPromise(action.uuid, (durable) => {
-            if (durable.state === "pending") {
-              todos.push(action);
-              input = {
-                type: "internal.promise",
-                state: "pending",
-                uuid: action.uuid,
-              };
-            } else {
-              input = {
-                type: "internal.promise",
-                state: "completed",
-                uuid: action.uuid,
-                value: {
-                  type: "internal.literal",
-                  uuid: `${action.uuid}.completed`,
-                  value: durable.value,
-                },
-              };
-            }
-            next();
-          });
+          this.handler.createPromise(
+            {
+              id: action.id,
+              timeout: Number.MAX_SAFE_INTEGER,
+              tags: { "resonate:invoke": "default" },
+              fn: action.func.name,
+              args: action.args?.map((arg) => (arg.type === "internal.literal" ? arg.value : undefined)) ?? [],
+            },
+            (durable) => {
+              if (durable.state === "pending") {
+                todos.push(action);
+                input = {
+                  type: "internal.promise",
+                  state: "pending",
+                  id: action.id,
+                };
+              } else {
+                input = {
+                  type: "internal.promise",
+                  state: "completed",
+                  id: action.id,
+                  value: {
+                    type: "internal.literal",
+                    id: `${action.id}.completed`,
+                    value: durable.value,
+                  },
+                };
+              }
+              next();
+            },
+          );
           return; // Exit the while loop to wait for async callback
         }
 
@@ -162,7 +171,7 @@ export class Coroutine<T> {
           );
           input = {
             type: "internal.literal",
-            uuid: `${action.promise.uuid}.literal`,
+            id: `${action.promise.id}.literal`,
             value: action.promise.value.value,
           };
           continue;

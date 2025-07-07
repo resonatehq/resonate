@@ -3,14 +3,14 @@ import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from 
 import * as util from "./util";
 
 export class Decorator<TRet> {
-  public uuid: string;
+  public id: string;
   private sequ: number;
-  private invokes: { kind: "call" | "invoke"; uuid: string }[];
+  private invokes: { kind: "call" | "invoke"; id: string }[];
   private generator: Generator<Yieldable, any, TRet>;
   private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
 
-  constructor(uuid: string, generator: Generator<Yieldable, any, TRet>) {
-    this.uuid = uuid;
+  constructor(id: string, generator: Generator<Yieldable, any, TRet>) {
+    this.id = id;
     this.sequ = 0;
     this.generator = generator;
     this.invokes = [];
@@ -31,7 +31,7 @@ export class Decorator<TRet> {
         this.nextState = value.state === "completed" ? "internal.literal" : "over";
         return {
           type: "internal.await",
-          uuid: prevInvoke.uuid,
+          id: prevInvoke.id,
           promise: value,
         };
       }
@@ -44,17 +44,17 @@ export class Decorator<TRet> {
         const val = this.invokes.pop()!;
         return {
           type: "internal.await",
-          uuid: val.uuid,
+          id: val.id,
           promise: {
             type: "internal.promise",
             state: "pending",
-            uuid: val.uuid,
+            id: val.id,
           },
         };
       }
       return {
         type: "internal.return",
-        uuid: this.uuidsequ(),
+        id: this.idsequ(),
         value: this.toLiteral(result.value),
       };
     }
@@ -68,12 +68,12 @@ export class Decorator<TRet> {
         return undefined;
       case "internal.promise":
         if (value.state === "pending") {
-          return new Future<T>(value.uuid, "pending", undefined);
+          return new Future<T>(value.id, "pending", undefined);
         }
         // promise === "complete"
         // We know for sure this promise relates to the last invoke inserted
         this.invokes.pop();
-        return new Future<T>(value.uuid, "completed", value.value.value);
+        return new Future<T>(value.id, "completed", value.value.value);
       case "internal.literal":
         return value.value;
     }
@@ -82,18 +82,18 @@ export class Decorator<TRet> {
   // From external type to internal type
   private toInternal<T>(event: Invoke<T> | Future<T> | Call<T>): InternalAsync<T> | InternalAwait<T> {
     if (event instanceof Invoke || event instanceof Call) {
-      const uuid = this.uuidsequ();
-      this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", uuid });
+      const id = this.idsequ();
+      this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", id });
       this.nextState = "internal.promise";
       return {
         type: "internal.async",
-        uuid,
+        id,
         kind: this.mapKind(event.type),
         mode: "eager", // default, adjust if needed
         func: event.func,
         args: (event.args || []).map((arg: any, i: number) => ({
           type: "internal.literal",
-          uuid: `${uuid}.arg${i}`,
+          id: `${id}.arg${i}`,
           value: arg,
         })),
       };
@@ -104,14 +104,14 @@ export class Decorator<TRet> {
         this.nextState = "internal.literal";
         return {
           type: "internal.await",
-          uuid: event.uuid,
+          id: event.id,
           promise: {
             type: "internal.promise",
             state: "completed",
-            uuid: event.uuid,
+            id: event.id,
             value: {
               type: "internal.literal",
-              uuid: `${event.uuid}.completed`,
+              id: `${event.id}.completed`,
               value: event.value!,
             },
           },
@@ -119,30 +119,30 @@ export class Decorator<TRet> {
       }
       // If the Future was completed (the promise was completed) we already poped the related invoke
       // when the user awaits the future we remove it from the invokes
-      this.invokes = this.invokes.filter(({ uuid }) => uuid !== event.uuid);
+      this.invokes = this.invokes.filter(({ id }) => id !== event.id);
       this.nextState = "over";
       return {
         type: "internal.await",
-        uuid: event.uuid,
+        id: event.id,
         promise: {
           type: "internal.promise",
           state: "pending",
-          uuid: event.uuid,
+          id: event.id,
         },
       };
     }
     throw new Error("Unexpected input to extToInt");
   }
 
-  private uuidsequ(): string {
-    return `${this.uuid}.${this.sequ++}`;
+  private idsequ(): string {
+    return `${this.id}.${this.sequ++}`;
   }
 
   private toLiteral<T>(value: T): Literal<T> {
     // If value is undefined, use null as a fallback to avoid type error
     return {
       type: "internal.literal",
-      uuid: this.uuidsequ(),
+      id: this.idsequ(),
       value: value === undefined ? (null as any as T) : value,
     };
   }

@@ -6,7 +6,7 @@ type F<T> = ((...args: any[]) => T) | ((...args: any[]) => Generator<any, T, any
 
 export type InternalAsync<T> = {
   type: "internal.async";
-  uuid: string;
+  id: string;
   kind: "lfi" | "rfi";
   mode: "eager" | "defer";
   func: F<T>;
@@ -15,13 +15,13 @@ export type InternalAsync<T> = {
 
 export type InternalAwait<T> = {
   type: "internal.await";
-  uuid: string;
+  id: string;
   promise: Promise<T>;
 };
 
 export type InternalReturn<T> = {
   type: "internal.return";
-  uuid: string;
+  id: string;
   value: Value<T>;
 };
 
@@ -31,12 +31,12 @@ export type Value<T> = Nothing | Literal<T> | Promise<T>;
 
 export type Nothing = {
   type: "internal.nothing";
-  uuid: string;
+  id: string;
 };
 
 export type Literal<T> = {
   type: "internal.literal";
-  uuid: string;
+  id: string;
   value: T;
 };
 
@@ -45,12 +45,12 @@ export type Promise<T> = PromisePending | PromiseCompleted<T>;
 export type PromisePending = {
   type: "internal.promise";
   state: "pending";
-  uuid: string;
+  id: string;
 };
 
 export type PromiseCompleted<T> = {
   type: "internal.promise";
   state: "completed";
-  uuid: string;
+  id: string;
   value: Literal<T>;
 };
