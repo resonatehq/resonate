@@ -57,10 +57,10 @@ export class Server {
   }
 
   step() {
-    const now = Date.now();
+    const time = Date.now();
 
     for (const promise of this.promises.scan()) {
-      if (promise.state === "pending" && now >= promise.timeout) {
+      if (promise.state === "pending" && time >= promise.timeout) {
         var applied = this.transition(
           promise.id,
           "rejected_timedout",
@@ -72,6 +72,34 @@ export class Server {
         )[2];
         util.assert(applied, "expected promise to be timedout");
       }
+    }
+
+    // transition expired tasks to init
+    for (const task of this.tasks.scan()) {
+      if (["enqueued", "claimed"].includes(task.state)) {
+        if (task.expiry === undefined) {
+          throw new Error("task must have an expiry");
+        }
+        util.assert(task.expiry !== undefined);
+
+        if (time >= task.expiry) {
+          var [_, applied] = this.tasks.transition(
+            task.id,
+            "init",
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            true,
+          );
+          util.assert(applied);
+        }
+      }
+
+      //
     }
   }
 
@@ -149,6 +177,7 @@ export class Server {
     }
     return [promise, undefined, applied];
   }
+
   process(req: CreatePromiseReq): CreatePromiseRes;
   process(req: ReadPromiseReq): ReadPromiseRes;
   process(req: CompletePromiseReq): CompletePromiseRes;
