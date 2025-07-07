@@ -21,12 +21,7 @@ import {
 
 interface DurablePromiseData {
   id: string;
-  state:
-    | "pending"
-    | "resolved"
-    | "rejected"
-    | "rejected_canceled"
-    | "rejected_timedout";
+  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -138,27 +133,14 @@ export class Server {
 
   private transition(
     id: string,
-    to:
-      | "pending"
-      | "resolved"
-      | "rejected"
-      | "rejected_canceled"
-      | "rejected_timedout",
+    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
     value?: any,
     tags?: Record<string, string>,
   ): [DurablePromiseData, TaskData | undefined, boolean] {
-    var [promise, applied] = this.promises.transition(
-      id,
-      to,
-      strict,
-      timeout,
-      ikey,
-      value,
-      tags,
-    );
+    var [promise, applied] = this.promises.transition(id, to, strict, timeout, ikey, value, tags);
 
     if (applied && promise.state === "pending") {
       for (const router of this.routers) {
@@ -180,12 +162,7 @@ export class Server {
 
     if (
       applied &&
-      [
-        "resolved",
-        "rejected",
-        "rejected_canceled",
-        "rejected_timedout",
-      ].includes(promise.state) &&
+      ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(promise.state) &&
       promise.callbacks
     ) {
       for (const callback of promise.callbacks.values()) {
@@ -243,9 +220,7 @@ export class Server {
           req.param,
           req.tags,
         );
-        util.assert(
-          !applied || ["pending", "rejected_timedout"].includes(promise.state),
-        );
+        util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
 
         return {
           kind: "createPromise",
@@ -254,28 +229,14 @@ export class Server {
       case "readPromise":
         return { kind: "readPromise", promise: this.promises.get(req.id) };
       case "completePromise":
-        var [promise, _, applied] = this.transition(
-          req.id,
-          req.state,
-          req.strict,
-          undefined,
-          req.iKey,
-          req.value,
-        );
-        util.assert(
-          !applied || [req.state, "rejected_timedout"].includes(promise.state),
-        );
+        var [promise, _, applied] = this.transition(req.id, req.state, req.strict, undefined, req.iKey, req.value);
+        util.assert(!applied || [req.state, "rejected_timedout"].includes(promise.state));
         return {
           kind: "completePromise",
           promise: promise,
         };
       case "createSubscription":
-        var [promise, callback] = this.promises.subscribe(
-          req.id,
-          req.id,
-          req.recv,
-          req.timeout,
-        );
+        var [promise, callback] = this.promises.subscribe(req.id, req.id, req.recv, req.timeout);
 
         return {
           kind: "createSubscription",
@@ -283,12 +244,7 @@ export class Server {
           callback: callback,
         };
       case "createCallback":
-        var [promise, callback] = this.promises.callback(
-          req.id,
-          req.rootPromiseId,
-          req.recv,
-          req.timeout,
-        );
+        var [promise, callback] = this.promises.callback(req.id, req.rootPromiseId, req.recv, req.timeout);
 
         return { kind: "createCallback", promise: promise, callback: callback };
 
@@ -450,11 +406,7 @@ export class TaskStore {
       return [record, true];
     }
 
-    if (
-      record?.state === "init" &&
-      to === "claimed" &&
-      record.counter === counter
-    ) {
+    if (record?.state === "init" && to === "claimed" && record.counter === counter) {
       if (!ttl || !pid) {
         throw new Error("Missing required fields from init task");
       }
@@ -478,11 +430,7 @@ export class TaskStore {
       return [record, true];
     }
 
-    if (
-      record?.state === "enqueued" &&
-      to === "claimed" &&
-      record.counter === counter
-    ) {
+    if (record?.state === "enqueued" && to === "claimed" && record.counter === counter) {
       if (!ttl || !pid) {
         throw new Error("Missing required fields from init task");
       }
@@ -528,11 +476,7 @@ export class TaskStore {
       return [record, true];
     }
 
-    if (
-      record !== undefined &&
-      ["enqueued", "claimed"].includes(record.state) &&
-      to === "init"
-    ) {
+    if (record !== undefined && ["enqueued", "claimed"].includes(record.state) && to === "init") {
       if (record.expiry === undefined || time < record.expiry) {
         throw new Error("Missing required fields from init task");
       }
@@ -552,12 +496,7 @@ export class TaskStore {
       return [record, true];
     }
 
-    if (
-      record !== undefined &&
-      record.state === "claimed" &&
-      to === "claimed" &&
-      force
-    ) {
+    if (record !== undefined && record.state === "claimed" && to === "claimed" && force) {
       if (record.ttl === undefined) {
         throw new Error("record.ttl must exist");
       }
@@ -605,12 +544,7 @@ export class TaskStore {
       return [record, true];
     }
 
-    if (
-      record !== undefined &&
-      ["init", "enqueued", "claimed"].includes(record.state) &&
-      to === "completed" &&
-      force
-    ) {
+    if (record !== undefined && ["init", "enqueued", "claimed"].includes(record.state) && to === "completed" && force) {
       record = {
         id: id,
         counter: record.counter,
@@ -634,9 +568,7 @@ export class TaskStore {
       throw new Error("Task not found");
     }
 
-    throw new Error(
-      "task is already claimed, completed, or an invalid counter was provided",
-    );
+    throw new Error("task is already claimed, completed, or an invalid counter was provided");
   }
 }
 export class PromiseStore {
@@ -697,12 +629,7 @@ export class PromiseStore {
     return [record, callback];
   }
 
-  callback(
-    id: string,
-    rootId: string,
-    recv: string,
-    timeout: number,
-  ): [DurablePromiseData, CallbackData | undefined] {
+  callback(id: string, rootId: string, recv: string, timeout: number): [DurablePromiseData, CallbackData | undefined] {
     var record = this.promises.get(id);
 
     if (!record) {
@@ -733,12 +660,7 @@ export class PromiseStore {
 
   transition(
     id: string,
-    to:
-      | "pending"
-      | "resolved"
-      | "rejected"
-      | "rejected_canceled"
-      | "rejected_timedout",
+    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
@@ -768,10 +690,7 @@ export class PromiseStore {
       return [record, true];
     }
 
-    if (
-      record === undefined &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to)
-    ) {
+    if (record === undefined && ["resolved", "rejected", "rejected_canceled"].includes(to)) {
       throw new Error("promise not found");
     }
 
@@ -857,12 +776,7 @@ export class PromiseStore {
 
     if (
       record?.state !== undefined &&
-      [
-        "resolved",
-        "rejected",
-        "rejected_canceled",
-        "rejected_timedout",
-      ].includes(record.state) &&
+      ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(record.state) &&
       to === "pending" &&
       !strict &&
       ikeyMatch(record.iKeyForCreate, ikey)
