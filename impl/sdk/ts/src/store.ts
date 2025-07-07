@@ -1,27 +1,31 @@
-import { Heapq } from "./heapq";
-import * as util from "./util";
-import {
+import type {
+  ClaimTaskReq,
+  ClaimTaskRes,
   CompletePromiseReq,
   CompletePromiseRes,
+  CompleteTaskReq,
+  CompleteTaskRes,
   CreateCallbackReq,
   CreateCallbackRes,
   CreatePromiseReq,
   CreatePromiseRes,
   CreateSubscriptionReq,
   CreateSubscriptionRes,
+  HeartbeatTasksReq,
+  HeartbeatTasksRes,
   ReadPromiseReq,
   ReadPromiseRes,
-  ClaimTaskReq,
-  ClaimTaskRes,
-  CompleteTaskReq,
-  CompleteTaskRes,
-  HeartbeatTasksRes,
-  HeartbeatTasksReq,
 } from "./network/network";
+import * as util from "./util";
 
 interface DurablePromiseData {
   id: string;
-  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
+  state:
+    | "pending"
+    | "resolved"
+    | "rejected"
+    | "rejected_canceled"
+    | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -64,7 +68,7 @@ interface Router {
 class TagRouter implements Router {
   private tag: string;
 
-  constructor(tag: string = "resonate:invoke") {
+  constructor(tag = "resonate:invoke") {
     this.tag = tag;
   }
 
@@ -76,20 +80,18 @@ class TagRouter implements Router {
 export class Server {
   private promises: PromiseStore;
   private tasks: TaskStore;
-  private timeouts: Heapq<number>;
   private routers: Array<Router>;
   private targets: Record<string, string>;
 
   constructor() {
     this.promises = new PromiseStore();
     this.tasks = new TaskStore();
-    this.timeouts = new Heapq();
     this.routers = new Array(new TagRouter());
     this.targets = { default: "local://any@defaul" };
   }
 
   next(): [() => void, number] {
-    return [this.step, this.timeouts.top()];
+    throw new Error("not implemented");
   }
 
   step() {
@@ -97,7 +99,7 @@ export class Server {
 
     for (const promise of this.promises.scan()) {
       if (promise.state === "pending" && time >= promise.timeout) {
-        var applied = this.transition(promise.id, "rejected_timedout")[2];
+        let applied = this.transition(promise.id, "rejected_timedout").applied;
         util.assert(applied, "expected promise to be timedout");
       }
     }
@@ -111,7 +113,7 @@ export class Server {
         util.assert(task.expiry !== undefined);
 
         if (time >= task.expiry) {
-          var [_, applied] = this.tasks.transition(
+          const applied = this.tasks.transition(
             task.id,
             "init",
             undefined,
@@ -122,7 +124,7 @@ export class Server {
             undefined,
             undefined,
             true,
-          );
+          ).applied;
           util.assert(applied);
         }
       }
@@ -133,20 +135,34 @@ export class Server {
 
   private transition(
     id: string,
-    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
+    to:
+      | "pending"
+      | "resolved"
+      | "rejected"
+      | "rejected_canceled"
+      | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
     value?: any,
     tags?: Record<string, string>,
-  ): [DurablePromiseData, TaskData | undefined, boolean] {
-    var [promise, applied] = this.promises.transition(id, to, strict, timeout, ikey, value, tags);
+    // ): [DurablePromiseData, TaskData | undefined, boolean] {
+  ): { promise: DurablePromiseData; task?: TaskData; applied: boolean } {
+    const { promise, applied } = this.promises.transition(
+      id,
+      to,
+      strict,
+      timeout,
+      ikey,
+      value,
+      tags,
+    );
 
     if (applied && promise.state === "pending") {
       for (const router of this.routers) {
         const recv = router.route(promise);
         if (recv !== undefined) {
-          var [task, applied] = this.tasks.transition(
+          const { task, applied } = this.tasks.transition(
             `__invoke:${id}`,
             "init",
             "invoke",
@@ -155,18 +171,23 @@ export class Server {
             promise.id,
           );
           util.assert(applied);
-          return [promise, task, applied];
+          return { promise: promise, task: task, applied: applied };
         }
       }
     }
 
     if (
       applied &&
-      ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(promise.state) &&
+      [
+        "resolved",
+        "rejected",
+        "rejected_canceled",
+        "rejected_timedout",
+      ].includes(promise.state) &&
       promise.callbacks
     ) {
       for (const callback of promise.callbacks.values()) {
-        var [task, applied] = this.tasks.transition(
+        const { task, applied } = this.tasks.transition(
           callback.id,
           "init",
           callback.type,
@@ -179,7 +200,7 @@ export class Server {
       }
       promise.callbacks.clear();
     }
-    return [promise, undefined, applied];
+    return { promise: promise, applied: applied };
   }
 
   process(req: CreatePromiseReq): CreatePromiseRes;
@@ -210,8 +231,8 @@ export class Server {
     | CompleteTaskRes
     | HeartbeatTasksRes {
     switch (req.kind) {
-      case "createPromise":
-        var [promise, task, applied] = this.transition(
+      case "createPromise": {
+        const { promise, task, applied } = this.transition(
           req.id,
           "pending",
           req.strict,
@@ -220,36 +241,61 @@ export class Server {
           req.param,
           req.tags,
         );
-        util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
+        util.assert(
+          !applied || ["pending", "rejected_timedout"].includes(promise.state),
+        );
 
         return {
           kind: "createPromise",
           promise: promise,
         };
+      }
       case "readPromise":
         return { kind: "readPromise", promise: this.promises.get(req.id) };
-      case "completePromise":
-        var [promise, _, applied] = this.transition(req.id, req.state, req.strict, undefined, req.iKey, req.value);
-        util.assert(!applied || [req.state, "rejected_timedout"].includes(promise.state));
+      case "completePromise": {
+        const { promise, task, applied } = this.transition(
+          req.id,
+          req.state,
+          req.strict,
+          undefined,
+          req.iKey,
+          req.value,
+        );
+        util.assert(
+          !applied || [req.state, "rejected_timedout"].includes(promise.state),
+        );
         return {
           kind: "completePromise",
           promise: promise,
         };
-      case "createSubscription":
-        var [promise, callback] = this.promises.subscribe(req.id, req.id, req.recv, req.timeout);
+      }
+      case "createSubscription": {
+        const { promise, callback } = this.promises.subscribe(
+          req.id,
+          req.id,
+          req.recv,
+          req.timeout,
+        );
 
         return {
           kind: "createSubscription",
           promise: promise,
           callback: callback,
         };
-      case "createCallback":
-        var [promise, callback] = this.promises.callback(req.id, req.rootPromiseId, req.recv, req.timeout);
+      }
+      case "createCallback": {
+        const { promise, callback } = this.promises.callback(
+          req.id,
+          req.rootPromiseId,
+          req.recv,
+          req.timeout,
+        );
 
         return { kind: "createCallback", promise: promise, callback: callback };
+      }
 
-      case "claimTask":
-        [task, applied] = this.tasks.transition(
+      case "claimTask": {
+        const { task, applied } = this.tasks.transition(
           req.id,
           "claimed",
           undefined,
@@ -264,8 +310,8 @@ export class Server {
         util.assert(applied);
 
         switch (task.type) {
-          case "invoke":
-            var promise = this.promises.get(task.rootPromiseId);
+          case "invoke": {
+            const promise = this.promises.get(task.rootPromiseId);
             return {
               kind: "claimedtask",
               message: {
@@ -275,9 +321,10 @@ export class Server {
                 },
               },
             };
-          case "resume":
-            var rootPromise = this.promises.get(task.rootPromiseId);
-            var learPromise = this.promises.get(task.leafPromiseId);
+          }
+          case "resume": {
+            const rootPromise = this.promises.get(task.rootPromiseId);
+            const learPromise = this.promises.get(task.leafPromiseId);
 
             return {
               kind: "claimedtask",
@@ -289,9 +336,11 @@ export class Server {
                 },
               },
             };
+          }
         }
-      case "completeTask":
-        [task, applied] = this.tasks.transition(
+      }
+      case "completeTask": {
+        const { task, applied } = this.tasks.transition(
           req.id,
           "completed",
           undefined,
@@ -300,6 +349,8 @@ export class Server {
           undefined,
           req.counter,
         );
+
+        util.assert(applied);
 
         return {
           kind: "completedtask",
@@ -312,9 +363,10 @@ export class Server {
             completedOn: task.completedOn,
           },
         };
-      case "heartbeatTasks":
-        applied = false;
-        var affectedTasks: number = 0;
+      }
+      case "heartbeatTasks": {
+        let applied = false;
+        let affectedTasks = 0;
 
         for (const task of this.tasks.scan()) {
           if (task.state !== "claimed" || task.pid !== req.processId) {
@@ -332,13 +384,14 @@ export class Server {
             undefined,
             undefined,
             true,
-          )[1];
+          ).applied;
 
           util.assert(applied);
           affectedTasks += 1;
         }
 
         return { kind: "heartbeatTasks", tasksAffected: affectedTasks };
+      }
       default:
         throw new Error(`Network request not processed: ${(req as any).kind}`);
     }
@@ -366,10 +419,10 @@ export class TaskStore {
     counter?: number,
     pid?: string,
     ttl?: number,
-    force: boolean = false,
-  ): [TaskData, boolean] {
+    force = false,
+  ): { task: TaskData; applied: boolean } {
     const time = Date.now();
-    var record = this.tasks.get(id);
+    let record = this.tasks.get(id);
 
     if (record === undefined && to === "init") {
       if (!type || !recv || !rootPromiseId || !leafPromiseId) {
@@ -386,7 +439,7 @@ export class TaskStore {
         createdOn: time,
       };
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
     if (record?.state === "init" && to === "enqueued") {
@@ -403,10 +456,14 @@ export class TaskStore {
         completedOn: record.completedOn,
       };
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
-    if (record?.state === "init" && to === "claimed" && record.counter === counter) {
+    if (
+      record?.state === "init" &&
+      to === "claimed" &&
+      record.counter === counter
+    ) {
       if (!ttl || !pid) {
         throw new Error("Missing required fields from init task");
       }
@@ -427,10 +484,14 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
-    if (record?.state === "enqueued" && to === "claimed" && record.counter === counter) {
+    if (
+      record?.state === "enqueued" &&
+      to === "claimed" &&
+      record.counter === counter
+    ) {
       if (!ttl || !pid) {
         throw new Error("Missing required fields from init task");
       }
@@ -451,7 +512,7 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
     if (
@@ -473,10 +534,14 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
-    if (record !== undefined && ["enqueued", "claimed"].includes(record.state) && to === "init") {
+    if (
+      record !== undefined &&
+      ["enqueued", "claimed"].includes(record.state) &&
+      to === "init"
+    ) {
       if (record.expiry === undefined || time < record.expiry) {
         throw new Error("Missing required fields from init task");
       }
@@ -493,10 +558,15 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
-    if (record !== undefined && record.state === "claimed" && to === "claimed" && force) {
+    if (
+      record !== undefined &&
+      record.state === "claimed" &&
+      to === "claimed" &&
+      force
+    ) {
       if (record.ttl === undefined) {
         throw new Error("record.ttl must exist");
       }
@@ -517,7 +587,7 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
     if (
@@ -541,10 +611,15 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
-    if (record !== undefined && ["init", "enqueued", "claimed"].includes(record.state) && to === "completed" && force) {
+    if (
+      record !== undefined &&
+      ["init", "enqueued", "claimed"].includes(record.state) &&
+      to === "completed" &&
+      force
+    ) {
       record = {
         id: id,
         counter: record.counter,
@@ -557,18 +632,20 @@ export class TaskStore {
       };
 
       this.tasks.set(id, record);
-      return [record, true];
+      return { task: record, applied: true };
     }
 
     if (record?.state === "completed" && to === "completed") {
-      return [record, false];
+      return { task: record, applied: false };
     }
 
     if (record === undefined) {
       throw new Error("Task not found");
     }
 
-    throw new Error("task is already claimed, completed, or an invalid counter was provided");
+    throw new Error(
+      "task is already claimed, completed, or an invalid counter was provided",
+    );
   }
 }
 export class PromiseStore {
@@ -597,8 +674,8 @@ export class PromiseStore {
     promiseId: string,
     recv: string,
     timeout: number,
-  ): [DurablePromiseData, CallbackData | undefined] {
-    var record = this.promises.get(id);
+  ): { promise: DurablePromiseData; callback?: CallbackData } {
+    const record = this.promises.get(id);
 
     if (!record) {
       throw new Error("not found");
@@ -607,7 +684,7 @@ export class PromiseStore {
     const cbId = `__notify:${promiseId}:${id}`;
 
     if (record.state !== "pending" || record.callbacks?.has(cbId)) {
-      return [record, undefined];
+      return { promise: record };
     }
 
     const callback: CallbackData = {
@@ -626,18 +703,26 @@ export class PromiseStore {
 
     // register and return
     record.callbacks.set(cbId, callback);
-    return [record, callback];
+    return {
+      promise: record,
+      callback: callback,
+    };
   }
 
-  callback(id: string, rootId: string, recv: string, timeout: number): [DurablePromiseData, CallbackData | undefined] {
-    var record = this.promises.get(id);
+  callback(
+    id: string,
+    rootId: string,
+    recv: string,
+    timeout: number,
+  ): { promise: DurablePromiseData; callback?: CallbackData } {
+    const record = this.promises.get(id);
 
     if (!record) {
       throw new Error("not found");
     }
 
     if (record.state !== "pending" || record.callbacks?.has(id)) {
-      return [record, undefined];
+      return { promise: record };
     }
 
     const callback: CallbackData = {
@@ -655,20 +740,25 @@ export class PromiseStore {
     }
 
     record.callbacks.set(callback.id, callback);
-    return [record, callback];
+    return { promise: record, callback: callback };
   }
 
   transition(
     id: string,
-    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
+    to:
+      | "pending"
+      | "resolved"
+      | "rejected"
+      | "rejected_canceled"
+      | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
     value?: any,
     tags?: Record<string, string>,
-  ): [DurablePromiseData, boolean] {
+  ): { promise: DurablePromiseData; applied: boolean } {
     const time = Date.now();
-    var record = this.promises.get(id);
+    let record = this.promises.get(id);
 
     if (record === undefined && to === "pending") {
       if (timeout === undefined) {
@@ -687,10 +777,13 @@ export class PromiseStore {
       };
 
       this.promises.set(id, record);
-      return [record, true];
+      return { promise: record, applied: true };
     }
 
-    if (record === undefined && ["resolved", "rejected", "rejected_canceled"].includes(to)) {
+    if (
+      record === undefined &&
+      ["resolved", "rejected", "rejected_canceled"].includes(to)
+    ) {
       throw new Error("promise not found");
     }
 
@@ -700,7 +793,7 @@ export class PromiseStore {
       time < record.timeout &&
       ikeyMatch(record.iKeyForCreate, ikey)
     ) {
-      return [record, false];
+      return { promise: record, applied: false };
     }
 
     if (
@@ -733,7 +826,7 @@ export class PromiseStore {
       };
 
       this.promises.set(id, record);
-      return [record, true];
+      return { promise: record, applied: true };
     }
 
     if (
@@ -771,17 +864,22 @@ export class PromiseStore {
       };
 
       this.promises.set(id, record);
-      return [record, true];
+      return { promise: record, applied: true };
     }
 
     if (
       record?.state !== undefined &&
-      ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(record.state) &&
+      [
+        "resolved",
+        "rejected",
+        "rejected_canceled",
+        "rejected_timedout",
+      ].includes(record.state) &&
       to === "pending" &&
       !strict &&
       ikeyMatch(record.iKeyForCreate, ikey)
     ) {
-      return [record, false];
+      return { promise: record, applied: false };
     }
 
     if (
@@ -791,7 +889,7 @@ export class PromiseStore {
       !strict &&
       ikeyMatch(record.iKeyForComplete, ikey)
     ) {
-      return [record, false];
+      return { promise: record, applied: false };
     }
 
     if (
@@ -800,7 +898,7 @@ export class PromiseStore {
       ["resolved", "rejected", "rejected_canceled"].includes(to) &&
       !strict
     ) {
-      return [record, false];
+      return { promise: record, applied: false };
     }
 
     if (
@@ -811,7 +909,7 @@ export class PromiseStore {
       ikeyMatch(record.iKeyForComplete, ikey) &&
       record.state === to
     ) {
-      return [record, false];
+      return { promise: record, applied: false };
     }
 
     throw new Error("unexpected transition");
