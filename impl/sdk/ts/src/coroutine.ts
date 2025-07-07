@@ -1,156 +1,204 @@
-import { Call, Future, Invoke, type Yieldable } from "./context";
-import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
+import type { Yieldable } from "./context";
+import { Decorator } from "./decorator";
+import type { Handler } from "./handler";
+import type { InternalAsync, Value } from "./types";
 import * as util from "./util";
 
-export class Coroutine<TRet> {
-  public uuid: string;
-  private sequ: number;
-  private invokes: { kind: "call" | "invoke"; uuid: string }[];
-  private generator: Generator<Yieldable, any, TRet>;
-  private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
+export type Suspended = {
+  type: "suspended";
+  todos: InternalAsync<any>[];
+};
 
-  constructor(uuid: string, generator: Generator<Yieldable, any, TRet>) {
-    this.uuid = uuid;
-    this.sequ = 0;
-    this.generator = generator;
-    this.invokes = [];
+export type Completed<T> = {
+  type: "completed";
+  value: T;
+};
+
+export class Coroutine<T> {
+  private decorator: Decorator<T>;
+  private handler: Handler;
+
+  constructor(decorator: Decorator<T>, handler: Handler) {
+    this.decorator = decorator;
+    this.handler = handler;
   }
 
-  public next(value: Value<any>): InternalExpr<any> {
-    // If nextState was set to over, is becasue we shouldn't have been called
-    util.assert(
-      this.nextState !== "over" && value.type === this.nextState,
-      `Coroutine called wit type "${value.type}" expected "${this.nextState}"`,
-    );
-
-    // Handle rfc/lfc by returning an await if the previous invocation was a call
-    if (value.type === "internal.promise" && this.invokes.length > 0) {
-      const prevInvoke = this.invokes.at(-1)!;
-      if (prevInvoke.kind === "call") {
-        this.invokes.pop();
-        this.nextState = value.state === "completed" ? "internal.literal" : "over";
-        return {
-          type: "internal.await",
-          id: prevInvoke.uuid,
-          promise: value,
-        };
+  public static exec<T>(
+    id: string,
+    func: (...args: any[]) => Generator<Yieldable, T, any>, // TODO: support any function as well
+    args: any[],
+    handler: Handler,
+    callback: (result: Suspended | Completed<T>) => void,
+  ): void {
+    handler.createPromise<T>({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, fn: func.name, args }, (durable) => {
+      if (durable.state === "pending") {
+        const c = new Coroutine(new Decorator<T>(id, func(...args)), handler);
+        c.exec((r) => {
+          if (r.type === "completed") {
+            handler.resolvePromise(id, r.value, () => {
+              callback(r);
+            });
+          } else {
+            callback(r);
+          }
+        });
+      } else {
+        callback({ type: "completed", value: durable.value! });
       }
-    }
-
-    const result = this.generator.next(this.toExternal(value));
-    if (result.done) {
-      this.nextState = "over";
-      if (this.invokes.length > 0) {
-        const val = this.invokes.pop()!;
-        return {
-          type: "internal.await",
-          id: val.uuid,
-          promise: {
-            type: "internal.promise",
-            state: "pending",
-            id: val.uuid,
-          },
-        };
-      }
-      return {
-        type: "internal.return",
-        id: this.uuidsequ(),
-        value: this.toLiteral(result.value),
-      };
-    }
-    return this.toInternal(result.value);
+    });
   }
 
-  // From internal type to external type
-  private toExternal<T>(value: Value<T>): Future<T> | T | undefined {
-    switch (value.type) {
-      case "internal.nothing":
-        return undefined;
-      case "internal.promise":
-        if (value.state === "pending") {
-          return new Future<T>(value.id, "pending", undefined);
-        }
-        // promise === "complete"
-        // We know for sure this promise relates to the last invoke inserted
-        this.invokes.pop();
-        return new Future<T>(value.id, "completed", value.value.value);
-      case "internal.literal":
-        return value.value;
-    }
-  }
-
-  // From external type to internal type
-  private toInternal<T>(event: Invoke<T> | Future<T> | Call<T>): InternalAsync<T> | InternalAwait<T> {
-    if (event instanceof Invoke || event instanceof Call) {
-      const uuid = this.uuidsequ();
-      this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", uuid });
-      this.nextState = "internal.promise";
-      return {
-        type: "internal.async",
-        id: uuid,
-        kind: this.mapKind(event.type),
-        mode: "eager", // default, adjust if needed
-        func: event.func,
-        args: (event.args || []).map((arg: any, i: number) => ({
-          type: "internal.literal",
-          uuid: `${uuid}.arg${i}`,
-          value: arg,
-        })),
-      };
-    }
-    if (event instanceof Future) {
-      // Map Future to InternalPromise union
-      if (event.isCompleted()) {
-        this.nextState = "internal.literal";
-        return {
-          type: "internal.await",
-          id: event.uuid,
-          promise: {
-            type: "internal.promise",
-            state: "completed",
-            id: event.uuid,
-            value: {
-              type: "internal.literal",
-              id: `${event.uuid}.completed`,
-              value: event.value!,
-            },
-          },
-        };
-      }
-      // If the Future was completed (the promise was completed) we already poped the related invoke
-      // when the user awaits the future we remove it from the invokes
-      this.invokes = this.invokes.filter(({ uuid }) => uuid !== event.uuid);
-      this.nextState = "over";
-      return {
-        type: "internal.await",
-        id: event.uuid,
-        promise: {
-          type: "internal.promise",
-          state: "pending",
-          id: event.uuid,
-        },
-      };
-    }
-    throw new Error("Unexpected input to extToInt");
-  }
-
-  private uuidsequ(): string {
-    return `${this.uuid}.${this.sequ++}`;
-  }
-
-  private toLiteral<T>(value: T): Literal<T> {
-    // If value is undefined, use null as a fallback to avoid type error
-    return {
-      type: "internal.literal",
-      id: this.uuidsequ(),
-      value: value === undefined ? (null as any as T) : value,
+  public exec(callback: (result: Suspended | Completed<T>) => void): void {
+    const todos: InternalAsync<any>[] = [];
+    let input: Value<any> = {
+      type: "internal.nothing",
+      id: `${this.decorator.id}.nothing`,
     };
-  }
 
-  private mapKind(k: "lfi" | "rfi" | "lfc" | "rfc"): "lfi" | "rfi" {
-    if (k === "lfi" || k === "rfi") return k;
-    if (k === "lfc") return "lfi";
-    if (k === "rfc") return "rfi";
-    throw new Error(`Unknown value ${k}`);
+    // next needs to be called when we want to go to the top of the loop but are inside a callback
+    const next = () => {
+      while (true) {
+        const action = this.decorator.next(input);
+
+        // Handle internal.async with lfi kind
+        if (action.type === "internal.async" && action.kind === "lfi") {
+          this.handler.createPromise({ id: action.id, timeout: Number.MAX_SAFE_INTEGER, tags: {} }, (durable) => {
+            if (durable.state === "pending") {
+              if (!util.isGeneratorFunction(action.func)) {
+                todos.push(action);
+                input = {
+                  type: "internal.promise",
+                  state: "pending",
+                  id: action.id,
+                };
+                next(); // Go back to the top of the loop
+                return;
+              }
+
+              const c = new Coroutine(
+                new Decorator(
+                  action.id,
+                  action.func(
+                    ...(action.args?.map((arg) => (arg.type === "internal.literal" ? arg.value : undefined)) ?? []),
+                  ),
+                ),
+                this.handler,
+              );
+              c.exec((r) => {
+                if (r.type === "suspended") {
+                  todos.push(...r.todos);
+                  input = {
+                    type: "internal.promise",
+                    state: "pending",
+                    id: action.id,
+                  };
+                  next();
+                } else {
+                  this.handler.resolvePromise(action.id, r.value, (durable) => {
+                    input = {
+                      type: "internal.promise",
+                      state: "completed",
+                      id: action.id,
+                      value: {
+                        type: "internal.literal",
+                        id: `${action.id}.completed`,
+                        value: durable.value,
+                      },
+                    };
+                    next();
+                  });
+                }
+              });
+            } else {
+              // durable promise is completed
+              input = {
+                type: "internal.promise",
+                state: "completed",
+                id: action.id,
+                value: {
+                  type: "internal.literal",
+                  id: `${action.id}.completed`,
+                  value: durable.value,
+                },
+              };
+              next();
+            }
+          });
+          return; // Exit the while loop to wait for async callback
+        }
+
+        // Handle internal.async with rfi kind
+        if (action.type === "internal.async" && action.kind === "rfi") {
+          this.handler.createPromise(
+            {
+              id: action.id,
+              timeout: Number.MAX_SAFE_INTEGER,
+              tags: { "resonate:invoke": "default" },
+              fn: action.func.name,
+              args: action.args?.map((arg) => (arg.type === "internal.literal" ? arg.value : undefined)) ?? [],
+            },
+            (durable) => {
+              if (durable.state === "pending") {
+                todos.push(action);
+                input = {
+                  type: "internal.promise",
+                  state: "pending",
+                  id: action.id,
+                };
+              } else {
+                input = {
+                  type: "internal.promise",
+                  state: "completed",
+                  id: action.id,
+                  value: {
+                    type: "internal.literal",
+                    id: `${action.id}.completed`,
+                    value: durable.value,
+                  },
+                };
+              }
+              next();
+            },
+          );
+          return; // Exit the while loop to wait for async callback
+        }
+
+        // Handle await
+        if (action.type === "internal.await" && action.promise.state === "completed") {
+          util.assert(
+            action.promise.value && action.promise.value.type === "internal.literal",
+            "Promise value must be an 'internal.literal' type",
+          );
+          input = {
+            type: "internal.literal",
+            id: `${action.promise.id}.literal`,
+            value: action.promise.value.value,
+          };
+          continue;
+        }
+
+        // invoke the callback when a awaiting a pending "Future" the list of todos will include
+        // the global callbacks to create.
+        if (action.type === "internal.await" && action.promise.state === "pending") {
+          callback({ type: "suspended", todos });
+          return;
+        }
+
+        // Handle return
+        if (action.type === "internal.return") {
+          util.assert(
+            action.value && action.value.type === "internal.literal",
+            "Promise value must be an 'internal.literal' type",
+          );
+          callback({
+            type: "completed",
+            value: action?.value?.type === "internal.literal" ? action.value.value : undefined, // Even with the assertion on top it is neccesary to have the ternary condition to make the typesystem happy
+          });
+          return;
+        }
+      }
+    };
+
+    next();
   }
 }

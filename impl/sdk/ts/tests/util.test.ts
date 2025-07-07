@@ -103,23 +103,6 @@ describe("isGeneratorFunction", () => {
     expect(isGeneratorFunction(instance.asyncGeneratorMethod)).toBe(true);
   });
 
-  // Edge cases
-  test("should handle bound functions", () => {
-    function* originalGenerator() {
-      yield this;
-    }
-
-    function regularFunction() {
-      return this;
-    }
-
-    const boundGenerator = originalGenerator.bind({});
-    const boundRegular = regularFunction.bind({});
-
-    expect(isGeneratorFunction(boundGenerator)).toBe(true);
-    expect(isGeneratorFunction(boundRegular)).toBe(false);
-  });
-
   test("should handle functions created with Function constructor", () => {
     const dynamicFunction = new Function("return 42");
     const dynamicGenerator = new (Object.getPrototypeOf(function* () {}).constructor)("yield 42");

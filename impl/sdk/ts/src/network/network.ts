@@ -1,16 +1,6 @@
-export interface Value {
-  headers?: { [key: string]: string };
-  data?: string;
-}
-
 export interface DurablePromiseRecord {
   id: string;
-  state:
-    | "pending"
-    | "resolved"
-    | "rejected"
-    | "rejected_canceled"
-    | "rejected_timedout";
+  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -19,42 +9,16 @@ export interface DurablePromiseRecord {
   iKeyForComplete?: string;
   createdOn?: number;
   completedOn?: number;
-  callbacks?: Map<string, CallbackRecord>;
 }
 
-export interface CallbackRecord {
+export interface ScheduleRecord {
   id: string;
-  type: "resume" | "notify";
-  promiseId: string;
-  rootPromiseId: string;
-  recv: string;
-  timeout: number;
-  createdOn: number;
-}
-
-export interface TaskRecord {
-  id: string;
-  counter: number;
-  state: "init" | "enqueued" | "claimed" | "completed";
-  type: "invoke" | "resume" | "notify";
-  recv: string;
-  rootPromiseId: string;
-  leafPromiseId: string;
-  pid: string | undefined;
-  ttl: number | undefined;
-  expiry: number | undefined;
-  createdOn: number;
-  completedOn: number | undefined;
-}
-
-export interface Schedule {
-  id: string;
-  description: string;
+  description?: string;
   cron: string;
   tags: Record<string, string>;
   promiseId: string;
   promiseTimeout: number;
-  promiseParam: Value;
+  promiseParam: any;
   promiseTags: Record<string, string>;
   iKey?: string;
   lastRunTime?: number;
@@ -62,7 +26,7 @@ export interface Schedule {
   createdOn?: number;
 }
 
-export interface Task {
+export interface TaskRecord {
   id: string;
   counter: number;
   timeout: number;
@@ -71,7 +35,7 @@ export interface Task {
   completedOn?: number;
 }
 
-export interface Callback {
+export interface CallbackRecord {
   id: string;
   promiseId: string;
   timeout: number;
@@ -223,7 +187,7 @@ export type CreatePromiseRes = {
 export type CreatePromiseAndTaskRes = {
   kind: "createPromiseAndTask";
   promise: DurablePromiseRecord;
-  task?: Task;
+  task?: TaskRecord;
 };
 
 export type ReadPromiseRes = {
@@ -238,24 +202,24 @@ export type CompletePromiseRes = {
 
 export type CreateCallbackRes = {
   kind: "createCallback";
-  callback?: Callback;
+  callback?: CallbackRecord;
   promise: DurablePromiseRecord;
 };
 
 export type CreateSubscriptionRes = {
   kind: "createSubscription";
-  callback?: Callback;
+  callback?: CallbackRecord;
   promise: DurablePromiseRecord;
 };
 
 export type CreateScheduleRes = {
   kind: "createSchedule";
-  schedule: Schedule;
+  schedule: ScheduleRecord;
 };
 
 export type ReadScheduleRes = {
   kind: "readSchedule";
-  schedule: Schedule;
+  schedule: ScheduleRecord;
 };
 
 export type DeleteScheduleRes = {
@@ -269,7 +233,7 @@ export type ClaimTaskRes = {
 
 export type CompleteTaskRes = {
   kind: "completedtask";
-  task: Task;
+  task: TaskRecord;
 };
 
 export type DropTaskRes = {
@@ -308,9 +272,6 @@ export type ResponseMsg =
 export type RecvMsg = any;
 
 export interface Network {
-  send(
-    request: RequestMsg,
-    callback: (timeout: boolean, response: ResponseMsg) => void,
-  ): void;
+  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void;
   recv(msg: RecvMsg): void;
 }
