@@ -1,7 +1,6 @@
 import { Heapq } from "./heapq";
 import * as util from "./util";
 import {
-  CallbackRecord,
   CompletePromiseReq,
   CompletePromiseRes,
   CreateCallbackReq,
@@ -10,20 +9,62 @@ import {
   CreatePromiseRes,
   CreateSubscriptionReq,
   CreateSubscriptionRes,
-  DurablePromiseRecord,
   ReadPromiseReq,
   ReadPromiseRes,
   ClaimTaskReq,
   ClaimTaskRes,
-  TaskRecord,
   CompleteTaskReq,
   CompleteTaskRes,
   HeartbeatTasksRes,
   HeartbeatTasksReq,
 } from "./network/network";
 
+interface DurablePromiseData {
+  id: string;
+  state:
+    | "pending"
+    | "resolved"
+    | "rejected"
+    | "rejected_canceled"
+    | "rejected_timedout";
+  timeout: number;
+  param: any;
+  value: any;
+  tags: Record<string, string>;
+  iKeyForCreate?: string;
+  iKeyForComplete?: string;
+  createdOn?: number;
+  completedOn?: number;
+  callbacks?: Map<string, CallbackData>;
+}
+
+interface CallbackData {
+  id: string;
+  type: "resume" | "notify";
+  promiseId: string;
+  rootPromiseId: string;
+  recv: string;
+  timeout: number;
+  createdOn: number;
+}
+
+interface TaskData {
+  id: string;
+  counter: number;
+  state: "init" | "enqueued" | "claimed" | "completed";
+  type: "invoke" | "resume" | "notify";
+  recv: string;
+  rootPromiseId: string;
+  leafPromiseId: string;
+  pid?: string;
+  ttl?: number;
+  expiry?: number;
+  createdOn: number;
+  completedOn?: number;
+}
+
 interface Router {
-  route(promise: DurablePromiseRecord): any;
+  route(promise: DurablePromiseData): any;
 }
 class TagRouter implements Router {
   private tag: string;
@@ -32,7 +73,7 @@ class TagRouter implements Router {
     this.tag = tag;
   }
 
-  route(promise: DurablePromiseRecord): any {
+  route(promise: DurablePromiseData): any {
     return promise.tags?.[this.tag];
   }
 }
@@ -61,15 +102,7 @@ export class Server {
 
     for (const promise of this.promises.scan()) {
       if (promise.state === "pending" && time >= promise.timeout) {
-        var applied = this.transition(
-          promise.id,
-          "rejected_timedout",
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-        )[2];
+        var applied = this.transition(promise.id, "rejected_timedout")[2];
         util.assert(applied, "expected promise to be timedout");
       }
     }
@@ -111,12 +144,12 @@ export class Server {
       | "rejected"
       | "rejected_canceled"
       | "rejected_timedout",
-    strict: boolean | undefined,
-    timeout: number | undefined,
-    ikey: string | undefined,
-    value: any,
-    tags: Record<string, string> | undefined,
-  ): [DurablePromiseRecord, TaskRecord | undefined, boolean] {
+    strict?: boolean,
+    timeout?: number,
+    ikey?: string,
+    value?: any,
+    tags?: Record<string, string>,
+  ): [DurablePromiseData, TaskData | undefined, boolean] {
     var [promise, applied] = this.promises.transition(
       id,
       to,
@@ -138,9 +171,6 @@ export class Server {
             this.targets[recv],
             promise.id,
             promise.id,
-            undefined,
-            undefined,
-            undefined,
           );
           util.assert(applied);
           return [promise, task, applied];
@@ -166,9 +196,6 @@ export class Server {
           callback.recv,
           callback.rootPromiseId,
           callback.promiseId,
-          undefined,
-          undefined,
-          undefined,
         );
 
         util.assert(applied);
@@ -234,7 +261,6 @@ export class Server {
           undefined,
           req.iKey,
           req.value,
-          undefined,
         );
         util.assert(
           !applied || [req.state, "rejected_timedout"].includes(promise.state),
@@ -317,8 +343,6 @@ export class Server {
           undefined,
           undefined,
           req.counter,
-          undefined,
-          undefined,
         );
 
         return {
@@ -366,28 +390,28 @@ export class Server {
 }
 
 export class TaskStore {
-  private tasks: Map<string, TaskRecord>;
+  private tasks: Map<string, TaskData>;
 
   constructor() {
     this.tasks = new Map();
   }
 
-  scan(): IterableIterator<TaskRecord> {
+  scan(): IterableIterator<TaskData> {
     return this.tasks.values();
   }
 
   transition(
     id: string,
     to: "init" | "enqueued" | "claimed" | "completed",
-    type: "invoke" | "resume" | "notify" | undefined,
-    recv: string | undefined,
-    rootPromiseId: string | undefined,
-    leafPromiseId: string | undefined,
-    counter: number | undefined,
-    pid: string | undefined,
-    ttl: number | undefined,
+    type?: "invoke" | "resume" | "notify",
+    recv?: string,
+    rootPromiseId?: string,
+    leafPromiseId?: string,
+    counter?: number,
+    pid?: string,
+    ttl?: number,
     force: boolean = false,
-  ): [TaskRecord, boolean] {
+  ): [TaskData, boolean] {
     const time = Date.now();
     var record = this.tasks.get(id);
 
@@ -403,11 +427,7 @@ export class TaskStore {
         recv: recv,
         rootPromiseId: rootPromiseId,
         leafPromiseId: leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
         createdOn: time,
-        completedOn: undefined,
-        expiry: undefined,
       };
       this.tasks.set(id, record);
       return [record, true];
@@ -422,8 +442,6 @@ export class TaskStore {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
         expiry: time + 500,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
@@ -502,9 +520,6 @@ export class TaskStore {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
-        expiry: undefined,
         createdOn: record.createdOn,
         completedOn: time,
       };
@@ -530,11 +545,7 @@ export class TaskStore {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
-        expiry: undefined,
         createdOn: record.createdOn,
-        completedOn: undefined,
       };
 
       this.tasks.set(id, record);
@@ -586,9 +597,6 @@ export class TaskStore {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
-        expiry: undefined,
         createdOn: record.createdOn,
         completedOn: time,
       };
@@ -611,11 +619,7 @@ export class TaskStore {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: undefined,
-        ttl: undefined,
-        expiry: undefined,
         createdOn: record.createdOn,
-        completedOn: undefined,
       };
 
       this.tasks.set(id, record);
@@ -636,17 +640,17 @@ export class TaskStore {
   }
 }
 export class PromiseStore {
-  private promises: Map<string, DurablePromiseRecord>;
+  private promises: Map<string, DurablePromiseData>;
 
   constructor() {
     this.promises = new Map();
   }
 
-  scan(): IterableIterator<DurablePromiseRecord> {
+  scan(): IterableIterator<DurablePromiseData> {
     return this.promises.values();
   }
 
-  get(id: string): DurablePromiseRecord {
+  get(id: string): DurablePromiseData {
     const record = this.promises.get(id);
 
     if (!record) {
@@ -661,7 +665,7 @@ export class PromiseStore {
     promiseId: string,
     recv: string,
     timeout: number,
-  ): [DurablePromiseRecord, CallbackRecord | undefined] {
+  ): [DurablePromiseData, CallbackData | undefined] {
     var record = this.promises.get(id);
 
     if (!record) {
@@ -674,7 +678,7 @@ export class PromiseStore {
       return [record, undefined];
     }
 
-    const callback: CallbackRecord = {
+    const callback: CallbackData = {
       id: cbId,
       type: "notify",
       promiseId: promiseId,
@@ -685,7 +689,7 @@ export class PromiseStore {
     };
 
     if (!record.callbacks) {
-      record.callbacks = new Map<string, CallbackRecord>();
+      record.callbacks = new Map<string, CallbackData>();
     }
 
     // register and return
@@ -698,7 +702,7 @@ export class PromiseStore {
     rootId: string,
     recv: string,
     timeout: number,
-  ): [DurablePromiseRecord, CallbackRecord | undefined] {
+  ): [DurablePromiseData, CallbackData | undefined] {
     var record = this.promises.get(id);
 
     if (!record) {
@@ -709,7 +713,7 @@ export class PromiseStore {
       return [record, undefined];
     }
 
-    const callback: CallbackRecord = {
+    const callback: CallbackData = {
       id: `__resume:${rootId}:${id}`,
       type: "resume",
       promiseId: id,
@@ -720,7 +724,7 @@ export class PromiseStore {
     };
 
     if (!record.callbacks) {
-      record.callbacks = new Map<string, CallbackRecord>();
+      record.callbacks = new Map<string, CallbackData>();
     }
 
     record.callbacks.set(callback.id, callback);
@@ -735,12 +739,12 @@ export class PromiseStore {
       | "rejected"
       | "rejected_canceled"
       | "rejected_timedout",
-    strict: boolean | undefined,
-    timeout: number | undefined,
-    ikey: string | undefined,
-    value: any | undefined,
-    tags: Record<string, string> | undefined,
-  ): [DurablePromiseRecord, boolean] {
+    strict?: boolean,
+    timeout?: number,
+    ikey?: string,
+    value?: any,
+    tags?: Record<string, string>,
+  ): [DurablePromiseData, boolean] {
     const time = Date.now();
     var record = this.promises.get(id);
 
@@ -754,12 +758,10 @@ export class PromiseStore {
         state: to,
         timeout: timeout,
         iKeyForCreate: ikey,
-        iKeyForComplete: undefined,
         param: value,
         value: undefined,
         tags: tags ?? {},
         createdOn: time,
-        completedOn: undefined,
       };
 
       this.promises.set(id, record);
@@ -789,15 +791,7 @@ export class PromiseStore {
       time >= record.timeout &&
       ikeyMatch(record.iKeyForCreate, ikey)
     ) {
-      return this.transition(
-        id,
-        "rejected_timedout",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-      );
+      return this.transition(id, "rejected_timedout");
     }
 
     if (
@@ -829,15 +823,7 @@ export class PromiseStore {
       !strict &&
       time >= record.timeout
     ) {
-      return this.transition(
-        id,
-        "rejected_timedout",
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-        undefined,
-      );
+      return this.transition(id, "rejected_timedout");
     }
 
     if (
@@ -857,9 +843,8 @@ export class PromiseStore {
         state: record.tags?.["resonate:timeout"] === "true" ? "resolved" : to,
         timeout: record.timeout,
         iKeyForCreate: record.iKeyForCreate,
-        iKeyForComplete: undefined,
         param: record.param,
-        value: undefined,
+        value: record.value,
         tags: record.tags,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
@@ -919,9 +904,6 @@ export class PromiseStore {
   }
 }
 
-function ikeyMatch(
-  left: string | undefined,
-  right: string | undefined,
-): boolean {
+function ikeyMatch(left?: string, right?: string): boolean {
   return left !== undefined && right !== undefined && left === right;
 }

@@ -175,7 +175,10 @@ export class JsonEncoder implements Encoder {
       }
 
       if (value?.__type === "aggregate_error") {
-        return Object.assign(new AggregateError(value.errors, value.message), value);
+        return Object.assign(
+          new AggregateError(value.errors, value.message),
+          value,
+        );
       }
 
       if (value?.__type === "error") {
@@ -210,14 +213,23 @@ export class HttpNetwork implements Network {
     this.encoder = config.encoder ?? new JsonEncoder();
   }
 
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
+  send(
+    request: RequestMsg,
+    callback: (timeout: boolean, response: ResponseMsg) => void,
+  ): void {
     this.handleRequest(request)
       .then((response) => callback(false, response))
       .catch((error) => {
         if (error.name === "TimeoutError") {
-          callback(true, this.createErrorResponse("invalid_request", "Request timeout"));
+          callback(
+            true,
+            this.createErrorResponse("invalid_request", "Request timeout"),
+          );
         } else {
-          callback(false, this.createErrorResponse("invalid_request", error.message));
+          callback(
+            false,
+            this.createErrorResponse("invalid_request", error.message),
+          );
         }
       });
   }
@@ -282,7 +294,9 @@ export class HttpNetwork implements Network {
     return { kind: "createPromise", promise };
   }
 
-  private async createPromiseAndTask(req: CreatePromiseAndTaskReq): Promise<ResponseMsg> {
+  private async createPromiseAndTask(
+    req: CreatePromiseAndTaskReq,
+  ): Promise<ResponseMsg> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -315,10 +329,13 @@ export class HttpNetwork implements Network {
   }
 
   private async readPromise(req: ReadPromiseReq): Promise<ResponseMsg> {
-    const response = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, {
-      method: "GET",
-      headers: this.baseHeaders,
-    });
+    const response = await this.fetch(
+      `/promises/${encodeURIComponent(req.id)}`,
+      {
+        method: "GET",
+        headers: this.baseHeaders,
+      },
+    );
 
     const apiPromise = (await response.json()) as PromiseDto;
     const promise = this.mapPromiseDtoToRecord(apiPromise);
@@ -335,11 +352,14 @@ export class HttpNetwork implements Network {
       value: this.encoder.encode(req.value),
     };
 
-    const response = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify(body),
-    });
+    const response = await this.fetch(
+      `/promises/${encodeURIComponent(req.id)}`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify(body),
+      },
+    );
 
     const apiPromise = (await response.json()) as PromiseDto;
     const promise = this.mapPromiseDtoToRecord(apiPromise);
@@ -353,37 +373,49 @@ export class HttpNetwork implements Network {
       recv: req.recv,
     };
 
-    const response = await this.fetch(`/promises/callback/${encodeURIComponent(req.id)}`, {
-      method: "POST",
-      headers: this.baseHeaders,
-      body: JSON.stringify(body),
-    });
+    const response = await this.fetch(
+      `/promises/callback/${encodeURIComponent(req.id)}`,
+      {
+        method: "POST",
+        headers: this.baseHeaders,
+        body: JSON.stringify(body),
+      },
+    );
 
     const data = (await response.json()) as CallbackResponseDto;
     return {
       kind: "createCallback",
-      callback: data.callback ? this.mapCallbackDtoToRecord(data.callback) : undefined,
+      callback: data.callback
+        ? this.mapCallbackDtoToRecord(data.callback)
+        : undefined,
       promise: this.mapPromiseDtoToRecord(data.promise),
     };
   }
 
-  private async createSubscription(req: CreateSubscriptionReq): Promise<ResponseMsg> {
+  private async createSubscription(
+    req: CreateSubscriptionReq,
+  ): Promise<ResponseMsg> {
     const body = {
       id: req.id,
       timeout: req.timeout,
       recv: req.recv,
     };
 
-    const response = await this.fetch(`/promises/subscribe/${encodeURIComponent(req.id)}`, {
-      method: "POST",
-      headers: this.baseHeaders,
-      body: JSON.stringify(body),
-    });
+    const response = await this.fetch(
+      `/promises/subscribe/${encodeURIComponent(req.id)}`,
+      {
+        method: "POST",
+        headers: this.baseHeaders,
+        body: JSON.stringify(body),
+      },
+    );
 
     const data = (await response.json()) as CallbackResponseDto;
     return {
       kind: "createSubscription",
-      callback: data.callback ? this.mapCallbackDtoToRecord(data.callback) : undefined,
+      callback: data.callback
+        ? this.mapCallbackDtoToRecord(data.callback)
+        : undefined,
       promise: this.mapPromiseDtoToRecord(data.promise),
     };
   }
@@ -417,10 +449,13 @@ export class HttpNetwork implements Network {
   }
 
   private async readSchedule(req: ReadScheduleReq): Promise<ResponseMsg> {
-    const response = await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, {
-      method: "GET",
-      headers: this.baseHeaders,
-    });
+    const response = await this.fetch(
+      `/schedules/${encodeURIComponent(req.id)}`,
+      {
+        method: "GET",
+        headers: this.baseHeaders,
+      },
+    );
 
     const schedule = (await response.json()) as ScheduleDto;
     return {
@@ -552,8 +587,13 @@ export class HttpNetwork implements Network {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
-        throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
+        const errorData = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
+        throw new Error(
+          errorData.message ||
+            `HTTP ${response.status}: ${response.statusText}`,
+        );
       }
 
       return response;
@@ -623,7 +663,12 @@ export class HttpNetwork implements Network {
 
   private mapApiStateToInternal(
     apiState: string,
-  ): "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout" {
+  ):
+    | "pending"
+    | "resolved"
+    | "rejected"
+    | "rejected_canceled"
+    | "rejected_timedout" {
     switch (apiState) {
       case "PENDING":
         return "pending";
@@ -640,7 +685,10 @@ export class HttpNetwork implements Network {
     }
   }
 
-  private createErrorResponse(code: ErrorRes["code"], message: string): ErrorRes {
+  private createErrorResponse(
+    code: ErrorRes["code"],
+    message: string,
+  ): ErrorRes {
     return {
       kind: "error",
       code,
