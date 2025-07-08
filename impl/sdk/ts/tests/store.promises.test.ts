@@ -1,4 +1,4 @@
-import { Server } from "../src/store";
+import { Server } from "../src/server";
 describe("State Transition Tests", () => {
   test("Test Case 0: transitions from Init to Pending via Create", async () => {
     const server = new Server();
