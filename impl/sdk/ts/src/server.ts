@@ -248,14 +248,17 @@ export class Server {
         };
       }
       case "resume": {
-        const rootPromise = this.getPromise(task.rootPromiseId);
-        const learPromise = this.getPromise(task.leafPromiseId);
-
         return {
           kind: task.type,
           promises: {
-            root: { id: rootPromise.id, data: rootPromise },
-            leaf: { id: learPromise.id, data: learPromise },
+            root: {
+              id: task.rootPromiseId,
+              data: this.getPromise(task.rootPromiseId),
+            },
+            leaf: {
+              id: task.leafPromiseId,
+              data: this.getPromise(task.leafPromiseId),
+            },
           },
         };
       }
