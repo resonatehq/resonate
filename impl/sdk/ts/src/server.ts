@@ -78,11 +78,56 @@ export class Server {
     this.targets = { default: "local://any@defaul" };
   }
 
-  next(): [() => void, number] {
-    throw new Error("not implemented");
+  next(time: number = Date.now()): number {
+    let timeout: number | undefined = undefined;
+    for (const promise of this.promises.values()) {
+      if (promise.state === "pending") {
+        if (timeout === undefined) {
+          timeout = promise.timeout;
+        } else {
+          timeout = Math.min(promise.timeout, timeout);
+        }
+      }
+    }
+
+    for (const task of this.tasks.values()) {
+      if (["init", "enqueued", "claimed"].includes(task.state)) {
+        if (task.expiry === undefined) {
+          throw new Error("unexpected path");
+        }
+
+        if (timeout === undefined) {
+          timeout = task.expiry;
+        } else {
+          timeout = Math.min(task.expiry, timeout);
+        }
+      }
+    }
+
+    if (timeout !== undefined) {
+      timeout = Math.max(0, timeout - time);
+    }
+
+    if (timeout === undefined) {
+      throw new Error("timeout should have been set by this point");
+    }
+
+    return timeout;
   }
 
-  step(time: number = Date.now()) {
+  *step(
+    time: number = Date.now(),
+  ): Generator<
+    [
+      string,
+      (
+        | { kind: "invoke" | "resume"; id: string; counter: number }
+        | { kind: "notify"; promise: DurablePromiseRecord }
+      ),
+    ],
+    void,
+    boolean | undefined
+  > {
     for (const promise of this.promises.values()) {
       if (promise.state === "pending" && time >= promise.timeout) {
         let applied = this.transitionPromise(
@@ -105,7 +150,6 @@ export class Server {
         if (task.expiry === undefined) {
           throw new Error("task must have an expiry");
         }
-        util.assert(task.expiry !== undefined);
 
         if (time >= task.expiry) {
           const applied = this.transitionTask(
@@ -124,8 +168,65 @@ export class Server {
           util.assert(applied);
         }
       }
+    }
 
-      //
+    for (const task of this.tasks.values()) {
+      if (task.state !== "init") {
+        continue;
+      }
+      let msg:
+        | { kind: "invoke" | "resume"; id: string; counter: number }
+        | { kind: "notify"; promise: DurablePromiseRecord };
+      if (task.type === "invoke") {
+        msg = {
+          kind: "invoke",
+          id: task.id,
+          counter: task.counter,
+        };
+      } else if (task.type === "resume") {
+        msg = { kind: "resume", id: task.id, counter: task.counter };
+      } else {
+        util.assert(task.type === "notify");
+        msg = { kind: "notify", promise: this.getPromise(task.rootPromiseId) };
+      }
+
+      if (yield [task.recv, msg]) {
+        var applied: boolean;
+        if (task.type === "notify") {
+          applied = this.transitionTask(
+            task.id,
+            "completed",
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            time,
+          ).applied;
+        } else {
+          applied = this.transitionTask(
+            task.id,
+            "enqueued",
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            time,
+          ).applied;
+        }
+        util.assert(applied);
+      } else {
+        // # TODO(dfarr): implement this
+        // # _, applied = self.tasks.transition(task.id, to="INIT", expiry=0)
+        // # assert applied
+      }
     }
   }
 
