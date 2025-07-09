@@ -73,7 +73,6 @@ export class LocalNetwork implements Network {
     return {
       kind: "createPromise",
       promise: this.server.createPromise(
-        Date.now(),
         request.id,
         request.timeout,
         request.param,
@@ -87,7 +86,7 @@ export class LocalNetwork implements Network {
   private readPromise(request: ReadPromiseReq): ReadPromiseRes {
     return {
       kind: "readPromise",
-      promise: this.server.readPromise(Date.now(), request.id),
+      promise: this.server.readPromise(request.id),
     };
   }
 
@@ -95,7 +94,6 @@ export class LocalNetwork implements Network {
     return {
       kind: "completePromise",
       promise: this.server.completePromise(
-        Date.now(),
         request.id,
         request.state,
         request.value,
@@ -111,7 +109,6 @@ export class LocalNetwork implements Network {
     return {
       kind: "createSubscription",
       ...this.server.createSubscription(
-        Date.now(),
         request.id,
         request.timeout,
         request.recv,
@@ -123,7 +120,6 @@ export class LocalNetwork implements Network {
     return {
       kind: "createCallback",
       ...this.server.createCallback(
-        Date.now(),
         request.id,
         request.rootPromiseId,
         request.timeout,
@@ -136,7 +132,6 @@ export class LocalNetwork implements Network {
     return {
       kind: "claimedtask",
       message: this.server.claimTask(
-        Date.now(),
         request.id,
         request.counter,
         request.processId,
@@ -148,14 +143,14 @@ export class LocalNetwork implements Network {
   private completeTask(request: CompleteTaskReq): CompleteTaskRes {
     return {
       kind: "completedtask",
-      task: this.server.completeTask(Date.now(), request.id, request.counter),
+      task: this.server.completeTask(request.id, request.counter),
     };
   }
 
   private heartbeatTasks(request: HeartbeatTasksReq): HeartbeatTasksRes {
     return {
       kind: "heartbeatTasks",
-      tasksAffected: this.server.hearbeatTasks(Date.now(), request.processId),
+      tasksAffected: this.server.hearbeatTasks(request.processId),
     };
   }
 }

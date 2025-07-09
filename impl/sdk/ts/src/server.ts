@@ -82,13 +82,18 @@ export class Server {
     throw new Error("not implemented");
   }
 
-  step(time: number) {
+  step(time: number = Date.now()) {
     for (const promise of this.promises.values()) {
       if (promise.state === "pending" && time >= promise.timeout) {
         let applied = this.transitionPromise(
-          time,
           promise.id,
           "rejected_timedout",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          time,
         ).applied;
         util.assert(applied, "expected promise to be timedout");
       }
@@ -104,7 +109,6 @@ export class Server {
 
         if (time >= task.expiry) {
           const applied = this.transitionTask(
-            time,
             task.id,
             "init",
             undefined,
@@ -115,6 +119,7 @@ export class Server {
             undefined,
             undefined,
             true,
+            time,
           ).applied;
           util.assert(applied);
         }
@@ -125,16 +130,15 @@ export class Server {
   }
 
   createPromise(
-    time: number,
     id: string,
     timeout: number,
     param?: any,
     tags?: Record<string, string>,
     iKey?: string,
     strict?: boolean,
+    time: number = Date.now(),
   ): DurablePromiseRecord {
     const { promise, task, applied } = this.transitionPromise(
-      time,
       id,
       "pending",
       strict,
@@ -142,6 +146,7 @@ export class Server {
       iKey,
       param,
       tags,
+      time,
     );
     util.assert(
       !applied || ["pending", "rejected_timedout"].includes(promise.state),
@@ -150,26 +155,27 @@ export class Server {
     return promise;
   }
 
-  readPromise(time: number, id: string): DurablePromiseRecord {
+  readPromise(id: string, time: number = Date.now()): DurablePromiseRecord {
     return this.getPromise(id);
   }
 
   completePromise(
-    time: number,
     id: string,
     state: "resolved" | "rejected" | "rejected_canceled",
     value?: any,
     iKey?: string,
     strict?: boolean,
+    time: number = Date.now(),
   ): DurablePromiseRecord {
     const { promise, task, applied } = this.transitionPromise(
-      time,
       id,
       state,
       strict,
       undefined,
       iKey,
       value,
+      undefined,
+      time,
     );
     util.assert(
       !applied || [state, "rejected_timedout"].includes(promise.state),
@@ -178,17 +184,17 @@ export class Server {
   }
 
   createSubscription(
-    time: number,
     id: string,
     timeout: number,
     recv: string,
+    time: number = Date.now(),
   ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
     const { promise, callback } = this.subscribeToPromise(
-      time,
       id,
       id,
       recv,
       timeout,
+      time,
     );
 
     return {
@@ -198,32 +204,31 @@ export class Server {
   }
 
   createCallback(
-    time: number,
     id: string,
     rootPromiseId: string,
     timeout: number,
     recv: string,
+    time: number = Date.now(),
   ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
     const { promise, callback } = this.callbackToPromise(
-      time,
       id,
       rootPromiseId,
       recv,
       timeout,
+      time,
     );
 
     return { promise: promise, callback: callback };
   }
 
   claimTask(
-    time: number,
     id: string,
     counter: number,
     processId: string,
     ttl: number,
+    time: number = Date.now(),
   ): Mesg {
     const { task, applied } = this.transitionTask(
-      time,
       id,
       "claimed",
       undefined,
@@ -233,6 +238,8 @@ export class Server {
       counter,
       processId,
       ttl,
+      undefined,
+      time,
     );
 
     util.assert(applied);
@@ -267,9 +274,12 @@ export class Server {
     }
   }
 
-  completeTask(time: number, id: string, counter: number): TaskRecord {
+  completeTask(
+    id: string,
+    counter: number,
+    time: number = Date.now(),
+  ): TaskRecord {
     const { task, applied } = this.transitionTask(
-      time,
       id,
       "completed",
       undefined,
@@ -277,6 +287,8 @@ export class Server {
       undefined,
       undefined,
       counter,
+      undefined,
+      time,
     );
 
     util.assert(applied);
@@ -291,7 +303,7 @@ export class Server {
     };
   }
 
-  hearbeatTasks(time: number, processId: string): number {
+  hearbeatTasks(processId: string, time: number = Date.now()): number {
     let applied = false;
     let affectedTasks = 0;
 
@@ -301,7 +313,6 @@ export class Server {
       }
 
       applied = this.transitionTask(
-        time,
         task.id,
         "claimed",
         undefined,
@@ -312,6 +323,7 @@ export class Server {
         undefined,
         undefined,
         true,
+        time,
       ).applied;
 
       util.assert(applied);
@@ -332,11 +344,11 @@ export class Server {
   }
 
   private subscribeToPromise(
-    time: number,
     id: string,
     promiseId: string,
     recv: string,
     timeout: number,
+    time: number = Date.now(),
   ): { promise: DurablePromise; callback?: Callback } {
     const record = this.promises.get(id);
 
@@ -373,11 +385,11 @@ export class Server {
   }
 
   private callbackToPromise(
-    time: number,
     id: string,
     rootId: string,
     recv: string,
     timeout: number,
+    time: number = Date.now(),
   ): { promise: DurablePromise; callback?: Callback } {
     const record = this.promises.get(id);
 
@@ -408,7 +420,6 @@ export class Server {
   }
 
   private transitionPromise(
-    time: number,
     id: string,
     to:
       | "pending"
@@ -421,9 +432,9 @@ export class Server {
     ikey?: string,
     value?: any,
     tags?: Record<string, string>,
+    time: number = Date.now(),
   ): { promise: DurablePromise; task?: Task; applied: boolean } {
     const { promise, applied } = this._transitionPromise(
-      time,
       id,
       to,
       strict,
@@ -431,6 +442,7 @@ export class Server {
       ikey,
       value,
       tags,
+      time,
     );
 
     if (applied && promise.state === "pending") {
@@ -438,13 +450,13 @@ export class Server {
         const recv = router.route(promise);
         if (recv !== undefined) {
           const { task, applied } = this.transitionTask(
-            time,
             `__invoke:${id}`,
             "init",
             "invoke",
             this.targets[recv],
             promise.id,
             promise.id,
+            time,
           );
           util.assert(applied);
           return { promise: promise, task: task, applied: applied };
@@ -464,13 +476,13 @@ export class Server {
     ) {
       for (const callback of promise.callbacks.values()) {
         const { task, applied } = this.transitionTask(
-          time,
           callback.id,
           "init",
           callback.type,
           callback.recv,
           callback.rootPromiseId,
           callback.promiseId,
+          time,
         );
 
         util.assert(applied);
@@ -481,7 +493,6 @@ export class Server {
   }
 
   private _transitionPromise(
-    time: number,
     id: string,
     to:
       | "pending"
@@ -494,6 +505,7 @@ export class Server {
     ikey?: string,
     value?: any,
     tags?: Record<string, string>,
+    time: number = Date.now(),
   ): { promise: DurablePromise; applied: boolean } {
     let record = this.promises.get(id);
 
@@ -540,7 +552,16 @@ export class Server {
       time >= record.timeout &&
       ikeyMatch(record.iKeyForCreate, ikey)
     ) {
-      return this._transitionPromise(time, id, "rejected_timedout");
+      return this._transitionPromise(
+        id,
+        "rejected_timedout",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        time,
+      );
     }
 
     if (
@@ -572,7 +593,16 @@ export class Server {
       !strict &&
       time >= record.timeout
     ) {
-      return this._transitionPromise(time, id, "rejected_timedout");
+      return this._transitionPromise(
+        id,
+        "rejected_timedout",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        time,
+      );
     }
 
     if (
@@ -653,7 +683,6 @@ export class Server {
   }
 
   private transitionTask(
-    time: number,
     id: string,
     to: "init" | "enqueued" | "claimed" | "completed",
     type?: "invoke" | "resume" | "notify",
@@ -664,6 +693,7 @@ export class Server {
     pid?: string,
     ttl?: number,
     force = false,
+    time: number = Date.now(),
   ): { task: Task; applied: boolean } {
     let record = this.tasks.get(id);
 
