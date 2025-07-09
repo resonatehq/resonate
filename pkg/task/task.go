@@ -12,9 +12,9 @@ type Task struct {
 	Id            string          `json:"id"`
 	Counter       int             `json:"counter"`
 	Timeout       int64           `json:"timeout"`
+	RootPromiseId string          `json:"rootPromiseId"`
 	ProcessId     *string         `json:"processId,omitempty"`
 	State         State           `json:"-"`
-	RootPromiseId string          `json:"-"`
 	Recv          json.RawMessage `json:"-"`
 	Mesg          *message.Mesg   `json:"-"`
 	Attempt       int             `json:"-"`
