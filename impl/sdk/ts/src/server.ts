@@ -115,16 +115,13 @@ export class Server {
     return timeout;
   }
 
-  *step(
-    time: number = Date.now(),
-  ): Generator<
-    [
-      string,
-      (
+  *step(time: number = Date.now()): Generator<
+    {
+      recv: string;
+      msg:
         | { kind: "invoke" | "resume"; id: string; counter: number }
-        | { kind: "notify"; promise: DurablePromiseRecord }
-      ),
-    ],
+        | { kind: "notify"; promise: DurablePromiseRecord };
+    },
     void,
     boolean | undefined
   > {
@@ -190,7 +187,7 @@ export class Server {
         msg = { kind: "notify", promise: this.getPromise(task.rootPromiseId) };
       }
 
-      if (yield [task.recv, msg]) {
+      if (yield { recv: task.recv, msg: msg }) {
         var applied: boolean;
         if (task.type === "notify") {
           applied = this.transitionTask(
