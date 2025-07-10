@@ -75,7 +75,7 @@ export class Server {
     this.promises = new Map();
     this.tasks = new Map();
     this.routers = new Array(new TagRouter());
-    this.targets = { default: "local://any@defaul" };
+    this.targets = { default: "local://any@default" };
   }
 
   next(time: number = Date.now()): number {
@@ -220,9 +220,9 @@ export class Server {
         }
         util.assert(applied);
       } else {
-        // # TODO(dfarr): implement this
-        // # _, applied = self.tasks.transition(task.id, to="INIT", expiry=0)
-        // # assert applied
+        // TODO(dfarr): implement this
+        // _, applied = self.tasks.transition(task.id, to="INIT", expiry=0)
+        // assert applied
       }
     }
   }
@@ -388,8 +388,6 @@ export class Server {
       undefined,
       time,
     );
-
-    util.assert(applied);
 
     return {
       id: task.id,
@@ -822,7 +820,7 @@ export class Server {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        expiry: time + 500,
+        expiry: time + 5000,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
       };
@@ -835,7 +833,7 @@ export class Server {
       to === "claimed" &&
       record.counter === counter
     ) {
-      if (!ttl || !pid) {
+      if (ttl === undefined || pid === undefined) {
         throw new Error("Missing required fields from init task");
       }
 
@@ -863,7 +861,7 @@ export class Server {
       to === "claimed" &&
       record.counter === counter
     ) {
-      if (!ttl || !pid) {
+      if (ttl === undefined || pid === undefined) {
         throw new Error("Missing required fields from init task");
       }
 

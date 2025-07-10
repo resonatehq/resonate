@@ -25,8 +25,8 @@ import { Server } from "../server";
 export class LocalNetwork implements Network {
   private server: Server;
 
-  constructor() {
-    this.server = new Server();
+  constructor(server: Server = new Server()) {
+    this.server = server;
   }
   send(
     request: RequestMsg,

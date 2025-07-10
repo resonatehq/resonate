@@ -1,0 +1,148 @@
+import { assert } from "node:test";
+import { LocalNetwork } from "../src/network/local";
+import { Promises } from "../src/promises";
+import { Server } from "../src/server";
+import { Tasks } from "../src/tasks";
+
+let COUNTER = 0;
+let TICK_TIME = 1000;
+
+describe("tasks transitions", () => {
+  function step(server: Server): { id: string; counter: number } {
+    let step = server.step();
+    let next = step.next();
+    let value = next.value!;
+    next = step.next(true);
+    expect(value.msg.kind).toBe("invoke");
+
+    return value.msg as { id: string; counter: number };
+  }
+
+  let server: Server;
+  let promises: Promises;
+  let tasks: Tasks;
+  let id: string;
+
+  beforeAll(() => {
+    server = new Server();
+    promises = new Promises(new LocalNetwork(server));
+    tasks = new Tasks(new LocalNetwork(server));
+  });
+
+  beforeEach(async () => {
+    id = `tid${COUNTER++}`;
+
+    await promises.create(id, Number.MAX_SAFE_INTEGER, undefined, {
+      "resonate:invoke": "default",
+    });
+  });
+
+  afterEach(async () => {
+    // resolve the promise so it’s cleaned up for the next test
+    await promises.resolve(id);
+  });
+
+  test("Test Case 5: transition from enqueued to claimed via claim", async () => {
+    let task = step(server);
+    await expect(
+      tasks.claim(task.id, task.counter, "task5", Number.MAX_SAFE_INTEGER),
+    ).resolves.not.toThrow();
+  });
+
+  test("Test Case 6: transition from enqueue to enqueue via claim", async () => {
+    let task = step(server);
+    await expect(
+      tasks.claim(task.id, task.counter + 1, "task5", Number.MAX_SAFE_INTEGER),
+    ).rejects.toThrow();
+  });
+
+  test("Test Case 8: transition from enqueue to enqueue via complete", async () => {
+    let task = step(server);
+    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+  });
+
+  test("Test Case 10: transition from enqueue to enqueue via heartbeat", async () => {
+    const count = await tasks.heartbeat("task10");
+    expect(count).toBe(0);
+  });
+
+  test("Test Case 12: transition from claimed to claimed via claim", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER);
+    await expect(
+      tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER),
+    ).rejects.toThrow();
+  });
+
+  test("Test Case 13: transition from claimed to init via claim", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task13", 0);
+    await expect(
+      tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER),
+    ).rejects.toThrow();
+  });
+
+  test("Test Case 14: transition from claimed to completed via complete", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task14", Number.MAX_SAFE_INTEGER);
+    await expect(tasks.complete(task.id, task.counter)).resolves.not.toThrow();
+  });
+
+  test("Test Case 15: transition from claimed to init via complete", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task15", 0);
+    await new Promise((r) => setTimeout(r, TICK_TIME));
+    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+  });
+
+  test("Test Case 16: transition from claimed to claimed via complete", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task16", Number.MAX_SAFE_INTEGER);
+    await expect(tasks.complete(task.id, task.counter + 1)).rejects.toThrow();
+  });
+
+  test("Test Case 17: transition from claimed to init via complete (expired)", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task17", 0);
+    await new Promise((r) => setTimeout(r, TICK_TIME));
+    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+  });
+
+  test("Test Case 18: transition from claimed to claimed via heartbeat", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task18", Number.MAX_SAFE_INTEGER);
+    const count = await tasks.heartbeat("task18");
+    expect(count).toBe(1);
+  });
+
+  test("Test Case 19: transition from claimed to init via heartbeat", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task19", 0);
+    const count = await tasks.heartbeat("task19");
+    expect(count).toBe(1);
+  });
+
+  test("Test Case 20: transition from completed to completed via claim", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task20", Number.MAX_SAFE_INTEGER);
+    await tasks.complete(task.id, task.counter);
+    await expect(
+      tasks.claim(task.id, task.counter, "task20", 0),
+    ).rejects.toThrow();
+  });
+
+  test("Test Case 21: transition from completed to completed via complete", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task21", Number.MAX_SAFE_INTEGER);
+    await tasks.complete(task.id, task.counter);
+    await expect(tasks.complete(task.id, task.counter)).resolves.not.toThrow();
+  });
+
+  test("Test Case 22: transition from completed to completed via heartbeat", async () => {
+    let task = step(server);
+    await tasks.claim(task.id, task.counter, "task22", Number.MAX_SAFE_INTEGER);
+    await tasks.complete(task.id, task.counter);
+    const count = await tasks.heartbeat("task22");
+    expect(count).toBe(0);
+  });
+});

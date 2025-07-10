@@ -93,6 +93,7 @@ export class Tasks {
             if (response.kind !== "heartbeatTasks") {
               throw new Error("unexpected response");
             }
+
             resolve(response.tasksAffected);
           }
         },
