@@ -567,24 +567,49 @@ export class Server {
         "rejected",
         "rejected_canceled",
         "rejected_timedout",
-      ].includes(promise.state) &&
-      promise.callbacks
+      ].includes(promise.state)
     ) {
-      for (const callback of promise.callbacks.values()) {
-        const { task, applied } = this.transitionTask(
-          callback.id,
-          "init",
-          callback.type,
-          callback.recv,
-          callback.rootPromiseId,
-          callback.promiseId,
-          time,
-        );
+      if (promise.callbacks) {
+        for (const callback of promise.callbacks.values()) {
+          const { task, applied } = this.transitionTask(
+            callback.id,
+            "init",
+            callback.type,
+            callback.recv,
+            callback.rootPromiseId,
+            callback.promiseId,
+            time,
+          );
 
-        util.assert(applied);
+          util.assert(applied);
+        }
+        promise.callbacks.clear();
       }
-      promise.callbacks.clear();
+
+      for (const task of this.tasks.values()) {
+        if (
+          task.rootPromiseId === id &&
+          ["init", "enqueued", "claimed"].includes(task.state)
+        ) {
+          let applied = this.transitionTask(
+            task.id,
+            "completed",
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            true,
+            time,
+          ).applied;
+
+          util.assert(applied);
+        }
+      }
     }
+
     return { promise: promise, applied: applied };
   }
 
