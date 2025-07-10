@@ -588,10 +588,11 @@ export class Server {
 
       for (const task of this.tasks.values()) {
         if (
-          task.rootPromiseId === id &&
-          ["init", "enqueued", "claimed"].includes(task.state)
+          task.leafPromiseId === id &&
+          ["init", "enqueued", "claimed"].includes(task.state) &&
+          ["invoke", "resume"].includes(task.type)
         ) {
-          let applied = this.transitionTask(
+          const { applied } = this.transitionTask(
             task.id,
             "completed",
             undefined,
@@ -603,8 +604,7 @@ export class Server {
             undefined,
             true,
             time,
-          ).applied;
-
+          );
           util.assert(applied);
         }
       }

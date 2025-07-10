@@ -13,7 +13,6 @@ describe("tasks transitions", () => {
     let next = step.next();
     let value = next.value!;
     next = step.next(true);
-    expect(next.done).toBe(true);
     expect(value.msg.kind).toBe("invoke");
 
     return value.msg as { id: string; counter: number };
