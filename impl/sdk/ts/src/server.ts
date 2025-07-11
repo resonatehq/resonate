@@ -569,27 +569,10 @@ export class Server {
         "rejected_timedout",
       ].includes(promise.state)
     ) {
-      if (promise.callbacks) {
-        for (const callback of promise.callbacks.values()) {
-          const { task, applied } = this.transitionTask(
-            callback.id,
-            "init",
-            callback.type,
-            callback.recv,
-            callback.rootPromiseId,
-            callback.promiseId,
-            time,
-          );
-
-          util.assert(applied);
-        }
-        promise.callbacks.clear();
-      }
-
       for (const task of this.tasks.values()) {
         if (
           task.leafPromiseId === id &&
-          ["init", "enqueued", "claimed"].includes(task.state) &&
+          ["init", "enqueued"].includes(task.state) &&
           ["invoke", "resume"].includes(task.type)
         ) {
           const { applied } = this.transitionTask(
@@ -607,6 +590,23 @@ export class Server {
           );
           util.assert(applied);
         }
+      }
+
+      if (promise.callbacks) {
+        for (const callback of promise.callbacks.values()) {
+          const { task, applied } = this.transitionTask(
+            callback.id,
+            "init",
+            callback.type,
+            callback.recv,
+            callback.rootPromiseId,
+            callback.promiseId,
+            time,
+          );
+
+          util.assert(applied);
+        }
+        promise.callbacks.clear();
       }
     }
 
