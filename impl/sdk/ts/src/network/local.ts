@@ -1,26 +1,26 @@
-import {
-  RequestMsg,
-  Network,
-  ResponseMsg,
-  RecvMsg,
-  CreatePromiseReq,
-  CreatePromiseRes,
-  ReadPromiseReq,
-  ReadPromiseRes,
-  CompletePromiseRes,
-  CompletePromiseReq,
-  CreateSubscriptionReq,
-  CreateSubscriptionRes,
+import { Server } from "../server";
+import type {
   ClaimTaskReq,
   ClaimTaskRes,
-  CreateCallbackReq,
-  CreateCallbackRes,
+  CompletePromiseReq,
+  CompletePromiseRes,
   CompleteTaskReq,
   CompleteTaskRes,
+  CreateCallbackReq,
+  CreateCallbackRes,
+  CreatePromiseReq,
+  CreatePromiseRes,
+  CreateSubscriptionReq,
+  CreateSubscriptionRes,
   HeartbeatTasksReq,
   HeartbeatTasksRes,
+  Network,
+  ReadPromiseReq,
+  ReadPromiseRes,
+  RecvMsg,
+  RequestMsg,
+  ResponseMsg,
 } from "./network";
-import { Server } from "../server";
 
 export class LocalNetwork implements Network {
   private server: Server;

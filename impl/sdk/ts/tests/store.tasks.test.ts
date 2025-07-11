@@ -1,4 +1,3 @@
-import { assert } from "node:test";
 import { LocalNetwork } from "../src/network/local";
 import { Promises } from "../src/promises";
 import { Server } from "../src/server";

@@ -171,7 +171,7 @@ export class Server {
 
       if (yield { recv: task.recv, msg: msg }) {
         if (task.type === "notify") {
-          var { applied } = this.transitionTask(
+          const { applied } = this.transitionTask(
             task.id,
             "completed",
             undefined,
@@ -184,8 +184,9 @@ export class Server {
             undefined,
             time,
           );
+          util.assert(applied);
         } else {
-          var { applied } = this.transitionTask(
+          const { applied } = this.transitionTask(
             task.id,
             "enqueued",
             undefined,
@@ -198,8 +199,8 @@ export class Server {
             undefined,
             time,
           );
+          util.assert(applied);
         }
-        util.assert(applied);
       } else {
         // TODO(dfarr): implement this
         // _, applied = self.tasks.transition(task.id, to="INIT", expiry=0)

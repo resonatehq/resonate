@@ -1,5 +1,5 @@
 import { LocalNetwork } from "./network/local";
-import { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
+import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
 import * as util from "./util";
 export class Promises {
   private network: Network;
@@ -13,7 +13,9 @@ export class Promises {
         if (timeout) {
           util.assert(response.kind === "error");
           throw new Error("not implemented");
-        } else if (response.kind === "error") {
+        }
+
+        if (response.kind === "error") {
           util.assert(!timeout);
           reject(response.message);
         } else {
@@ -49,7 +51,9 @@ export class Promises {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -78,7 +82,9 @@ export class Promises {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -106,7 +112,9 @@ export class Promises {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -134,7 +142,9 @@ export class Promises {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -170,7 +180,9 @@ export class Promises {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -197,7 +209,9 @@ export class Promises {
         if (timeout) {
           util.assert(response.kind === "error");
           throw new Error("not implemented");
-        } else if (response.kind === "error") {
+        }
+
+        if (response.kind === "error") {
           util.assert(!timeout);
           reject(response.message);
         } else {

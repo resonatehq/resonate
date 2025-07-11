@@ -1,5 +1,5 @@
 import { LocalNetwork } from "./network/local";
-import { CallbackRecord, DurablePromiseRecord, Mesg, Network, TaskRecord } from "./network/network";
+import type { Mesg, Network, TaskRecord } from "./network/network";
 
 import * as util from "./util";
 
@@ -24,7 +24,9 @@ export class Tasks {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -50,7 +52,9 @@ export class Tasks {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
@@ -75,7 +79,9 @@ export class Tasks {
           if (timeout) {
             util.assert(response.kind === "error");
             throw new Error("not implemented");
-          } else if (response.kind === "error") {
+          }
+
+          if (response.kind === "error") {
             util.assert(!timeout);
             reject(response.message);
           } else {
