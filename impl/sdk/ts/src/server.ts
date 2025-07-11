@@ -1,4 +1,6 @@
-import type { CallbackRecord, DurablePromiseRecord, Mesg, TaskRecord } from "./network/network";
+import { CronExpressionParser } from "cron-parser";
+
+import type { CallbackRecord, DurablePromiseRecord, Mesg, ScheduleRecord, TaskRecord } from "./network/network";
 import * as util from "./util";
 
 interface DurablePromise {
@@ -40,6 +42,21 @@ interface Task {
   completedOn?: number;
 }
 
+interface Schedule {
+  id: string;
+  description?: string;
+  cron: string;
+  tags: Record<string, string>;
+  promiseId: string;
+  promiseTimeout: number;
+  promiseParam: any;
+  promiseTags: Record<string, string>;
+  lastRunTime?: number;
+  nextRunTime?: number;
+  iKey?: string;
+  createdOn?: number;
+}
+
 interface Router {
   route(promise: DurablePromise): any;
 }
@@ -58,12 +75,14 @@ class TagRouter implements Router {
 export class Server {
   private promises: Map<string, DurablePromise>;
   private tasks: Map<string, Task>;
+  private schedules: Map<string, Schedule>;
   private routers: Array<Router>;
   private targets: Record<string, string>;
 
   constructor() {
     this.promises = new Map();
     this.tasks = new Map();
+    this.schedules = new Map();
     this.routers = new Array(new TagRouter());
     this.targets = { default: "local://any@default" };
   }
@@ -92,6 +111,15 @@ export class Server {
       }
     }
 
+    for (const schedule of this.schedules.values()) {
+      util.assert(schedule.nextRunTime !== undefined);
+      if (timeout === undefined) {
+        timeout = schedule.nextRunTime!;
+      } else {
+        timeout = Math.min(schedule.nextRunTime!, timeout);
+      }
+    }
+
     if (timeout !== undefined) {
       timeout = Math.max(0, timeout - time);
     }
@@ -109,6 +137,38 @@ export class Server {
     void,
     boolean | undefined
   > {
+    for (const schedule of this.schedules.values()) {
+      if (time < schedule.nextRunTime!) {
+        continue;
+      }
+      try {
+        this.createPromise(
+          schedule.promiseId.replace("{{.timestamp}}", time.toString()),
+          time + schedule.promiseTimeout,
+          schedule.promiseParam,
+          schedule.promiseTags,
+          undefined,
+          false,
+          time,
+        );
+      } catch {}
+
+      const { applied } = this.transitionSchedule(
+        schedule.id,
+        "created",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true,
+        time,
+      );
+      util.assert(applied);
+    }
     for (const promise of this.promises.values()) {
       if (promise.state === "pending" && time >= promise.timeout) {
         const { applied } = this.transitionPromise(
@@ -449,6 +509,47 @@ export class Server {
     }
 
     return affectedTasks;
+  }
+
+  createSchedule(
+    id: string,
+    cron: string,
+    promiseId: string,
+    promiseTimeout: number,
+    iKey?: string,
+    description?: string,
+    tags?: Record<string, string>,
+    promiseParam?: any,
+    promiseTags?: Record<string, string>,
+    time: number = Date.now(),
+  ): ScheduleRecord {
+    return this.transitionSchedule(
+      id,
+      "created",
+      cron,
+      promiseId,
+      promiseTimeout,
+      iKey,
+      description,
+      tags,
+      promiseParam,
+      promiseTags,
+      undefined,
+      time,
+    ).schedule;
+  }
+
+  readSchedule(id: string): ScheduleRecord {
+    const schedule = this.schedules.get(id);
+    if (schedule === undefined) {
+      throw new Error("schedule not found");
+    }
+    return schedule;
+  }
+
+  deleteSchedule(id: string, time: number = Date.now()): void {
+    const { applied } = this.transitionSchedule(id, "deleted");
+    util.assert(applied);
   }
 
   private getPromise(id: string): DurablePromise {
@@ -918,6 +1019,85 @@ export class Server {
     }
 
     throw new Error("task is already claimed, completed, or an invalid counter was provided");
+  }
+
+  private transitionSchedule(
+    id: string,
+    to: "created" | "deleted",
+    cron?: string,
+    promiseId?: string,
+    promiseTimeout?: number,
+    iKey?: string,
+    description?: string,
+    tags?: Record<string, string>,
+    promiseParam?: any,
+    promiseTags?: Record<string, string>,
+    updating?: boolean,
+    time: number = Date.now(),
+  ): { schedule: Schedule; applied: boolean } {
+    let record = this.schedules.get(id);
+
+    if (record === undefined && to === "created") {
+      util.assert(cron !== undefined);
+      util.assert(promiseId !== undefined);
+      util.assert(promiseTimeout !== undefined);
+      util.assert(promiseTimeout! >= 0);
+
+      record = {
+        id: id,
+        description: description,
+        cron: cron!,
+        tags: tags ?? {},
+        promiseId: promiseId!,
+        promiseTimeout: promiseTimeout!,
+        promiseParam: promiseParam,
+        promiseTags: promiseTags ?? {},
+        lastRunTime: undefined,
+        nextRunTime: CronExpressionParser.parse(cron!).next().getMilliseconds(),
+        iKey: iKey,
+        createdOn: time,
+      };
+      this.schedules.set(id, record);
+      return { schedule: record, applied: true };
+    }
+
+    if (record !== undefined && to === "created" && ikeyMatch(iKey, record.iKey)) {
+      return { schedule: record, applied: false };
+    }
+
+    if (record !== undefined && to === "created" && updating) {
+      record = {
+        id: record.id,
+        description: record.description,
+        cron: record.cron,
+        tags: record.tags,
+        promiseId: record.promiseId,
+        promiseTimeout: record.promiseTimeout,
+        promiseParam: record.promiseParam,
+        promiseTags: record.promiseTags,
+        lastRunTime: record.nextRunTime,
+        nextRunTime: CronExpressionParser.parse(record.cron!).next().getMilliseconds(),
+        iKey: record.iKey,
+        createdOn: record.createdOn,
+      };
+      this.schedules.set(id, record);
+      return { schedule: record, applied: true };
+    }
+
+    if (record !== undefined && to === "created") {
+      throw new Error("schedule already exists");
+    }
+
+    if (record === undefined && to === "deleted") {
+      throw new Error("schedule not found");
+    }
+
+    if (record !== undefined && to === "deleted") {
+      this.schedules.delete(id);
+      return { schedule: record, applied: true };
+    }
+
+    throw new Error("Unexpected transition");
   }
 }
 

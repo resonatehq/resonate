@@ -13,13 +13,19 @@ import type {
   CreatePromiseAndTaskRes,
   CreatePromiseReq,
   CreatePromiseRes,
+  CreateScheduleReq,
+  CreateScheduleRes,
   CreateSubscriptionReq,
   CreateSubscriptionRes,
+  DeleteScheduleReq,
+  DeleteScheduleRes,
   HeartbeatTasksReq,
   HeartbeatTasksRes,
   Network,
   ReadPromiseReq,
   ReadPromiseRes,
+  ReadScheduleReq,
+  ReadScheduleRes,
   RecvMsg,
   RequestMsg,
   ResponseMsg,
@@ -52,11 +58,11 @@ export class LocalNetwork implements Network {
       case "createSubscription":
         return this.createSubscription(request);
       case "createSchedule":
-        throw new Error("not implemented");
+        return this.createSchedule(request);
       case "readSchedule":
-        throw new Error("not implemented");
+        return this.readSchedule(request);
       case "deleteSchedule":
-        throw new Error("not implemented");
+        return this.deleteSchedule(request);
       case "claimTask":
         return this.claimTask(request);
       case "completeTask":
@@ -121,6 +127,29 @@ export class LocalNetwork implements Network {
     };
   }
 
+  private createSchedule(request: CreateScheduleReq): CreateScheduleRes {
+    return {
+      kind: "createSchedule",
+      schedule: this.server.createSchedule(
+        request.id!,
+        request.cron!,
+        request.promiseId!,
+        request.promiseTimeout!,
+        request.iKey,
+        request.description,
+        request.tags,
+        request.promiseParam,
+        request.promiseTags,
+      ),
+    };
+  }
+  private readSchedule(request: ReadScheduleReq): ReadScheduleRes {
+    return { kind: "readSchedule", schedule: this.server.readSchedule(request.id) };
+  }
+
+  private deleteSchedule(request: DeleteScheduleReq): DeleteScheduleRes {
+    return { kind: "deleteSchedule" };
+  }
   private createCallback(request: CreateCallbackReq): CreateCallbackRes {
     return {
       kind: "createCallback",
