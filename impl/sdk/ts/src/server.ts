@@ -127,7 +127,7 @@ export class Server {
   > {
     for (const promise of this.promises.values()) {
       if (promise.state === "pending" && time >= promise.timeout) {
-        let applied = this.transitionPromise(
+        const { applied } = this.transitionPromise(
           promise.id,
           "rejected_timedout",
           undefined,
@@ -136,7 +136,7 @@ export class Server {
           undefined,
           undefined,
           time,
-        ).applied;
+        );
         util.assert(applied, "expected promise to be timedout");
       }
     }
@@ -149,7 +149,7 @@ export class Server {
         }
 
         if (time >= task.expiry) {
-          const applied = this.transitionTask(
+          const { applied } = this.transitionTask(
             task.id,
             "init",
             undefined,
@@ -161,7 +161,7 @@ export class Server {
             undefined,
             true,
             time,
-          ).applied;
+          );
           util.assert(applied);
         }
       }
@@ -188,9 +188,8 @@ export class Server {
       }
 
       if (yield { recv: task.recv, msg: msg }) {
-        var applied: boolean;
         if (task.type === "notify") {
-          applied = this.transitionTask(
+          var { applied } = this.transitionTask(
             task.id,
             "completed",
             undefined,
@@ -202,9 +201,9 @@ export class Server {
             undefined,
             undefined,
             time,
-          ).applied;
+          );
         } else {
-          applied = this.transitionTask(
+          var { applied } = this.transitionTask(
             task.id,
             "enqueued",
             undefined,
@@ -216,7 +215,7 @@ export class Server {
             undefined,
             undefined,
             time,
-          ).applied;
+          );
         }
         util.assert(applied);
       } else {
@@ -400,7 +399,6 @@ export class Server {
   }
 
   hearbeatTasks(processId: string, time: number = Date.now()): number {
-    let applied = false;
     let affectedTasks = 0;
 
     for (const task of this.tasks.values()) {
@@ -408,7 +406,7 @@ export class Server {
         continue;
       }
 
-      applied = this.transitionTask(
+      const { applied } = this.transitionTask(
         task.id,
         "claimed",
         undefined,
@@ -420,7 +418,7 @@ export class Server {
         undefined,
         true,
         time,
-      ).applied;
+      );
 
       util.assert(applied);
       affectedTasks += 1;
@@ -572,7 +570,7 @@ export class Server {
       for (const task of this.tasks.values()) {
         if (
           task.leafPromiseId === id &&
-          ["init", "enqueued"].includes(task.state) &&
+          ["init", "enqueued", "claimed"].includes(task.state) &&
           ["invoke", "resume"].includes(task.type)
         ) {
           const { applied } = this.transitionTask(
@@ -594,7 +592,7 @@ export class Server {
 
       if (promise.callbacks) {
         for (const callback of promise.callbacks.values()) {
-          const { task, applied } = this.transitionTask(
+          const { applied } = this.transitionTask(
             callback.id,
             "init",
             callback.type,
