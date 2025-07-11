@@ -91,26 +91,24 @@ export class Server {
     let timeout: number | undefined = undefined;
     for (const promise of this.promises.values()) {
       if (promise.state === "pending") {
-        timeout = Math.min(promise.timeout, timeout!) ? timeout : promise.timeout;
+        timeout = timeout === undefined ? promise.timeout : Math.min(promise.timeout, timeout);
       }
     }
 
     for (const task of this.tasks.values()) {
       if (["init", "enqueued", "claimed"].includes(task.state)) {
         util.assert(task.expiry !== undefined);
-        timeout = Math.min(task.expiry!, timeout!) ? timeout : task.expiry;
+        timeout = timeout === undefined ? task.expiry : Math.min(task.expiry!, timeout);
       }
     }
 
     for (const schedule of this.schedules.values()) {
       util.assert(schedule.nextRunTime !== undefined);
-
-      timeout = Math.min(schedule.nextRunTime!, timeout!) ? timeout : schedule.nextRunTime!;
+      timeout = timeout === undefined ? schedule.nextRunTime : Math.min(schedule.nextRunTime!, timeout);
     }
 
-    if (timeout !== undefined) {
-      timeout = Math.max(0, timeout - time);
-    }
+    timeout = timeout !== undefined ? Math.max(0, timeout - time) : timeout;
+
     util.assert(timeout !== undefined);
     return timeout!;
   }
