@@ -773,8 +773,7 @@ export class Server {
     }
 
     if (
-      record !== undefined &&
-      record.state === "rejected_timedout" &&
+      record?.state === "rejected_timedout" &&
       ["resolved", "rejected", "rejected_canceled"].includes(to) &&
       !strict
     ) {
@@ -902,7 +901,7 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (record !== undefined && record.state === "claimed" && to === "claimed" && force) {
+    if (record?.state === "claimed" && to === "claimed" && force) {
       util.assert(record.ttl !== undefined);
 
       record = {
@@ -917,8 +916,7 @@ export class Server {
     }
 
     if (
-      record !== undefined &&
-      record.state === "claimed" &&
+      record?.state === "claimed" &&
       to === "completed" &&
       record.counter === counter &&
       record.expiry !== undefined &&
@@ -934,7 +932,12 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (record !== undefined && ["init", "enqueued", "claimed"].includes(record.state) && to === "completed" && force) {
+    if (
+      record !== undefined &&
+      ["init", "enqueued", "claimed"].includes(record?.state) &&
+      to === "completed" &&
+      force
+    ) {
       record = {
         ...record,
         state: to,
