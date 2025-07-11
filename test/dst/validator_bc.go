@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math/rand"
 
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -74,47 +73,21 @@ func ValidateTasksWithSameRootPromiseId(model *Model, reqTime int64, _ int64, re
 			return model, nil
 		}
 
-		state := reqT.State
-		completedOn := reqT.CompletedOn
-		if p != nil &&
-			p.State != promise.Pending {
-			if reqT.Mesg.Type == message.Invoke && *p.CompletedOn <= *reqT.CreatedOn {
-				return model, fmt.Errorf("invocation for a promise that is alredy completed")
-			} else if *p.CompletedOn > *reqT.CreatedOn {
-				state = task.Completed
-				completedOn = util.ToPointer(*p.CompletedOn)
-			}
+		if p != nil && p.State != promise.Pending && reqT.Mesg.Type == message.Invoke && *p.CompletedOn <= *reqT.CreatedOn {
+			return model, fmt.Errorf("invoke message recieved for complete promise")
 		}
 
-		for _, t := range *model.tasks {
-			if t.value.RootPromiseId != reqT.RootPromiseId ||
-				t.value.Mesg.Type != reqT.Mesg.Type ||
-				t.value.Id == reqT.Id {
+		for _, t := range model.tasks.all() {
+			if t.RootPromiseId != reqT.RootPromiseId || t.Mesg.Type != reqT.Mesg.Type || t.Id == reqT.Id {
 				continue
 			}
-			if !t.value.State.In(task.Completed|task.Timedout) &&
-				t.value.Timeout > reqTime {
+			if !t.State.In(task.Completed|task.Timedout) && t.ExpiresAt > reqTime && t.Timeout > reqTime {
 				return model, fmt.Errorf("multiple tasks with same rootpromiseId '%s' active at the same time", req.bc.Task.RootPromiseId)
 			}
 		}
 
-		newT := &task.Task{
-			Id:            reqT.Id,
-			Counter:       reqT.Counter,
-			Timeout:       reqT.Timeout,
-			ProcessId:     reqT.ProcessId,
-			State:         state,
-			RootPromiseId: reqT.RootPromiseId,
-			Recv:          reqT.Recv,
-			Mesg:          reqT.Mesg,
-			Attempt:       reqT.Attempt,
-			Ttl:           reqT.Ttl,
-			ExpiresAt:     reqT.ExpiresAt,
-			CreatedOn:     reqT.CreatedOn,
-			CompletedOn:   completedOn,
-		}
 		model = model.Copy()
-		model.tasks.set(newT.Id, newT)
+		model.tasks.set(reqT.Id, reqT)
 	}
 
 	return model, nil

@@ -43,7 +43,7 @@ const issueFmt = `# DST Failed
 
 **Command**
 ~~~
-go run ./... dst run --seed %d --ticks %d --scenario %s --aio-store %s
+go run ./... dst run --seed %d --ticks %d --scenario %s --aio-store-%s-enable
 ~~~
 
 **Logs**

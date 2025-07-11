@@ -69,6 +69,15 @@ func (s *Store[I, T]) copy() *Store[I, T] {
 	return &copied
 }
 
+func (s *Store[I, T]) all() []T {
+	var values []T
+	for _, item := range *s {
+		values = append(values, item.value)
+	}
+
+	return values
+}
+
 func (s *Store[I, T]) get(id I) T {
 	i := sort.Search(len(*s), func(i int) bool {
 		return (*s)[i].id >= id
