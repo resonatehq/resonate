@@ -107,9 +107,8 @@ export class Server {
       timeout = timeout === undefined ? schedule.nextRunTime : Math.min(schedule.nextRunTime!, timeout);
     }
 
-    if (timeout !== undefined) {
-      timeout = Math.max(0, timeout - time);
-    }
+    timeout = timeout !== undefined ? Math.max(0, timeout - time) : timeout;
+
     util.assert(timeout !== undefined);
     return timeout!;
   }
