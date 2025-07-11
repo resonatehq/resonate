@@ -91,33 +91,21 @@ export class Server {
     let timeout: number | undefined = undefined;
     for (const promise of this.promises.values()) {
       if (promise.state === "pending") {
-        if (timeout === undefined) {
-          timeout = promise.timeout;
-        } else {
-          timeout = Math.min(promise.timeout, timeout);
-        }
+        timeout = Math.min(promise.timeout, timeout!) ? timeout : promise.timeout;
       }
     }
 
     for (const task of this.tasks.values()) {
       if (["init", "enqueued", "claimed"].includes(task.state)) {
         util.assert(task.expiry !== undefined);
-
-        if (timeout === undefined) {
-          timeout = task.expiry;
-        } else {
-          timeout = Math.min(task.expiry!, timeout);
-        }
+        timeout = Math.min(task.expiry!, timeout!) ? timeout : task.expiry;
       }
     }
 
     for (const schedule of this.schedules.values()) {
       util.assert(schedule.nextRunTime !== undefined);
-      if (timeout === undefined) {
-        timeout = schedule.nextRunTime!;
-      } else {
-        timeout = Math.min(schedule.nextRunTime!, timeout);
-      }
+
+      timeout = Math.min(schedule.nextRunTime!, timeout!) ? timeout : schedule.nextRunTime!;
     }
 
     if (timeout !== undefined) {
@@ -269,7 +257,7 @@ export class Server {
     }
   }
 
-  private _cratePromise(
+  private _createPromise(
     id: string,
     timeout: number,
     param?: any,
@@ -298,7 +286,7 @@ export class Server {
     strict?: boolean,
     time: number = Date.now(),
   ): DurablePromiseRecord {
-    return this._cratePromise(id, timeout, param, tags, iKey, strict, undefined, undefined, time).promise;
+    return this._createPromise(id, timeout, param, tags, iKey, strict, undefined, undefined, time).promise;
   }
 
   createPromiseAndTask(
@@ -312,7 +300,7 @@ export class Server {
     strict?: boolean,
     time: number = Date.now(),
   ): { promise: DurablePromiseRecord; task?: TaskRecord } {
-    return this._cratePromise(id, timeout, param, tags, iKey, strict, processId, ttl, time) as {
+    return this._createPromise(id, timeout, param, tags, iKey, strict, processId, ttl, time) as {
       promise: DurablePromiseRecord;
       task?: TaskRecord;
     };
