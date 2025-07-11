@@ -47,12 +47,10 @@ export interface Mesg {
   promises: {
     root?: {
       id: string;
-      href: string;
       data: DurablePromiseRecord;
     };
     leaf?: {
       id: string;
-      href: string;
       data: DurablePromiseRecord;
     };
   };

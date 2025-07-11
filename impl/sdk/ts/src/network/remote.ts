@@ -465,14 +465,12 @@ export class HttpNetwork implements Network {
           root: message.promises.root
             ? {
                 id: message.promises.root.id,
-                href: message.promises.root.href,
                 data: this.mapPromiseDtoToRecord(message.promises.root.data),
               }
             : undefined,
           leaf: message.promises.leaf
             ? {
                 id: message.promises.leaf.id,
-                href: message.promises.leaf.href,
                 data: this.mapPromiseDtoToRecord(message.promises.leaf.data),
               }
             : undefined,
@@ -552,7 +550,9 @@ export class HttpNetwork implements Network {
       });
 
       if (!response.ok) {
-        const errorData = (await response.json().catch(() => ({}))) as { message?: string };
+        const errorData = (await response.json().catch(() => ({}))) as {
+          message?: string;
+        };
         throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
