@@ -251,8 +251,11 @@ export class Server {
     iKey?: string,
     strict?: boolean,
     time: number = Date.now(),
-  ): { promise: DurablePromiseRecord; task?: Task } {
-    return this._cratePromise(id, timeout, param, tags, iKey, strict, processId, ttl, time);
+  ): { promise: DurablePromiseRecord; task?: TaskRecord } {
+    return this._cratePromise(id, timeout, param, tags, iKey, strict, processId, ttl, time) as {
+      promise: DurablePromiseRecord;
+      task?: TaskRecord;
+    };
   }
 
   readPromise(id: string, time: number = Date.now()): DurablePromiseRecord {

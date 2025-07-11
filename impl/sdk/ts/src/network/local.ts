@@ -1,4 +1,5 @@
 import { Server } from "../server";
+
 import type {
   ClaimTaskReq,
   ClaimTaskRes,
@@ -8,6 +9,8 @@ import type {
   CompleteTaskRes,
   CreateCallbackReq,
   CreateCallbackRes,
+  CreatePromiseAndTaskReq,
+  CreatePromiseAndTaskRes,
   CreatePromiseReq,
   CreatePromiseRes,
   CreateSubscriptionReq,
@@ -39,7 +42,7 @@ export class LocalNetwork implements Network {
       case "createPromise":
         return this.createPromise(request);
       case "createPromiseAndTask":
-        throw new Error("not implemented");
+        return this.createPromiseAndTask(request);
       case "readPromise":
         return this.readPromise(request);
       case "completePromise":
@@ -77,6 +80,23 @@ export class LocalNetwork implements Network {
         request.iKey,
         request.strict,
       ),
+    };
+  }
+  private createPromiseAndTask(request: CreatePromiseAndTaskReq): CreatePromiseAndTaskRes {
+    const { promise, task } = this.server.createPromiseAndTask(
+      request.promise.id,
+      request.promise.timeout,
+      request.task.processId,
+      request.task.ttl,
+      request.promise.param,
+      request.promise.tags,
+      request.iKey,
+      request.strict,
+    );
+    return {
+      kind: "createPromiseAndTask",
+      promise: promise,
+      task: task,
     };
   }
 
