@@ -44,16 +44,12 @@ describe("tasks transitions", () => {
 
   test("Test Case 5: transition from enqueued to claimed via claim", async () => {
     let task = step(server);
-    await expect(
-      tasks.claim(task.id, task.counter, "task5", Number.MAX_SAFE_INTEGER),
-    ).resolves.not.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task5", Number.MAX_SAFE_INTEGER)).resolves.not.toThrow();
   });
 
   test("Test Case 6: transition from enqueue to enqueue via claim", async () => {
     let task = step(server);
-    await expect(
-      tasks.claim(task.id, task.counter + 1, "task5", Number.MAX_SAFE_INTEGER),
-    ).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter + 1, "task5", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
   });
 
   test("Test Case 8: transition from enqueue to enqueue via complete", async () => {
@@ -69,17 +65,13 @@ describe("tasks transitions", () => {
   test("Test Case 12: transition from claimed to claimed via claim", async () => {
     let task = step(server);
     await tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER);
-    await expect(
-      tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER),
-    ).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
   });
 
   test("Test Case 13: transition from claimed to init via claim", async () => {
     let task = step(server);
     await tasks.claim(task.id, task.counter, "task13", 0);
-    await expect(
-      tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER),
-    ).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
   });
 
   test("Test Case 14: transition from claimed to completed via complete", async () => {
@@ -126,9 +118,7 @@ describe("tasks transitions", () => {
     let task = step(server);
     await tasks.claim(task.id, task.counter, "task20", Number.MAX_SAFE_INTEGER);
     await tasks.complete(task.id, task.counter);
-    await expect(
-      tasks.claim(task.id, task.counter, "task20", 0),
-    ).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task20", 0)).rejects.toThrow();
   });
 
   test("Test Case 21: transition from completed to completed via complete", async () => {

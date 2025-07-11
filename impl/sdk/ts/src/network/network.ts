@@ -1,11 +1,6 @@
 export interface DurablePromiseRecord {
   id: string;
-  state:
-    | "pending"
-    | "resolved"
-    | "rejected"
-    | "rejected_canceled"
-    | "rejected_timedout";
+  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -275,9 +270,6 @@ export type ResponseMsg =
 export type RecvMsg = any;
 
 export interface Network {
-  send(
-    request: RequestMsg,
-    callback: (timeout: boolean, response: ResponseMsg) => void,
-  ): void;
+  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void;
   recv(msg: RecvMsg): void;
 }

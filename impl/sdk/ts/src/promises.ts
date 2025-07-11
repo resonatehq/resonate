@@ -1,9 +1,5 @@
 import { LocalNetwork } from "./network/local";
-import {
-  CallbackRecord,
-  DurablePromiseRecord,
-  Network,
-} from "./network/network";
+import { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
 import * as util from "./util";
 export class Promises {
   private network: Network;
@@ -13,23 +9,20 @@ export class Promises {
 
   get(id: string): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
-      this.network.send(
-        { kind: "readPromise", id: id },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
-          } else if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response.message);
-          } else {
-            if (response.kind !== "readPromise") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.promise);
+      this.network.send({ kind: "readPromise", id: id }, (timeout, response) => {
+        if (timeout) {
+          util.assert(response.kind === "error");
+          throw new Error("not implemented");
+        } else if (response.kind === "error") {
+          util.assert(!timeout);
+          reject(response.message);
+        } else {
+          if (response.kind !== "readPromise") {
+            throw new Error("unexpected response");
           }
-        },
-      );
+          resolve(response.promise);
+        }
+      });
     });
   }
 
@@ -70,12 +63,7 @@ export class Promises {
     });
   }
 
-  resolve(
-    id: string,
-    value?: any,
-    iKey?: string,
-    strict?: boolean,
-  ): Promise<DurablePromiseRecord> {
+  resolve(id: string, value?: any, iKey?: string, strict?: boolean): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
@@ -103,12 +91,7 @@ export class Promises {
       );
     });
   }
-  reject(
-    id: string,
-    value?: any,
-    iKey?: string,
-    strict?: boolean,
-  ): Promise<DurablePromiseRecord> {
+  reject(id: string, value?: any, iKey?: string, strict?: boolean): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
@@ -136,12 +119,7 @@ export class Promises {
       );
     });
   }
-  cancel(
-    id: string,
-    value?: any,
-    iKey?: string,
-    strict?: boolean,
-  ): Promise<DurablePromiseRecord> {
+  cancel(id: string, value?: any, iKey?: string, strict?: boolean): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
@@ -215,23 +193,20 @@ export class Promises {
     callback: CallbackRecord | undefined;
   }> {
     return new Promise((resolve, reject) => {
-      this.network.send(
-        { kind: "createSubscription", id: id, timeout: timeout, recv: recv },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
-          } else if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response.message);
-          } else {
-            if (response.kind !== "createSubscription") {
-              throw new Error("unexpected response");
-            }
-            resolve({ promise: response.promise, callback: response.callback });
+      this.network.send({ kind: "createSubscription", id: id, timeout: timeout, recv: recv }, (timeout, response) => {
+        if (timeout) {
+          util.assert(response.kind === "error");
+          throw new Error("not implemented");
+        } else if (response.kind === "error") {
+          util.assert(!timeout);
+          reject(response.message);
+        } else {
+          if (response.kind !== "createSubscription") {
+            throw new Error("unexpected response");
           }
-        },
-      );
+          resolve({ promise: response.promise, callback: response.callback });
+        }
+      });
     });
   }
 }

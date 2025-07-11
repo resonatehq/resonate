@@ -1,19 +1,9 @@
-import type {
-  CallbackRecord,
-  DurablePromiseRecord,
-  Mesg,
-  TaskRecord,
-} from "./network/network";
+import type { CallbackRecord, DurablePromiseRecord, Mesg, TaskRecord } from "./network/network";
 import * as util from "./util";
 
 interface DurablePromise {
   id: string;
-  state:
-    | "pending"
-    | "resolved"
-    | "rejected"
-    | "rejected_canceled"
-    | "rejected_timedout";
+  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   timeout: number;
   param: any;
   value: any;
@@ -92,14 +82,12 @@ export class Server {
 
     for (const task of this.tasks.values()) {
       if (["init", "enqueued", "claimed"].includes(task.state)) {
-        if (task.expiry === undefined) {
-          throw new Error("unexpected path");
-        }
+        util.assert(task.expiry !== undefined);
 
         if (timeout === undefined) {
           timeout = task.expiry;
         } else {
-          timeout = Math.min(task.expiry, timeout);
+          timeout = Math.min(task.expiry!, timeout);
         }
       }
     }
@@ -107,12 +95,8 @@ export class Server {
     if (timeout !== undefined) {
       timeout = Math.max(0, timeout - time);
     }
-
-    if (timeout === undefined) {
-      throw new Error("timeout should have been set by this point");
-    }
-
-    return timeout;
+    util.assert(timeout !== undefined);
+    return timeout!;
   }
 
   *step(time: number = Date.now()): Generator<
@@ -144,11 +128,9 @@ export class Server {
     // transition expired tasks to init
     for (const task of this.tasks.values()) {
       if (["enqueued", "claimed"].includes(task.state)) {
-        if (task.expiry === undefined) {
-          throw new Error("task must have an expiry");
-        }
+        util.assert(task.expiry !== undefined);
 
-        if (time >= task.expiry) {
+        if (time >= task.expiry!) {
           const { applied } = this.transitionTask(
             task.id,
             "init",
@@ -235,19 +217,8 @@ export class Server {
     strict?: boolean,
     time: number = Date.now(),
   ): DurablePromiseRecord {
-    const { promise, task, applied } = this.transitionPromise(
-      id,
-      "pending",
-      strict,
-      timeout,
-      iKey,
-      param,
-      tags,
-      time,
-    );
-    util.assert(
-      !applied || ["pending", "rejected_timedout"].includes(promise.state),
-    );
+    const { promise, applied } = this.transitionPromise(id, "pending", strict, timeout, iKey, param, tags, time);
+    util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
 
     return promise;
   }
@@ -264,19 +235,8 @@ export class Server {
     strict?: boolean,
     time: number = Date.now(),
   ): DurablePromiseRecord {
-    const { promise, task, applied } = this.transitionPromise(
-      id,
-      state,
-      strict,
-      undefined,
-      iKey,
-      value,
-      undefined,
-      time,
-    );
-    util.assert(
-      !applied || [state, "rejected_timedout"].includes(promise.state),
-    );
+    const { promise, applied } = this.transitionPromise(id, state, strict, undefined, iKey, value, undefined, time);
+    util.assert(!applied || [state, "rejected_timedout"].includes(promise.state));
     return promise;
   }
 
@@ -286,18 +246,40 @@ export class Server {
     recv: string,
     time: number = Date.now(),
   ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
-    const { promise, callback } = this.subscribeToPromise(
-      id,
-      id,
-      recv,
-      timeout,
-      time,
-    );
+    {
+      const record = this.promises.get(id);
 
-    return {
-      promise: promise,
-      callback: callback,
-    };
+      if (!record) {
+        throw new Error("not found");
+      }
+
+      const cbId = `__notify:${id}:${id}`;
+
+      if (record.state !== "pending" || record.callbacks?.has(cbId)) {
+        return { promise: record, callback: undefined };
+      }
+
+      const callback: Callback = {
+        id: cbId,
+        type: "notify",
+        promiseId: id,
+        rootPromiseId: id,
+        recv,
+        timeout,
+        createdOn: time,
+      };
+
+      if (!record.callbacks) {
+        record.callbacks = new Map<string, Callback>();
+      }
+
+      // register and return
+      record.callbacks.set(cbId, callback);
+      return {
+        promise: record,
+        callback: callback,
+      };
+    }
   }
 
   createCallback(
@@ -307,24 +289,35 @@ export class Server {
     recv: string,
     time: number = Date.now(),
   ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
-    const { promise, callback } = this.callbackToPromise(
-      id,
-      rootPromiseId,
+    const record = this.promises.get(id);
+
+    if (!record) {
+      throw new Error("not found");
+    }
+
+    if (record.state !== "pending" || record.callbacks?.has(id)) {
+      return { promise: record, callback: undefined };
+    }
+
+    const callback: Callback = {
+      id: `__resume:${rootPromiseId}:${id}`,
+      type: "resume",
+      promiseId: id,
+      rootPromiseId: rootPromiseId,
       recv,
       timeout,
-      time,
-    );
+      createdOn: time,
+    };
 
-    return { promise: promise, callback: callback };
+    if (!record.callbacks) {
+      record.callbacks = new Map<string, Callback>();
+    }
+
+    record.callbacks.set(callback.id, callback);
+    return { promise: record, callback: callback };
   }
 
-  claimTask(
-    id: string,
-    counter: number,
-    processId: string,
-    ttl: number,
-    time: number = Date.now(),
-  ): Mesg {
+  claimTask(id: string, counter: number, processId: string, ttl: number, time: number = Date.now()): Mesg {
     const { task, applied } = this.transitionTask(
       id,
       "claimed",
@@ -371,12 +364,8 @@ export class Server {
     }
   }
 
-  completeTask(
-    id: string,
-    counter: number,
-    time: number = Date.now(),
-  ): TaskRecord {
-    const { task, applied } = this.transitionTask(
+  completeTask(id: string, counter: number, time: number = Date.now()): TaskRecord {
+    const { task } = this.transitionTask(
       id,
       "completed",
       undefined,
@@ -437,90 +426,9 @@ export class Server {
     return record;
   }
 
-  private subscribeToPromise(
-    id: string,
-    promiseId: string,
-    recv: string,
-    timeout: number,
-    time: number = Date.now(),
-  ): { promise: DurablePromise; callback?: Callback } {
-    const record = this.promises.get(id);
-
-    if (!record) {
-      throw new Error("not found");
-    }
-
-    const cbId = `__notify:${promiseId}:${id}`;
-
-    if (record.state !== "pending" || record.callbacks?.has(cbId)) {
-      return { promise: record };
-    }
-
-    const callback: Callback = {
-      id: cbId,
-      type: "notify",
-      promiseId: promiseId,
-      rootPromiseId: promiseId,
-      recv,
-      timeout,
-      createdOn: time,
-    };
-
-    if (!record.callbacks) {
-      record.callbacks = new Map<string, Callback>();
-    }
-
-    // register and return
-    record.callbacks.set(cbId, callback);
-    return {
-      promise: record,
-      callback: callback,
-    };
-  }
-
-  private callbackToPromise(
-    id: string,
-    rootId: string,
-    recv: string,
-    timeout: number,
-    time: number = Date.now(),
-  ): { promise: DurablePromise; callback?: Callback } {
-    const record = this.promises.get(id);
-
-    if (!record) {
-      throw new Error("not found");
-    }
-
-    if (record.state !== "pending" || record.callbacks?.has(id)) {
-      return { promise: record };
-    }
-
-    const callback: Callback = {
-      id: `__resume:${rootId}:${id}`,
-      type: "resume",
-      promiseId: id,
-      rootPromiseId: rootId,
-      recv,
-      timeout,
-      createdOn: time,
-    };
-
-    if (!record.callbacks) {
-      record.callbacks = new Map<string, Callback>();
-    }
-
-    record.callbacks.set(callback.id, callback);
-    return { promise: record, callback: callback };
-  }
-
   private transitionPromise(
     id: string,
-    to:
-      | "pending"
-      | "resolved"
-      | "rejected"
-      | "rejected_canceled"
-      | "rejected_timedout",
+    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
@@ -528,16 +436,7 @@ export class Server {
     tags?: Record<string, string>,
     time: number = Date.now(),
   ): { promise: DurablePromise; task?: Task; applied: boolean } {
-    const { promise, applied } = this._transitionPromise(
-      id,
-      to,
-      strict,
-      timeout,
-      ikey,
-      value,
-      tags,
-      time,
-    );
+    const { promise, applied } = this._transitionPromise(id, to, strict, timeout, ikey, value, tags, time);
 
     if (applied && promise.state === "pending") {
       for (const router of this.routers) {
@@ -558,21 +457,9 @@ export class Server {
       }
     }
 
-    if (
-      applied &&
-      [
-        "resolved",
-        "rejected",
-        "rejected_canceled",
-        "rejected_timedout",
-      ].includes(promise.state)
-    ) {
+    if (applied && ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(promise.state)) {
       for (const task of this.tasks.values()) {
-        if (
-          task.leafPromiseId === id &&
-          ["init", "enqueued", "claimed"].includes(task.state) &&
-          ["invoke", "resume"].includes(task.type)
-        ) {
+        if (task.rootPromiseId === id && ["init", "enqueued", "claimed"].includes(task.state)) {
           const { applied } = this.transitionTask(
             task.id,
             "completed",
@@ -613,12 +500,7 @@ export class Server {
 
   private _transitionPromise(
     id: string,
-    to:
-      | "pending"
-      | "resolved"
-      | "rejected"
-      | "rejected_canceled"
-      | "rejected_timedout",
+    to: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout",
     strict?: boolean,
     timeout?: number,
     ikey?: string,
@@ -629,14 +511,12 @@ export class Server {
     let record = this.promises.get(id);
 
     if (record === undefined && to === "pending") {
-      if (timeout === undefined) {
-        throw new Error("timeout not set");
-      }
+      util.assert(timeout !== undefined);
 
       record = {
         id: id,
         state: to,
-        timeout: timeout,
+        timeout: timeout!,
         iKeyForCreate: ikey,
         param: value,
         value: undefined,
@@ -648,10 +528,7 @@ export class Server {
       return { promise: record, applied: true };
     }
 
-    if (
-      record === undefined &&
-      ["resolved", "rejected", "rejected_canceled"].includes(to)
-    ) {
+    if (record === undefined && ["resolved", "rejected", "rejected_canceled"].includes(to)) {
       throw new Error("promise not found");
     }
 
@@ -755,12 +632,7 @@ export class Server {
 
     if (
       record?.state !== undefined &&
-      [
-        "resolved",
-        "rejected",
-        "rejected_canceled",
-        "rejected_timedout",
-      ].includes(record.state) &&
+      ["resolved", "rejected", "rejected_canceled", "rejected_timedout"].includes(record.state) &&
       to === "pending" &&
       !strict &&
       ikeyMatch(record.iKeyForCreate, ikey)
@@ -817,17 +689,19 @@ export class Server {
     let record = this.tasks.get(id);
 
     if (record === undefined && to === "init") {
-      if (!type || !recv || !rootPromiseId || !leafPromiseId) {
-        throw new Error("Missing required fields from init task");
-      }
+      util.assert(type !== undefined);
+      util.assert(recv !== undefined);
+      util.assert(rootPromiseId !== undefined);
+      util.assert(leafPromiseId !== undefined);
+
       record = {
         id: id,
         counter: 1,
         state: to,
-        type: type,
-        recv: recv,
-        rootPromiseId: rootPromiseId,
-        leafPromiseId: leafPromiseId,
+        type: type!,
+        recv: recv!,
+        rootPromiseId: rootPromiseId!,
+        leafPromiseId: leafPromiseId!,
         createdOn: time,
       };
       this.tasks.set(id, record);
@@ -851,14 +725,9 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (
-      record?.state === "init" &&
-      to === "claimed" &&
-      record.counter === counter
-    ) {
-      if (ttl === undefined || pid === undefined) {
-        throw new Error("Missing required fields from init task");
-      }
+    if (record?.state === "init" && to === "claimed" && record.counter === counter) {
+      util.assert(ttl !== undefined);
+      util.assert(pid !== undefined);
 
       record = {
         id: record.id,
@@ -868,9 +737,9 @@ export class Server {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: pid,
-        ttl: ttl,
-        expiry: time + ttl,
+        pid: pid!,
+        ttl: ttl!,
+        expiry: time + ttl!,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
       };
@@ -879,14 +748,9 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (
-      record?.state === "enqueued" &&
-      to === "claimed" &&
-      record.counter === counter
-    ) {
-      if (ttl === undefined || pid === undefined) {
-        throw new Error("Missing required fields from init task");
-      }
+    if (record?.state === "enqueued" && to === "claimed" && record.counter === counter) {
+      util.assert(ttl !== undefined);
+      util.assert(pid !== undefined);
 
       record = {
         id: record.id,
@@ -896,9 +760,9 @@ export class Server {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: pid,
-        ttl: ttl,
-        expiry: time + ttl,
+        pid: pid!,
+        ttl: ttl!,
+        expiry: time + ttl!,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
       };
@@ -929,14 +793,9 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (
-      record !== undefined &&
-      ["enqueued", "claimed"].includes(record.state) &&
-      to === "init"
-    ) {
-      if (record.expiry === undefined || time < record.expiry) {
-        throw new Error("Missing required fields from init task");
-      }
+    if (record !== undefined && ["enqueued", "claimed"].includes(record.state) && to === "init") {
+      util.assert(record.expiry !== undefined);
+      util.assert(time >= record.expiry!);
 
       record = {
         id: record.id,
@@ -953,15 +812,8 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (
-      record !== undefined &&
-      record.state === "claimed" &&
-      to === "claimed" &&
-      force
-    ) {
-      if (record.ttl === undefined) {
-        throw new Error("record.ttl must exist");
-      }
+    if (record !== undefined && record.state === "claimed" && to === "claimed" && force) {
+      util.assert(record.ttl !== undefined);
 
       record = {
         id: record.id,
@@ -971,9 +823,9 @@ export class Server {
         recv: record.recv,
         rootPromiseId: record.rootPromiseId,
         leafPromiseId: record.leafPromiseId,
-        pid: record.pid,
-        ttl: record.ttl,
-        expiry: time + record.ttl,
+        pid: record.pid!,
+        ttl: record.ttl!,
+        expiry: time + record.ttl!,
         createdOn: record.createdOn,
         completedOn: record.completedOn,
       };
@@ -1006,12 +858,7 @@ export class Server {
       return { task: record, applied: true };
     }
 
-    if (
-      record !== undefined &&
-      ["init", "enqueued", "claimed"].includes(record.state) &&
-      to === "completed" &&
-      force
-    ) {
+    if (record !== undefined && ["init", "enqueued", "claimed"].includes(record.state) && to === "completed" && force) {
       record = {
         id: id,
         counter: record.counter,
@@ -1035,9 +882,7 @@ export class Server {
       throw new Error("Task not found");
     }
 
-    throw new Error(
-      "task is already claimed, completed, or an invalid counter was provided",
-    );
+    throw new Error("task is already claimed, completed, or an invalid counter was provided");
   }
 }
 

@@ -1,11 +1,5 @@
 import { LocalNetwork } from "./network/local";
-import {
-  CallbackRecord,
-  DurablePromiseRecord,
-  Mesg,
-  Network,
-  TaskRecord,
-} from "./network/network";
+import { CallbackRecord, DurablePromiseRecord, Mesg, Network, TaskRecord } from "./network/network";
 
 import * as util from "./util";
 
@@ -16,12 +10,7 @@ export class Tasks {
     this.network = network;
   }
 
-  claim(
-    id: string,
-    counter: number,
-    processId: string,
-    ttl: number,
-  ): Promise<Mesg> {
+  claim(id: string, counter: number, processId: string, ttl: number): Promise<Mesg> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {

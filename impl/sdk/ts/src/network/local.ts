@@ -28,10 +28,7 @@ export class LocalNetwork implements Network {
   constructor(server: Server = new Server()) {
     this.server = server;
   }
-  send(
-    request: RequestMsg,
-    callback: (timeout: boolean, response: ResponseMsg) => void,
-  ): void {
+  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
     callback(false, this.handleRequest(request));
   }
 
@@ -93,50 +90,28 @@ export class LocalNetwork implements Network {
   private completePromise(request: CompletePromiseReq): CompletePromiseRes {
     return {
       kind: "completePromise",
-      promise: this.server.completePromise(
-        request.id,
-        request.state,
-        request.value,
-        request.iKey,
-        request.strict,
-      ),
+      promise: this.server.completePromise(request.id, request.state, request.value, request.iKey, request.strict),
     };
   }
 
-  private createSubscription(
-    request: CreateSubscriptionReq,
-  ): CreateSubscriptionRes {
+  private createSubscription(request: CreateSubscriptionReq): CreateSubscriptionRes {
     return {
       kind: "createSubscription",
-      ...this.server.createSubscription(
-        request.id,
-        request.timeout,
-        request.recv,
-      ),
+      ...this.server.createSubscription(request.id, request.timeout, request.recv),
     };
   }
 
   private createCallback(request: CreateCallbackReq): CreateCallbackRes {
     return {
       kind: "createCallback",
-      ...this.server.createCallback(
-        request.id,
-        request.rootPromiseId,
-        request.timeout,
-        request.recv,
-      ),
+      ...this.server.createCallback(request.id, request.rootPromiseId, request.timeout, request.recv),
     };
   }
 
   private claimTask(request: ClaimTaskReq): ClaimTaskRes {
     return {
       kind: "claimedtask",
-      message: this.server.claimTask(
-        request.id,
-        request.counter,
-        request.processId,
-        request.ttl,
-      ),
+      message: this.server.claimTask(request.id, request.counter, request.processId, request.ttl),
     };
   }
 
