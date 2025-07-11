@@ -1026,6 +1026,6 @@ export class Server {
   }
 }
 
-function ikeyMatch(left?: string, right?: string): boolean {
+function ikeyMatch(left: string | undefined, right: string | undefined): boolean {
   return left !== undefined && right !== undefined && left === right;
 }
