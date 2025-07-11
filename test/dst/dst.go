@@ -321,7 +321,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 		if req.kind == Op {
 			model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
 		} else {
-			model, err = d.BcStep(model, req.time, res.time, req)
+			model, err = d.StepBc(model, req.time, res.time, req)
 		}
 		util.Assert(err == nil, "Only the last operation must result in error")
 	}
@@ -333,7 +333,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
 		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Metadata["id"], req.time, res.time, req.req, res.res)
 	} else {
-		_, err = d.BcStep(model, req.time, res.time, req)
+		_, err = d.StepBc(model, req.time, res.time, req)
 		var obj any
 		if req.bc.Task != nil {
 			obj = req.bc.Task
@@ -390,7 +390,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return true, updatedModel
 			case Bc:
-				updatedModel, err := d.BcStep(model, req.time, res.time, req)
+				updatedModel, err := d.StepBc(model, req.time, res.time, req)
 				if err != nil {
 					return false, model
 				}
@@ -668,7 +668,7 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 	return d.validator.Validate(model, reqTime, resTime, req, res)
 }
 
-func (d *DST) BcStep(model *Model, reqTime int64, resTime int64, req *Req) (*Model, error) {
+func (d *DST) StepBc(model *Model, reqTime int64, resTime int64, req *Req) (*Model, error) {
 	util.Assert(req.kind == Bc, "Backchannel step can only be taken if req is of kind Bc")
 	if req.bc.Task == nil && req.bc.Promise == nil {
 		return model, nil

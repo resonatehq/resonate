@@ -600,15 +600,17 @@ func (v *Validator) ValidateCompleteTask(model *Model, reqTime int64, resTime in
 		model.tasks.set(completeTaskReq.Id, completeTaskRes.Task)
 		return model, nil
 	case t_api.StatusOK:
-		p := model.promises.get(t.RootPromiseId)
-
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", completeTaskReq.Id)
 		}
 
-		// TODO: provide description
+		// the task should be in state completed if:
+		// - the task is init, enqueued, or claimed
+		// - the task has not expired
+		// - the root promise has not completed or timedout (if known to the model)
+		p := model.promises.get(t.RootPromiseId)
 		if !t.State.In(task.Completed|task.Timedout) && p != nil && p.State == promise.Pending && t.ExpiresAt >= resTime && resTime >= p.Timeout {
-			return model, fmt.Errorf("nah")
+			return model, fmt.Errorf("task '%s' not completed", completeTaskReq.Id)
 		}
 
 		model = model.Copy()
@@ -664,15 +666,17 @@ func (v *Validator) ValidateDropTask(model *Model, reqTime int64, resTime int64,
 		model.tasks.set(dropTaskReq.Id, dropTaskRes.Task)
 		return model, nil
 	case t_api.StatusOK:
-		p := model.promises.get(t.RootPromiseId)
-
 		if t == nil {
 			return model, fmt.Errorf("task '%s' does not exist", dropTaskReq.Id)
 		}
 
-		// TODO: provide description
-		if !t.State.In(task.Init|task.Enqueued|task.Completed|task.Timedout) && p != nil && p.State == promise.Pending && t.ExpiresAt >= resTime && resTime >= p.Timeout {
-			return model, fmt.Errorf("nah")
+		// the task should be in state init if:
+		// - the task is claimed
+		// - the task has not expired
+		// - the root promise has not completed or timedout (if known to the model)
+		p := model.promises.get(t.RootPromiseId)
+		if t.State == task.Claimed && p != nil && p.State == promise.Pending && t.ExpiresAt >= resTime && resTime >= p.Timeout {
+			return model, fmt.Errorf("task '%s' not init", dropTaskReq.Id)
 		}
 
 		model = model.Copy()
