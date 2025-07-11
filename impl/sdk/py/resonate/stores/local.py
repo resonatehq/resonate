@@ -523,6 +523,12 @@ class LocalPromiseStore:
                     return promise, task, applied
 
         if applied and promise.state in ("RESOLVED", "REJECTED", "REJECTED_CANCELED", "REJECTED_TIMEDOUT"):
+            # complete all pending tasks for the same promise_id
+            for task in self._store.tasks.scan():
+                if task.root_promise_id == id and task.state in ("INIT", "ENQUEUED", "CLAIMED"):
+                    _, applied = self._store.tasks.transition(task.id, "COMPLETED", force=True)
+                    assert applied
+
             # create resume and notify tasks
             for callback in promise.callbacks.values():
                 _, applied = self._store.tasks.transition(
@@ -535,6 +541,8 @@ class LocalPromiseStore:
                 )
                 assert applied
             promise.callbacks.clear()
+
+
 
         return promise, None, applied
 

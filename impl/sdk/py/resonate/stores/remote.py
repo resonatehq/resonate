@@ -87,7 +87,7 @@ class RemoteStore:
                     if delay is None or e.response.status_code != 500:
                         mesg = error.get("message", "Unknown exception")
                         code = error.get("code", 0)
-                        details = error.get("details", None)
+                        details = error.get("details")
                         raise ResonateStoreError(mesg=mesg, code=code, details=details) from e
                 except requests.exceptions.Timeout as e:
                     if delay is None:
