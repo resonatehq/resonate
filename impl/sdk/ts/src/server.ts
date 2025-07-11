@@ -209,6 +209,26 @@ export class Server {
     }
   }
 
+  private _cratePromise(
+    id: string,
+    timeout: number,
+    param?: any,
+    tags?: Record<string, string>,
+    iKey?: string,
+    strict?: boolean,
+    processId?: string,
+    ttl?: number,
+    time: number = Date.now(),
+  ): { promise: DurablePromiseRecord; task?: Task } {
+    const { promise, task, applied } = this.transitionPromise(id, "pending", strict, timeout, iKey, param, tags, time);
+    util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
+    if (applied && task !== undefined && processId !== undefined) {
+      const { task: newTask, applied: appliedTask } = this.transitionTask(task.id, "claimed", undefined);
+      util.assert(appliedTask);
+      return { promise: promise, task: newTask };
+    }
+    return { promise, task };
+  }
   createPromise(
     id: string,
     timeout: number,
@@ -218,10 +238,21 @@ export class Server {
     strict?: boolean,
     time: number = Date.now(),
   ): DurablePromiseRecord {
-    const { promise, applied } = this.transitionPromise(id, "pending", strict, timeout, iKey, param, tags, time);
-    util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
+    return this._cratePromise(id, timeout, param, tags, iKey, strict, undefined, undefined, time).promise;
+  }
 
-    return promise;
+  createPromiseAndTask(
+    id: string,
+    timeout: number,
+    processId: string,
+    ttl: number,
+    param?: any,
+    tags?: Record<string, string>,
+    iKey?: string,
+    strict?: boolean,
+    time: number = Date.now(),
+  ): { promise: DurablePromiseRecord; task?: Task } {
+    return this._cratePromise(id, timeout, param, tags, iKey, strict, processId, ttl, time);
   }
 
   readPromise(id: string, time: number = Date.now()): DurablePromiseRecord {
@@ -246,7 +277,7 @@ export class Server {
     timeout: number,
     recv: string,
     time: number = Date.now(),
-  ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
+  ): { promise: DurablePromiseRecord; callback?: CallbackRecord } {
     {
       const record = this.promises.get(id);
 
@@ -289,7 +320,7 @@ export class Server {
     timeout: number,
     recv: string,
     time: number = Date.now(),
-  ): { promise: DurablePromiseRecord; callback: CallbackRecord | undefined } {
+  ): { promise: DurablePromiseRecord; callback?: CallbackRecord } {
     const record = this.promises.get(id);
 
     if (!record) {
