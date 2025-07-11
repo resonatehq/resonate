@@ -189,10 +189,11 @@ func (r *CompleteTaskResponse) String() string {
 func (r *CompleteTaskResponse) Kind() Kind { return CompleteTask }
 
 type DropTaskResponse struct {
+	Task *task.Task `json:"task,omitempty"`
 }
 
 func (r *DropTaskResponse) String() string {
-	return "DropTask()"
+	return fmt.Sprintf("DropTask(task=%v)", r.Task)
 }
 
 func (r *DropTaskResponse) Kind() Kind { return DropTask }

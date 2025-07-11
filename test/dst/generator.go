@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -383,11 +384,14 @@ func (g *Generator) GenerateClaimTask(r *rand.Rand, t int64) *t_api.Request {
 
 	if req != nil {
 		claimTaskReq := req.Payload.(*t_api.ClaimTaskRequest)
+		partitionId, ok := req.Metadata["partitionId"]
+		util.Assert(ok, "req metadata must contain partitionId")
+
 		g.nextTasks(r,
 			claimTaskReq.Id,
 			claimTaskReq.ProcessId,
 			claimTaskReq.Counter,
-			req.Metadata)
+			partitionId)
 	}
 
 	return req
@@ -450,14 +454,14 @@ func (g *Generator) pop(r *rand.Rand, kind t_api.Kind) *t_api.Request {
 	return req
 }
 
-func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, reqTags map[string]string) {
+func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, partitionId string) {
 	// seed the "next" requests,
 	// sometimes we deliberately do nothing
 	for i := 0; i < r.Intn(3); i++ {
 		switch r.Intn(5) {
 		case 0:
 			g.AddRequest(&t_api.Request{
-				Metadata: reqTags,
+				Metadata: map[string]string{"partitionId": partitionId},
 				Payload: &t_api.ClaimTaskRequest{
 					Id:        id,
 					ProcessId: pid,
@@ -467,7 +471,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 1:
 			g.AddRequest(&t_api.Request{
-				Metadata: reqTags,
+				Metadata: map[string]string{"partitionId": partitionId},
 				Payload: &t_api.CompleteTaskRequest{
 					Id:      id,
 					Counter: counter,
@@ -475,7 +479,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 2:
 			g.AddRequest(&t_api.Request{
-				Metadata: reqTags,
+				Metadata: map[string]string{"partitionId": partitionId},
 				Payload: &t_api.DropTaskRequest{
 					Id:      id,
 					Counter: counter,
@@ -483,7 +487,7 @@ func (g *Generator) nextTasks(r *rand.Rand, id string, pid string, counter int, 
 			})
 		case 3:
 			g.AddRequest(&t_api.Request{
-				Metadata: reqTags,
+				Metadata: map[string]string{"partitionId": partitionId},
 				Payload: &t_api.HeartbeatTasksRequest{
 					ProcessId: pid,
 				},

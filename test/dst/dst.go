@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/anishathalye/porcupine"
@@ -101,7 +102,6 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 	// promises
 	d.Add(t_api.ReadPromise, d.generator.GenerateReadPromise, d.validator.ValidateReadPromise)
-
 	d.Add(t_api.CreatePromise, d.generator.GenerateCreatePromise, d.validator.ValidateCreatePromise)
 	d.Add(t_api.CreatePromiseAndTask, d.generator.GenerateCreatePromiseAndTask, d.validator.ValidateCreatePromiseAndTask)
 	d.Add(t_api.CompletePromise, d.generator.GenerateCompletePromise, d.validator.ValidateCompletePromise)
@@ -138,14 +138,14 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 		time := d.Time(t)
 
 		for _, req := range d.generator.Generate(r, time, d.config.ReqsPerTick()) {
-			id := strconv.FormatInt(i, 10)
 			req := req
 			reqTime := time
 
 			if req.Metadata == nil {
 				req.Metadata = make(map[string]string)
 			}
-			req.Metadata["id"] = id
+
+			req.Metadata["id"] = strconv.FormatInt(i, 10)
 			req.Metadata["name"] = req.Kind().String()
 
 			api.EnqueueSQE(&bus.SQE[t_api.Request, t_api.Response]{
@@ -158,26 +158,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 					if d.config.PrintOps {
 						// log
-						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "id", id, "req", req, "res", res, "err", err)
-
-					}
-
-					// extract cursors for subsequent requests
-					if err == nil {
-						switch v := res.Payload.(type) {
-						case *t_api.SearchPromisesResponse:
-							if v.Cursor != nil {
-								d.generator.AddRequest(&t_api.Request{
-									Payload: v.Cursor.Next,
-								})
-							}
-						case *t_api.SearchSchedulesResponse:
-							if v.Cursor != nil {
-								d.generator.AddRequest(&t_api.Request{
-									Payload: v.Cursor.Next,
-								})
-							}
-						}
+						slog.Info("DST", "t", fmt.Sprintf("%d|%d", reqTime, resTime), "req", req, "res", res, "err", err)
 					}
 
 					// add operation to porcupine
@@ -203,6 +184,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 
 			switch obj := obj.(type) {
 			case *task.Task:
+				// skip scheduled promises, this is a little hacky but we know
+				// that scheduled promises start with an 's'
+				if strings.HasPrefix(obj.RootPromiseId, "s") {
+					continue
+				}
+
 				bc = &Backchannel{
 					Task: obj,
 				}
@@ -212,10 +199,9 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 				// our model has been updated via the backchannel
 				counter := obj.Counter - r.Intn(2)
 
-				// The ProcessId is always the taskId, which means each task
-				// is always claimed by a different process, which means
-				// that when heartbeating there will always be a single task at
-				// most when heartbeating
+				// The processId is always the taskId, which means each task
+				// is always claimed by a unique process. When heartbeating there
+				// will be most a single task.
 
 				// add claim req to generator
 				d.generator.AddRequest(&t_api.Request{
@@ -228,6 +214,12 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 					},
 				})
 			case *promise.Promise:
+				// skip scheduled promises, this is a little hacky but we know
+				// that scheduled promises start with an 's'
+				if strings.HasPrefix(obj.Id, "s") {
+					continue
+				}
+
 				bc = &Backchannel{
 					Promise: obj,
 				}
@@ -301,7 +293,7 @@ func (d *DST) logPossibleError(history porcupine.LinearizationInfo) {
 	for i, partiton := range d.partitions {
 		util.Assert(len(linearizationsPartitions[i]) > 0, "partition must have at least one linearization")
 
-		// take the first (and we assumee, by empiric evidence, only linearization)
+		// take the first (and we assume, by empiric evidence, only linearization)
 		linearization := linearizationsPartitions[i][0]
 
 		// if the linearization includes all the operations in the partiton all good
@@ -329,7 +321,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 		if req.kind == Op {
 			model, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
 		} else {
-			model, err = d.BcStep(model, req.time, res.time, req)
+			model, err = d.StepBc(model, req.time, res.time, req)
 		}
 		util.Assert(err == nil, "Only the last operation must result in error")
 	}
@@ -341,7 +333,7 @@ func (d *DST) logError(partialLinearization []porcupine.Operation, lastOp porcup
 		_, err = d.Step(model, req.time, res.time, req.req, res.res, res.err)
 		fmt.Printf("Op(id=%s, t=%d|%d), req=%v, res=%v\n", req.req.Metadata["id"], req.time, res.time, req.req, res.res)
 	} else {
-		_, err = d.BcStep(model, req.time, res.time, req)
+		_, err = d.StepBc(model, req.time, res.time, req)
 		var obj any
 		if req.bc.Task != nil {
 			obj = req.bc.Task
@@ -398,7 +390,7 @@ func (d *DST) Model() porcupine.Model {
 				}
 				return true, updatedModel
 			case Bc:
-				updatedModel, err := d.BcStep(model, req.time, res.time, req)
+				updatedModel, err := d.StepBc(model, req.time, res.time, req)
 				if err != nil {
 					return false, model
 				}
@@ -676,7 +668,7 @@ func (d *DST) Step(model *Model, reqTime int64, resTime int64, req *t_api.Reques
 	return d.validator.Validate(model, reqTime, resTime, req, res)
 }
 
-func (d *DST) BcStep(model *Model, reqTime int64, resTime int64, req *Req) (*Model, error) {
+func (d *DST) StepBc(model *Model, reqTime int64, resTime int64, req *Req) (*Model, error) {
 	util.Assert(req.kind == Bc, "Backchannel step can only be taken if req is of kind Bc")
 	if req.bc.Task == nil && req.bc.Promise == nil {
 		return model, nil
@@ -706,10 +698,8 @@ func (d *DST) String() string {
 func partition(req *Req) string {
 	switch req.kind {
 	case Op:
-		partition, exists := req.req.Metadata["partitionId"]
-		if !exists {
-			panic(fmt.Sprintf("Missing partitionId for request %v", req.req))
-		}
+		partition, ok := req.req.Metadata["partitionId"]
+		util.Assert(ok, "partition id must be set")
 		return partition
 	case Bc:
 		if req.bc.Task != nil {
