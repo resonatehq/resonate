@@ -702,17 +702,11 @@ export class Server {
       time < record.timeout
     ) {
       record = {
-        id: record.id,
+        ...record,
         state: to,
-        timeout: record.timeout,
-        iKeyForCreate: record.iKeyForCreate,
         iKeyForComplete: ikey,
-        param: record.param,
         value: value,
-        tags: record.tags,
-        createdOn: record.createdOn,
         completedOn: time,
-        callbacks: record.callbacks,
       };
 
       this.promises.set(id, record);
@@ -750,16 +744,8 @@ export class Server {
       util.assert(time >= record.timeout);
 
       record = {
-        id: record.id,
+        ...record,
         state: record.tags?.["resonate:timeout"] === "true" ? "resolved" : to,
-        timeout: record.timeout,
-        iKeyForCreate: record.iKeyForCreate,
-        param: record.param,
-        value: record.value,
-        tags: record.tags,
-        createdOn: record.createdOn,
-        completedOn: record.completedOn,
-        callbacks: record.callbacks,
       };
 
       this.promises.set(id, record);
@@ -846,16 +832,9 @@ export class Server {
 
     if (record?.state === "init" && to === "enqueued") {
       record = {
-        id: record.id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
         expiry: time + 5000,
-        createdOn: record.createdOn,
-        completedOn: record.completedOn,
       };
       this.tasks.set(id, record);
       return { task: record, applied: true };
@@ -866,18 +845,11 @@ export class Server {
       util.assert(pid !== undefined);
 
       record = {
-        id: record.id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
         pid: pid!,
         ttl: ttl!,
         expiry: time + ttl!,
-        createdOn: record.createdOn,
-        completedOn: record.completedOn,
       };
 
       this.tasks.set(id, record);
@@ -889,18 +861,11 @@ export class Server {
       util.assert(pid !== undefined);
 
       record = {
-        id: record.id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
         pid: pid!,
         ttl: ttl!,
         expiry: time + ttl!,
-        createdOn: record.createdOn,
-        completedOn: record.completedOn,
       };
 
       this.tasks.set(id, record);
@@ -914,14 +879,8 @@ export class Server {
       to === "completed"
     ) {
       record = {
-        id: record.id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
-        createdOn: record.createdOn,
         completedOn: time,
       };
 
@@ -934,14 +893,9 @@ export class Server {
       util.assert(time >= record.expiry!);
 
       record = {
-        id: record.id,
+        ...record,
         counter: record.counter + 1,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
-        createdOn: record.createdOn,
       };
 
       this.tasks.set(id, record);
@@ -952,18 +906,10 @@ export class Server {
       util.assert(record.ttl !== undefined);
 
       record = {
-        id: record.id,
-        counter: record.counter,
-        state: record.state,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
+        ...record,
         pid: record.pid!,
         ttl: record.ttl!,
         expiry: time + record.ttl!,
-        createdOn: record.createdOn,
-        completedOn: record.completedOn,
       };
 
       this.tasks.set(id, record);
@@ -979,14 +925,8 @@ export class Server {
       record.expiry >= time
     ) {
       record = {
-        id: record.id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
-        createdOn: record.createdOn,
         completedOn: time,
       };
 
@@ -996,14 +936,8 @@ export class Server {
 
     if (record !== undefined && ["init", "enqueued", "claimed"].includes(record.state) && to === "completed" && force) {
       record = {
-        id: id,
-        counter: record.counter,
+        ...record,
         state: to,
-        type: record.type,
-        recv: record.recv,
-        rootPromiseId: record.rootPromiseId,
-        leafPromiseId: record.leafPromiseId,
-        createdOn: record.createdOn,
       };
 
       this.tasks.set(id, record);
@@ -1067,18 +1001,9 @@ export class Server {
 
     if (record !== undefined && to === "created" && updating) {
       record = {
-        id: record.id,
-        description: record.description,
-        cron: record.cron,
-        tags: record.tags,
-        promiseId: record.promiseId,
-        promiseTimeout: record.promiseTimeout,
-        promiseParam: record.promiseParam,
-        promiseTags: record.promiseTags,
+        ...record,
         lastRunTime: record.nextRunTime,
         nextRunTime: CronExpressionParser.parse(record.cron!).next().getMilliseconds(),
-        iKey: record.iKey,
-        createdOn: record.createdOn,
       };
       this.schedules.set(id, record);
       return { schedule: record, applied: true };
