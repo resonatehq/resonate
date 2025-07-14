@@ -542,8 +542,6 @@ class LocalPromiseStore:
                 assert applied
             promise.callbacks.clear()
 
-
-
         return promise, None, applied
 
     def _transition(

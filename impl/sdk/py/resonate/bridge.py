@@ -234,7 +234,6 @@ class Bridge:
                         case [Network(_, cid, CreateSubscriptionReq(id, promise_id, timeout, recv))]:
                             # Current implementation returns a single CreateSubscriptionReq in the list
                             # if we get more than one element they are all CreateCallbackReq
-
                             durable_promise, callback = self._store.promises.subscribe(
                                 id=id,
                                 promise_id=promise_id,
@@ -242,7 +241,6 @@ class Bridge:
                                 recv=recv,
                             )
                             assert durable_promise.id == cid
-                            assert durable_promise.completed or callback
 
                             if durable_promise.completed:
                                 self._cq.put_nowait(Notify(cid, durable_promise))
