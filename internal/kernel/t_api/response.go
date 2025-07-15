@@ -243,7 +243,7 @@ func (r *EchoResponse) isResponsePayload()                 {}
 
 func (r *Response) String() string {
 	util.Assert(r.Payload != nil, "Payload must not be nil")
-	return fmt.Sprintf("Request(status=%d, %s)", r.Status, r.Payload.String())
+	return fmt.Sprintf("Response(status=%d, %s)", r.Status, r.Payload.String())
 }
 
 func (r *Response) Kind() Kind {

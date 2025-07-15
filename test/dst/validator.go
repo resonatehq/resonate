@@ -716,7 +716,9 @@ func (v *Validator) ValidateHeartbeatTasks(model *Model, reqTime int64, resTime 
 			util.Assert(t.value.State != task.Claimed || t.value.ProcessId != nil, "process id must be set if claimed")
 			if t.value.State == task.Claimed && *t.value.ProcessId == heartbeatTasksReq.ProcessId {
 				ub++
-				if t.value.ExpiresAt > resTime && t.value.Timeout > resTime {
+
+				p := model.promises.get(t.value.RootPromiseId)
+				if p != nil && p.State == promise.Pending && t.value.ExpiresAt > resTime && t.value.Timeout > resTime && p.Timeout > resTime {
 					lb++
 					tasks = append(tasks, t.value)
 				}
