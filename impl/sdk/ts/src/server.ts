@@ -269,7 +269,17 @@ export class Server {
     const { promise, task, applied } = this.transitionPromise(id, "pending", strict, timeout, iKey, param, tags, time);
     util.assert(!applied || ["pending", "rejected_timedout"].includes(promise.state));
     if (applied && task !== undefined && processId !== undefined) {
-      const { task: newTask, applied: appliedTask } = this.transitionTask(task.id, "claimed", undefined);
+      const { task: newTask, applied: appliedTask } = this.transitionTask(
+        task.id,
+        "claimed",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        1,
+        processId,
+        ttl,
+      );
       util.assert(appliedTask);
       return { promise: promise, task: newTask };
     }
