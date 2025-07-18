@@ -37,8 +37,20 @@ class LFX[T]:
         retry_policy: RetryPolicy | Callable[[Callable], RetryPolicy] | None = None,
         tags: dict[str, str] | None = None,
         timeout: float | None = None,
-        version: int | None = None,
     ) -> Self:
+        """Configure options for the function.
+
+        - `durable`: Whether or not you want this function to be durable.
+        - `encoder`: Configure your own data encoder.
+        - `id`: Override the id for the function invocation.
+        - `idempotency_key`: Define the idempotency key invocation or a function that
+            receives the promise `id` and creates an idempotency key.
+        - `non_retryable_exceptions`: Exceptions that ignore the retry policy of the invocation.
+        - `retry_policy`: Define the retry policy `exponential | constant | linear | never`
+        - `tags`: Add custom tags to the durable promise representing the invocation.
+        - `target`: Target to distribute the invocation.
+        - `timeout`: Number of seconds before the invocation times out.
+        """
         # Note: we deliberately ignore the version for LFX
         self.conv = self.conv.options(
             id=id,
@@ -80,11 +92,22 @@ class RFX[T]:
         encoder: Encoder[Any, str | None] | None = None,
         id: str | None = None,
         idempotency_key: str | Callable[[str], str] | None = None,
-        target: str | None = None,
         tags: dict[str, str] | None = None,
+        target: str | None = None,
         timeout: float | None = None,
         version: int | None = None,
     ) -> Self:
+        """Configure options for the function.
+
+        - `encoder`: Configure your own data encoder.
+        - `id`: Override the id for the function invocation.
+        - `idempotency_key`: Define the idempotency key invocation or a function that
+            receives the promise `id` and creates an idempotency key.
+        - `tags`: Add custom tags to the durable promise representing the invocation.
+        - `target`: Target to distribute the invocation.
+        - `timeout`: Number of seconds before the invocation times out.
+        - `version`: Version of the function to invoke.
+        """
         self.conv = self.conv.options(
             id=id,
             idempotency_key=idempotency_key,

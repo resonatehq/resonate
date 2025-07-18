@@ -36,6 +36,8 @@ ALLOWED_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 
 
 class Resonate:
+    """Resonate client."""
+
     def __init__(
         self,
         *,
@@ -141,7 +143,7 @@ class Resonate:
         registry: Registry | None = None,
         ttl: int = 10,
     ) -> Resonate:
-        """Create a local Resonate client.
+        """Create a Resonate client with local configuration.
 
         This configuration stores all state in memory, with no external
         persistence or network I/O. The in memory store implements the same
@@ -176,7 +178,7 @@ class Resonate:
         store_port: str | None = None,
         ttl: int = 10,
     ) -> Resonate:
-        """Create a remote Resonate client.
+        """Create a Resonate client with remote configuration.
 
         This configuration persists all state to a remote store, enabling
         full durability, coordination, and recovery protocols across processes.
@@ -199,17 +201,26 @@ class Resonate:
 
     @property
     def promises(self) -> PromiseStore:
+        """Promises low level client."""
         return self._store.promises
 
     @property
     def schedules(self) -> ScheduleStore:
+        """Schedules low level client."""
         return self._store.schedules
 
     def start(self) -> None:
+        """Explicitly start Resonate threads.
+
+        This happens automatically when calling .run() or .rpc(),
+        but is generally recommended for all workers that have
+        functions registered with Resonate.
+        """
         if not self._started:
             self._bridge.start()
 
     def stop(self) -> None:
+        """Stop resonate."""
         self._started = False
         self._bridge.stop()
 
@@ -224,6 +235,17 @@ class Resonate:
         timeout: float | None = None,
         version: int | None = None,
     ) -> Resonate:
+        """Configure options for the function.
+
+        - `encoder`: Configure your own data encoder.
+        - `idempotency_key`: Define the idempotency key invocation or a function that
+            receives the promise `id` and creates an idempotency key.
+        - `retry_policy`: Define the retry policy `exponential | constant | linear | never`
+        - `tags`: Add custom tags to the durable promise representing the invocation.
+        - `target`: Target to distribute the invocation.
+        - `timeout`: Number of seconds before the invocation timesout.
+        - `version`: Version of the function to invoke.
+        """
         copied: Resonate = copy.copy(self)
         copied._opts = self._opts.merge(
             encoder=encoder,
@@ -467,10 +489,12 @@ class Context:
 
     @property
     def id(self) -> str:
+        """`id` for the current execution."""
         return self._id
 
     @property
     def info(self) -> Info:
+        """Information for the current execution."""
         return self._info
 
     @property
@@ -479,10 +503,12 @@ class Context:
 
     @property
     def random(self) -> Random:
+        """Deterministic random methods."""
         return self._random
 
     @property
     def time(self) -> Time:
+        """Deterministic time methods."""
         return self._time
 
     def get_dependency[T](self, key: str, default: T = None) -> Any | T:
@@ -643,9 +669,28 @@ class Context:
     @overload
     def typesafe[T](self, cmd: LFC[T] | RFC[T] | Promise[T]) -> Generator[LFC[T] | RFC[T] | Promise[T], T, T]: ...
     def typesafe(self, cmd: LFI | RFI | LFC | RFC | Promise) -> Generator[LFI | RFI | LFC | RFC | Promise, Any, Any]:
+        """Optionally provide type safety for your coroutine definition.
+
+        ```python
+        def bar(ctx: Context) -> str: ...
+
+        def foo_no_types(ctx: Context) -> Generator[Yieldable, Any, str]:
+            v = yield ctx.lfc(bar) # the type system doesn't know that v is str
+            return v
+
+        def foo_with_types(ctx: Context) -> Generator[Yieldable, Any, str]:
+            v = yield from ctx.typesafe(ctx.lfc(bar)) # the type system knows that v is str
+            return v
+        ```
+        """
         return (yield cmd)
 
     def sleep(self, secs: float) -> RFC[None]:
+        """Sleep inside a function.
+
+        There is no limit to how long you can sleep.
+        The sleep method accepts a float value in seconds.
+        """
         if not isinstance(secs, int | float):
             msg = f"secs must be `float`, got {type(secs).__name__}"
             raise TypeError(msg)
@@ -661,6 +706,16 @@ class Context:
         data: Any = None,
         tags: dict[str, str] | None = None,
     ) -> RFI:
+        """Get or create a promise that can be awaited on.
+
+        If no ID is provided, one is generated and a new promise is created. If an ID
+        is provided and a promise already exists with that ID, then the existing promise
+        is returned (if the idempotency keys match).
+
+        This is very useful for HITL (Human-In-The-Loop) use cases where you want to block
+        progress until a human has taken an action or provided data. It works well in
+        conjunction with Resonate's .promise.resolve() method.
+        """
         if id is not None and not isinstance(id, str):
             msg = f"id must be `str | None`, got {type(id).__name__}"
             raise TypeError(msg)
@@ -789,6 +844,17 @@ class Function[**P, R]:
         timeout: float | None = None,
         version: int | None = None,
     ) -> Function[P, R]:
+        """Configure options for the function.
+
+        - `encoder`: Configure your own data encoder.
+        - `idempotency_key`: Define the idempotency key invocation or a function that
+            receives the promise `id` and creates an idempotency key.
+        - `retry_policy`: Define the retry policy `exponential | constant | linear | never`
+        - `tags`: Add custom tags to the durable promise representing the invocation.
+        - `target`: Target to distribute the invocation.
+        - `timeout`: Number of seconds before the invocation timesout.
+        - `version`: Version of the function to invoke.
+        """
         self._opts = self._opts.merge(
             encoder=encoder,
             idempotency_key=idempotency_key,
@@ -801,6 +867,17 @@ class Function[**P, R]:
         return self
 
     def run[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
+        """Run a function with Resonate.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        """
         resonate = self._resonate.options(
             encoder=self._opts.encoder,
             idempotency_key=self._opts.idempotency_key,
@@ -813,6 +890,17 @@ class Function[**P, R]:
         return resonate.run(id, self._func, *args, **kwargs)
 
     def rpc[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
+        """Run a function with Resonate remotely.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        """
         resonate = self._resonate.options(
             encoder=self._opts.encoder,
             idempotency_key=self._opts.idempotency_key,

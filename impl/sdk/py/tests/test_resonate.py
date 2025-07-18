@@ -730,7 +730,6 @@ def test_options(
                 retry_policy=retry_policy,
                 tags=tags,
                 timeout=timeout,
-                version=version + 1,
             )
 
             # version is a noop for lfx
