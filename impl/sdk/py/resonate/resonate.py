@@ -237,14 +237,14 @@ class Resonate:
     ) -> Resonate:
         """Configure options for the function.
 
-        - `encoder`: Configure your own data encoder.
-        - `idempotency_key`: Define the idempotency key invocation or a function that
-            receives the promise `id` and creates an idempotency key.
-        - `retry_policy`: Define the retry policy `exponential | constant | linear | never`
-        - `tags`: Add custom tags to the durable promise representing the invocation.
-        - `target`: Target to distribute the invocation.
-        - `timeout`: Number of seconds before the invocation timesout.
-        - `version`: Version of the function to invoke.
+        - encoder: Configure your own data encoder.
+        - idempotency_key: Define the idempotency key invocation or a function that
+            receives the promise id and creates an idempotency key.
+        - retry_policy: Define the retry policy: exponential | constant | linear | never
+        - tags: Add custom tags to the durable promise representing the invocation.
+        - target: Target to distribute the invocation.
+        - timeout: Number of seconds before the invocation timesout.
+        - version: Version of the function to invoke.
         """
         copied: Resonate = copy.copy(self)
         copied._opts = self._opts.merge(
@@ -489,7 +489,7 @@ class Context:
 
     @property
     def id(self) -> str:
-        """`id` for the current execution."""
+        """Id for the current execution."""
         return self._id
 
     @property
@@ -589,7 +589,7 @@ class Context:
         *args: Any,
         **kwargs: Any,
     ) -> RFI:
-        """Schedule a function for remote execution`.
+        """Schedule a function for remote execution.
 
         The function is scheduled on the global event loop and potentially executed
         in a different process, the returned promise can be awaited for the final
@@ -669,20 +669,7 @@ class Context:
     @overload
     def typesafe[T](self, cmd: LFC[T] | RFC[T] | Promise[T]) -> Generator[LFC[T] | RFC[T] | Promise[T], T, T]: ...
     def typesafe(self, cmd: LFI | RFI | LFC | RFC | Promise) -> Generator[LFI | RFI | LFC | RFC | Promise, Any, Any]:
-        """Optionally provide type safety for your coroutine definition.
-
-        ```python
-        def bar(ctx: Context) -> str: ...
-
-        def foo_no_types(ctx: Context) -> Generator[Yieldable, Any, str]:
-            v = yield ctx.lfc(bar) # the type system doesn't know that v is str
-            return v
-
-        def foo_with_types(ctx: Context) -> Generator[Yieldable, Any, str]:
-            v = yield from ctx.typesafe(ctx.lfc(bar)) # the type system knows that v is str
-            return v
-        ```
-        """
+        """Optionally provide type safety for your coroutine definition."""
         return (yield cmd)
 
     def sleep(self, secs: float) -> RFC[None]:
@@ -846,14 +833,14 @@ class Function[**P, R]:
     ) -> Function[P, R]:
         """Configure options for the function.
 
-        - `encoder`: Configure your own data encoder.
-        - `idempotency_key`: Define the idempotency key invocation or a function that
-            receives the promise `id` and creates an idempotency key.
-        - `retry_policy`: Define the retry policy `exponential | constant | linear | never`
-        - `tags`: Add custom tags to the durable promise representing the invocation.
-        - `target`: Target to distribute the invocation.
-        - `timeout`: Number of seconds before the invocation timesout.
-        - `version`: Version of the function to invoke.
+        - encoder: Configure your own data encoder.
+        - idempotency_key: Define the idempotency key invocation or a function that
+            receives the promise id and creates an idempotency key.
+        - retry_policy: Define the retry policy exponential | constant | linear | never
+        - tags: Add custom tags to the durable promise representing the invocation.
+        - target: Target to distribute the invocation.
+        - timeout: Number of seconds before the invocation timesout.
+        - version: Version of the function to invoke.
         """
         self._opts = self._opts.merge(
             encoder=encoder,
