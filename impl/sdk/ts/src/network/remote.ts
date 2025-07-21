@@ -23,6 +23,9 @@ import type {
   TaskRecord,
 } from "./network"; // Assuming types are in a separate file
 
+import { EventSource } from "eventsource";
+import * as util from "../util";
+
 // API Value format from OpenAPI spec
 interface ApiValue {
   headers?: Record<string, string>;
@@ -45,6 +48,7 @@ interface PromiseDto {
 
 interface TaskDto {
   id: string;
+  rootPromiseId: string;
   counter: number;
   timeout: number;
   processId: string;
@@ -189,16 +193,23 @@ export class JsonEncoder implements Encoder {
 
 export interface HttpNetworkConfig {
   url?: string;
+  msgUrl?: string;
   timeout?: number;
   headers?: Record<string, string>;
   encoder?: Encoder;
 }
 
+export type Msg = { type: "invoke" | "resume"; task: TaskRecord } | { type: "notify"; promise: DurablePromiseRecord };
+
 export class HttpNetwork implements Network {
   private url: string;
+  private msg_url: string;
   private timeout: number;
   private baseHeaders: Record<string, string>;
   private encoder: Encoder;
+  private eventSource: EventSource;
+
+  public onMessage?: (msg: Msg) => void;
 
   constructor(config: HttpNetworkConfig) {
     this.url = config.url || "http://localhost:8001";
@@ -207,7 +218,11 @@ export class HttpNetwork implements Network {
       "Content-Type": "application/json",
       ...config.headers,
     };
+    this.msg_url = config.msg_url || "http://localhost:8002/default/0";
     this.encoder = config.encoder ?? new JsonEncoder();
+
+    this.eventSource = new EventSource(this.msg_url);
+    this.eventSource.addEventListener("message", (event) => this.recv(event));
   }
 
   send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
@@ -222,8 +237,16 @@ export class HttpNetwork implements Network {
       });
   }
 
-  recv(msg: RecvMsg): void {
-    // TODO: Use EventSource to connect to the server in long polling way
+  recv(event: any): void {
+    const e = event as MessageEvent;
+    const data = JSON.parse(e.data);
+
+    if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
+      this.onMessage?.({ type: data.type, task: data.task });
+      return;
+    }
+
+    console.warn("couldn't parse", data, "as a message");
   }
 
   private async handleRequest(request: RequestMsg): Promise<ResponseMsg> {
@@ -267,7 +290,7 @@ export class HttpNetwork implements Network {
     const body = {
       id: req.id,
       timeout: req.timeout,
-      param: req.param,
+      param: this.encoder.encode(req.param),
       tags: req.tags,
     };
 
@@ -494,14 +517,7 @@ export class HttpNetwork implements Network {
     const task = (await response.json()) as TaskDto;
     return {
       kind: "completedtask",
-      task: {
-        id: task.id,
-        counter: task.counter,
-        timeout: task.timeout,
-        processId: task.processId,
-        createdOn: task.createdOn,
-        completedOn: task.completedOn,
-      },
+      task: this.mapTaskDtoToRecord(task),
     };
   }
 
@@ -613,6 +629,7 @@ export class HttpNetwork implements Network {
   private mapTaskDtoToRecord(apiTask: TaskDto): TaskRecord {
     return {
       id: apiTask.id,
+      rootPromiseId: apiTask.rootPromiseId,
       counter: apiTask.counter,
       timeout: apiTask.timeout,
       processId: apiTask.processId,

@@ -1,5 +1,5 @@
-import { Call, Future, Invoke, type Yieldable } from "./context";
-import type { InternalAsync, InternalAwait, InternalExpr, Literal, Value } from "./types";
+import { CallLocal, CallRemote, Future, InvokeLocal, InvokeRemote, type Yieldable } from "./context";
+import type { InternalAsyncL, InternalAsyncR, InternalAwait, InternalExpr, Literal, Value } from "./types";
 import * as util from "./util";
 
 export class Decorator<TRet> {
@@ -19,7 +19,7 @@ export class Decorator<TRet> {
   public next(value: Value<any>): InternalExpr<any> {
     // If nextState was set to over, is becasue we shouldn't have been called
     util.assert(
-      this.nextState !== "over" && value.type === this.nextState,
+      value.type === this.nextState,
       `Generator called wit type "${value.type}" expected "${this.nextState}"`,
     );
 
@@ -41,6 +41,7 @@ export class Decorator<TRet> {
     if (result.done) {
       this.nextState = "over";
       if (this.invokes.length > 0) {
+        // Handles structured concurrency
         const val = this.invokes.pop()!;
         return {
           type: "internal.await",
@@ -54,7 +55,6 @@ export class Decorator<TRet> {
       }
       return {
         type: "internal.return",
-        id: this.idsequ(),
         value: this.toLiteral(result.value),
       };
     }
@@ -80,22 +80,31 @@ export class Decorator<TRet> {
   }
 
   // From external type to internal type
-  private toInternal<T>(event: Invoke<T> | Future<T> | Call<T>): InternalAsync<T> | InternalAwait<T> {
-    if (event instanceof Invoke || event instanceof Call) {
+  private toInternal<T>(
+    event: InvokeLocal<T> | InvokeRemote<T> | Future<T> | CallLocal<T> | CallRemote<T>,
+  ): InternalAsyncL<T> | InternalAsyncR<T> | InternalAwait<T> {
+    if (event instanceof InvokeLocal || event instanceof CallLocal) {
       const id = this.idsequ();
-      this.invokes.push({ kind: event instanceof Invoke ? "invoke" : "call", id });
+      this.invokes.push({ kind: event instanceof InvokeLocal ? "invoke" : "call", id });
       this.nextState = "internal.promise";
       return {
-        type: "internal.async",
+        type: "internal.async.l",
         id,
-        kind: this.mapKind(event.type),
-        mode: "eager", // default, adjust if needed
         func: event.func,
-        args: (event.args || []).map((arg: any, i: number) => ({
-          type: "internal.literal",
-          id: `${id}.arg${i}`,
-          value: arg,
-        })),
+        args: event.args ?? [],
+        mode: "eager", // default, adjust if needed
+      };
+    }
+    if (event instanceof InvokeRemote || event instanceof CallRemote) {
+      const id = this.idsequ();
+      this.invokes.push({ kind: event instanceof InvokeRemote ? "invoke" : "call", id });
+      this.nextState = "internal.promise";
+      return {
+        type: "internal.async.r",
+        id,
+        func: event.func,
+        args: event.args ?? [],
+        mode: "eager", // default, adjust if needed
       };
     }
     if (event instanceof Future) {
@@ -111,13 +120,12 @@ export class Decorator<TRet> {
             id: event.id,
             value: {
               type: "internal.literal",
-              id: `${event.id}.completed`,
               value: event.value!,
             },
           },
         };
       }
-      // If the Future was completed (the promise was completed) we already poped the related invoke
+      // If the Future was completed (the promise was completed) we already poped the related invoke,
       // when the user awaits the future we remove it from the invokes
       this.invokes = this.invokes.filter(({ id }) => id !== event.id);
       this.nextState = "over";
@@ -139,18 +147,9 @@ export class Decorator<TRet> {
   }
 
   private toLiteral<T>(value: T): Literal<T> {
-    // If value is undefined, use null as a fallback to avoid type error
     return {
       type: "internal.literal",
-      id: this.idsequ(),
-      value: value === undefined ? (null as any as T) : value,
+      value: value,
     };
-  }
-
-  private mapKind(k: "lfi" | "rfi" | "lfc" | "rfc"): "lfi" | "rfi" {
-    if (k === "lfi" || k === "rfi") return k;
-    if (k === "lfc") return "lfi";
-    if (k === "rfc") return "rfi";
-    throw new Error(`Unknown value ${k}`);
   }
 }

@@ -1,18 +1,35 @@
+import type { Context } from "./context";
+
+export type Func = (ctx: Context, ...args: any[]) => any;
+
+// The args of a resonate function excluding the context argument
+export type Params<F> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
+
+// Return type of a function or a generator
+export type Ret<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
+  ? R // Return type of generator
+  : T extends (...args: any[]) => infer R
+    ? R // Return type of regular function
+    : never;
+
 // Expression
+export type InternalExpr<T> = InternalAsyncL<T> | InternalAsyncR<T> | InternalAwait<T> | InternalReturn<T>;
 
-export type InternalExpr<T> = InternalAsync<T> | InternalAwait<T> | InternalReturn<T>;
-
-type F<T> = ((...args: any[]) => T) | ((...args: any[]) => Generator<any, T, any>);
-
-export type InternalAsync<T> = {
-  type: "internal.async";
+export type InternalAsyncR<T> = {
+  type: "internal.async.r";
   id: string;
-  kind: "lfi" | "rfi";
-  mode: "eager" | "defer";
-  func: F<T>;
-  args: Value<any>[];
+  func: string;
+  args: any[];
+  mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
 };
 
+export type InternalAsyncL<T> = {
+  type: "internal.async.l";
+  id: string;
+  func: Func;
+  args: any[];
+  mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
+};
 export type InternalAwait<T> = {
   type: "internal.await";
   id: string;
@@ -21,8 +38,7 @@ export type InternalAwait<T> = {
 
 export type InternalReturn<T> = {
   type: "internal.return";
-  id: string;
-  value: Value<T>;
+  value: Literal<T>;
 };
 
 // Values
@@ -31,12 +47,10 @@ export type Value<T> = Nothing | Literal<T> | Promise<T>;
 
 export type Nothing = {
   type: "internal.nothing";
-  id: string;
 };
 
 export type Literal<T> = {
   type: "internal.literal";
-  id: string;
   value: T;
 };
 

@@ -1,15 +1,15 @@
 import { Decorator } from "../src/decorator";
 
-import { Call, Future, Invoke } from "../src/context";
+import { CallLocal, CallRemote, Future, InvokeLocal } from "../src/context";
 
 describe("Decorator", () => {
   it("returns internal.return when generator is done", () => {
-    function* foo(): Generator<Invoke<any> | Future<any>, any, number> {
+    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
       return 42;
     }
 
     const d = new Decorator("abc", foo());
-    const r = d.next({ type: "internal.nothing", id: "abc" });
+    const r = d.next({ type: "internal.nothing" });
 
     expect(r).toMatchObject({
       type: "internal.return",
@@ -21,16 +21,15 @@ describe("Decorator", () => {
   });
 
   it("handles internal.async correctly", () => {
-    function* foo(): Generator<Invoke<any>, any, any> {
-      yield new Invoke("lfi", () => 42);
+    function* foo(): Generator<InvokeLocal<any>, any, any> {
+      yield new InvokeLocal(() => 42);
     }
 
     const d = new Decorator("abc", foo());
-    const r = d.next({ type: "internal.nothing", id: "abc" });
+    const r = d.next({ type: "internal.nothing" });
 
     expect(r).toMatchObject({
-      type: "internal.async",
-      kind: "lfi",
+      type: "internal.async.l",
       id: "abc.0",
     });
   });
@@ -41,7 +40,7 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator("abc", foo());
-    const r = d.next({ type: "internal.nothing", id: "abc" });
+    const r = d.next({ type: "internal.nothing" });
 
     expect(r).toMatchObject({
       type: "internal.await",
@@ -54,16 +53,15 @@ describe("Decorator", () => {
 
   it("handles lfc/rfc correctly", () => {
     function* foo(): Generator<any, any, any> {
-      let v1 = yield new Call("lfc", (x: number) => x + 1, 1);
-      let v2 = yield new Call("rfc", (x: number) => x, 2);
+      let v1 = yield new CallLocal((x: number) => x + 1, 1);
+      let v2 = yield new CallRemote("foo");
       return v1 + v2;
     }
 
     const d = new Decorator("abc", foo());
-    let r = d.next({ type: "internal.nothing", id: "abc" });
+    let r = d.next({ type: "internal.nothing" });
     expect(r).toMatchObject({
-      type: "internal.async",
-      kind: "lfi",
+      type: "internal.async.l",
     });
 
     r = d.next({
@@ -72,7 +70,6 @@ describe("Decorator", () => {
       id: "abc",
       value: {
         type: "internal.literal",
-        id: "abc",
         value: 2,
       },
     });
@@ -92,12 +89,10 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.literal",
       value: 2,
-      id: "abc",
     });
 
     expect(r).toMatchObject({
-      type: "internal.async",
-      kind: "rfi",
+      type: "internal.async.r",
     });
 
     r = d.next({
@@ -116,23 +111,22 @@ describe("Decorator", () => {
   });
 
   it("returns final value after multiple yields", () => {
-    function* foo(): Generator<Invoke<any> | Future<any>, any, number> {
+    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10);
-      yield new Invoke("lfi", () => 42);
+      yield new InvokeLocal(() => 42);
       return 30;
     }
 
     const d = new Decorator("abc", foo());
 
-    d.next({ type: "internal.nothing", id: "abc" }); // First yield
-    d.next({ type: "internal.literal", id: "abc.1", value: 10 }); // yield a future, get a literal back
+    d.next({ type: "internal.nothing" }); // First yield
+    d.next({ type: "internal.literal", value: 10 }); // yield a future, get a literal back
     const r = d.next({
       type: "internal.promise",
       state: "completed",
       id: "abc.2",
       value: {
         type: "internal.literal",
-        id: "abc.2.lit",
         value: 42,
       },
     }); // yield an invoke, get a completed promise back
@@ -147,17 +141,17 @@ describe("Decorator", () => {
   });
 
   it("awaits if there are pending invokes - Structured Concurrency", () => {
-    function* foo(): Generator<Invoke<any> | Future<any>, any, number> {
+    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield new Invoke("lfi", () => 20); // B
-      yield new Invoke("lfi", () => 30); // C
+      yield new InvokeLocal(() => 20); // B
+      yield new InvokeLocal(() => 30); // C
       return 30; // D
     }
 
     const d = new Decorator("abc", foo());
 
-    d.next({ type: "internal.nothing", id: "abc" }); // First yield
-    d.next({ type: "internal.literal", id: "abc.1", value: 10 }); // A -> yield a future, get a literal back
+    d.next({ type: "internal.nothing" }); // First yield
+    d.next({ type: "internal.literal", value: 10 }); // A -> yield a future, get a literal back
     d.next({
       type: "internal.promise",
       state: "pending",
@@ -169,7 +163,6 @@ describe("Decorator", () => {
       id: "abc.2",
       value: {
         type: "internal.literal",
-        id: "abc.1.lit",
         value: 30,
       },
     }); // C -> yield an invoke, get a completed promise back
@@ -185,24 +178,23 @@ describe("Decorator", () => {
   });
 
   it("returns if there are no pending invokes even if not explecityly awaited", () => {
-    function* foo(): Generator<Invoke<any> | Future<any>, any, number> {
+    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield new Invoke("lfi", () => 20); // B
-      yield new Invoke("lfi", () => 30); // C
+      yield new InvokeLocal(() => 20); // B
+      yield new InvokeLocal(() => 30); // C
       return 42; // D
     }
 
     const d = new Decorator("abc", foo());
 
-    d.next({ type: "internal.nothing", id: "abc" }); // First yield
-    d.next({ type: "internal.literal", id: "abc.1", value: 10 }); // A -> yield a future, get a literal back
+    d.next({ type: "internal.nothing" }); // First yield
+    d.next({ type: "internal.literal", value: 10 }); // A -> yield a future, get a literal back
     d.next({
       type: "internal.promise",
       state: "completed",
       id: "abc.1",
       value: {
         type: "internal.literal",
-        id: "abc.1.lit",
         value: 20,
       },
     }); // B -> yield an invoke, get a completed promise back
@@ -212,7 +204,6 @@ describe("Decorator", () => {
       id: "abc.2",
       value: {
         type: "internal.literal",
-        id: "abc.1.lit",
         value: 30,
       },
     }); // C -> yield an invoke, get a completed promise back

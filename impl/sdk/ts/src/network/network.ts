@@ -28,6 +28,7 @@ export interface ScheduleRecord {
 
 export interface TaskRecord {
   id: string;
+  rootPromiseId: string;
   counter: number;
   timeout: number;
   processId?: string;
@@ -267,9 +268,14 @@ export type ResponseMsg =
   | HeartbeatTasksRes
   | ErrorRes;
 
-export type RecvMsg = any;
+export type RecvMsg =
+  | { type: "invoke" | "resume"; task: TaskRecord }
+  | { type: "notify"; promise: DurablePromiseRecord };
 
 export interface Network {
   send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void;
-  recv(msg: RecvMsg): void;
+  recv(msg: any): void;
+
+  // Provided by the user of the network, interface
+  onMessage?: (msg: RecvMsg) => void;
 }

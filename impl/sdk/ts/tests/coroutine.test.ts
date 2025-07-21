@@ -1,4 +1,4 @@
-import { lfc, lfi, rfc, rfi } from "../src/context";
+import { type Context, lfc, lfi, rfc, rfi } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
@@ -46,7 +46,7 @@ class DummyNetwork implements Network {
 
 describe("Coroutine", () => {
   // Helper functions to write test easily
-  const exec = (uuid: string, func: any, args: any[], handler: Handler) => {
+  const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
     return new Promise<any>((resolve) => {
       Coroutine.exec(uuid, func, args, handler, resolve);
     });
@@ -63,11 +63,12 @@ describe("Coroutine", () => {
       return 42;
     }
 
-    function* foo() {
+    function* foo(_: Context) {
       const p = yield* lfi(bar);
       const v = yield* p;
       return v;
     }
+
     const h = new Handler(new DummyNetwork());
     const r = await exec("foo.1", foo, [], h);
     expect(r).toEqual({ type: "completed", value: 42 });
@@ -94,7 +95,7 @@ describe("Coroutine", () => {
     let r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "suspended" });
     const suspended = r as Suspended;
-    expect(suspended.todos).toHaveLength(2);
+    expect(suspended.localTodos).toHaveLength(2);
 
     await resolvePromise(h, "foo.1.0", 42);
     await resolvePromise(h, "foo.1.1", 31416);
@@ -111,7 +112,7 @@ describe("Coroutine", () => {
 
     function* foo() {
       const p1 = yield* lfi(bar);
-      const p2 = yield* rfi(bar);
+      const p2 = yield* rfi("bar");
       const v1 = yield* p1;
       const vx = yield* p1;
       const v2 = yield* p2;
@@ -123,7 +124,7 @@ describe("Coroutine", () => {
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
     r = r as Suspended;
-    expect(r.todos).toHaveLength(1);
+    expect(r.remoteTodos).toHaveLength(1);
 
     await resolvePromise(h, "foo.1.1", 42);
     r = await exec("foo.1", foo, [], h);
@@ -136,8 +137,8 @@ describe("Coroutine", () => {
     }
 
     function* foo() {
-      yield* rfi(bar);
-      yield* rfi(bar);
+      yield* rfi("bar");
+      yield* rfi("bar");
       return 99;
     }
 
@@ -146,14 +147,14 @@ describe("Coroutine", () => {
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
-    expect(r.todos).toHaveLength(2);
+    expect(r.remoteTodos).toHaveLength(2);
 
     await resolvePromise(h, "foo.1.1", 42);
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
-    expect(r.todos).toHaveLength(1);
+    expect(r.remoteTodos).toHaveLength(1);
 
     await resolvePromise(h, "foo.1.0", 42);
     r = await exec("foo.1", foo, [], h);
@@ -168,7 +169,7 @@ describe("Coroutine", () => {
 
     function* foo() {
       const v1: number = yield* lfc(bar);
-      const v2: number = yield* rfc(bar);
+      const v2: number = yield* rfc<number>("bar");
       return v1 + v2;
     }
 
@@ -177,7 +178,7 @@ describe("Coroutine", () => {
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
     let suspended = r as Suspended;
-    expect(suspended.todos).toHaveLength(1);
+    expect(suspended.remoteTodos).toHaveLength(1);
 
     await resolvePromise(h, "foo.1.1", 42);
 

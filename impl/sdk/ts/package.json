@@ -29,7 +29,8 @@
     "type-check": "npx tsc --noEmit"
   },
   "dependencies": {
-    "cron-parser": "^5.3.0"
+    "cron-parser": "^5.3.0",
+    "eventsource": "^4.0.0"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
