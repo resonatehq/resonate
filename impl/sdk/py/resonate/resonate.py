@@ -49,6 +49,7 @@ class Resonate:
         registry: Registry | None = None,
         store: Store | None = None,
         ttl: int = 10,
+        workers: int | None = None,
     ) -> None:
         """Create a Resonate client."""
         # dependencies
@@ -113,6 +114,7 @@ class Resonate:
         self._registry = registry or Registry()
         self._started = False
         self._ttl = ttl
+        self._workers = workers
 
         if store and message_source:
             self._store = store
@@ -126,6 +128,7 @@ class Resonate:
             self._pid,
             self._ttl,
             self._opts,
+            self._workers,
             self._message_source.anycast,
             self._message_source.unicast,
             self._registry,
@@ -142,6 +145,7 @@ class Resonate:
         pid: str | None = None,
         registry: Registry | None = None,
         ttl: int = 10,
+        workers: int | None = None,
     ) -> Resonate:
         """Create a Resonate client with local configuration.
 
@@ -162,6 +166,7 @@ class Resonate:
             log_level=log_level,
             store=store,
             message_source=store.message_source(group=group, id=pid),
+            workers=workers,
         )
 
     @classmethod
@@ -177,6 +182,7 @@ class Resonate:
         registry: Registry | None = None,
         store_port: str | None = None,
         ttl: int = 10,
+        workers: int | None = None,
     ) -> Resonate:
         """Create a Resonate client with remote configuration.
 
@@ -197,6 +203,7 @@ class Resonate:
             log_level=log_level,
             store=RemoteStore(host=host, port=store_port, auth=auth),
             message_source=Poller(group=group, id=pid, host=host, port=message_source_port, auth=auth),
+            workers=workers,
         )
 
     @property

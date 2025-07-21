@@ -58,6 +58,7 @@ class Bridge:
         pid: str,
         ttl: int,
         opts: Options,
+        workers: int | None,
         unicast: str,
         anycast: str,
         registry: Registry,
@@ -72,7 +73,7 @@ class Bridge:
         self._ttl = ttl
         self._opts = opts
         self._unicast = unicast
-        self._anycast = unicast
+        self._anycast = anycast
 
         self._registry = registry
         self._store = store
@@ -85,7 +86,7 @@ class Bridge:
             self._unicast,
             self._anycast,
         )
-        self._processor = Processor()
+        self._processor = Processor(workers)
 
         self._bridge_thread = threading.Thread(target=self._process_cq, name="bridge", daemon=True)
         self._message_source_thread = threading.Thread(target=self._process_msgs, name="message-source", daemon=True)
