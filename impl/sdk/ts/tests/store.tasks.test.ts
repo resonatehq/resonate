@@ -43,7 +43,7 @@ describe("tasks transitions", () => {
 
   test("Test Case 5: transition from enqueued to claimed via claim", async () => {
     let task = step(server);
-    await expect(tasks.claim(task.id, task.counter, "task5", Number.MAX_SAFE_INTEGER)).resolves.not.toThrow();
+    await tasks.claim(task.id, task.counter, "task5", Number.MAX_SAFE_INTEGER);
   });
 
   test("Test Case 6: transition from enqueue to enqueue via claim", async () => {
@@ -76,7 +76,7 @@ describe("tasks transitions", () => {
   test("Test Case 14: transition from claimed to completed via complete", async () => {
     let task = step(server);
     await tasks.claim(task.id, task.counter, "task14", Number.MAX_SAFE_INTEGER);
-    await expect(tasks.complete(task.id, task.counter)).resolves.not.toThrow();
+    await tasks.complete(task.id, task.counter);
   });
 
   test("Test Case 15: transition from claimed to init via complete", async () => {
@@ -124,7 +124,7 @@ describe("tasks transitions", () => {
     let task = step(server);
     await tasks.claim(task.id, task.counter, "task21", Number.MAX_SAFE_INTEGER);
     await tasks.complete(task.id, task.counter);
-    await expect(tasks.complete(task.id, task.counter)).resolves.not.toThrow();
+    await tasks.complete(task.id, task.counter);
   });
 
   test("Test Case 22: transition from completed to completed via heartbeat", async () => {
