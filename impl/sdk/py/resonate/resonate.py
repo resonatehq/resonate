@@ -331,7 +331,7 @@ class Resonate:
         func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> Handle[R]: ...
+    ) -> R: ...
     @overload
     def run(
         self,
@@ -339,8 +339,45 @@ class Resonate:
         func: str,
         *args: Any,
         **kwargs: Any,
-    ) -> Handle[Any]: ...
+    ) -> Any: ...
     def run[**P, R](
+        self,
+        id: str,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> R:
+        """Run a function with Resonate and wait for the result.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        - This is a blocking operation
+        """
+        return self.begin_run(id, func, *args, **kwargs).result()
+
+    @overload
+    def begin_run[**P, R](
+        self,
+        id: str,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[R]: ...
+    @overload
+    def begin_run(
+        self,
+        id: str,
+        func: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Handle[Any]: ...
+    def begin_run[**P, R](
         self,
         id: str,
         func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
@@ -391,7 +428,7 @@ class Resonate:
         func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
         *args: P.args,
         **kwargs: P.kwargs,
-    ) -> Handle[R]: ...
+    ) -> R: ...
     @overload
     def rpc(
         self,
@@ -399,8 +436,45 @@ class Resonate:
         func: str,
         *args: Any,
         **kwargs: Any,
-    ) -> Handle[Any]: ...
+    ) -> Any: ...
     def rpc[**P, R](
+        self,
+        id: str,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> R:
+        """Run a function with Resonate remotely and wait for the result.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        - This is a blocking operation
+        """
+        return self.begin_rpc(id, func, *args, **kwargs).result()
+
+    @overload
+    def begin_rpc[**P, R](
+        self,
+        id: str,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Handle[R]: ...
+    @overload
+    def begin_rpc(
+        self,
+        id: str,
+        func: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Handle[Any]: ...
+    def begin_rpc[**P, R](
         self,
         id: str,
         func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R] | str,
@@ -530,6 +604,96 @@ class Context:
             raise TypeError(msg)
 
         return self._dependencies.get(key, default)
+
+    def run[**P, R](
+        self,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LFC[R]:
+        """Schedule a function for local execution and await its result. (Alias for ctx.lfc).
+
+        The function is executed in the current process.
+
+        By default, execution is durable; non durable behavior can be configured if needed.
+        """
+        return self.lfc(func, *args, **kwargs)
+
+    def begin_run[**P, R](
+        self,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LFI[R]:
+        """Schedule a function for local execution. (Alias for ctx.lfi).
+
+        The function is executed in the current process, and the returned promise
+        can be awaited for the final result.
+
+        By default, execution is durable; non durable behavior can be configured if needed.
+        """
+        return self.lfi(func, *args, **kwargs)
+
+    @overload
+    def rpc[**P, R](
+        self,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> RFC[R]: ...
+    @overload
+    def rpc(
+        self,
+        func: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> RFC: ...
+    def rpc(
+        self,
+        func: Callable | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> RFC:
+        """Schedule a function for remote execution and await its result. (Alias for ctx.rfc).
+
+        The function is scheduled on the global event loop and potentially executed
+        in a different process.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        """
+        return self.rfc(func, *args, **kwargs)
+
+    @overload
+    def begin_rpc[**P, R](
+        self,
+        func: Callable[Concatenate[Context, P], Generator[Any, Any, R] | R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> RFI[R]: ...
+    @overload
+    def begin_rpc(
+        self,
+        func: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> RFI: ...
+    def begin_rpc(
+        self,
+        func: Callable | str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> RFI:
+        """Schedule a function for remote execution. (Alias for ctx.rfi).
+
+        The function is scheduled on the global event loop and potentially executed
+        in a different process, the returned promise can be awaited for the final
+        result.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        """
+        return self.rfi(func, *args, **kwargs)
 
     def lfi[**P, R](
         self,
@@ -860,7 +1024,22 @@ class Function[**P, R]:
         )
         return self
 
-    def run[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
+    def run[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> T:
+        """Run a function with Resonate and wait for the result.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        - This is a blocking operation
+        """
+        return self.begin_run(id, *args, **kwargs).result()
+
+    def begin_run[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
         """Run a function with Resonate.
 
         If a durable promise with the same id already exists, the method
@@ -881,9 +1060,24 @@ class Function[**P, R]:
             timeout=self._opts.timeout,
             version=self._opts.version,
         )
-        return resonate.run(id, self._func, *args, **kwargs)
+        return resonate.begin_run(id, self._func, *args, **kwargs)
 
-    def rpc[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
+    def rpc[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> T:
+        """Run a function with Resonate remotely and wait for the result.
+
+        If a durable promise with the same id already exists, the method
+        will subscribe to its result or return the value immediately if
+        the promise has been completed.
+
+        Resonate will prevent duplicate executions for the same id.
+
+        - Function must be registered
+        - Function args and kwargs must be serializable
+        - This is a blocking operation
+        """
+        return self.begin_rpc(id, *args, **kwargs).result()
+
+    def begin_rpc[T](self: Function[P, Generator[Any, Any, T] | T], id: str, *args: P.args, **kwargs: P.kwargs) -> Handle[T]:
         """Run a function with Resonate remotely.
 
         If a durable promise with the same id already exists, the method
@@ -904,4 +1098,4 @@ class Function[**P, R]:
             timeout=self._opts.timeout,
             version=self._opts.version,
         )
-        return resonate.rpc(id, self._func, *args, **kwargs)
+        return resonate.begin_rpc(id, self._func, *args, **kwargs)

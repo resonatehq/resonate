@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .coroutine import Yieldable
-from .options import Options
+from .coroutine import Promise, Yieldable
+from .models.handle import Handle
 from .resonate import Context, Resonate
 
-__all__ = ["Context", "Options", "Resonate", "Yieldable"]
+__all__ = ["Context", "Handle", "Promise", "Resonate", "Yieldable"]

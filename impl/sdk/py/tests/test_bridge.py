@@ -255,24 +255,24 @@ def test_local_invocations_with_registered_functions(resonate: Resonate) -> None
         else:
             return (yield (yield ctx.lfi(recursive, n - 1)))
 
-    assert recursive.run("recursive", 5).result() == 1
+    assert recursive.run("recursive", 5) == 1
 
 
 @pytest.mark.parametrize("durable", [True, False])
 def test_fail_immediately_fn(resonate: Resonate, durable: bool) -> None:
     with pytest.raises(RuntimeError):
-        resonate.run(f"fail-immediately-fn-{uuid.uuid4()}", wkflw, durable).result()
+        resonate.run(f"fail-immediately-fn-{uuid.uuid4()}", wkflw, durable)
 
 
 def test_fail_immediately_coro(resonate: Resonate) -> None:
     with pytest.raises(RuntimeError):
-        resonate.options(timeout=1, retry_policy=Constant(delay=10, max_retries=1_000_000)).run(f"fail-immediately-coro-{uuid.uuid4()}", failure_wkflw).result()
+        resonate.options(timeout=1, retry_policy=Constant(delay=10, max_retries=1_000_000)).run(f"fail-immediately-coro-{uuid.uuid4()}", failure_wkflw)
 
 
 @pytest.mark.parametrize("mode", ["rfc", "lfc"])
 @pytest.mark.parametrize(("parent_timeout", "child_timeout"), [(1100, 10), (10, 1100), (10, 10), (10, 11), (11, 10)])
 def test_timeout_bound_by_parent(resonate: Resonate, mode: Literal["rfc", "lfc"], parent_timeout: float, child_timeout: float) -> None:
-    resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", parent_bound, child_timeout, mode).result()
+    resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", parent_bound, child_timeout, mode)
 
 
 @pytest.mark.parametrize(
@@ -286,20 +286,18 @@ def test_timeout_bound_by_parent(resonate: Resonate, mode: Literal["rfc", "lfc"]
     ],
 )
 def test_timeout_unbound_by_parent_detached(resonate: Resonate, parent_timeout: float, child_timeout: float) -> None:
-    resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", unbound_detached, parent_timeout, child_timeout).result()
+    resonate.options(timeout=parent_timeout).run(f"parent-bound-timeout-{uuid.uuid4()}", unbound_detached, parent_timeout, child_timeout)
 
 
 def test_random_generation(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"random-gen-{timestamp}", random_generation)
-    v = handle.result()
-    assert v == resonate.run(f"random-gen-{timestamp}", random_generation).result()
+    assert resonate.run(f"random-gen-{timestamp}", random_generation) == resonate.run(f"random-gen-{timestamp}", random_generation)
 
 
 @pytest.mark.parametrize("id", ["foo", None])
 def test_hitl(resonate: Resonate, id: str | None) -> None:
     uid = uuid.uuid4()
-    handle = resonate.run(f"hitl-{uid}", hitl, id)
+    handle = resonate.begin_run(f"hitl-{uid}", hitl, id)
     time.sleep(1)
     resonate.promises.resolve(id=id or f"hitl-{uid}.1", data="1")
     assert handle.result() == 1
@@ -308,65 +306,56 @@ def test_hitl(resonate: Resonate, id: str | None) -> None:
 def test_get_dependency(resonate: Resonate) -> None:
     timestamp = int(time.time())
     resonate.set_dependency("foo", 1)
-    handle = resonate.run(f"get-dependency-{timestamp}", get_dependency)
-    assert handle.result() == 2
+    assert resonate.run(f"get-dependency-{timestamp}", get_dependency) == 2
 
 
 def test_basic_lfi(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"foo-lfi-{timestamp}", foo_lfi)
-    assert handle.result() == "baz"
+    assert resonate.run(f"foo-lfi-{timestamp}", foo_lfi) == "baz"
 
 
 def test_basic_rfi(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"foo-rfi-{timestamp}", foo_rfi)
-    assert handle.result() == "baz"
+    assert resonate.run(f"foo-rfi-{timestamp}", foo_rfi) == "baz"
 
 
 def test_rfi_by_name(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.rpc(f"add_one_by_name_rfi-{timestamp}", "rfi_add_one_by_name", 42)
-    assert handle.result() == 43
+    assert resonate.rpc(f"add_one_by_name_rfi-{timestamp}", "rfi_add_one_by_name", 42) == 43
 
 
 def test_fib_lfi(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"fib_lfi-{timestamp}", fib_lfi, 10)
     fib_10 = 55
-    assert handle.result() == fib_10
+    assert resonate.run(f"fib_lfi-{timestamp}", fib_lfi, 10) == fib_10
 
 
 def test_fib_rfi(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"fib_rfi-{timestamp}", fib_rfi, 10)
     fib_10 = 55
-    assert handle.result() == fib_10
+    assert resonate.run(f"fib_rfi-{timestamp}", fib_rfi, 10) == fib_10
 
 
 def test_fib_lfc(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"fib_lfc-{timestamp}", fib_lfc, 10)
     fib_10 = 55
-    assert handle.result() == fib_10
+    assert resonate.run(f"fib_lfc-{timestamp}", fib_lfc, 10) == fib_10
 
 
 def test_fib_rfc(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"fib_rfc-{timestamp}", fib_rfc, 10)
     fib_10 = 55
-    assert handle.result() == fib_10
+    assert resonate.run(f"fib_rfc-{timestamp}", fib_rfc, 10) == fib_10
 
 
 def test_sleep(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"sleep-{timestamp}", sleep, 0)
-    assert handle.result() == 1
+    assert resonate.run(f"sleep-{timestamp}", sleep, 0) == 1
 
 
 def test_handle_timeout(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.run(f"handle-timeout-{timestamp}", sleep, 1)
+    handle = resonate.begin_run(f"handle-timeout-{timestamp}", sleep, 1)
     with pytest.raises(TimeoutError):
         handle.result(timeout=0.1)
     assert handle.result() == 1
@@ -385,8 +374,7 @@ def test_basic_retries() -> None:
     resonate.start()
 
     start_time = time.time()
-    handle = f.options(retry_policy=Constant(delay=1, max_retries=3)).run(f"retriable-{int(start_time)}")
-    result = handle.result()
+    result = f.options(retry_policy=Constant(delay=1, max_retries=3)).run(f"retriable-{int(start_time)}")
     end_time = time.time()
 
     assert result == 4
@@ -399,8 +387,7 @@ def test_basic_retries() -> None:
 
 def test_listen(resonate: Resonate) -> None:
     timestamp = int(time.time())
-    handle = resonate.rpc(f"add_one_{timestamp}", "add_one", 42)
-    assert handle.result() == 43
+    assert resonate.rpc(f"add_one_{timestamp}", "add_one", 42) == 43
 
 
 def test_implicit_resonate_start() -> None:
@@ -416,9 +403,7 @@ def test_implicit_resonate_start() -> None:
     r = resonate.register(f)
 
     timestamp = int(time.time())
-    handle = r.run(f"r-implicit-start-{timestamp}", 1)
-    result = handle.result()
-    assert result == 2
+    assert r.run(f"r-implicit-start-{timestamp}", 1) == 2
 
 
 @pytest.mark.parametrize("idempotency_key", ["foo", None])
@@ -443,7 +428,7 @@ def test_info(
         version=version,
     )
 
-    handle = resonate.run(
+    handle = resonate.begin_run(
         id,
         "info",
         idempotency_key or id,
@@ -508,10 +493,8 @@ def test_resonate_platform_errors() -> None:
         resonate.register(g)
 
         # First test normal behavior
-        handle = resonate.run("f-no-err", f, flag=False)
-        assert handle.result() == 42
+        assert resonate.run("f-no-err", f, flag=False) == 42
 
         # Now trigger errors
-        handle = resonate.run("f-err", f, flag=True)
         with pytest.raises(ResonateShutdownError):
-            handle.result()
+            resonate.run("f-err", f, flag=True)

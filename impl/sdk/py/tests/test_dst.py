@@ -21,8 +21,7 @@ from resonate.simulator import Server, Simulator, Worker
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from resonate import Context
-    from resonate.coroutine import Promise
+    from resonate import Context, Promise
     from resonate.models.context import Info
 
 

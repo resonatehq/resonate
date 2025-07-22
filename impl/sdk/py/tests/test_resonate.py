@@ -10,14 +10,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from resonate import Context, Resonate
+from resonate import Context, Handle, Resonate
 from resonate.conventions import Remote
 from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
 from resonate.encoders import JsonEncoder, JsonPickleEncoder, NoopEncoder
 from resonate.loggers import ContextLogger
 from resonate.models.commands import Command, Invoke, Listen
-from resonate.models.handle import Handle
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Function
@@ -196,7 +195,7 @@ def test_register_validations(registry: Registry, func: Callable, kwargs: dict, 
         (baz, "baz", (), {"1": 1, "2": 2}),
     ],
 )
-def test_run(
+def test_begin_run(
     resonate: Resonate,
     encoder: Encoder[Any, str | None] | None,
     idempotency_key: str | None,
@@ -255,7 +254,7 @@ def test_run(
         return Invoke(id, conv, promise.abs_timeout, func, args, kwargs, updated_opts, promise)
 
     for id, fn in [("f1", func), ("f2", name), ("f3", f)]:
-        resonate.run(id, fn, *args, **kwargs)
+        resonate.begin_run(id, fn, *args, **kwargs)
         assert cmd(resonate) == invoke(id)
 
         promise = resonate.promises.get(id=id)
@@ -270,7 +269,7 @@ def test_run(
         )
 
     for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
-        resonate.options(**opts).run(id, fn, *args, **kwargs)
+        resonate.options(**opts).begin_run(id, fn, *args, **kwargs)
         assert cmd(resonate) == invoke_with_opts(id)
 
         promise = resonate.promises.get(id=id)
@@ -288,7 +287,7 @@ def test_run(
             == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
         )
 
-    f.run("f7", *args, **kwargs)
+    f.begin_run("f7", *args, **kwargs)
     assert cmd(resonate) == invoke("f7")
 
     promise = resonate.promises.get(id="f7")
@@ -302,7 +301,7 @@ def test_run(
         == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
-    f.options(**opts).run("f8", *args, **kwargs)
+    f.options(**opts).begin_run("f8", *args, **kwargs)
     assert cmd(resonate) == invoke_with_opts("f8")
 
     promise = resonate.promises.get(id="f8")
@@ -339,7 +338,7 @@ def test_run(
         (baz, "baz", (), {"1": 1, "2": 2}),
     ],
 )
-def test_rpc(
+def test_begin_rpc(
     resonate: Resonate,
     encoder: Encoder[Any, str | None] | None,
     idempotency_key: str | None,
@@ -388,7 +387,7 @@ def test_rpc(
     assert updated_opts.tags == (tags or default_opts.tags)
 
     for id, fn in [("f1", func), ("f2", name), ("f3", f)]:
-        resonate.rpc(id, fn, *args, **kwargs)
+        resonate.begin_rpc(id, fn, *args, **kwargs)
         assert cmd(resonate) == Listen(id=id)
 
         promise = resonate.promises.get(id=id)
@@ -403,7 +402,7 @@ def test_rpc(
         )
 
     for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
-        resonate.options(**opts).rpc(id, fn, *args, **kwargs)
+        resonate.options(**opts).begin_rpc(id, fn, *args, **kwargs)
         assert cmd(resonate) == Listen(id=id)
 
         promise = resonate.promises.get(id=id)
@@ -421,7 +420,7 @@ def test_rpc(
             == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
         )
 
-    f.rpc("f7", *args, **kwargs)
+    f.begin_rpc("f7", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f7")
 
     promise = resonate.promises.get(id="f7")
@@ -435,7 +434,7 @@ def test_rpc(
         == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
-    f.options(**opts).rpc("f8", *args, **kwargs)
+    f.options(**opts).begin_rpc("f8", *args, **kwargs)
     assert cmd(resonate) == Listen(id="f8")
 
     promise = resonate.promises.get(id="f8")
@@ -472,15 +471,15 @@ def test_rpc(
         (Qux().baz, {}, "function baz not found in registry"),
     ],
 )
-def test_run_and_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict, match: str) -> None:
+def test_begin_run_and_begin_rpc_validations(registry: Registry, func: Callable | str, kwargs: dict, match: str) -> None:
     resonate = Resonate(registry=registry)
 
     with pytest.raises(ValueError, match=match):
-        resonate.options(**kwargs).run("f", func)
+        resonate.options(**kwargs).begin_run("f", func)
 
     if not isinstance(func, str):
         with pytest.raises(ValueError, match=match):
-            resonate.options(**kwargs).rpc("f", func)
+            resonate.options(**kwargs).begin_rpc("f", func)
 
 
 @pytest.mark.parametrize("id", ["foo", "bar", "baz"])
@@ -505,77 +504,77 @@ def test_resonate_type_annotations() -> None:
     def foo(ctx: Context, a: int, b: int, /) -> int: ...
 
     assert_type(foo, Function[[int, int], int])
-    assert_type(foo.run, Callable[[str, int, int], Handle[int]])
-    assert_type(foo.rpc, Callable[[str, int, int], Handle[int]])
+    assert_type(foo.begin_run, Callable[[str, int, int], Handle[int]])
+    assert_type(foo.begin_rpc, Callable[[str, int, int], Handle[int]])
     assert_type(foo.__call__, Callable[[Context, int, int], int])
-    assert_type(resonate.run("f", foo, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", foo, 1, 2), Handle[int])
-    assert_type(resonate.run("f", "foo", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("f", "foo", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("f", foo, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", foo, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", "foo", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("f", "foo", 1, 2), Handle[Any])
 
     @resonate.register
     def bar(ctx: Context, a: int, b: int, /) -> Generator[Any, Any, int]: ...
 
     assert_type(bar, Function[[int, int], Generator[Any, Any, int]])
-    assert_type(bar.run("f", 1, 2), Handle[int])
-    assert_type(bar.rpc("f", 1, 2), Handle[int])
+    assert_type(bar.begin_run("f", 1, 2), Handle[int])
+    assert_type(bar.begin_rpc("f", 1, 2), Handle[int])
     assert_type(bar.__call__, Callable[[Context, int, int], Generator[Any, Any, int]])
-    assert_type(resonate.run("f", bar, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", bar, 1, 2), Handle[int])
-    assert_type(resonate.run("f", "bar", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("f", "bar", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("f", bar, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", bar, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", "bar", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("f", "bar", 1, 2), Handle[Any])
 
     @resonate.register()
     def baz(ctx: Context, a: int, b: int, /) -> int: ...
 
     assert_type(baz, Function[[int, int], int])
-    assert_type(baz.run, Callable[[str, int, int], Handle[int]])
-    assert_type(baz.rpc, Callable[[str, int, int], Handle[int]])
+    assert_type(baz.begin_run, Callable[[str, int, int], Handle[int]])
+    assert_type(baz.begin_rpc, Callable[[str, int, int], Handle[int]])
     assert_type(baz.__call__, Callable[[Context, int, int], int])
-    assert_type(resonate.run("f", baz, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", baz, 1, 2), Handle[int])
-    assert_type(resonate.run("f", "baz", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("f", "baz", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("f", baz, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", baz, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", "baz", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("f", "baz", 1, 2), Handle[Any])
 
     @resonate.register()
     def qux(ctx: Context, a: int, b: int, /) -> Generator[Any, Any, int]: ...
 
     assert_type(qux, Function[[int, int], Generator[Any, Any, int]])
-    assert_type(qux.run("f", 1, 2), Handle[int])
-    assert_type(qux.rpc("f", 1, 2), Handle[int])
+    assert_type(qux.begin_run("f", 1, 2), Handle[int])
+    assert_type(qux.begin_rpc("f", 1, 2), Handle[int])
     assert_type(qux.__call__, Callable[[Context, int, int], Generator[Any, Any, int]])
-    assert_type(resonate.run("f", qux, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", qux, 1, 2), Handle[int])
-    assert_type(resonate.run("f", "qux", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("f", "qux", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("f", qux, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", qux, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", "qux", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("f", "qux", 1, 2), Handle[Any])
 
     def zog(ctx: Context, a: int, b: int, /) -> int: ...
 
     f = resonate.register(zog)
     assert_type(f, Function[[int, int], int])
-    assert_type(f.run, Callable[[str, int, int], Handle[int]])
-    assert_type(f.rpc, Callable[[str, int, int], Handle[int]])
+    assert_type(f.begin_run, Callable[[str, int, int], Handle[int]])
+    assert_type(f.begin_rpc, Callable[[str, int, int], Handle[int]])
     assert_type(f.__call__, Callable[[Context, int, int], int])
-    assert_type(resonate.run("f", f, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", f, 1, 2), Handle[int])
-    assert_type(resonate.run("f", zog, 1, 2), Handle[int])
-    assert_type(resonate.rpc("f", zog, 1, 2), Handle[int])
-    assert_type(resonate.run("f", "zog", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("f", "zog", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("f", f, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", f, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", zog, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("f", zog, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("f", "zog", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("f", "zog", 1, 2), Handle[Any])
 
     def waz(ctx: Context, a: int, b: int, /) -> Generator[Any, Any, int]: ...
 
     g = resonate.register(waz)
     assert_type(g, Function[[int, int], Generator[Any, Any, int]])
-    assert_type(g.run("g", 1, 2), Handle[int])
-    assert_type(g.rpc("g", 1, 2), Handle[int])
+    assert_type(g.begin_run("g", 1, 2), Handle[int])
+    assert_type(g.begin_rpc("g", 1, 2), Handle[int])
     assert_type(g.__call__, Callable[[Context, int, int], Generator[Any, Any, int]])
-    assert_type(resonate.run("g", g, 1, 2), Handle[int])
-    assert_type(resonate.rpc("g", g, 1, 2), Handle[int])
-    assert_type(resonate.run("g", waz, 1, 2), Handle[int])
-    assert_type(resonate.rpc("g", waz, 1, 2), Handle[int])
-    assert_type(resonate.run("g", "waz", 1, 2), Handle[Any])
-    assert_type(resonate.rpc("g", "waz", 1, 2), Handle[Any])
+    assert_type(resonate.begin_run("g", g, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("g", g, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("g", waz, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("g", waz, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("g", "waz", 1, 2), Handle[Any])
+    assert_type(resonate.begin_rpc("g", "waz", 1, 2), Handle[Any])
 
     # The following assertions check the equivalence of the following permissible types:
     # Function[[int, int], int]
@@ -583,16 +582,16 @@ def test_resonate_type_annotations() -> None:
     # Callable[[Context, int, int], int]
     # Callable[[Context, int, int], Generator[Any, Any, int]]
     for h in (foo, bar, baz, qux, zog, waz, f, g):
-        assert_type(resonate.run("h", h, 1, 2), Handle[int])
-        assert_type(resonate.rpc("h", h, 1, 2), Handle[int])
+        assert_type(resonate.begin_run("h", h, 1, 2), Handle[int])
+        assert_type(resonate.begin_rpc("h", h, 1, 2), Handle[int])
 
     # The following assertions check the covariance of Function generic R parameter
     i: Function[[int, int], Generator[Any, Any, int]] | Function[[int, int], int] = random.choice([foo, bar, baz, qux, f, g])
     j: Function[[int, int], Generator[Any, Any, int] | int] = random.choice([foo, bar, baz, qux, f, g])
-    assert_type(resonate.run("i", i, 1, 2), Handle[int])
-    assert_type(resonate.rpc("i", i, 1, 2), Handle[int])
-    assert_type(resonate.run("i", j, 1, 2), Handle[int])
-    assert_type(resonate.rpc("i", j, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("i", i, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("i", i, 1, 2), Handle[int])
+    assert_type(resonate.begin_run("i", j, 1, 2), Handle[int])
+    assert_type(resonate.begin_rpc("i", j, 1, 2), Handle[int])
 
 
 def test_context_type_annotations() -> None:
