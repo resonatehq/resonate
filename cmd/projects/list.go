@@ -44,7 +44,7 @@ func ListProjectCmd() *cobra.Command {
 }
 
 func display(templates Projects) {
-	fmt.Println("\n✨ Available templates ✨\n\n")
+	fmt.Println("\n✨ Available templates ✨\n")
 	for name, t := range templates {
 		fmt.Printf("✨ %s\n\n\t%s\n\n", name, t.Desc)
 		fmt.Printf("\tTo use this template, run:\n\n")
