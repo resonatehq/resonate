@@ -124,16 +124,16 @@ class Resonate:
             self._message_source = self._store.message_source(self._group, self._pid)
 
         self._bridge = Bridge(
-            lambda id, cid, info: Context(id, cid, info, self._registry, self._dependencies, ContextLogger(cid, id, self._log_level)),
-            self._pid,
-            self._ttl,
-            self._opts,
-            self._workers,
-            self._message_source.anycast,
-            self._message_source.unicast,
-            self._registry,
-            self._store,
-            self._message_source,
+            ctx=lambda id, cid, info: Context(id, cid, info, self._registry, self._dependencies, ContextLogger(cid, id, self._log_level)),
+            pid=self._pid,
+            ttl=self._ttl,
+            opts=self._opts,
+            workers=self._workers,
+            unicast=self._message_source.unicast,
+            anycast=self._message_source.anycast,
+            registry=self._registry,
+            store=self._store,
+            message_source=self._message_source,
         )
 
     @classmethod

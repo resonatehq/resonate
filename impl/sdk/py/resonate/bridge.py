@@ -81,10 +81,10 @@ class Bridge:
         self._delay_q = DelayQ[Function | Retry]()
 
         self._scheduler = Scheduler(
-            self._ctx,
-            self._pid,
-            self._unicast,
-            self._anycast,
+            ctx=self._ctx,
+            pid=self._pid,
+            unicast=self._unicast,
+            anycast=self._anycast,
         )
         self._processor = Processor(workers)
 

@@ -74,7 +74,16 @@ class Scheduler:
         return f"Scheduler(pid={self.pid}, computations={list(self.computations.values())})"
 
     def step(self, cmd: Command, future: Future | None = None) -> More | Done:
-        computation = self.computations.setdefault(cmd.cid, Computation(cmd.cid, self.ctx, self.pid, self.unicast, self.anycast))
+        computation = self.computations.setdefault(
+            cmd.cid,
+            Computation(
+                id=cmd.cid,
+                ctx=self.ctx,
+                pid=self.pid,
+                unicast=self.unicast,
+                anycast=self.anycast,
+            ),
+        )
 
         # subscribe
         if future:
