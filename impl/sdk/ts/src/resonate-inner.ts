@@ -1,8 +1,10 @@
 import { Computation } from "./computation";
 import type { Context } from "./context";
+import { LocalNetwork } from "./network/local";
 import type { CreatePromiseAndTaskRes, DurablePromiseRecord, Mesg, Network, RecvMsg } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Registry } from "./registry";
+import { Server } from "./server";
 import type { Func, Params, Ret } from "./types";
 import * as util from "./util";
 
@@ -27,6 +29,10 @@ export class ResonateInner {
     this.invocationHandlers = new Map();
     this.network = network;
     this.network.onMessage = this.onMessage;
+  }
+
+  static local(): ResonateInner {
+    return new ResonateInner(new LocalNetwork(new Server()), {});
   }
 
   static remote(opts: { host?: string; storePort?: number; messageSourcePort?: number; pid?: string }): ResonateInner {

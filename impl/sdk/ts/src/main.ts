@@ -25,7 +25,7 @@ function* foo(ctx: context.Context) {
   return { v1, v2, v3 };
 }
 
-const resonate = ResonateInner.remote({});
+const resonate = ResonateInner.local();
 
 const rfoo = resonate.register("foo", foo);
 resonate.register("bar", bar);

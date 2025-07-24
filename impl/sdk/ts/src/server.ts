@@ -1,6 +1,13 @@
 import { CronExpressionParser } from "cron-parser";
 
-import type { CallbackRecord, DurablePromiseRecord, Mesg, ScheduleRecord, TaskRecord } from "./network/network";
+import type {
+  CallbackRecord,
+  DurablePromiseRecord,
+  Mesg,
+  RecvMsg,
+  ScheduleRecord,
+  TaskRecord,
+} from "./network/network";
 import * as util from "./util";
 
 interface DurablePromise {
@@ -87,42 +94,47 @@ export class Server {
     this.targets = { default: "local://any@default" };
   }
 
-  next(time: number = Date.now()): number {
+  next(time: number = Date.now()): number | undefined {
     let timeout: number | undefined = undefined;
     for (const promise of this.promises.values()) {
+      if (timeout === 0) {
+        return timeout;
+      }
+
       if (promise.state === "pending") {
         timeout = timeout === undefined ? promise.timeout : Math.min(promise.timeout, timeout);
       }
     }
 
     for (const task of this.tasks.values()) {
-      if (["init", "enqueued", "claimed"].includes(task.state)) {
+      if (timeout === 0) {
+        return timeout;
+      }
+
+      if (task.state === "init") {
+        timeout = timeout === undefined ? 0 : Math.min(0, timeout);
+      } else if (["claimed", "enqueued"].includes(task.state)) {
         util.assert(task.expiry !== undefined);
-        timeout = timeout === undefined ? task.expiry : Math.min(task.expiry!, timeout);
+        timeout = timeout === undefined ? task.expiry! : Math.min(task.expiry!, timeout);
       }
     }
 
     for (const schedule of this.schedules.values()) {
+      if (timeout === 0) {
+        return timeout;
+      }
+
       util.assert(schedule.nextRunTime !== undefined);
       timeout = timeout === undefined ? schedule.nextRunTime : Math.min(schedule.nextRunTime!, timeout);
     }
 
-    timeout = timeout !== undefined ? Math.max(0, timeout - time) : timeout;
-
-    util.assert(timeout !== undefined);
-    return timeout!;
+    // we truncate to largest signed 32-bit, since it's the max number js
+    // setTimeout function can as delay
+    timeout = timeout !== undefined ? Math.min(Math.max(0, timeout - time), 2147483647) : timeout;
+    return timeout;
   }
 
-  *step(time: number = Date.now()): Generator<
-    {
-      recv: string;
-      msg:
-        | { kind: "invoke" | "resume"; id: string; counter: number }
-        | { kind: "notify"; promise: DurablePromiseRecord };
-    },
-    void,
-    boolean | undefined
-  > {
+  step(time: number = Date.now()): RecvMsg[] {
     for (const schedule of this.schedules.values()) {
       if (time < schedule.nextRunTime!) {
         continue;
@@ -161,40 +173,39 @@ export class Server {
       }
     }
 
+    const msgs: RecvMsg[] = Array();
+
     for (const task of this.tasks.values()) {
       if (task.state !== "init") {
         continue;
       }
-      let msg:
-        | { kind: "invoke" | "resume"; id: string; counter: number }
-        | { kind: "notify"; promise: DurablePromiseRecord };
+      let msg: RecvMsg;
       if (task.type === "invoke") {
         msg = {
-          kind: "invoke",
-          id: task.id,
-          counter: task.counter,
+          type: "invoke",
+          task: { ...task, timeout: this.getPromise(task.rootPromiseId).timeout },
         };
       } else if (task.type === "resume") {
-        msg = { kind: "resume", id: task.id, counter: task.counter };
+        msg = {
+          type: "resume",
+          task: { ...task, timeout: this.getPromise(task.rootPromiseId).timeout },
+        };
       } else {
         util.assert(task.type === "notify");
-        msg = { kind: "notify", promise: this.getPromise(task.rootPromiseId) };
+        msg = { type: "notify", promise: this.getPromise(task.rootPromiseId) };
       }
 
-      if (yield { recv: task.recv, msg: msg }) {
-        if (task.type === "notify") {
-          const { applied } = this.transitionTask(task.id, "completed", {}, time);
-          util.assert(applied);
-        } else {
-          const { applied } = this.transitionTask(task.id, "enqueued", {}, time);
-          util.assert(applied);
-        }
+      msgs.push(msg);
+
+      if (task.type === "notify") {
+        const { applied } = this.transitionTask(task.id, "completed", {}, time);
+        util.assert(applied);
       } else {
-        // TODO(dfarr): implement this
-        // _, applied = self.tasks.transition(task.id, to="INIT", expiry=0)
-        // assert applied
+        const { applied } = this.transitionTask(task.id, "enqueued", {}, time);
+        util.assert(applied);
       }
     }
+    return msgs;
   }
 
   private _createPromise(

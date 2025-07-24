@@ -203,7 +203,7 @@ export type Msg = { type: "invoke" | "resume"; task: TaskRecord } | { type: "not
 
 export class HttpNetwork implements Network {
   private url: string;
-  private msg_url: string;
+  private msgUrl: string;
   private timeout: number;
   private baseHeaders: Record<string, string>;
   private encoder: Encoder;
@@ -218,10 +218,10 @@ export class HttpNetwork implements Network {
       "Content-Type": "application/json",
       ...config.headers,
     };
-    this.msg_url = config.msg_url || "http://localhost:8002/default/0";
+    this.msgUrl = config.msgUrl || "http://localhost:8002/default/0";
     this.encoder = config.encoder ?? new JsonEncoder();
 
-    this.eventSource = new EventSource(this.msg_url);
+    this.eventSource = new EventSource(this.msgUrl);
     this.eventSource.addEventListener("message", (event) => this.recv(event));
   }
 

@@ -33,15 +33,41 @@ import type {
 
 export class LocalNetwork implements Network {
   private server: Server;
+  private timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   constructor(server: Server = new Server()) {
     this.server = server;
-  }
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
-    callback(false, this.handleRequest(request));
+    this.timeoutId = undefined;
   }
 
-  recv(msg: RecvMsg): void {}
+  private enqueueNext(): void {
+    clearTimeout(this.timeoutId);
+    const n = this.server.next();
+
+    if (n !== undefined) {
+      this.timeoutId = setTimeout((): void => {
+        const msgs = this.server.step();
+        this.enqueueNext();
+        this.recv(msgs);
+      }, n);
+    }
+  }
+
+  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
+    const response = this.handleRequest(request);
+    clearTimeout(this.timeoutId);
+    this.enqueueNext();
+    callback(false, response);
+  }
+
+  recv(msg: any): void {
+    const msgs = msg as RecvMsg[];
+    for (const m of msgs) {
+      this.onMessage?.(m);
+    }
+  }
+
+  public onMessage?: (msg: RecvMsg) => void;
 
   private handleRequest(request: RequestMsg): ResponseMsg {
     switch (request.kind) {

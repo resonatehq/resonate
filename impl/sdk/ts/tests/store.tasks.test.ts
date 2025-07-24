@@ -8,24 +8,27 @@ let TICK_TIME = 1000;
 
 describe("tasks transitions", () => {
   function step(server: Server): { id: string; counter: number } {
-    let step = server.step();
-    let next = step.next();
-    let value = next.value!;
-    next = step.next(true);
-    expect(value.msg.kind).toBe("invoke");
-
-    return value.msg as { id: string; counter: number };
+    let msgs = server.step();
+    expect(msgs.length).toBe(1);
+    const value = msgs[0];
+    expect(value.type).toBe("invoke");
+    if (value.type === "invoke") {
+      return value.task as { id: string; counter: number };
+    }
+    throw new Error("unreachable path");
   }
 
   let server: Server;
+  let network: LocalNetwork;
   let promises: Promises;
   let tasks: Tasks;
   let id: string;
 
   beforeAll(() => {
     server = new Server();
-    promises = new Promises(new LocalNetwork(server));
-    tasks = new Tasks(new LocalNetwork(server));
+    network = new LocalNetwork(server);
+    promises = new Promises(network);
+    tasks = new Tasks(network);
   });
 
   beforeEach(async () => {
@@ -37,7 +40,6 @@ describe("tasks transitions", () => {
   });
 
   afterEach(async () => {
-    // resolve the promise so it’s cleaned up for the next test
     await promises.resolve(id);
   });
 
