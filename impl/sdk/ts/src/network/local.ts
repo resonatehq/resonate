@@ -200,7 +200,7 @@ export class LocalNetwork implements Network {
   private heartbeatTasks(request: HeartbeatTasksReq): HeartbeatTasksRes {
     return {
       kind: "heartbeatTasks",
-      tasksAffected: this.server.hearbeatTasks(request.processId),
+      tasksAffected: this.server.heartbeatTasks(request.processId),
     };
   }
 }
