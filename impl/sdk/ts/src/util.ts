@@ -1,5 +1,11 @@
 import type { TaskRecord } from "./network/network";
 
+// Base unit: milliseconds
+export const MS = 1;
+export const SEC = 1000;
+export const MIN = 60 * SEC;
+export const HOUR = 60 * MIN;
+
 export function assert(cond: boolean, msg?: string): void {
   if (cond) return; // Early return if assertion passes
 

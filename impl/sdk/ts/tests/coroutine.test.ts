@@ -1,4 +1,4 @@
-import { type Context, lfc, lfi, rfc, rfi } from "../src/context";
+import { Context } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
@@ -63,8 +63,8 @@ describe("Coroutine", () => {
       return 42;
     }
 
-    function* foo(_: Context) {
-      const p = yield* lfi(bar);
+    function* foo(ctx: Context) {
+      const p = yield* ctx.lfi(bar);
       const v = yield* p;
       return v;
     }
@@ -82,9 +82,9 @@ describe("Coroutine", () => {
       return 31416;
     }
 
-    function* foo() {
-      const p = yield* lfi(bar);
-      const p2 = yield* lfi(baz);
+    function* foo(ctx: Context) {
+      const p = yield* ctx.lfi(bar);
+      const p2 = yield* ctx.lfi(baz);
       const v = yield* p;
       const v2 = yield* p2;
       return v + v2;
@@ -110,9 +110,9 @@ describe("Coroutine", () => {
       return 42;
     }
 
-    function* foo() {
-      const p1 = yield* lfi(bar);
-      const p2 = yield* rfi("bar");
+    function* foo(ctx: Context) {
+      const p1 = yield* ctx.lfi(bar);
+      const p2 = yield* ctx.rfi("bar");
       const v1 = yield* p1;
       const vx = yield* p1;
       const v2 = yield* p2;
@@ -136,9 +136,9 @@ describe("Coroutine", () => {
       return 42;
     }
 
-    function* foo() {
-      yield* rfi("bar");
-      yield* rfi("bar");
+    function* foo(ctx: Context) {
+      yield* ctx.rfi("bar");
+      yield* ctx.rfi("bar");
       return 99;
     }
 
@@ -167,9 +167,9 @@ describe("Coroutine", () => {
       return 42;
     }
 
-    function* foo() {
-      const v1: number = yield* lfc(bar);
-      const v2: number = yield* rfc<number>("bar");
+    function* foo(ctx: Context) {
+      const v1: number = yield* ctx.lfc(bar);
+      const v2: number = yield* ctx.rfc<number>("bar");
       return v1 + v2;
     }
 

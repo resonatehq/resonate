@@ -5,6 +5,16 @@ export type Func = (ctx: Context, ...args: any[]) => any;
 // The args of a resonate function excluding the context argument
 export type Params<F> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
 
+export type RemoteOpts = {
+  target: string;
+  timeout: number;
+};
+
+export type LocalOpts = {
+  target: string;
+  timeout: number;
+};
+
 // Return type of a function or a generator
 export type Ret<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
   ? R // Return type of generator
@@ -20,6 +30,7 @@ export type InternalAsyncR<T> = {
   id: string;
   func: string;
   args: any[];
+  opts: RemoteOpts;
   mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
 };
 

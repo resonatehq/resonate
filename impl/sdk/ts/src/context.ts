@@ -1,15 +1,18 @@
+import type { Func, Params, RemoteOpts, Ret } from "./types";
 import * as util from "./util";
-export type AnyGen<T> = (...args: any[]) => Generator<any, T, any>;
-export type AnyFun<T> = (...args: any[]) => T;
 
-export type Invocable<T> = AnyGen<T> | AnyFun<T>;
+const defaultRemoteOpts: RemoteOpts = {
+  target: "default",
+  timeout: Number.MAX_SAFE_INTEGER,
+};
+
 export type Yieldable = InvokeLocal<any> | InvokeRemote<any> | Future<any> | CallLocal<any> | CallRemote<any>;
 
 export class InvokeLocal<T> implements Iterable<InvokeLocal<T>> {
-  public func: Invocable<T>;
+  public func: Func;
   public args: any[];
 
-  constructor(func: Invocable<T>, ...args: any[]) {
+  constructor(func: Func, args: any[]) {
     this.func = func;
     this.args = args;
   }
@@ -24,10 +27,17 @@ export class InvokeLocal<T> implements Iterable<InvokeLocal<T>> {
 export class InvokeRemote<T> implements Iterable<InvokeRemote<T>> {
   public func: string;
   public args: any[];
+  public opts: RemoteOpts;
 
-  constructor(func: string, ...args: any[]) {
+  constructor(func: string, args: any[]) {
     this.func = func;
     this.args = args;
+    this.opts = { ...defaultRemoteOpts };
+  }
+
+  options(opts: Partial<RemoteOpts>): InvokeRemote<T> {
+    this.opts = { ...this.opts, ...opts };
+    return this;
   }
 
   *[Symbol.iterator](): Generator<InvokeRemote<T>, Future<T>, any> {
@@ -38,10 +48,10 @@ export class InvokeRemote<T> implements Iterable<InvokeRemote<T>> {
 }
 
 export class CallLocal<T> implements Iterable<CallLocal<T>> {
-  public func: Invocable<T>;
+  public func: Func;
   public args: any[];
 
-  constructor(func: Invocable<T>, ...args: any[]) {
+  constructor(func: Func, args: any[]) {
     this.func = func;
     this.args = args;
   }
@@ -56,10 +66,17 @@ export class CallLocal<T> implements Iterable<CallLocal<T>> {
 export class CallRemote<T> implements Iterable<CallRemote<T>> {
   public func: string;
   public args: any[];
+  public opts: RemoteOpts;
 
-  constructor(func: string, ...args: any[]) {
+  constructor(func: string, args: any[]) {
     this.func = func;
     this.args = args;
+    this.opts = { ...defaultRemoteOpts };
+  }
+
+  options(opts: Partial<RemoteOpts>): CallRemote<T> {
+    this.opts = { ...this.opts, ...opts };
+    return this;
   }
 
   *[Symbol.iterator](): Generator<CallRemote<T>, T, any> {
@@ -96,20 +113,24 @@ export class Future<T> implements Iterable<Future<T>> {
   }
 }
 
-export class Context {}
+export class Context {
+  // TODO(avillega): Allow user to define other opts
+  lfi<F extends Func>(func: F, ...args: Params<F>): InvokeLocal<Ret<F>> {
+    return new InvokeLocal<Ret<F>>(func, args);
+  }
 
-export function lfi<R>(func: Invocable<R>, ...args: any[]): InvokeLocal<R> {
-  return new InvokeLocal<R>(func, ...args);
-}
+  // TODO(avillega): Allow user to define target, and opts
+  rfi<R>(func: string, ...args: any[]): InvokeRemote<R> {
+    return new InvokeRemote<R>(func, args);
+  }
 
-export function rfi<R>(func: string, ...args: any[]): InvokeRemote<R> {
-  return new InvokeRemote<R>(func, ...args);
-}
+  // TODO(avillega): Allow user to define other opts
+  lfc<F extends Func>(func: F, ...args: Params<F>): CallLocal<Ret<F>> {
+    return new CallLocal<Ret<F>>(func, args);
+  }
 
-export function lfc<R>(func: Invocable<R>, ...args: any[]): CallLocal<R> {
-  return new CallLocal<R>(func, ...args);
-}
-
-export function rfc<R>(func: string, ...args: any[]): CallRemote<R> {
-  return new CallRemote<R>(func, ...args);
+  // TODO(avillega): Allow user to define target and opts
+  rfc<R>(func: string, ...args: any[]): CallRemote<R> {
+    return new CallRemote<R>(func, args);
+  }
 }

@@ -22,23 +22,48 @@ export class ResonateInner {
   private computations: Map<string, Computation>;
   private invocationHandlers: Map<string, InvocationHandler<any>>;
   private registry: Registry;
+  private ttl: number;
+  private pid: string;
+  private group: string;
 
-  constructor(network: Network, opts: {}) {
+  constructor(network: Network, config: { pid: string; group: string; ttl: number }) {
     this.registry = new Registry();
     this.computations = new Map();
     this.invocationHandlers = new Map();
+    this.group = config.group;
+    this.pid = config.pid;
+    this.ttl = config.ttl;
     this.network = network;
     this.network.onMessage = this.onMessage;
   }
 
   static local(): ResonateInner {
-    return new ResonateInner(new LocalNetwork(new Server()), {});
+    return new ResonateInner(new LocalNetwork(new Server()), { pid: "defautl", group: "default", ttl: 1 * util.SEC });
   }
 
-  static remote(opts: { host?: string; storePort?: number; messageSourcePort?: number; pid?: string }): ResonateInner {
-    // const { host, storePort, messageSourcePort } = opts; // TODO(avillega): use this values to create the httpnetwork
-    const network = new HttpNetwork({}); // TODO(avillega): initialize httpsNetwork with the right args
-    return new ResonateInner(network, {});
+  static remote(config: {
+    host?: string;
+    storePort?: string;
+    messageSourcePort?: string;
+    group?: string;
+    pid?: string;
+    ttl?: number;
+  }): ResonateInner {
+    const pid = config.pid ?? crypto.randomUUID();
+    const group = config.group ?? "default";
+    const ttl = config.ttl ?? 10 * util.SEC;
+
+    const { host, storePort, messageSourcePort } = config;
+    const network = new HttpNetwork({
+      host: host ?? "http://localhost",
+      storePort: storePort ?? "8001",
+      msgSrcPort: messageSourcePort ?? "8002",
+      pid: pid,
+      group: group,
+      timeout: 1 * util.MIN,
+      headers: {},
+    });
+    return new ResonateInner(network, { pid, group, ttl });
   }
 
   public invoke<T>(
@@ -62,11 +87,11 @@ export class ResonateInner {
             fn: funcName,
             args,
           },
-          tags: { "resonate:invoke": "default" }, // TODO(avillega): use the real anycast address
+          tags: { "resonate:invoke": `poll://any@${this.group}/${this.pid}` }, // TODO(avillega): use the real anycast address
         },
         task: {
-          processId: "0", // TODO(avillega): use the real processId
-          ttl: 300_000, // TODO(avillega): use ttl from options
+          processId: this.pid,
+          ttl: this.ttl,
         },
         iKey: id,
         strict: false,
@@ -84,6 +109,7 @@ export class ResonateInner {
 
         if (durable.state === "resolved") {
           resultPromise.resolve(durable.value);
+          cb(iHandler);
           return;
         }
 
@@ -93,9 +119,10 @@ export class ResonateInner {
           return;
         }
 
-        const compu = new Computation(this.network);
+        const compu = new Computation(this.network, this.group, this.pid);
         this.computations.set(durable.id, compu);
-        compu.invoke(task!, { id: durable.id, fn: func, args }, (_err, result) => resultPromise.resolve(result));
+        compu.handler.updateCache(durable); // Note: we can update the cache because we are holding a claimed task
+        compu.invoke(task, { id: durable.id, fn: func, args }, (_err, result) => resultPromise.resolve(result));
 
         cb(iHandler);
       },
@@ -122,15 +149,13 @@ export class ResonateInner {
   private onMessage = (msg: RecvMsg): void => {
     console.log({ msg });
     if (msg.type === "resume" || msg.type === "invoke") {
-      // - Could try to find the computation at this point and use the computation handle to claim the task
-      // and update the root and leaf promise for that computation (mostly in the resume case)
       this.network.send(
         {
           kind: "claimTask",
           id: msg.task.id,
           counter: msg.task.counter,
-          processId: "0", // TODO (avillega): use right processId
-          ttl: 30_000, // TODO  (avillega): parametrize
+          processId: this.pid,
+          ttl: this.ttl,
         },
         (_timeout, response) => {
           if (response.kind === "claimedtask") {
@@ -148,24 +173,23 @@ export class ResonateInner {
             }
 
             // Handle it as a new invocation
-            //
             const { fn: funcName, args } = root.data.param;
             const func = this.registry.get(funcName);
 
             if (!func) {
-              // Drop the task, can not invoke this function in this node
+              // TODO(avillega) Drop the task, can not invoke this function in this node
               console.log("got a task that can not be executed in this node, dropping task");
               return;
             }
 
-            const compu = new Computation(this.network);
+            const compu = new Computation(this.network, this.group, this.pid);
             this.computations.set(root.id, compu);
             compu.invoke(msg.task!, { id: root.data.id, fn: func, args }, () => {});
           }
         },
       );
     } else {
-      // Get the subs handlers and complete them with the promise info
+      // TODO(avillega): Get the subs handlers and complete them with the promise info
     }
   };
 }

@@ -4,7 +4,7 @@ import { Server } from "../src/server";
 import { Tasks } from "../src/tasks";
 
 let COUNTER = 0;
-let TICK_TIME = 1000;
+let TICK_TIME = 5;
 
 describe("tasks transitions", () => {
   function step(server: Server): { id: string; counter: number } {

@@ -104,6 +104,7 @@ export class Decorator<TRet> {
         id,
         func: event.func,
         args: event.args ?? [],
+        opts: event.opts,
         mode: "eager", // default, adjust if needed
       };
     }

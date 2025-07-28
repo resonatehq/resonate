@@ -192,8 +192,11 @@ export class JsonEncoder implements Encoder {
 }
 
 export interface HttpNetworkConfig {
-  url?: string;
-  msgUrl?: string;
+  host: string;
+  storePort: string;
+  msgSrcPort: string;
+  pid: string;
+  group: string;
   timeout?: number;
   headers?: Record<string, string>;
   encoder?: Encoder;
@@ -212,13 +215,17 @@ export class HttpNetwork implements Network {
   public onMessage?: (msg: Msg) => void;
 
   constructor(config: HttpNetworkConfig) {
-    this.url = config.url || "http://localhost:8001";
-    this.timeout = config.timeout || 30000;
+    const { host, storePort, msgSrcPort, pid, group } = config;
+    this.url = `${host}:${storePort}/`;
+    console.log(this.url);
+    this.msgUrl = new URL(`/${encodeURIComponent(group)}/${encodeURIComponent(pid)}`, `${host}:${msgSrcPort}`).href;
+    console.log("poller:", this.msgUrl);
+    this.timeout = config.timeout || 30 * util.SEC;
+
     this.baseHeaders = {
       "Content-Type": "application/json",
       ...config.headers,
     };
-    this.msgUrl = config.msgUrl || "http://localhost:8002/default/0";
     this.encoder = config.encoder ?? new JsonEncoder();
 
     this.eventSource = new EventSource(this.msgUrl);

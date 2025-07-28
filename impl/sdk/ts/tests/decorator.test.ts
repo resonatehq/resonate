@@ -1,6 +1,6 @@
 import { Decorator } from "../src/decorator";
 
-import { CallLocal, CallRemote, Future, InvokeLocal } from "../src/context";
+import { CallLocal, CallRemote, Context, Future, InvokeLocal } from "../src/context";
 
 describe("Decorator", () => {
   it("returns internal.return when generator is done", () => {
@@ -21,11 +21,11 @@ describe("Decorator", () => {
   });
 
   it("handles internal.async correctly", () => {
-    function* foo(): Generator<InvokeLocal<any>, any, any> {
-      yield new InvokeLocal(() => 42);
+    function* foo(ctx: Context): Generator<InvokeLocal<any>, any, any> {
+      yield* ctx.lfi(() => 42);
     }
 
-    const d = new Decorator("abc", foo());
+    const d = new Decorator("abc", foo(new Context()));
     const r = d.next({ type: "internal.nothing" });
 
     expect(r).toMatchObject({
@@ -52,13 +52,13 @@ describe("Decorator", () => {
   });
 
   it("handles lfc/rfc correctly", () => {
-    function* foo(): Generator<any, any, any> {
-      let v1 = yield new CallLocal((x: number) => x + 1, 1);
-      let v2 = yield new CallRemote("foo");
+    function* foo(ctx: Context): Generator<any, any, any> {
+      let v1 = yield* ctx.lfc((ctx: Context, x: number) => x + 1, 1);
+      let v2 = yield* ctx.rfc<number>("foo");
       return v1 + v2;
     }
 
-    const d = new Decorator("abc", foo());
+    const d = new Decorator("abc", foo(new Context()));
     let r = d.next({ type: "internal.nothing" });
     expect(r).toMatchObject({
       type: "internal.async.l",
@@ -111,13 +111,13 @@ describe("Decorator", () => {
   });
 
   it("returns final value after multiple yields", () => {
-    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10);
-      yield new InvokeLocal(() => 42);
+      yield* ctx.lfi(() => 42);
       return 30;
     }
 
-    const d = new Decorator("abc", foo());
+    const d = new Decorator("abc", foo(new Context()));
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: 10 }); // yield a future, get a literal back
@@ -141,14 +141,14 @@ describe("Decorator", () => {
   });
 
   it("awaits if there are pending invokes - Structured Concurrency", () => {
-    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield new InvokeLocal(() => 20); // B
-      yield new InvokeLocal(() => 30); // C
+      yield* ctx.lfi(() => 20); // B
+      yield* ctx.lfi(() => 30); // C
       return 30; // D
     }
 
-    const d = new Decorator("abc", foo());
+    const d = new Decorator("abc", foo(new Context()));
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: 10 }); // A -> yield a future, get a literal back
@@ -178,14 +178,14 @@ describe("Decorator", () => {
   });
 
   it("returns if there are no pending invokes even if not explecityly awaited", () => {
-    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield new InvokeLocal(() => 20); // B
-      yield new InvokeLocal(() => 30); // C
+      yield* ctx.lfi(() => 20); // B
+      yield* ctx.lfi(() => 30); // C
       return 42; // D
     }
 
-    const d = new Decorator("abc", foo());
+    const d = new Decorator("abc", foo(new Context()));
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: 10 }); // A -> yield a future, get a literal back
