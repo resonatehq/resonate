@@ -7,8 +7,8 @@ import type {
   RecvMsg,
   ScheduleRecord,
   TaskRecord,
-} from "./network/network";
-import * as util from "./util";
+} from "../src/network/network";
+import * as util from "../src/util";
 
 interface DurablePromise {
   id: string;

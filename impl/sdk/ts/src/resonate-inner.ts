@@ -1,10 +1,9 @@
+import { Server } from "../dev/server";
 import { Computation } from "./computation";
-import type { Context } from "./context";
 import { LocalNetwork } from "./network/local";
-import type { CreatePromiseAndTaskRes, DurablePromiseRecord, Mesg, Network, RecvMsg } from "./network/network";
+import type { CreatePromiseAndTaskRes, Network, RecvMsg } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Registry } from "./registry";
-import { Server } from "./server";
 import type { Func, Params, Ret } from "./types";
 import * as util from "./util";
 
@@ -12,9 +11,9 @@ export interface InvocationHandler<T> {
   result: Promise<T>;
 }
 
-export interface RegisteredFunc<F extends Func> {
+export interface InnerRegisteredFunc<F extends Func> {
   options: () => void;
-  run: (id: string, args: Params<F>, cb: (invocationHandler: InvocationHandler<Ret<F>>) => void) => void;
+  beginRun: (id: string, args: Params<F>, cb: (invocationHandler: InvocationHandler<Ret<F>>) => void) => void;
 }
 
 export class ResonateInner {
@@ -66,7 +65,7 @@ export class ResonateInner {
     return new ResonateInner(network, { pid, group, ttl });
   }
 
-  public invoke<T>(
+  public beginRun<T>(
     id: string,
     funcName: string,
     args: any[],
@@ -129,7 +128,7 @@ export class ResonateInner {
     );
   }
 
-  public register<T extends Func>(name: string, func: T): RegisteredFunc<T> {
+  public register<T extends Func>(name: string, func: T): InnerRegisteredFunc<T> {
     if (this.registry.has(name)) {
       throw new Error(`'${name}' already registered`);
     }
@@ -137,8 +136,8 @@ export class ResonateInner {
     // Set the the function in the registry and create a closure to invoke the registered function
     this.registry.set(name, func);
     return {
-      run: (id: string, args: Params<T>, cb: (invocationHandler: InvocationHandler<Ret<T>>) => void) => {
-        this.invoke(id, name, args, cb);
+      beginRun: (id: string, args: Params<T>, cb: (invocationHandler: InvocationHandler<Ret<T>>) => void) => {
+        this.beginRun(id, name, args, cb);
       },
       options: () => {
         return undefined;

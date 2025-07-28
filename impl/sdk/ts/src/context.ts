@@ -115,22 +115,22 @@ export class Future<T> implements Iterable<Future<T>> {
 
 export class Context {
   // TODO(avillega): Allow user to define other opts
-  lfi<F extends Func>(func: F, ...args: Params<F>): InvokeLocal<Ret<F>> {
+  beginRun<F extends Func>(func: F, ...args: Params<F>): InvokeLocal<Ret<F>> {
     return new InvokeLocal<Ret<F>>(func, args);
   }
 
   // TODO(avillega): Allow user to define target, and opts
-  rfi<R>(func: string, ...args: any[]): InvokeRemote<R> {
+  beginRpc<R>(func: string, ...args: any[]): InvokeRemote<R> {
     return new InvokeRemote<R>(func, args);
   }
 
   // TODO(avillega): Allow user to define other opts
-  lfc<F extends Func>(func: F, ...args: Params<F>): CallLocal<Ret<F>> {
+  run<F extends Func>(func: F, ...args: Params<F>): CallLocal<Ret<F>> {
     return new CallLocal<Ret<F>>(func, args);
   }
 
   // TODO(avillega): Allow user to define target and opts
-  rfc<R>(func: string, ...args: any[]): CallRemote<R> {
+  rpc<R>(func: string, ...args: any[]): CallRemote<R> {
     return new CallRemote<R>(func, args);
   }
 }

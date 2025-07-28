@@ -64,7 +64,7 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p = yield* ctx.lfi(bar);
+      const p = yield* ctx.beginRun(bar);
       const v = yield* p;
       return v;
     }
@@ -83,8 +83,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p = yield* ctx.lfi(bar);
-      const p2 = yield* ctx.lfi(baz);
+      const p = yield* ctx.beginRun(bar);
+      const p2 = yield* ctx.beginRun(baz);
       const v = yield* p;
       const v2 = yield* p2;
       return v + v2;
@@ -111,8 +111,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p1 = yield* ctx.lfi(bar);
-      const p2 = yield* ctx.rfi("bar");
+      const p1 = yield* ctx.beginRun(bar);
+      const p2 = yield* ctx.beginRpc("bar");
       const v1 = yield* p1;
       const vx = yield* p1;
       const v2 = yield* p2;
@@ -137,8 +137,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      yield* ctx.rfi("bar");
-      yield* ctx.rfi("bar");
+      yield* ctx.beginRpc("bar");
+      yield* ctx.beginRpc("bar");
       return 99;
     }
 
@@ -168,8 +168,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const v1: number = yield* ctx.lfc(bar);
-      const v2: number = yield* ctx.rfc<number>("bar");
+      const v1: number = yield* ctx.run(bar);
+      const v2: number = yield* ctx.rpc<number>("bar");
       return v1 + v2;
     }
 

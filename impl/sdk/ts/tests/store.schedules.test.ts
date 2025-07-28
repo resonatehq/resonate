@@ -1,6 +1,6 @@
+import { Server } from "../dev/server";
 import { LocalNetwork } from "../src/network/local";
 import { Schedules } from "../src/schedules";
-import { Server } from "../src/server";
 
 let COUNTER = 0;
 
