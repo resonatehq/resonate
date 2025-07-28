@@ -38,7 +38,7 @@ export class ResonateInner {
   }
 
   static local(): ResonateInner {
-    return new ResonateInner(new LocalNetwork(new Server()), { pid: "defautl", group: "default", ttl: 1 * util.SEC });
+    return new ResonateInner(new LocalNetwork(new Server()), { pid: "default", group: "default", ttl: 1 * util.SEC });
   }
 
   static remote(config: {
@@ -147,7 +147,6 @@ export class ResonateInner {
   }
 
   private onMessage = (msg: RecvMsg): void => {
-    console.log({ msg });
     if (msg.type === "resume" || msg.type === "invoke") {
       this.network.send(
         {
@@ -159,7 +158,6 @@ export class ResonateInner {
         },
         (_timeout, response) => {
           if (response.kind === "claimedtask") {
-            console.log("claimed task=", response);
             const { root, leaf } = response.message.promises;
             util.assertDefined(root);
             const comp = this.computations.get(root.id);

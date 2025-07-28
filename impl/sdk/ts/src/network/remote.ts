@@ -217,7 +217,6 @@ export class HttpNetwork implements Network {
   constructor(config: HttpNetworkConfig) {
     const { host, storePort, msgSrcPort, pid, group } = config;
     this.url = `${host}:${storePort}/`;
-    console.log(this.url);
     this.msgUrl = new URL(`/${encodeURIComponent(group)}/${encodeURIComponent(pid)}`, `${host}:${msgSrcPort}`).href;
     console.log("poller:", this.msgUrl);
     this.timeout = config.timeout || 30 * util.SEC;
@@ -229,7 +228,7 @@ export class HttpNetwork implements Network {
     this.encoder = config.encoder ?? new JsonEncoder();
 
     this.eventSource = new EventSource(this.msgUrl);
-    this.eventSource.addEventListener("message", (event) => this.recv(event));
+    this.eventSource.addEventListener("message", (event) => this.recv(event)); // TODO(avillega): Handle errors on the event source
   }
 
   send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {

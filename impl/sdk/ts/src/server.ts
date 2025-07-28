@@ -239,6 +239,7 @@ export class Server {
     }
     return { promise, task };
   }
+
   createPromise(
     id: string,
     timeout: number,
@@ -511,7 +512,12 @@ export class Server {
           const { task, applied } = this.transitionTask(
             `__invoke:${id}`,
             "init",
-            { type: "invoke", recv: this.targets[recv], rootPromiseId: promise.id, leafPromiseId: promise.id },
+            {
+              type: "invoke",
+              recv: this.targets[recv] ?? "local://any@default",
+              rootPromiseId: promise.id,
+              leafPromiseId: promise.id,
+            },
             time,
           );
           util.assert(applied);
