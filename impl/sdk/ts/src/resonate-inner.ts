@@ -1,6 +1,6 @@
 import { Server } from "../dev/server";
 import { Computation } from "./computation";
-import { LocalNetwork } from "./network/local";
+import { LocalNetwork } from "../dev/network";
 import type { CreatePromiseAndTaskRes, Network, RecvMsg } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Registry } from "./registry";

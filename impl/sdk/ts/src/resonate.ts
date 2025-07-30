@@ -1,4 +1,4 @@
-import { InnerRegisteredFunc, type InvocationHandler, ResonateInner } from "./resonate-inner";
+import { type InvocationHandler, ResonateInner } from "./resonate-inner";
 import type { Func, Params, Ret } from "./types";
 
 export interface RegisteredFunc<F extends Func> {
