@@ -1,7 +1,7 @@
-import { Context } from "../src/context";
+import type { Context } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
-import { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
+import type { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
@@ -34,6 +34,7 @@ class DummyNetwork implements Network {
           kind: "completePromise",
           promise: p,
         });
+        break;
       }
       default:
         throw new Error("All other kind will not be implemented");
@@ -177,7 +178,7 @@ describe("Coroutine", () => {
 
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
-    let suspended = r as Suspended;
+    const suspended = r as Suspended;
     expect(suspended.remoteTodos).toHaveLength(1);
 
     await resolvePromise(h, "foo.1.1", 42);

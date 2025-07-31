@@ -62,9 +62,7 @@ describe("isGeneratorFunction", () => {
   });
 
   test("should return false for anonymous function", () => {
-    const anonymous = function () {
-      return "anonymous";
-    };
+    const anonymous = () => "anonymous";
     expect(isGeneratorFunction(anonymous)).toBe(false);
   });
 

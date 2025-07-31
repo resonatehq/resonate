@@ -7,7 +7,16 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "include": ["src/**/*.js", "src/**/*.ts", "tests/**/*.js", "tests/**/*.ts", "sim/**/*.ts", "sim/**/*.js"],
+    "include": [
+      "src/**/*.js",
+      "src/**/*.ts",
+      "tests/**/*.js",
+      "tests/**/*.ts",
+      "sim/**/*.ts",
+      "sim/**/*.js",
+      "dev/**/*.ts",
+      "dev/**/*.js"
+    ],
     "ignore": []
   },
   "formatter": {
@@ -21,14 +30,14 @@
   },
   "linter": {
     "enabled": true,
-    "ignore": ["tests/**"],
     "rules": {
       "recommended": true,
       "suspicious": {
         "noExplicitAny": "off"
       },
       "correctness": {
-        "useYield": "off"
+        "useYield": "off",
+        "noUnusedImports": "error"
       },
       "style": {
         "noNonNullAssertion": "off"

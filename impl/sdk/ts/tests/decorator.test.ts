@@ -1,6 +1,6 @@
 import { Decorator } from "../src/decorator";
 
-import { CallLocal, CallRemote, Context, Future, InvokeLocal } from "../src/context";
+import { Context, Future, type InvokeLocal } from "../src/context";
 
 describe("Decorator", () => {
   it("returns internal.return when generator is done", () => {
@@ -53,8 +53,8 @@ describe("Decorator", () => {
 
   it("handles lfc/rfc correctly", () => {
     function* foo(ctx: Context): Generator<any, any, any> {
-      let v1 = yield* ctx.run((ctx: Context, x: number) => x + 1, 1);
-      let v2 = yield* ctx.rpc<number>("foo");
+      const v1 = yield* ctx.run((ctx: Context, x: number) => x + 1, 1);
+      const v2 = yield* ctx.rpc<number>("foo");
       return v1 + v2;
     }
 

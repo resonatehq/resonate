@@ -23,7 +23,7 @@ describe("schedule transitions", () => {
   });
 
   test("test case 1: read and get", async () => {
-    let schedule = await schedules.create(id, "0 * * * *", "foo", Number.MAX_SAFE_INTEGER);
+    const schedule = await schedules.create(id, "0 * * * *", "foo", Number.MAX_SAFE_INTEGER);
     expect(await schedules.get(schedule.id)).toEqual(schedule);
   });
 
@@ -33,7 +33,7 @@ describe("schedule transitions", () => {
   });
 
   test("test case 3: create twich with ikey", async () => {
-    let schedule = await schedules.create(id, "* * * * *", "foo", 10, "foo");
+    const schedule = await schedules.create(id, "* * * * *", "foo", 10, "foo");
     await schedules.create(id, "* 2 * * *", "bar", 10, "foo");
     expect(await schedules.get(schedule.id)).toEqual(schedule);
   });

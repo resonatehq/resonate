@@ -1,8 +1,8 @@
 import type { Context } from "./context";
-import { Coroutine, type LocalTodo, type RemoteTodo, type Suspended } from "./coroutine";
+import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler, type Task } from "./handler";
 import type { Network } from "./network/network";
-import { AsyncProcessor, type Processor, type Result } from "./processor/processor";
+import { AsyncProcessor, type Processor } from "./processor/processor";
 import * as util from "./util";
 
 interface InvocationParams {

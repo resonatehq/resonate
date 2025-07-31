@@ -16,7 +16,6 @@ import type {
   Network,
   ReadPromiseReq,
   ReadScheduleReq,
-  RecvMsg,
   RequestMsg,
   ResponseMsg,
   ScheduleRecord,

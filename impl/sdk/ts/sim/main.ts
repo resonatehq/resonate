@@ -1,6 +1,6 @@
 import type { RequestMsg } from "../src/network/network";
 import { ServerProcess } from "./server";
-import { DeliveryOptions, Message, Simulator, unicast } from "./simulator";
+import { Message, Simulator, unicast } from "./simulator";
 import { WorkerProcess } from "./worker";
 
 import type * as context from "../src/context";
