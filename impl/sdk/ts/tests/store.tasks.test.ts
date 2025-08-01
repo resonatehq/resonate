@@ -1,5 +1,5 @@
+import { LocalNetwork } from "../dev/network";
 import { Server } from "../dev/server";
-import { LocalNetwork } from "../src/network/local";
 import { Promises } from "../src/promises";
 import { Tasks } from "../src/tasks";
 

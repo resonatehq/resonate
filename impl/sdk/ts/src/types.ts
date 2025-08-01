@@ -19,7 +19,7 @@ export type LocalOpts = {
 export type Ret<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
   ? R // Return type of generator
   : T extends (...args: any[]) => infer R
-    ? R // Return type of regular function
+    ? Awaited<R> // Return type of regular function
     : never;
 
 // Expression
