@@ -13,6 +13,7 @@ type (
 	Project struct {
 		Href string `json:"href"`
 		Desc string `json:"desc"`
+		Lang string `json:"lang"`
 	}
 
 	Projects map[string]Project
