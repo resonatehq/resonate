@@ -25,7 +25,7 @@ export class Schedules {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "readSchedule") {
               throw new Error("unexpected response");
@@ -70,7 +70,7 @@ export class Schedules {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "createSchedule") {
               throw new Error("unexpected response");
@@ -97,7 +97,7 @@ export class Schedules {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "deleteSchedule") {
               throw new Error("unexpected response");

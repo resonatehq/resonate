@@ -28,7 +28,7 @@ export class Tasks {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "claimedtask") {
               throw new Error("unexpected response");
@@ -56,7 +56,7 @@ export class Tasks {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "completedtask") {
               throw new Error("unexpected response");
@@ -83,7 +83,7 @@ export class Tasks {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "heartbeatTasks") {
               throw new Error("unexpected response");

@@ -18,7 +18,7 @@ export class Promises {
 
         if (response.kind === "error") {
           util.assert(!timeout);
-          reject(response.message);
+          reject(response);
         } else {
           if (response.kind !== "readPromise") {
             throw new Error("unexpected response");
@@ -56,7 +56,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "createPromise") {
               throw new Error("unexpected response");
@@ -103,7 +103,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "createPromiseAndTask") {
               throw new Error("unexpected response");
@@ -139,7 +139,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "completePromise") {
               throw new Error("unexpected response");
@@ -174,7 +174,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "completePromise") {
               throw new Error("unexpected response");
@@ -209,7 +209,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "completePromise") {
               throw new Error("unexpected response");
@@ -247,7 +247,7 @@ export class Promises {
 
           if (response.kind === "error") {
             util.assert(!timeout);
-            reject(response.message);
+            reject(response);
           } else {
             if (response.kind !== "createCallback") {
               throw new Error("unexpected response");
@@ -276,7 +276,7 @@ export class Promises {
 
         if (response.kind === "error") {
           util.assert(!timeout);
-          reject(response.message);
+          reject(response);
         } else {
           if (response.kind !== "createSubscription") {
             throw new Error("unexpected response");

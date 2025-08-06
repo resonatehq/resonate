@@ -50,12 +50,14 @@ describe("tasks transitions", () => {
 
   test("Test Case 6: transition from enqueue to enqueue via claim", async () => {
     const task = step(server);
-    await expect(tasks.claim(task.id, task.counter + 1, "task5", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter + 1, "task5", Number.MAX_SAFE_INTEGER)).rejects.toMatchObject({
+      kind: "error",
+    });
   });
 
   test("Test Case 8: transition from enqueue to enqueue via complete", async () => {
     const task = step(server);
-    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+    await expect(tasks.complete(task.id, task.counter)).rejects.toMatchObject({ kind: "error" });
   });
 
   test("Test Case 10: transition from enqueue to enqueue via heartbeat", async () => {
@@ -66,13 +68,17 @@ describe("tasks transitions", () => {
   test("Test Case 12: transition from claimed to claimed via claim", async () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER);
-    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toMatchObject({
+      kind: "error",
+    });
   });
 
   test("Test Case 13: transition from claimed to init via claim", async () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task13", 0);
-    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task12", Number.MAX_SAFE_INTEGER)).rejects.toMatchObject({
+      kind: "error",
+    });
   });
 
   test("Test Case 14: transition from claimed to completed via complete", async () => {
@@ -85,20 +91,20 @@ describe("tasks transitions", () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task15", 0);
     await new Promise((r) => setTimeout(r, TICK_TIME));
-    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+    await expect(tasks.complete(task.id, task.counter)).rejects.toMatchObject({ kind: "error" });
   });
 
   test("Test Case 16: transition from claimed to claimed via complete", async () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task16", Number.MAX_SAFE_INTEGER);
-    await expect(tasks.complete(task.id, task.counter + 1)).rejects.toThrow();
+    await expect(tasks.complete(task.id, task.counter + 1)).rejects.toMatchObject({ kind: "error" });
   });
 
   test("Test Case 17: transition from claimed to init via complete (expired)", async () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task17", 0);
     await new Promise((r) => setTimeout(r, TICK_TIME));
-    await expect(tasks.complete(task.id, task.counter)).rejects.toThrow();
+    await expect(tasks.complete(task.id, task.counter)).rejects.toMatchObject({ kind: "error" });
   });
 
   test("Test Case 18: transition from claimed to claimed via heartbeat", async () => {
@@ -119,7 +125,7 @@ describe("tasks transitions", () => {
     const task = step(server);
     await tasks.claim(task.id, task.counter, "task20", Number.MAX_SAFE_INTEGER);
     await tasks.complete(task.id, task.counter);
-    await expect(tasks.claim(task.id, task.counter, "task20", 0)).rejects.toThrow();
+    await expect(tasks.claim(task.id, task.counter, "task20", 0)).rejects.toMatchObject({ kind: "error" });
   });
 
   test("Test Case 21: transition from completed to completed via complete", async () => {
