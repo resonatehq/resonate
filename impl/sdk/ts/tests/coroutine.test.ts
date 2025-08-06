@@ -2,6 +2,7 @@ import type { Context } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
+import type { CompResult } from "../src/types";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
@@ -43,6 +44,8 @@ class DummyNetwork implements Network {
   recv(_msg: RecvMsg): void {
     throw new Error("Method not implemented.");
   }
+  stop() {}
+  onMessage?: ((msg: RecvMsg, cb: (res: CompResult) => void) => void) | undefined;
 }
 
 describe("Coroutine", () => {

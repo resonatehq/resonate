@@ -1,4 +1,5 @@
 import type { Context } from "./context";
+import type { DurablePromiseRecord } from "./network/network";
 
 export type Func = (ctx: Context, ...args: any[]) => any;
 
@@ -6,14 +7,39 @@ export type Func = (ctx: Context, ...args: any[]) => any;
 export type Params<F> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
 
 export type RemoteOpts = {
+  id?: string;
   target: string;
   timeout: number;
 };
 
 export type LocalOpts = {
+  id?: string;
   target: string;
   timeout: number;
 };
+
+export type Completed = { kind: "completed"; promiseId: string; result: any };
+export type Suspended = { kind: "suspended"; promiseId: string };
+export type Failure = { kind: "failure"; task: Task };
+export type PlatformError = { kind: "platformError"; cause: any; msg: string };
+export type CompResult = Completed | Suspended | Failure | PlatformError;
+
+export type ClaimedTask = {
+  kind: "claimed";
+  id: string;
+  counter: number;
+  rootPromiseId: string;
+  rootPromise: DurablePromiseRecord;
+};
+
+export type UnclaimedTask = {
+  kind: "unclaimed";
+  id: string;
+  counter: number;
+  rootPromiseId: string;
+};
+
+export type Task = UnclaimedTask | ClaimedTask;
 
 // Return type of a function or a generator
 export type Ret<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>

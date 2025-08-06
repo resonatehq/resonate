@@ -16,6 +16,7 @@ import type {
   Network,
   ReadPromiseReq,
   ReadScheduleReq,
+  RecvMsg,
   RequestMsg,
   ResponseMsg,
   ScheduleRecord,
@@ -23,6 +24,7 @@ import type {
 } from "./network"; // Assuming types are in a separate file
 
 import { EventSource } from "eventsource";
+import type { CompResult } from "../types";
 import * as util from "../util";
 
 // API Value format from OpenAPI spec
@@ -211,7 +213,7 @@ export class HttpNetwork implements Network {
   private encoder: Encoder;
   private eventSource: EventSource;
 
-  public onMessage?: (msg: Msg) => void;
+  public onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
 
   constructor(config: HttpNetworkConfig) {
     const { host, storePort, msgSrcPort, pid, group } = config;
@@ -247,11 +249,15 @@ export class HttpNetwork implements Network {
     const data = JSON.parse(e.data);
 
     if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
-      this.onMessage?.({ type: data.type, task: data.task });
+      this.onMessage?.({ type: data.type, task: data.task }, () => {});
       return;
     }
 
     console.warn("couldn't parse", data, "as a message");
+  }
+
+  public stop(): void {
+    this.eventSource.close();
   }
 
   private async handleRequest(request: RequestMsg): Promise<ResponseMsg> {
@@ -319,7 +325,7 @@ export class HttpNetwork implements Network {
       promise: {
         id: req.promise.id,
         timeout: req.promise.timeout,
-        param: req.promise.param,
+        param: this.encoder.encode(req.promise.param),
         tags: req.promise.tags,
       },
       task: {

@@ -1,7 +1,7 @@
 import type { Func } from "./types";
 
 export class Registry {
-  private funcs: Map<string, Func> = new Map();
+  public funcs: Map<string, Func> = new Map();
 
   get(id: string): Func | undefined {
     return this.funcs.get(id);

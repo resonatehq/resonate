@@ -16,17 +16,11 @@ export interface DurablePromiseProto {
   args?: any[];
 }
 
-export interface DurablePromise<T> {
+export type DurablePromise<T> = {
   id: string;
   state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
   value?: T;
-}
-
-export interface Task {
-  id: string;
-  rootPromiseId: string;
-  counter: number;
-}
+};
 
 export class Handler {
   private promises: Map<string, DurablePromise<any>>;
