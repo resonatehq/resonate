@@ -1,0 +1,86 @@
+name: dst
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: "seed"
+        type: number
+      steps:
+        description: "steps"
+        type: number
+  schedule:
+    - cron: "*/20 * * * *" # every 20 mins
+
+jobs:
+  values:
+    runs-on: ubuntu-22.04
+    steps:
+      - id: seed
+        name: Set random seed
+        run: echo "seed=$RANDOM" >> "$GITHUB_OUTPUT"
+    outputs:
+      seed: ${{ inputs.seed || steps.seed.outputs.seed }}
+      steps: ${{ inputs.steps || 10000 }}
+
+  dst:
+    runs-on: ${{ matrix.os }}
+    needs: [values]
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["18", "20", "22"]
+        run: [1, 2]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix['node-version'] }}
+
+      - name: Install dependencies
+        run: npm i
+
+      - name: Run DST (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }})
+        run: |
+          npx ts-node sim/main.ts --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} 2> logs.txt
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-${{ matrix.run }}
+          path: logs.txt
+
+  diff:
+    runs-on: ubuntu-22.04
+    needs: [values, dst]
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node-version: ["18", "20", "22"]
+
+    steps:
+      - name: Download logs from run 1
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-1
+          path: logs-1.txt
+
+      - name: Download logs from run 2
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ matrix['node-version'] }}-logs-2
+          path: logs-2.txt
+
+      - name: Diff
+        run: diff logs-1.txt logs-2.txt || true

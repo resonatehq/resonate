@@ -6,3 +6,4 @@ docs/
 coverage/
 .next/
 bun.lock
+public/

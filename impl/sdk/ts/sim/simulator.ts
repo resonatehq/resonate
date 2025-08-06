@@ -1,4 +1,4 @@
-class Random {
+export class Random {
   // Internal state of the random number generator (RNG)
   private state: number;
 
@@ -7,12 +7,20 @@ class Random {
     this.state = seed >>> 0;
   }
 
+  random(bound: number): number {
+    return this.next() * bound;
+  }
+
   next(): number {
     // Update the internal state using the LCG formula
     this.state = (1664525 * this.state + 1013904223) >>> 0;
 
     // Convert the 32-bit integer to a float in the range [0, 1)
     return this.state / 0x100000000; // Equivalent to 2^32
+  }
+
+  pick<T>(list: T[]): T {
+    return list[Math.floor(this.next() * list.length)];
   }
 }
 
@@ -150,12 +158,8 @@ export class Simulator {
         if (preference) {
           inboxes[preference.iaddr].push(message);
         } else {
-          for (const process of this.process) {
-            if (process.active && target.gaddr === process.gaddr) {
-              inboxes[process.iaddr].push(message);
-              break;
-            }
-          }
+          const process = this.prng.pick(this.process.filter((p) => p.active && target.gaddr === p.gaddr));
+          inboxes[process.iaddr].push(message);
         }
       } else {
         throw new Error("unknown target.kind");

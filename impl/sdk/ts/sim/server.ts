@@ -26,9 +26,9 @@ export class ServerProcess extends Process {
       const url = new URL(message.recv);
       let target: Address;
       if (url.username === "any") {
-        target = url.pathname === "" ? anycast(url.hostname) : anycast(url.hostname, `${url.hostname}${url.pathname}`);
+        target = url.pathname === "" ? anycast(url.hostname) : anycast(url.hostname, url.pathname.slice(1));
       } else if (url.username === "uni") {
-        target = unicast(`${url.hostname}${url.pathname}`);
+        target = unicast(url.pathname.slice(1));
       } else {
         throw new Error(`not handled ${url}`);
       }

@@ -69,6 +69,7 @@ interface Schedule {
 interface Router {
   route(promise: DurablePromise): any;
 }
+
 class TagRouter implements Router {
   private tag: string;
 
@@ -78,6 +79,14 @@ class TagRouter implements Router {
 
   route(promise: DurablePromise): any {
     return promise.tags?.[this.tag];
+  }
+}
+
+class ServerError extends Error {
+  code: "invalid_request" | "forbidden" | "not_found" | "conflict";
+  constructor(message: string, code: "invalid_request" | "forbidden" | "not_found" | "conflict") {
+    super(message);
+    this.code = code;
   }
 }
 
@@ -147,16 +156,14 @@ export class Server {
         continue;
       }
 
-      try {
-        this.createPromise({
-          id: schedule.promiseId.replace("{{.timestamp}}", time.toString()),
-          timeout: time + schedule.promiseTimeout,
-          param: schedule.promiseParam,
-          tags: schedule.promiseTags,
-          strict: false,
-          time,
-        });
-      } catch {}
+      this.createPromise({
+        id: schedule.promiseId.replace("{{.timestamp}}", time.toString()),
+        timeout: time + schedule.promiseTimeout,
+        param: schedule.promiseParam,
+        tags: schedule.promiseTags,
+        strict: false,
+        time,
+      });
 
       const { applied } = this.transitionSchedule({ id: schedule.id, to: "created", updating: true, time });
       util.assert(applied, `step(): failed to transition schedule '${schedule.id}' to 'created' state`);
@@ -206,13 +213,8 @@ export class Server {
           msg: {
             type: "resume",
             task: {
-              id: task.id,
-              rootPromiseId: task.rootPromiseId,
-              counter: task.counter,
+              ...task,
               timeout: this.getPromise({ id: task.rootPromiseId }).timeout,
-              processId: task.processId,
-              createdOn: task.createdOn,
-              completedOn: task.completedOn,
             },
           },
           recv: task.recv,
@@ -243,137 +245,132 @@ export class Server {
   }
 
   process(requ: RequestMsg, time: number): ResponseMsg {
-    switch (requ.kind) {
-      case "createPromise": {
-        return {
-          kind: requ.kind,
-          promise: this.createPromise({
-            id: requ.id,
-            timeout: requ.timeout,
-            param: requ.param,
-            tags: requ.tags,
+    try {
+      switch (requ.kind) {
+        case "createPromise": {
+          return {
+            kind: requ.kind,
+            promise: this.createPromise({
+              ...requ,
+              time,
+            }),
+          };
+        }
+        case "createPromiseAndTask": {
+          const { promise, task } = this.createPromiseAndTask({
+            id: requ.promise.id,
+            timeout: requ.promise.timeout,
+            processId: requ.task.processId,
+            ttl: requ.task.ttl,
+            param: requ.promise.param,
+            tags: requ.promise.tags,
             iKey: requ.iKey,
             strict: requ.strict,
             time,
-          }),
-        };
-      }
-      case "createPromiseAndTask": {
-        const { promise, task } = this.createPromiseAndTask({
-          id: requ.promise.id,
-          timeout: requ.promise.timeout,
-          processId: requ.task.processId,
-          ttl: requ.task.ttl,
-          param: requ.promise.param,
-          tags: requ.promise.tags,
-          iKey: requ.iKey,
-          strict: requ.strict,
-          time,
-        });
-        return {
-          kind: requ.kind,
-          promise: promise,
-          task: task,
-        };
-      }
-      case "readPromise": {
-        return {
-          kind: requ.kind,
-          promise: this.readPromise({ id: requ.id }),
-        };
-      }
+          });
+          return {
+            kind: requ.kind,
+            promise: promise,
+            task: task,
+          };
+        }
+        case "readPromise": {
+          return {
+            kind: requ.kind,
+            promise: this.readPromise({ ...requ }),
+          };
+        }
 
-      case "completePromise": {
-        return {
-          kind: requ.kind,
-          promise: this.completePromise({
-            id: requ.id,
-            state: requ.state,
-            value: requ.value,
-            iKey: requ.iKey,
-            strict: requ.strict,
-            time,
-          }),
-        };
-      }
+        case "completePromise": {
+          return {
+            kind: requ.kind,
+            promise: this.completePromise({
+              ...requ,
+              time,
+            }),
+          };
+        }
 
-      case "createCallback": {
-        return {
-          kind: requ.kind,
-          ...this.createCallback({
-            id: requ.id,
-            rootPromiseId: requ.rootPromiseId,
-            timeout: requ.timeout,
-            recv: requ.recv,
-            time,
-          }),
-        };
-      }
+        case "createCallback": {
+          return {
+            kind: requ.kind,
+            ...this.createCallback({
+              ...requ,
+              time,
+            }),
+          };
+        }
 
-      case "createSubscription": {
-        return {
-          kind: requ.kind,
-          ...this.createSubscription({ id: requ.id, timeout: requ.timeout, recv: requ.recv, time }),
-        };
-      }
+        case "createSubscription": {
+          return {
+            kind: requ.kind,
+            ...this.createSubscription({ ...requ, time }),
+          };
+        }
 
-      case "createSchedule": {
-        return {
-          kind: requ.kind,
-          schedule: this.createSchedule({
-            id: requ.id!,
-            cron: requ.cron!,
-            promiseId: requ.promiseId!,
-            promiseTimeout: requ.promiseTimeout!,
-            iKey: requ.iKey,
-            description: requ.description,
-            tags: requ.tags,
-            promiseParam: requ.promiseParam,
-            promiseTags: requ.promiseTags,
-            time,
-          }),
-        };
-      }
+        case "createSchedule": {
+          return {
+            kind: requ.kind,
+            schedule: this.createSchedule({
+              id: requ.id!,
+              cron: requ.cron!,
+              promiseId: requ.promiseId!,
+              promiseTimeout: requ.promiseTimeout!,
+              iKey: requ.iKey,
+              description: requ.description,
+              tags: requ.tags,
+              promiseParam: requ.promiseParam,
+              promiseTags: requ.promiseTags,
+              time,
+            }),
+          };
+        }
 
-      case "readSchedule": {
-        return { kind: requ.kind, schedule: this.readSchedule({ id: requ.id }) };
-      }
+        case "readSchedule": {
+          return { kind: requ.kind, schedule: this.readSchedule({ ...requ }) };
+        }
 
-      case "deleteSchedule": {
-        this.deleteSchedule({ id: requ.id, time });
-        return { kind: requ.kind };
-      }
+        case "deleteSchedule": {
+          this.deleteSchedule({ ...requ, time });
+          return { kind: requ.kind };
+        }
 
-      case "claimTask": {
-        return {
-          kind: "claimedtask",
-          message: this.claimTask({
-            ...requ,
-            time,
-          }),
-        };
-      }
+        case "claimTask": {
+          return {
+            kind: "claimedtask",
+            message: this.claimTask({
+              ...requ,
+              time,
+            }),
+          };
+        }
 
-      case "completeTask": {
-        return {
-          kind: "completedtask",
-          task: this.completeTask({ id: requ.id, counter: requ.counter, time }),
-        };
-      }
+        case "completeTask": {
+          return {
+            kind: "completedtask",
+            task: this.completeTask({ ...requ, time }),
+          };
+        }
 
-      case "heartbeatTasks": {
-        return {
-          kind: "heartbeatTasks",
-          tasksAffected: this.heartbeatTasks({ processId: requ.processId, time }),
-        };
-      }
+        case "heartbeatTasks": {
+          return {
+            kind: "heartbeatTasks",
+            tasksAffected: this.heartbeatTasks({ ...requ, time }),
+          };
+        }
 
-      case "dropTask": {
-        throw new Error("not implemented");
-      }
+        case "dropTask": {
+          throw new Error("not implemented");
+        }
 
-      default:
-        throw new Error(`Unsupported request kind: ${(requ as any).kind}`);
+        default:
+          throw new Error(`Unsupported request kind: ${(requ as any).kind}`);
+      }
+    } catch (err: any) {
+      if (!(err instanceof ServerError)) {
+        throw err;
+      }
+      return { kind: "error", message: err.message, code: err.code };
     }
   }
 
@@ -479,7 +476,7 @@ export class Server {
     strict?: boolean;
     time: number;
   }): { promise: DurablePromiseRecord; task?: TaskRecord } {
-    return this._createPromise({
+    const { promise, task } = this._createPromise({
       id,
       timeout,
       processId,
@@ -489,10 +486,11 @@ export class Server {
       iKey,
       strict,
       time,
-    }) as {
-      promise: DurablePromiseRecord;
-      task?: TaskRecord;
-    };
+    });
+    if (task === undefined) {
+      return { promise };
+    }
+    return { promise, task: { ...task, timeout: promise.timeout } };
   }
 
   private readPromise({ id }: { id: string }): DurablePromiseRecord {
@@ -542,7 +540,7 @@ export class Server {
       const record = this.promises.get(id);
 
       if (!record) {
-        throw new Error("not found");
+        throw new ServerError("not found", "not_found");
       }
 
       const cbId = `__notify:${id}:${id}`;
@@ -587,7 +585,7 @@ export class Server {
     const record = this.promises.get(id);
 
     if (!record) {
-      throw new Error("not found");
+      throw new ServerError("not found", "not_found");
     }
 
     if (record.state !== "pending" || record.callbacks?.has(id)) {
@@ -667,13 +665,8 @@ export class Server {
     const { task } = this.transitionTask({ id, to: "completed", counter, time });
 
     return {
-      id: task.id,
-      counter: task.counter,
-      rootPromiseId: task.rootPromiseId,
+      ...task,
       timeout: this.getPromise({ id: task.rootPromiseId }).timeout,
-      processId: task.processId,
-      createdOn: task.createdOn,
-      completedOn: task.completedOn,
     };
   }
 
@@ -739,7 +732,7 @@ export class Server {
   private readSchedule({ id }: { id: string }): ScheduleRecord {
     const schedule = this.schedules.get(id);
     if (schedule === undefined) {
-      throw new Error("schedule not found");
+      throw new ServerError("schedule not found", "not_found");
     }
     return schedule;
   }
@@ -754,7 +747,7 @@ export class Server {
     const record = this.promises.get(id);
 
     if (!record) {
-      throw new Error("not found");
+      throw new ServerError("not found", "not_found");
     }
 
     return record;
@@ -829,11 +822,8 @@ export class Server {
       if (promise.callbacks) {
         for (const callback of promise.callbacks.values()) {
           const { applied } = this.transitionTask({
-            id: callback.id,
+            ...callback,
             to: "init",
-            type: callback.type,
-            recv: callback.recv,
-            rootPromiseId: callback.rootPromiseId,
             leafPromiseId: callback.promiseId,
             time,
           });
@@ -887,7 +877,7 @@ export class Server {
 
     // Cannot complete non-existent promise
     if (record === undefined && ["resolved", "rejected", "rejected_canceled"].includes(to)) {
-      throw new Error(`transitionPromise(${to}): promise '${id}' not found`);
+      throw new ServerError(`transitionPromise(${to}): promise '${id}' not found`, "not_found");
     }
 
     // No-op re-create pending if before timeout and same iKey
@@ -946,7 +936,10 @@ export class Server {
       strict &&
       time >= record.timeout
     ) {
-      throw new Error(`transitionPromise(${to}): promise '${id}' already timed out at ${record.timeout}`);
+      throw new ServerError(
+        `transitionPromise(${to}): promise '${id}' already timed out at ${record.timeout}`,
+        "forbidden",
+      );
     }
 
     // Transition to timed-out
@@ -1006,7 +999,7 @@ export class Server {
     }
 
     // Fallback
-    throw new Error(`transitionPromise(${to}): unexpected transition for promise '${id}'`);
+    throw new ServerError(`transitionPromise(${to}): unexpected transition for promise '${id}'`, "conflict");
   }
 
   private transitionTask({
@@ -1180,10 +1173,10 @@ export class Server {
     }
 
     if (record === undefined) {
-      throw new Error("Task not found");
+      throw new ServerError("Task not found", "not_found");
     }
 
-    throw new Error("task is already claimed, completed, or an invalid counter was provided");
+    throw new ServerError("task is already claimed, completed, or an invalid counter was provided", "conflict");
   }
 
   private transitionSchedule({
@@ -1258,12 +1251,15 @@ export class Server {
 
     // Schedule exists and not updating
     if (record !== undefined && to === "created") {
-      throw new Error(`transitionSchedule(created): schedule '${id}' already exists and 'updating' flag is false`);
+      throw new ServerError(
+        `transitionSchedule(created): schedule '${id}' already exists and 'updating' flag is false`,
+        "conflict",
+      );
     }
 
     // Delete non-existent
     if (record === undefined && to === "deleted") {
-      throw new Error(`transitionSchedule(deleted): schedule '${id}' not found`);
+      throw new ServerError(`transitionSchedule(deleted): schedule '${id}' not found`, "not_found");
     }
 
     // Delete existing
@@ -1273,7 +1269,7 @@ export class Server {
     }
 
     // Fallback error
-    throw new Error(`transitionSchedule(${to}): unexpected transition for schedule '${id}'`);
+    throw new ServerError(`transitionSchedule(${to}): unexpected transition for schedule '${id}'`, "conflict");
   }
 }
 
