@@ -1,5 +1,6 @@
 import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
 import { ResonateInner } from "../src/resonate-inner";
+import type { CompResult } from "../src/types";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 class SimulatedNetwork implements Network {
@@ -23,10 +24,12 @@ class SimulatedNetwork implements Network {
   }
 
   recv(msg: Message<RecvMsg>): void {
-    this.onMessage?.(msg.data);
+    this.onMessage?.(msg.data, () => {});
   }
 
-  onMessage?: (msg: RecvMsg) => void;
+  stop(): void {}
+
+  onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
 
   time(time: number): void {
     this.currentTime = time;
