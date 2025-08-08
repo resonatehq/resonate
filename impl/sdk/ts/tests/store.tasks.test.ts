@@ -8,7 +8,7 @@ const TICK_TIME = 5;
 
 describe("tasks transitions", () => {
   function step(server: Server): { id: string; counter: number } {
-    const msgs = server.step(0);
+    const msgs = server.step(Date.now());
     expect(msgs.length).toBe(1);
     const value = msgs[0].msg;
     expect(value.type).toBe("invoke");
@@ -116,7 +116,7 @@ describe("tasks transitions", () => {
 
   test("Test Case 19: transition from claimed to init via heartbeat", async () => {
     const task = step(server);
-    await tasks.claim(task.id, task.counter, "task19", 0);
+    await tasks.claim(task.id, task.counter, "task19", 1000);
     const count = await tasks.heartbeat("task19");
     expect(count).toBe(1);
   });

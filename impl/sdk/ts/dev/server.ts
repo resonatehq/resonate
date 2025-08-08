@@ -156,14 +156,16 @@ export class Server {
         continue;
       }
 
-      this.createPromise({
-        id: schedule.promiseId.replace("{{.timestamp}}", time.toString()),
-        timeout: time + schedule.promiseTimeout,
-        param: schedule.promiseParam,
-        tags: schedule.promiseTags,
-        strict: false,
-        time,
-      });
+      try {
+        this.createPromise({
+          id: schedule.promiseId.replace("{{.timestamp}}", time.toString()),
+          timeout: time + schedule.promiseTimeout,
+          param: schedule.promiseParam,
+          tags: schedule.promiseTags,
+          strict: false,
+          time,
+        });
+      } catch {}
 
       const { applied } = this.transitionSchedule({ id: schedule.id, to: "created", updating: true, time });
       util.assert(applied, `step(): failed to transition schedule '${schedule.id}' to 'created' state`);
@@ -1232,12 +1234,13 @@ export class Server {
         promiseTimeout,
         promiseParam,
         promiseTags: promiseTags ?? {},
-        lastRunTime: undefined,
         nextRunTime: CronExpressionParser.parse(cron).next().getMilliseconds(),
         iKey,
         createdOn: time,
+        lastRunTime: 0,
       };
       this.schedules.set(id, record);
+
       return { schedule: record, applied: true };
     }
 

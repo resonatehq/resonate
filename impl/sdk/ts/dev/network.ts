@@ -34,10 +34,12 @@ export class LocalNetwork implements Network {
   }
 
   send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
-    const response = this.server.process(request, Date.now());
-    clearTimeout(this.timeoutId);
-    this.enqueueNext();
-    callback(false, response);
+    setTimeout(() => {
+      const response = this.server.process(request, Date.now());
+      clearTimeout(this.timeoutId);
+      this.enqueueNext();
+      callback(false, response);
+    });
   }
 
   recv(msg: any): void {
