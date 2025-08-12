@@ -1,4 +1,4 @@
-import type { Context } from "./context";
+import { Context } from "./context";
 import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler } from "./handler";
 import type { Network } from "./network/network";
@@ -51,6 +51,16 @@ export class Computation {
   }
 
   process(task: Task, cb: (res: CompResult) => void): void {
+    if (this.task) {
+      cb({ kind: "failure", task });
+      return;
+    }
+
+    util.assert(
+      task.rootPromiseId === this.promiseId,
+      "trying to execute a task in a computation for another root promise",
+    );
+
     if (task.kind === "claimed") {
       this.processClaimed(task, cb);
     } else if (task.kind === "unclaimed") {
@@ -77,8 +87,16 @@ export class Computation {
   }
 
   private processClaimed(task: ClaimedTask, cb: (res: CompResult) => void) {
+    util.assert(
+      this.task === undefined,
+      "Trying to work on a task while another task is in process for the same root promise id",
+    );
+
     this.task = task;
     this.callback = cb;
+    this.seenTodos.clear();
+    this.eventQueue = [];
+    this.isProcessing = false;
     this.handler.updateCache(task.rootPromise);
     const fn = this.registry.get(task.rootPromise.param?.fn ?? "");
 
@@ -94,94 +112,102 @@ export class Computation {
         args: task.rootPromise.param?.args ?? [],
       };
     }
-    this.eventQueue.push("invoke");
-    this.run();
+    this.enqueue(task.id, "invoke");
   }
 
-  private run(): void {
-    // Guard against concurrent processing
-    if (this.isProcessing) {
+  // Enqueues work to do by the run function.
+  // Only enqueues work if the given taskId matches the current this.task.id
+  private enqueue(taskId: string, event: Event) {
+    if (this.task?.id === taskId) {
+      this.eventQueue.push(event);
+      this.run(taskId);
+    }
+  }
+
+  // Run needs to take a task to prevent callbacks that might complete in the future, after the task they
+  // were associated with has possible been completed, to enter the run function when another task
+  // is being run
+  private run(taskId: string): void {
+    // Guard against concurrent processing of todos
+    if (this.task?.id !== taskId || this.isProcessing || this.eventQueue.length === 0) {
       return;
     }
+    this.doRun(taskId);
+  }
 
+  private doRun(taskId: string): void {
+    util.assert(!this.isProcessing, "should not execute doRun concurrently");
     this.isProcessing = true;
-
-    if (this.eventQueue.length === 0) {
-      this.isProcessing = false;
-      return;
-    }
 
     const event = this.eventQueue.shift();
     util.assertDefined(event);
 
     const { fn, args } = this.invocationParams!;
 
-    Coroutine.exec(this.promiseId, fn, args, this.handler, (result) => {
-      if (result.type === "completed") {
-        this.handler.resolvePromise(this.promiseId, result.value, (durablePromise) => {
-          util.assertDefined(this.task);
-          this.completeTask({
-            kind: "completed",
-            promiseId: this.promiseId,
-            result: durablePromise.value,
-          });
-        });
-      } else {
-        if (result.localTodos.length === 0) {
-          this.handleRemoteTodos(this.promiseId, result.remoteTodos);
-        } else {
-          this.handleLocalTodos(result.localTodos);
-        }
-      }
-    });
-
-    // Reset processing flag and continue if there are more events
-    this.isProcessing = false;
-    if (this.eventQueue.length > 0) {
-      this.run();
-    }
-  }
-
-  private handleRemoteTodos(rootId: string, remoteTodos: RemoteTodo[]): void {
-    let createdCallbacks = 0;
-    const totalCallbacks = remoteTodos.length;
-
-    for (const remoteTodo of remoteTodos) {
-      const { id } = remoteTodo;
-      this.handler.createCallback(
-        id,
-        rootId,
-        Number.MAX_SAFE_INTEGER, // TODO (avillega): use the promise timeout
-        `poll://any@${this.group}/${this.pid}`,
+    if (!util.isGeneratorFunction(fn)) {
+      this.processor.process(
+        this.promiseId,
+        async () => {
+          return await fn(new Context(), ...args);
+        },
         (result) => {
-          if (result.kind === "promise") {
-            this.scheduleNextProcess();
-            return;
-          }
-          if (result.kind === "callback") {
-            createdCallbacks++;
-            if (createdCallbacks === totalCallbacks) {
-              this.completeTask({
-                kind: "suspended",
-                promiseId: this.promiseId,
-              });
-            }
-            return;
+          if (result.success) {
+            this.handler.resolvePromise(this.promiseId, result.data, (durablePromise) => {
+              util.assertDefined(this.task);
+              this.completeTask({ kind: "completed", durablePromise });
+            });
+          } else {
+            // TODO(avillega): handle reject
           }
         },
       );
+      return;
     }
+
+    // Is generator function case
+    Coroutine.exec(this.promiseId, fn, args, this.handler, (result) => {
+      // it is safe to unset isProcessing at this point, there are three possible "result"
+      // - the coroutine is completed: we will complete the durablepromise and there should be no more work to do
+      // - there are local todos: We need to unset isProccessing so as results come back they retrigger the processing
+      // - there are only remote todos:
+
+      if (result.type === "completed") {
+        this.handler.resolvePromise(this.promiseId, result.value, (durablePromise) => {
+          util.assertDefined(this.task);
+          util.assert(taskId === this.task.id, "Trying to complete a current task from a stale task callback");
+          this.completeTask({ kind: "completed", durablePromise });
+        });
+        // We don't need to retrigger a run there is no more work to do for this task
+        return;
+      }
+
+      util.assert(
+        result.localTodos.length > 0 || result.remoteTodos.length > 0,
+        "There must be local todos or remote todos if the coroutine is suspended",
+      );
+
+      if (result.localTodos.length !== 0) {
+        this.handleLocalTodos(taskId, result.localTodos);
+      } else {
+        this.handleRemoteTodos(taskId, result.remoteTodos);
+      }
+
+      // This is the end of the coroutine callback, if we still have work to do we call run
+      // After sending all the todos to the processor or creating the callbacks
+      this.isProcessing = false;
+      if (this.eventQueue.length > 0 && this.task) {
+        this.run(taskId);
+      }
+    });
   }
 
-  private handleLocalTodos(localTodos: LocalTodo[]): void {
-    for (const localTodo of localTodos) {
+  private handleLocalTodos(taskId: string, todos: LocalTodo[]) {
+    for (const localTodo of todos) {
       if (this.seenTodos.has(localTodo.id)) {
         continue;
       }
-
       this.seenTodos.add(localTodo.id);
       const { id, fn, ctx, args } = localTodo;
-
       this.processor.process(
         id,
         async () => {
@@ -189,34 +215,51 @@ export class Computation {
         },
         (result) => {
           const value = result.success ? result.data : result.error;
-
-          // TODO (avillega): Need to do a rejection instead of resolving with error
+          // TODO (avillega): Need to do a rejection too instead of resolving with error
           this.handler.resolvePromise(id, value, (_) => {
-            this.scheduleNextProcess();
+            this.enqueue(taskId, "return");
           });
         },
       );
     }
   }
 
-  private completeTask(result: CompResult) {
-    // TODO (avillega): Should the task always be defined?
-    if (this.task) {
-      util.assert(this.eventQueue.length === 0, "The event queue must be empty when completing the task"); // The queue must be empty
-      this.network.send({ kind: "completeTask", id: this.task.id, counter: this.task.counter }, () => {
-        // Once the task is completed reset the computation
-        this.task = undefined;
-        this.seenTodos.clear();
-        this.callback?.(result);
-        this.callback = undefined;
-      });
+  private handleRemoteTodos(taskId: string, todos: RemoteTodo[]) {
+    let createdCallbacks = 0;
+    const totalCallbacks = todos.length;
+
+    for (const remoteTodo of todos) {
+      const { id } = remoteTodo;
+      this.handler.createCallback(
+        id,
+        this.promiseId,
+        Number.MAX_SAFE_INTEGER, // TODO (avillega): use the promise timeout
+        `poll://any@${this.group}/${this.pid}`,
+        (result) => {
+          if (result.kind === "promise") {
+            this.enqueue(taskId, "return");
+            return;
+          }
+          if (result.kind === "callback") {
+            createdCallbacks++;
+            if (createdCallbacks === totalCallbacks) {
+              this.completeTask({ kind: "suspended", durablePromiseId: this.promiseId });
+              return;
+            }
+          }
+        },
+      );
     }
   }
 
-  private scheduleNextProcess(): void {
-    this.eventQueue.push("return");
-    if (!this.isProcessing) {
-      this.run();
-    }
+  private completeTask(result: CompResult) {
+    util.assertDefined(this.task);
+    this.network.send({ kind: "completeTask", id: this.task.id, counter: this.task.counter }, () => {
+      // Once the task is completed reset the computation
+      this.task = undefined;
+      this.eventQueue = [];
+      this.callback?.(result);
+      this.callback = undefined;
+    });
   }
 }

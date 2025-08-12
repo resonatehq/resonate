@@ -106,6 +106,7 @@ export class Resonate {
         (timeout, res) => {
           if (timeout) {
             console.error("Something went wrong reaching the resonate server");
+            return;
             // TODO(avillega): Handle platform level error
           }
 

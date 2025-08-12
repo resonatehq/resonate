@@ -1,6 +1,13 @@
 import type { Context } from "./context";
 import type { DurablePromiseRecord } from "./network/network";
 
+// Internal representation of the DurablePromise, for external use DurablePromiseRecord
+export type DurablePromise<T> = {
+  id: string;
+  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
+  value?: T;
+};
+
 export type Func = (ctx: Context, ...args: any[]) => any;
 
 // The args of a resonate function excluding the context argument
@@ -18,8 +25,8 @@ export type LocalOpts = {
   timeout: number;
 };
 
-export type Completed = { kind: "completed"; promiseId: string; result: any };
-export type Suspended = { kind: "suspended"; promiseId: string };
+export type Completed = { kind: "completed"; durablePromise: DurablePromise<unknown> };
+export type Suspended = { kind: "suspended"; durablePromiseId: string };
 export type Failure = { kind: "failure"; task: Task };
 export type PlatformError = { kind: "platformError"; cause: any; msg: string };
 export type CompResult = Completed | Suspended | Failure | PlatformError;

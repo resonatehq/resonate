@@ -3,9 +3,9 @@ import type {
   CompletePromiseRes,
   CreateCallbackRes,
   CreatePromiseRes,
-  DurablePromiseRecord,
   Network,
 } from "./network/network";
+import type { DurablePromise } from "./types";
 import * as util from "./util";
 
 export interface DurablePromiseProto {
@@ -15,12 +15,6 @@ export interface DurablePromiseProto {
   fn?: string;
   args?: any[];
 }
-
-export type DurablePromise<T> = {
-  id: string;
-  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
-  value?: T;
-};
 
 export class Handler {
   private promises: Map<string, DurablePromise<any>>;
@@ -34,7 +28,7 @@ export class Handler {
     }
   }
 
-  public updateCache(durablePromise: DurablePromiseRecord) {
+  public updateCache(durablePromise: DurablePromise<any>) {
     this.promises.set(durablePromise.id, durablePromise);
   }
 

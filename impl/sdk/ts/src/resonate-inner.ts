@@ -33,7 +33,7 @@ export class ResonateInner {
 
     comp.process(t, (res) => {
       if (res.kind === "completed") {
-        this.emit({ promiseId: res.promiseId, value: res.result });
+        this.emit({ promiseId: res.durablePromise.id, value: res.durablePromise.value });
       }
       cb(res);
     });
