@@ -1,17 +1,28 @@
 import type { Func } from "./types";
 
+type Item = {
+  name: string;
+  func: Func;
+};
+
 export class Registry {
-  private funcs: Map<string, Func> = new Map();
+  public forward_registry: Map<string, Item> = new Map();
+  public reverse_registry: Map<Func, Item> = new Map();
 
-  get(id: string): Func | undefined {
-    return this.funcs.get(id);
+  get(nameOrFunc: string | Func): Item | undefined {
+    return typeof nameOrFunc === "string"
+      ? this.forward_registry.get(nameOrFunc)
+      : this.reverse_registry.get(nameOrFunc);
   }
 
-  set(id: string, func: Func): void {
-    this.funcs.set(id, func);
+  has(nameOrFunc: string | Func): boolean {
+    return typeof nameOrFunc === "string"
+      ? this.forward_registry.has(nameOrFunc)
+      : this.reverse_registry.has(nameOrFunc);
   }
 
-  has(id: string): boolean {
-    return this.funcs.has(id);
+  set(name: string, func: Func): void {
+    this.forward_registry.set(name, { name, func });
+    this.reverse_registry.set(func, { name, func });
   }
 }

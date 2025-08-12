@@ -3,9 +3,9 @@ import type {
   CompletePromiseRes,
   CreateCallbackRes,
   CreatePromiseRes,
+  DurablePromiseRecord,
   Network,
 } from "./network/network";
-import type { DurablePromise } from "./types";
 import * as util from "./util";
 
 export interface DurablePromiseProto {
@@ -17,10 +17,10 @@ export interface DurablePromiseProto {
 }
 
 export class Handler {
-  private promises: Map<string, DurablePromise<any>>;
+  private promises: Map<string, DurablePromiseRecord>;
   private network: Network;
 
-  constructor(network: Network, initialPromises?: DurablePromise<any>[]) {
+  constructor(network: Network, initialPromises?: DurablePromiseRecord[]) {
     this.network = network;
     this.promises = new Map();
     for (const p of initialPromises ?? []) {
@@ -28,13 +28,13 @@ export class Handler {
     }
   }
 
-  public updateCache(durablePromise: DurablePromise<any>) {
+  public updateCache(durablePromise: DurablePromiseRecord) {
     this.promises.set(durablePromise.id, durablePromise);
   }
 
-  public createPromise<T>(
+  public createPromise(
     { id, timeout, tags, fn, args }: DurablePromiseProto,
-    callback: (res: DurablePromise<T>) => void,
+    callback: (res: DurablePromiseRecord) => void,
   ): void {
     const promise = this.promises.get(id);
     if (promise) {
@@ -68,7 +68,7 @@ export class Handler {
     );
   }
 
-  public resolvePromise<T>(id: string, value: T, callback: (res: DurablePromise<T>) => void): void {
+  public resolvePromise(id: string, value: any, callback: (res: DurablePromiseRecord) => void): void {
     const promise = this.promises.get(id);
     util.assertDefined(promise);
 
@@ -99,13 +99,13 @@ export class Handler {
     );
   }
 
-  public createCallback<T>(
+  public createCallback(
     id: string,
     rootPromiseId: string,
     timeout: number,
     recv: string,
     cb: (
-      result: { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromise<T> },
+      result: { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord },
     ) => void,
   ): void {
     this.network.send(

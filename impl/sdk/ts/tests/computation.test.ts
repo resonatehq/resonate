@@ -21,7 +21,7 @@ async function createPromiseAndTask(
           id: id,
           timeout: 24 * util.HOUR + Date.now(),
           param: {
-            fn: funcName,
+            func: funcName,
             args,
           },
           tags: { "resonate:invoke": "poll://any@default/default" },

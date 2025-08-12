@@ -8,7 +8,7 @@ import type { ClaimedTask, CompResult, Task } from "./types";
 import * as util from "./util";
 
 interface InvocationParams {
-  fn: (ctx: Context, ...args: any[]) => any;
+  func: (ctx: Context, ...args: any[]) => any;
   args: any[];
 }
 
@@ -98,9 +98,9 @@ export class Computation {
     this.eventQueue = [];
     this.isProcessing = false;
     this.handler.updateCache(task.rootPromise);
-    const fn = this.registry.get(task.rootPromise.param?.fn ?? "");
 
-    if (!fn) {
+    const registered = this.registry.get(task.rootPromise.param?.func ?? "");
+    if (!registered) {
       // TODO(avillega): drop the task here and call the callback with an error
       console.warn("couldn't find fn in the registry");
       return;
@@ -108,7 +108,7 @@ export class Computation {
 
     if (!this.invocationParams) {
       this.invocationParams = {
-        fn,
+        func: registered.func,
         args: task.rootPromise.param?.args ?? [],
       };
     }
@@ -142,13 +142,13 @@ export class Computation {
     const event = this.eventQueue.shift();
     util.assertDefined(event);
 
-    const { fn, args } = this.invocationParams!;
+    const { func, args } = this.invocationParams!;
 
-    if (!util.isGeneratorFunction(fn)) {
+    if (!util.isGeneratorFunction(func)) {
       this.processor.process(
         this.promiseId,
         async () => {
-          return await fn(new Context(), ...args);
+          return await func(new Context(), ...args);
         },
         (result) => {
           if (result.success) {
@@ -165,7 +165,7 @@ export class Computation {
     }
 
     // Is generator function case
-    Coroutine.exec(this.promiseId, fn, args, this.handler, (result) => {
+    Coroutine.exec(this.promiseId, func, args, this.handler, (result) => {
       // it is safe to unset isProcessing at this point, there are three possible "result"
       // - the coroutine is completed: we will complete the durablepromise and there should be no more work to do
       // - there are local todos: We need to unset isProccessing so as results come back they retrigger the processing

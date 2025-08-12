@@ -1,31 +1,21 @@
 import type { Context } from "./context";
 import type { DurablePromiseRecord } from "./network/network";
 
-// Internal representation of the DurablePromise, for external use DurablePromiseRecord
-export type DurablePromise<T> = {
-  id: string;
-  state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
-  value?: T;
-};
-
 export type Func = (ctx: Context, ...args: any[]) => any;
+
+export const RESONATE_OPTIONS: unique symbol = Symbol("ResonateOptions");
 
 // The args of a resonate function excluding the context argument
 export type Params<F> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
+export type ParamsWithOptions<F> = [...Params<F>, (Partial<Options> & { [RESONATE_OPTIONS]: true })?];
 
-export type RemoteOpts = {
-  id?: string;
+export type Options = {
+  id: string;
   target: string;
   timeout: number;
 };
 
-export type LocalOpts = {
-  id?: string;
-  target: string;
-  timeout: number;
-};
-
-export type Completed = { kind: "completed"; durablePromise: DurablePromise<unknown> };
+export type Completed = { kind: "completed"; durablePromise: DurablePromiseRecord };
 export type Suspended = { kind: "suspended"; durablePromiseId: string };
 export type Failure = { kind: "failure"; task: Task };
 export type PlatformError = { kind: "platformError"; cause: any; msg: string };
@@ -49,7 +39,7 @@ export type UnclaimedTask = {
 export type Task = UnclaimedTask | ClaimedTask;
 
 // Return type of a function or a generator
-export type Ret<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
+export type Return<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
   ? R // Return type of generator
   : T extends (...args: any[]) => infer R
     ? Awaited<R> // Return type of regular function
@@ -63,7 +53,7 @@ export type InternalAsyncR<T> = {
   id: string;
   func: string;
   args: any[];
-  opts: RemoteOpts;
+  opts: Options;
   mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
 };
 

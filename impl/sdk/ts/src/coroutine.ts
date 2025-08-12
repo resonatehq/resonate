@@ -46,7 +46,7 @@ export class Coroutine<T> {
     handler: Handler,
     callback: (result: Suspended | Completed<T>) => void,
   ): void {
-    handler.createPromise<T>({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, fn: func.name, args }, (durable) => {
+    handler.createPromise({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, fn: func.name, args }, (durable) => {
       if (durable.state === "pending") {
         const ctx = new Context();
         const c = new Coroutine(ctx, new Decorator<T>(id, func(ctx, ...args)), handler);

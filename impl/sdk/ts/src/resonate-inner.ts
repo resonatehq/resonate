@@ -1,5 +1,5 @@
 import { Computation } from "./computation";
-import type { Network, RecvMsg } from "./network/network";
+import type { DurablePromiseRecord, Network, RecvMsg } from "./network/network";
 import { Registry } from "./registry";
 import type { CompResult, Func, Task } from "./types";
 
@@ -11,7 +11,8 @@ export class ResonateInner {
   private group: string;
   private pid: string;
   private ttl: number;
-  private listeners: Array<(data: { promiseId: string; value: any }) => void> = [];
+  private notifications: Map<string, DurablePromiseRecord> = new Map();
+  private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => void>> = new Map();
 
   constructor(network: Network, config: { group: string; pid: string; ttl: number }) {
     const { group, pid, ttl } = config;
@@ -25,22 +26,19 @@ export class ResonateInner {
   }
 
   public process(t: Task, cb: (res: CompResult) => void) {
-    let comp = this.computations.get(t.rootPromiseId);
-    if (!comp) {
-      comp = this.makeComputation(t.rootPromiseId);
-      this.computations.set(t.rootPromiseId, comp);
+    let computation = this.computations.get(t.rootPromiseId);
+    if (!computation) {
+      computation = new Computation(t.rootPromiseId, this.network, this.registry, this.group, this.pid, this.ttl);
+      this.computations.set(t.rootPromiseId, computation);
     }
 
-    comp.process(t, (res) => {
+    computation.process(t, (res) => {
+      // notify subscribers
       if (res.kind === "completed") {
-        this.emit({ promiseId: res.durablePromise.id, value: res.durablePromise.value });
+        this.notify(res.durablePromise);
       }
       cb(res);
     });
-  }
-
-  private makeComputation(promiseId: string): Computation {
-    return new Computation(promiseId, this.network, this.registry, this.group, this.pid, this.ttl);
   }
 
   private onMessage(msg: RecvMsg, cb: (res: CompResult) => void): void {
@@ -49,12 +47,10 @@ export class ResonateInner {
       case "resume":
         this.process({ ...msg.task, kind: "unclaimed" }, cb);
         break;
+
       case "notify":
         // TODO(avillega): assert that the promise is completed
-        if (msg.promise.state !== "pending") {
-          // TODO(avillega): handle rejection too, make the complete result be able to reject, probably just return the promise
-          this.emit({ promiseId: msg.promise.id, value: msg.promise.value });
-        }
+        this.notify(msg.promise);
         break;
     }
   }
@@ -67,14 +63,30 @@ export class ResonateInner {
     this.registry.set(name, func);
   }
 
-  private emit(data: { promiseId: string; value: any }) {
-    for (const listener of this.listeners) {
-      listener(data);
+  private notify(promise: DurablePromiseRecord) {
+    // store the notification
+    this.notifications.set(promise.id, promise);
+
+    // notify subscribers
+    for (const callback of this.subscriptions.get(promise.id) ?? []) {
+      callback(promise);
     }
+
+    // clear subscribers
+    this.subscriptions.delete(promise.id);
   }
 
-  public onComplete(listener: (data: { promiseId: string; value: any }) => void) {
-    this.listeners.push(listener);
+  public subscribe(id: string, callback: (promise: DurablePromiseRecord) => void): void {
+    // immediately notify if we already have a notification
+    if (this.notifications.has(id)) {
+      callback(this.notifications.get(id)!);
+      return;
+    }
+
+    // otherwise add callback to the subscriptions
+    const subscriptions = this.subscriptions.get(id) ?? [];
+    this.subscriptions.set(id, subscriptions);
+    subscriptions.push(callback);
   }
 
   public stop() {

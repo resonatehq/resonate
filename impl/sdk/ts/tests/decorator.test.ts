@@ -1,10 +1,10 @@
 import { Decorator } from "../src/decorator";
 
-import { Context, Future, type InvokeLocal } from "../src/context";
+import { Context, Future, type LFI } from "../src/context";
 
 describe("Decorator", () => {
   it("returns internal.return when generator is done", () => {
-    function* foo(): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(): Generator<LFI<any> | Future<any>, any, number> {
       return 42;
     }
 
@@ -21,8 +21,8 @@ describe("Decorator", () => {
   });
 
   it("handles internal.async correctly", () => {
-    function* foo(ctx: Context): Generator<InvokeLocal<any>, any, any> {
-      yield* ctx.beginRun(() => 42);
+    function* foo(ctx: Context): Generator<LFI<any>, any, any> {
+      yield* ctx.lfi(() => 42);
     }
 
     const d = new Decorator("abc", foo(new Context()));
@@ -53,8 +53,8 @@ describe("Decorator", () => {
 
   it("handles lfc/rfc correctly", () => {
     function* foo(ctx: Context): Generator<any, any, any> {
-      const v1 = yield* ctx.run((ctx: Context, x: number) => x + 1, 1);
-      const v2 = yield* ctx.rpc<number>("foo");
+      const v1 = yield* ctx.lfc((ctx: Context, x: number) => x + 1, 1);
+      const v2 = yield* ctx.rfc<number>("foo");
       return v1 + v2;
     }
 
@@ -111,9 +111,9 @@ describe("Decorator", () => {
   });
 
   it("returns final value after multiple yields", () => {
-    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<LFI<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10);
-      yield* ctx.beginRun(() => 42);
+      yield* ctx.lfi(() => 42);
       return 30;
     }
 
@@ -141,10 +141,10 @@ describe("Decorator", () => {
   });
 
   it("awaits if there are pending invokes - Structured Concurrency", () => {
-    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<LFI<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield* ctx.beginRun(() => 20); // B
-      yield* ctx.beginRun(() => 30); // C
+      yield* ctx.lfi(() => 20); // B
+      yield* ctx.lfi(() => 30); // C
       return 30; // D
     }
 
@@ -178,10 +178,10 @@ describe("Decorator", () => {
   });
 
   it("returns if there are no pending invokes even if not explecityly awaited", () => {
-    function* foo(ctx: Context): Generator<InvokeLocal<any> | Future<any>, any, number> {
+    function* foo(ctx: Context): Generator<LFI<any> | Future<any>, any, number> {
       yield new Future("future-1", "completed", 10); // A
-      yield* ctx.beginRun(() => 20); // B
-      yield* ctx.beginRun(() => 30); // C
+      yield* ctx.lfi(() => 20); // B
+      yield* ctx.lfi(() => 30); // C
       return 42; // D
     }
 

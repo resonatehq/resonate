@@ -1,4 +1,4 @@
-import { CallLocal, CallRemote, Future, InvokeLocal, InvokeRemote, type Yieldable } from "./context";
+import { Future, LFC, LFI, RFC, RFI, type Yieldable } from "./context";
 import type { InternalAsyncL, InternalAsyncR, InternalAwait, InternalExpr, Literal, Value } from "./types";
 import * as util from "./util";
 
@@ -81,11 +81,11 @@ export class Decorator<TRet> {
 
   // From external type to internal type
   private toInternal<T>(
-    event: InvokeLocal<T> | InvokeRemote<T> | Future<T> | CallLocal<T> | CallRemote<T>,
+    event: LFI<T> | RFI<T> | Future<T> | LFC<T> | RFC<T>,
   ): InternalAsyncL<T> | InternalAsyncR<T> | InternalAwait<T> {
-    if (event instanceof InvokeLocal || event instanceof CallLocal) {
+    if (event instanceof LFI || event instanceof LFC) {
       const id = this.idsequ();
-      this.invokes.push({ kind: event instanceof InvokeLocal ? "invoke" : "call", id });
+      this.invokes.push({ kind: event instanceof LFI ? "invoke" : "call", id });
       this.nextState = "internal.promise";
       return {
         type: "internal.async.l",
@@ -95,9 +95,9 @@ export class Decorator<TRet> {
         mode: "eager", // default, adjust if needed
       };
     }
-    if (event instanceof InvokeRemote || event instanceof CallRemote) {
+    if (event instanceof RFI || event instanceof RFC) {
       const id = this.idsequ();
-      this.invokes.push({ kind: event instanceof InvokeRemote ? "invoke" : "call", id });
+      this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id });
       this.nextState = "internal.promise";
       return {
         type: "internal.async.r",

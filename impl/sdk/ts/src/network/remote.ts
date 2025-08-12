@@ -253,6 +253,11 @@ export class HttpNetwork implements Network {
       return;
     }
 
+    if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
+      this.onMessage?.({ type: "notify", promise: this.mapPromiseDtoToRecord(data.promise) }, () => {});
+      return;
+    }
+
     console.warn("couldn't parse", data, "as a message");
   }
 
