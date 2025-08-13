@@ -2,7 +2,7 @@ import type { Context } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
-import type { CompResult } from "../src/types";
+import { type CompResult, type Result, ok } from "../src/types";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
@@ -56,9 +56,9 @@ describe("Coroutine", () => {
     });
   };
 
-  const resolvePromise = (handler: Handler, id: string, value: any) => {
+  const completePromise = (handler: Handler, id: string, value: Result<any>) => {
     return new Promise<any>((resolve) => {
-      handler.resolvePromise(id, value, resolve);
+      handler.completePromise(id, value, resolve);
     });
   };
 
@@ -75,7 +75,7 @@ describe("Coroutine", () => {
 
     const h = new Handler(new DummyNetwork());
     const r = await exec("foo.1", foo, [], h);
-    expect(r).toEqual({ type: "completed", value: 42 });
+    expect(r).toEqual({ type: "completed", value: ok(42) });
   });
 
   test("basic coroutine with function suspends after first await", async () => {
@@ -101,12 +101,12 @@ describe("Coroutine", () => {
     const suspended = r as Suspended;
     expect(suspended.localTodos).toHaveLength(2);
 
-    await resolvePromise(h, "foo.1.0", 42);
-    await resolvePromise(h, "foo.1.1", 31416);
+    await completePromise(h, "foo.1.0", ok(42));
+    await completePromise(h, "foo.1.1", ok(31416));
 
     // Second execution - should complete
     r = await exec("foo.1", foo, [], h);
-    expect(r).toMatchObject({ type: "completed", value: 42 + 31416 });
+    expect(r).toMatchObject({ type: "completed", value: ok(42 + 31416) });
   });
 
   test("coroutine with a suspension point suspends if can not make more progress", async () => {
@@ -130,9 +130,9 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.remoteTodos).toHaveLength(1);
 
-    await resolvePromise(h, "foo.1.1", 42);
+    await completePromise(h, "foo.1.1", ok(42));
     r = await exec("foo.1", foo, [], h);
-    expect(r).toEqual({ type: "completed", value: 42 });
+    expect(r).toEqual({ type: "completed", value: ok(42) });
   });
 
   test("Structured concurrency", async () => {
@@ -153,17 +153,17 @@ describe("Coroutine", () => {
     r = r as Suspended;
     expect(r.remoteTodos).toHaveLength(2);
 
-    await resolvePromise(h, "foo.1.1", 42);
+    await completePromise(h, "foo.1.1", ok(42));
     r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
     r = r as Suspended;
     expect(r.remoteTodos).toHaveLength(1);
 
-    await resolvePromise(h, "foo.1.0", 42);
+    await completePromise(h, "foo.1.0", ok(42));
     r = await exec("foo.1", foo, [], h);
 
-    expect(r).toEqual({ type: "completed", value: 99 });
+    expect(r).toEqual({ type: "completed", value: ok(99) });
   });
 
   test("lfc/rfc", async () => {
@@ -184,9 +184,9 @@ describe("Coroutine", () => {
     const suspended = r as Suspended;
     expect(suspended.remoteTodos).toHaveLength(1);
 
-    await resolvePromise(h, "foo.1.1", 42);
+    await completePromise(h, "foo.1.1", ok(42));
 
     r = await exec("foo.1", foo, [], h);
-    expect(r).toEqual({ type: "completed", value: 84 });
+    expect(r).toMatchObject({ type: "completed", value: ok(84) });
   });
 });

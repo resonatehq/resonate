@@ -6,6 +6,7 @@ import type {
   DurablePromiseRecord,
   Network,
 } from "./network/network";
+import type { Result } from "./types";
 import * as util from "./util";
 
 export interface DurablePromiseProto {
@@ -68,7 +69,7 @@ export class Handler {
     );
   }
 
-  public resolvePromise(id: string, value: any, callback: (res: DurablePromiseRecord) => void): void {
+  public completePromise(id: string, result: Result<any>, callback: (res: DurablePromiseRecord) => void): void {
     const promise = this.promises.get(id);
     util.assertDefined(promise);
 
@@ -77,12 +78,15 @@ export class Handler {
       return;
     }
 
+    const state = result.success ? "resolved" : "rejected";
+    const value = result.success ? result.data : result.error;
+
     this.network.send(
       {
         kind: "completePromise",
         id,
-        state: "resolved",
-        value: value,
+        state,
+        value,
         iKey: id,
         strict: false,
       },

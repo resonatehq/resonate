@@ -151,14 +151,10 @@ export class Computation {
           return await func(new Context(), ...args);
         },
         (result) => {
-          if (result.success) {
-            this.handler.resolvePromise(this.promiseId, result.data, (durablePromise) => {
-              util.assertDefined(this.task);
-              this.completeTask({ kind: "completed", durablePromise });
-            });
-          } else {
-            // TODO(avillega): handle reject
-          }
+          this.handler.completePromise(this.promiseId, result, (durablePromise) => {
+            util.assertDefined(this.task);
+            this.completeTask({ kind: "completed", durablePromise });
+          });
         },
       );
       return;
@@ -172,7 +168,7 @@ export class Computation {
       // - there are only remote todos:
 
       if (result.type === "completed") {
-        this.handler.resolvePromise(this.promiseId, result.value, (durablePromise) => {
+        this.handler.completePromise(this.promiseId, result.value, (durablePromise) => {
           util.assertDefined(this.task);
           util.assert(taskId === this.task.id, "Trying to complete a current task from a stale task callback");
           this.completeTask({ kind: "completed", durablePromise });
@@ -214,9 +210,7 @@ export class Computation {
           return await fn(ctx, ...args);
         },
         (result) => {
-          const value = result.success ? result.data : result.error;
-          // TODO (avillega): Need to do a rejection too instead of resolving with error
-          this.handler.resolvePromise(id, value, (_) => {
+          this.handler.completePromise(id, result, (_) => {
             this.enqueue(taskId, "return");
           });
         },

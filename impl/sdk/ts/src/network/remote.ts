@@ -184,7 +184,10 @@ export class JsonEncoder implements Encoder {
       }
 
       if (value?.__type === "error") {
-        return Object.assign(new Error(value.message), value);
+        const error = new Error(value.message || "Unknown error");
+        if (value.name) error.name = value.name;
+        if (value.stack) error.stack = value.stack;
+        return error;
       }
 
       return value;
@@ -217,7 +220,7 @@ export class HttpNetwork implements Network {
 
   constructor(config: HttpNetworkConfig) {
     const { host, storePort, msgSrcPort, pid, group } = config;
-    this.url = `${host}:${storePort}/`;
+    this.url = `${host}:${storePort}`;
     this.msgUrl = new URL(`/${encodeURIComponent(group)}/${encodeURIComponent(pid)}`, `${host}:${msgSrcPort}`).href;
     console.log("poller:", this.msgUrl);
     this.timeout = config.timeout || 30 * util.SEC;

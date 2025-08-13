@@ -1,4 +1,4 @@
-import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
+import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Result, type Return } from "./types";
 import * as util from "./util";
 
 export type Yieldable = LFI<any> | LFC<any> | RFI<any> | RFC<any> | Future<any>;
@@ -76,29 +76,34 @@ export class RFC<T> implements Iterable<RFC<T>> {
 }
 
 export class Future<T> implements Iterable<Future<T>> {
-  public readonly value?: T;
-  private state: "pending" | "completed";
+  private readonly value?: Result<T>;
+  public readonly state: "pending" | "completed";
 
   constructor(
     public id: string,
     state: "pending" | "completed",
-    value?: T,
+    value?: Result<T>,
   ) {
     this.value = value;
     this.state = state;
   }
 
-  isCompleted(): boolean {
-    return this.state === "completed";
-  }
+  getValue() {
+    if (!this.value) {
+      throw new Error("Future is not ready");
+    }
 
-  getValue(): T | undefined {
-    return this.value;
+    if (this.value.success) {
+      return this.value.data;
+    }
+    throw this.value.error; // Should be unreachble
   }
 
   *[Symbol.iterator](): Generator<Future<T>, T, undefined> {
-    yield this;
-    return this.value!;
+    const c = yield this;
+    util.assertDefined(this.value);
+    util.assert(this.value.success, "The value must be and ok result at this point.");
+    return this.getValue();
   }
 }
 

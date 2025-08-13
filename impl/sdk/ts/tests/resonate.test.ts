@@ -30,6 +30,7 @@ describe("Resonate usage tests", () => {
     expect(executionTime).toBeGreaterThan(400);
 
     expect(r).toStrictEqual(["a", "b"]);
+    resonate.stop();
   });
   test("sequential execution must be sequential", async () => {
     const resonate = Resonate.local();
@@ -56,5 +57,39 @@ describe("Resonate usage tests", () => {
     expect(executionTime).toBeGreaterThan(475);
 
     expect(r).toStrictEqual(["a", "b"]);
+    resonate.stop();
+  });
+
+  test("Correctly rejects a top level function using ctx.beginRun", async () => {
+    const resonate = Resonate.local();
+
+    const g = async (_ctx: Context, msg: string) => {
+      throw msg;
+    };
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      const future = yield* ctx.beginRun(g, "this is an error");
+      yield* future;
+    });
+
+    const h = await f.beginRun("f");
+    await expect(h.result).rejects.toBe("this is an error");
+    resonate.stop();
+  });
+
+  test("Correctly rejects a top level function using ctx.run", async () => {
+    const resonate = Resonate.local();
+
+    const g = async (_ctx: Context, msg: string) => {
+      throw msg;
+    };
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.run(g, "this is an error");
+    });
+
+    const h = await f.beginRun("f");
+    await expect(h.result).rejects.toBe("this is an error");
+    resonate.stop();
   });
 });

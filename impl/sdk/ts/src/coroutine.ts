@@ -1,7 +1,8 @@
 import { Context, type Yieldable } from "./context";
 import { Decorator } from "./decorator";
 import type { Handler } from "./handler";
-import type { Value } from "./types";
+import type { DurablePromiseRecord } from "./network/network";
+import { type Literal, type Result, type Value, ko, ok } from "./types";
 import * as util from "./util";
 
 export interface LocalTodo {
@@ -25,8 +26,18 @@ export type Suspended = {
 
 export type Completed<T> = {
   type: "completed";
-  value: T;
+  value: Result<T>;
 };
+
+function extractResult<T>(durablePromise: DurablePromiseRecord): Literal<T> {
+  util.assert(durablePromise.state !== "pending", "Can not get result from a pending promise");
+  const value: Result<T> = durablePromise.state === "resolved" ? ok(durablePromise.value) : ko(durablePromise.value);
+
+  return {
+    type: "internal.literal",
+    value,
+  };
+}
 
 export class Coroutine<T> {
   private decorator: Decorator<T>;
@@ -52,7 +63,7 @@ export class Coroutine<T> {
         const c = new Coroutine(ctx, new Decorator<T>(id, func(ctx, ...args)), handler);
         c.exec((r) => {
           if (r.type === "completed") {
-            handler.resolvePromise(id, r.value, () => {
+            handler.completePromise(id, r.value, () => {
               callback(r);
             });
           } else {
@@ -60,9 +71,8 @@ export class Coroutine<T> {
           }
         });
       } else {
-        handler.resolvePromise(id, durable.value!, (r) => {
-          callback({ type: "completed", value: r.value! });
-        });
+        const f = durable.state === "resolved" ? ok : ko;
+        callback({ type: "completed", value: f(durable.value) });
       }
     });
   }
@@ -115,15 +125,12 @@ export class Coroutine<T> {
                   };
                   next();
                 } else {
-                  this.handler.resolvePromise(action.id, r.value, (durable) => {
+                  this.handler.completePromise(action.id, r.value, (durable) => {
                     input = {
                       type: "internal.promise",
                       state: "completed",
                       id: action.id,
-                      value: {
-                        type: "internal.literal",
-                        value: durable.value,
-                      },
+                      value: extractResult(durable),
                     };
                     next();
                   });
@@ -135,10 +142,7 @@ export class Coroutine<T> {
                 type: "internal.promise",
                 state: "completed",
                 id: action.id,
-                value: {
-                  type: "internal.literal",
-                  value: durable.value,
-                },
+                value: extractResult(durable),
               };
               next();
             }
@@ -169,10 +173,7 @@ export class Coroutine<T> {
                   type: "internal.promise",
                   state: "completed",
                   id: action.id,
-                  value: {
-                    type: "internal.literal",
-                    value: durable.value,
-                  },
+                  value: extractResult(durable),
                 };
               }
               next();
@@ -183,15 +184,11 @@ export class Coroutine<T> {
 
         // Handle await
         if (action.type === "internal.await" && action.promise.state === "completed") {
-          util.assert(
-            action.promise.value && action.promise.value.type === "internal.literal",
-            "Promise value must be an 'internal.literal' type",
-          );
           input = action.promise.value;
           continue;
         }
 
-        // invoke the callback when a awaiting a pending "Future" the list of todos will include
+        // invoke the callback when awaiting a pending "Future" the list of todos will include
         // the global callbacks to create.
         if (action.type === "internal.await" && action.promise.state === "pending") {
           callback({ type: "suspended", localTodos, remoteTodos });
@@ -200,13 +197,9 @@ export class Coroutine<T> {
 
         // Handle return
         if (action.type === "internal.return") {
-          util.assert(
-            action.value && action.value.type === "internal.literal",
-            "Promise value must be an 'internal.literal' type",
-          );
           callback({
             type: "completed",
-            value: action?.value?.type === "internal.literal" ? action.value.value : undefined, // Even with the assertion on top it is neccesary to have the ternary condition to make the typesystem happy
+            value: action.value.value,
           });
           return;
         }

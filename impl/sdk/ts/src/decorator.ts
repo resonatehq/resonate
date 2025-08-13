@@ -1,15 +1,25 @@
 import { Future, LFC, LFI, RFC, RFI, type Yieldable } from "./context";
-import type { InternalAsyncL, InternalAsyncR, InternalAwait, InternalExpr, Literal, Value } from "./types";
+import {
+  type InternalAsyncL,
+  type InternalAsyncR,
+  type InternalAwait,
+  type InternalExpr,
+  type Literal,
+  type Result,
+  type Value,
+  ko,
+  ok,
+} from "./types";
 import * as util from "./util";
 
 export class Decorator<TRet> {
   public id: string;
   private sequ: number;
   private invokes: { kind: "call" | "invoke"; id: string }[];
-  private generator: Generator<Yieldable, any, TRet>;
+  private generator: Generator<Yieldable, TRet, any>;
   private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
 
-  constructor(id: string, generator: Generator<Yieldable, any, TRet>) {
+  constructor(id: string, generator: Generator<Yieldable, TRet, any>) {
     this.id = id;
     this.sequ = 0;
     this.generator = generator;
@@ -24,6 +34,7 @@ export class Decorator<TRet> {
     );
 
     // Handle rfc/lfc by returning an await if the previous invocation was a call
+    // if we await an rpc/rfc promise that is not completed the corotine is done and the decorator shouldn't be called again
     if (value.type === "internal.promise" && this.invokes.length > 0) {
       const prevInvoke = this.invokes.at(-1)!;
       if (prevInvoke.kind === "call") {
@@ -37,7 +48,7 @@ export class Decorator<TRet> {
       }
     }
 
-    const result = this.generator.next(this.toExternal(value));
+    const result = this.safeGeneratorNext(this.toExternal(value));
     if (result.done) {
       this.nextState = "over";
       if (this.invokes.length > 0) {
@@ -62,18 +73,20 @@ export class Decorator<TRet> {
   }
 
   // From internal type to external type
-  private toExternal<T>(value: Value<T>): Future<T> | T | undefined {
+  // Having to return a Result<> is an artifact of not being able to check
+  // the instance of "Result" at runtime
+  private toExternal<T>(value: Value<T>): Result<Future<T> | T | undefined> {
     switch (value.type) {
       case "internal.nothing":
-        return undefined;
+        return ok(undefined);
       case "internal.promise":
         if (value.state === "pending") {
-          return new Future<T>(value.id, "pending", undefined);
+          return ok(new Future<T>(value.id, "pending", undefined));
         }
         // promise === "complete"
         // We know for sure this promise relates to the last invoke inserted
         this.invokes.pop();
-        return new Future<T>(value.id, "completed", value.value.value);
+        return ok(new Future<T>(value.id, "completed", value.value.value));
       case "internal.literal":
         return value.value;
     }
@@ -82,7 +95,7 @@ export class Decorator<TRet> {
   // From external type to internal type
   private toInternal<T>(
     event: LFI<T> | RFI<T> | Future<T> | LFC<T> | RFC<T>,
-  ): InternalAsyncL<T> | InternalAsyncR<T> | InternalAwait<T> {
+  ): InternalAsyncL | InternalAsyncR | InternalAwait<T> {
     if (event instanceof LFI || event instanceof LFC) {
       const id = this.idsequ();
       this.invokes.push({ kind: event instanceof LFI ? "invoke" : "call", id });
@@ -110,7 +123,7 @@ export class Decorator<TRet> {
     }
     if (event instanceof Future) {
       // Map Future to InternalPromise union
-      if (event.isCompleted()) {
+      if (event.state === "completed") {
         this.nextState = "internal.literal";
         return {
           type: "internal.await",
@@ -121,7 +134,8 @@ export class Decorator<TRet> {
             id: event.id,
             value: {
               type: "internal.literal",
-              value: event.value!,
+              // biome-ignore lint/complexity/useLiteralKeys: We need to access this private member, it is only private to the user
+              value: event["value"]!,
             },
           },
         };
@@ -147,10 +161,34 @@ export class Decorator<TRet> {
     return `${this.id}.${this.sequ++}`;
   }
 
-  private toLiteral<T>(value: T): Literal<T> {
+  private toLiteral<T>(result: Result<T>): Literal<T> {
     return {
       type: "internal.literal",
-      value: value,
+      value: result,
     };
+  }
+
+  private safeGeneratorNext<T>(value: Result<Future<T> | T | undefined>): IteratorResult<Yieldable, Result<TRet>> {
+    try {
+      let itResult: IteratorResult<Yieldable, TRet>;
+      if (!value.success) {
+        itResult = this.generator.throw(value.error);
+      } else {
+        itResult = this.generator.next(value.data);
+      }
+
+      if (!itResult.done) {
+        return itResult;
+      }
+      return {
+        done: true,
+        value: ok(itResult.value),
+      };
+    } catch (e) {
+      return {
+        done: true,
+        value: ko(e),
+      };
+    }
   }
 }

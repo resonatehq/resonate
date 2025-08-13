@@ -1,16 +1,6 @@
+import type { Result } from "../types";
+
 type F = () => Promise<unknown>;
-
-type Ok<T> = {
-  success: true;
-  data: T;
-};
-
-type Ko = {
-  success: false;
-  error: any;
-};
-
-export type Result<T> = Ok<T> | Ko;
 
 export interface Processor {
   process(id: string, fn: F, cb: (result: Result<unknown>) => void): void;

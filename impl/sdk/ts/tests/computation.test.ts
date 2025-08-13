@@ -2,9 +2,9 @@ import { LocalNetwork } from "../dev/network";
 import { Computation } from "../src/computation";
 import type { Context } from "../src/context";
 import type { CreatePromiseAndTaskRes, DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
-import type { Processor, Result } from "../src/processor/processor";
+import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
-import type { ClaimedTask, CompResult } from "../src/types";
+import type { ClaimedTask, CompResult, Result } from "../src/types";
 import * as util from "../src/util";
 
 async function createPromiseAndTask(

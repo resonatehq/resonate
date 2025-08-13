@@ -39,16 +39,28 @@ export type UnclaimedTask = {
 export type Task = UnclaimedTask | ClaimedTask;
 
 // Return type of a function or a generator
-export type Return<T> = T extends (...args: any[]) => Generator<infer Y, infer R, infer N>
+export type Return<T> = T extends (...args: any[]) => Generator<infer __, infer R, infer _>
   ? R // Return type of generator
   : T extends (...args: any[]) => infer R
     ? Awaited<R> // Return type of regular function
     : never;
 
-// Expression
-export type InternalExpr<T> = InternalAsyncL<T> | InternalAsyncR<T> | InternalAwait<T> | InternalReturn<T>;
+type Ok<T> = {
+  success: true;
+  data: T;
+};
 
-export type InternalAsyncR<T> = {
+type Ko = {
+  success: false;
+  error: any;
+};
+
+export type Result<T> = Ok<T> | Ko;
+
+// Expression
+export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalReturn<T>;
+
+export type InternalAsyncR = {
   type: "internal.async.r";
   id: string;
   func: string;
@@ -57,7 +69,7 @@ export type InternalAsyncR<T> = {
   mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
 };
 
-export type InternalAsyncL<T> = {
+export type InternalAsyncL = {
   type: "internal.async.l";
   id: string;
   func: Func;
@@ -83,11 +95,6 @@ export type Nothing = {
   type: "internal.nothing";
 };
 
-export type Literal<T> = {
-  type: "internal.literal";
-  value: T;
-};
-
 export type Promise<T> = PromisePending | PromiseCompleted<T>;
 
 export type PromisePending = {
@@ -102,3 +109,18 @@ export type PromiseCompleted<T> = {
   id: string;
   value: Literal<T>;
 };
+
+export type Literal<T> = {
+  type: "internal.literal";
+  value: Result<T>;
+};
+
+// Helper functions to create some of the types defined in this file
+
+export function ok<T>(data: T): Result<T> {
+  return { success: true, data };
+}
+
+export function ko(error: any): Result<any> {
+  return { success: false, error };
+}
