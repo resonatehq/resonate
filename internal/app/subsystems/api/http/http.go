@@ -61,7 +61,8 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	if len(config.Cors.AllowOrigins) > 0 {
 		handler.Use(cors.New(cors.Config{
 			AllowOrigins: config.Cors.AllowOrigins,
-			AllowHeaders: []string{"Origin", "Content-Length", "Content-Type"},
+			AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+			AllowHeaders: []string{"Origin", "Content-Length", "Content-Type", "Idempotency-Key", "Strict"},
 		}))
 	}
 
