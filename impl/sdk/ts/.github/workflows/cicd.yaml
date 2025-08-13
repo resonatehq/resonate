@@ -33,11 +33,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run linter
-        run: npm run lint
+      - name: Run linter and format check
+        run: npm run check
 
-      - name: Run prettier
-        run: npm run prettier
+      - name: Run type check
+        run: npm run type-check
 
       - name: Checkout resonate repository
         uses: actions/checkout@v4

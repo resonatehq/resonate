@@ -8,6 +8,7 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
+    "baseUrl": "./src",
     "outDir": "./dist",
     "strict": true,
     "allowJs": true,
