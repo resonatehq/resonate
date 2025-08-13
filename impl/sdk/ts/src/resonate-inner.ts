@@ -63,19 +63,6 @@ export class ResonateInner {
     this.registry.set(name, func);
   }
 
-  private notify(promise: DurablePromiseRecord) {
-    // store the notification
-    this.notifications.set(promise.id, promise);
-
-    // notify subscribers
-    for (const callback of this.subscriptions.get(promise.id) ?? []) {
-      callback(promise);
-    }
-
-    // clear subscribers
-    this.subscriptions.delete(promise.id);
-  }
-
   public subscribe(id: string, callback: (promise: DurablePromiseRecord) => void): void {
     // immediately notify if we already have a notification
     if (this.notifications.has(id)) {
@@ -87,6 +74,19 @@ export class ResonateInner {
     const subscriptions = this.subscriptions.get(id) ?? [];
     this.subscriptions.set(id, subscriptions);
     subscriptions.push(callback);
+  }
+
+  private notify(promise: DurablePromiseRecord) {
+    // store the notification
+    this.notifications.set(promise.id, promise);
+
+    // notify subscribers
+    for (const callback of this.subscriptions.get(promise.id) ?? []) {
+      callback(promise);
+    }
+
+    // clear subscribers
+    this.subscriptions.delete(promise.id);
   }
 
   public stop() {

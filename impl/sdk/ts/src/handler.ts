@@ -50,7 +50,7 @@ export class Handler {
         timeout,
         tags,
         param: {
-          fn,
+          func: fn,
           args,
         },
         strict: false,

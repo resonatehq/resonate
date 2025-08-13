@@ -168,6 +168,9 @@ export class Resonate {
             return;
           }
 
+          // otherwise subscribe and process
+          this.inner.subscribe(id, (p) => this.complete(p, promise.resolve, promise.reject));
+
           // TODO(avillega): Handle failure and platform errors in callback
           this.inner.process(
             {
@@ -175,11 +178,7 @@ export class Resonate {
               rootPromise: res.promise,
               ...res.task,
             },
-            (res) => {
-              if (res.kind === "completed") {
-                this.complete(res.durablePromise, promise.resolve, promise.reject);
-              }
-            },
+            () => {},
           );
         },
       );
