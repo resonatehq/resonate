@@ -25,4 +25,8 @@ export class Registry {
     this.forward_registry.set(name, { name, func });
     this.reverse_registry.set(func, { name, func });
   }
+
+  keys(): IterableIterator<string> {
+    return this.forward_registry.keys();
+  }
 }
