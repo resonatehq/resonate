@@ -1,6 +1,6 @@
-import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
-import { ResonateInner } from "../src/resonate-inner";
-import type { CompResult } from "../src/types";
+import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
+import { ResonateInner } from "../../src/resonate-inner";
+import type { CompResult } from "../../src/types";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 class SimulatedNetwork implements Network {
@@ -83,15 +83,17 @@ export class WorkerProcess extends Process {
   }
 
   tick(time: number, messages: Message<ResponseMsg | RecvMsg>[]): Message<RequestMsg>[] {
-    if (messages.length > 0) {
-      this.log(time, messages);
-    }
+    this.log(time, "[recv]", messages);
 
     this.network.time(time);
     for (const message of messages) {
       this.network.process(message);
     }
 
-    return this.network.flush();
+    const responses = this.network.flush();
+
+    this.log(time, "[send]", responses);
+
+    return responses;
   }
 }

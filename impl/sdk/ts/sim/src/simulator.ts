@@ -22,6 +22,10 @@ export class Random {
   pick<T>(list: T[]): T {
     return list[Math.floor(this.next() * list.length)];
   }
+
+  randint(min: number, max: number): number {
+    return Math.floor(this.next() * (max - min + 1)) + min;
+  }
 }
 
 export type Address = { kind: "unicast"; iaddr: string } | { kind: "anycast"; gaddr: string; iaddr?: string };

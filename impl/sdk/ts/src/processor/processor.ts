@@ -3,13 +3,13 @@ import type { Result } from "../types";
 type F = () => Promise<unknown>;
 
 export interface Processor {
-  process(id: string, fn: F, cb: (result: Result<unknown>) => void): void;
+  process(id: string, func: F, cb: (result: Result<unknown>) => void): void;
 }
 
 export class AsyncProcessor implements Processor {
   private seen = new Set<string>();
 
-  process(id: string, fn: F, cb: (result: Result<unknown>) => void): void {
+  process(id: string, func: F, cb: (result: Result<unknown>) => void): void {
     // If already seen, ignore, either we are already working on it, or it was already completed
     if (this.seen.has(id)) {
       return;
@@ -17,7 +17,7 @@ export class AsyncProcessor implements Processor {
 
     this.seen.add(id);
 
-    fn()
+    func()
       .then((data) => {
         const result: Result<unknown> = { success: true, data };
         cb(result);

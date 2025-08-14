@@ -1,5 +1,5 @@
-import { Server } from "../dev/server";
-import type { RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
+import { Server } from "../../dev/server";
+import type { RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 export class ServerProcess extends Process {
@@ -10,9 +10,7 @@ export class ServerProcess extends Process {
   }
 
   tick(time: number, messages: Message<RequestMsg>[]): Message<ResponseMsg | RecvMsg>[] {
-    if (messages.length > 0) {
-      this.log(time, messages);
-    }
+    this.log(time, "[recv]", messages);
 
     const responses: Message<ResponseMsg | RecvMsg>[] = [];
 
@@ -35,7 +33,7 @@ export class ServerProcess extends Process {
       const msg = new Message<RecvMsg>(unicast(this.iaddr), target, message.msg, { requ: true });
       responses.push(msg);
     }
-
+    this.log(time, "[send]", responses);
     return responses;
   }
 }

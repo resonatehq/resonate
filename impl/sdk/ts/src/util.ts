@@ -22,10 +22,10 @@ export function assertDefined<T>(val: T | undefined | null): asserts val is T {
   assert(val !== null && val !== undefined, "value must not be null");
 }
 
-export function isGeneratorFunction(fn: Function): boolean {
+export function isGeneratorFunction(func: Function): boolean {
   const GeneratorFunction = Object.getPrototypeOf(function* () {}).constructor;
   const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
-  return fn instanceof GeneratorFunction || fn instanceof AsyncGeneratorFunction;
+  return func instanceof GeneratorFunction || func instanceof AsyncGeneratorFunction;
 }
 
 export function isTaskRecord(obj: any): obj is TaskRecord {

@@ -7,7 +7,7 @@ import * as util from "./util";
 
 export interface LocalTodo {
   id: string;
-  fn: (ctx: Context, ...args: any[]) => any;
+  func: (ctx: Context, ...args: any[]) => any;
   ctx: Context;
   args: any[];
   // Need function to execute and id to resolve the promise
@@ -57,7 +57,7 @@ export class Coroutine<T> {
     handler: Handler,
     callback: (result: Suspended | Completed<T>) => void,
   ): void {
-    handler.createPromise({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, fn: func.name, args }, (durable) => {
+    handler.createPromise({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, func: func.name, args }, (durable) => {
       if (durable.state === "pending") {
         const ctx = new Context();
         const c = new Coroutine(ctx, new Decorator<T>(id, func(ctx, ...args)), handler);
@@ -97,7 +97,7 @@ export class Coroutine<T> {
                 localTodos.push({
                   ctx: this.ctx,
                   id: action.id,
-                  fn: action.func,
+                  func: action.func,
                   args: action.args,
                 });
                 input = {
@@ -157,7 +157,7 @@ export class Coroutine<T> {
               id: action.id,
               timeout: action.opts.timeout + Date.now(), // TODO(avillega): this is not deterministic, chage it
               tags: { "resonate:invoke": `poll://any@${action.opts.target}` }, // TODO(avillega): remove the poll assumption, might need server work
-              fn: action.func,
+              func: action.func,
               args: action.args ?? [],
             },
             (durable) => {

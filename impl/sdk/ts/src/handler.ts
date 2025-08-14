@@ -13,7 +13,7 @@ export interface DurablePromiseProto {
   id: string;
   timeout: number;
   tags: Record<string, string>;
-  fn?: string;
+  func?: string;
   args?: any[];
 }
 
@@ -34,7 +34,7 @@ export class Handler {
   }
 
   public createPromise(
-    { id, timeout, tags, fn, args }: DurablePromiseProto,
+    { id, timeout, tags, func, args }: DurablePromiseProto,
     callback: (res: DurablePromiseRecord) => void,
   ): void {
     const promise = this.promises.get(id);
@@ -51,7 +51,7 @@ export class Handler {
         timeout,
         tags,
         param: {
-          func: fn,
+          func,
           args,
         },
         strict: false,

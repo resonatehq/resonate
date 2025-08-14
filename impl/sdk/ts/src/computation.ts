@@ -102,7 +102,7 @@ export class Computation {
     const registered = this.registry.get(task.rootPromise.param?.func ?? "");
     if (!registered) {
       // TODO(avillega): drop the task here and call the callback with an error
-      console.warn("couldn't find fn in the registry");
+      console.warn("couldn't find func in the registry");
       return;
     }
 
@@ -203,11 +203,11 @@ export class Computation {
         continue;
       }
       this.seenTodos.add(localTodo.id);
-      const { id, fn, ctx, args } = localTodo;
+      const { id, func, ctx, args } = localTodo;
       this.processor.process(
         id,
         async () => {
-          return await fn(ctx, ...args);
+          return await func(ctx, ...args);
         },
         (result) => {
           this.handler.completePromise(id, result, (_) => {

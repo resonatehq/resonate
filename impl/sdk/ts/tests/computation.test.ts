@@ -44,7 +44,7 @@ async function createPromiseAndTask(
 // A captured task waiting to be completed
 interface PendingTodo {
   id: string;
-  fn: () => Promise<any>;
+  func: () => Promise<any>;
   callback: (result: Result<any>) => void;
 }
 
@@ -53,9 +53,9 @@ class MockProcessor implements Processor {
   public pendingTodos: Map<string, PendingTodo> = new Map();
   private todoNotifier?: { expectedCount: number; resolve: () => void };
 
-  process(id: string, fn: () => Promise<any>, callback: (result: Result<any>) => void): void {
+  process(id: string, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
     // Instead of running the work, we just store it.
-    this.pendingTodos.set(id, { id, fn, callback });
+    this.pendingTodos.set(id, { id, func, callback });
 
     // After adding a task, check if we've met the count the test is waiting for.
     if (this.todoNotifier && this.pendingTodos.size >= this.todoNotifier.expectedCount) {
