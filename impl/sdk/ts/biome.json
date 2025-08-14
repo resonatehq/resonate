@@ -17,7 +17,7 @@
       "dev/**/*.ts",
       "dev/**/*.js"
     ],
-    "ignore": []
+    "ignore": ["dist/**", "node_modules/**"]
   },
   "formatter": {
     "enabled": true,
