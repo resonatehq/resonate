@@ -1,4 +1,4 @@
-import { NoHeartbeat } from "heartbeat";
+import { NoHeartbeat } from "../src/heartbeat";
 import { LocalNetwork } from "../dev/network";
 import { Computation } from "../src/computation";
 import type { Context } from "../src/context";

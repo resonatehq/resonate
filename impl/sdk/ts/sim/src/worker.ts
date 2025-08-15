@@ -1,4 +1,4 @@
-import { NoHeartbeat } from "heartbeat";
+import { NoHeartbeat } from "../../src/heartbeat";
 import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
 import type { CompResult } from "../../src/types";
