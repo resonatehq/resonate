@@ -1,3 +1,4 @@
+import { NoHeartbeat } from "heartbeat";
 import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
 import type { CompResult } from "../../src/types";
@@ -111,7 +112,12 @@ export class WorkerProcess extends Process {
   ) {
     super(iaddr, gaddr);
     this.network = new SimulatedNetwork(prng, { charFlipProb }, anycast(gaddr, iaddr), unicast("server"));
-    this.resonate = new ResonateInner(this.network, { pid: iaddr, group: gaddr, ttl: 5000 });
+    this.resonate = new ResonateInner(this.network, {
+      pid: iaddr,
+      group: gaddr,
+      ttl: 5000,
+      heartbeat: new NoHeartbeat(),
+    });
   }
 
   tick(time: number, messages: Message<ResponseMsg | RecvMsg>[]): Message<RequestMsg>[] {

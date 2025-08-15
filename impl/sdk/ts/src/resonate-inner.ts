@@ -1,3 +1,4 @@
+import type { Heartbeat } from "heartbeat";
 import { Computation } from "./computation";
 import type { DurablePromiseRecord, Network, RecvMsg } from "./network/network";
 import { Registry } from "./registry";
@@ -11,15 +12,17 @@ export class ResonateInner {
   private group: string;
   private pid: string;
   private ttl: number;
+  private heartbeat: Heartbeat;
   private notifications: Map<string, DurablePromiseRecord> = new Map();
   private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => void>> = new Map();
 
-  constructor(network: Network, config: { group: string; pid: string; ttl: number }) {
-    const { group, pid, ttl } = config;
+  constructor(network: Network, config: { group: string; pid: string; ttl: number; heartbeat: Heartbeat }) {
+    const { group, pid, ttl, heartbeat } = config;
     this.computations = new Map();
     this.group = group;
     this.pid = pid;
     this.ttl = ttl;
+    this.heartbeat = heartbeat;
     this.registry = new Registry();
     this.network = network;
     this.network.onMessage = this.onMessage.bind(this);
@@ -28,7 +31,15 @@ export class ResonateInner {
   public process(t: Task, cb: (res: CompResult) => void) {
     let computation = this.computations.get(t.rootPromiseId);
     if (!computation) {
-      computation = new Computation(t.rootPromiseId, this.network, this.registry, this.group, this.pid, this.ttl);
+      computation = new Computation(
+        t.rootPromiseId,
+        this.network,
+        this.registry,
+        this.group,
+        this.pid,
+        this.ttl,
+        this.heartbeat,
+      );
       this.computations.set(t.rootPromiseId, computation);
     }
 
@@ -91,5 +102,6 @@ export class ResonateInner {
 
   public stop() {
     this.network.stop();
+    this.heartbeat.stopHeartbeat();
   }
 }

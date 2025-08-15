@@ -1,3 +1,4 @@
+import { NoHeartbeat } from "heartbeat";
 import { LocalNetwork } from "../dev/network";
 import { Computation } from "../src/computation";
 import type { Context } from "../src/context";
@@ -101,7 +102,16 @@ describe("Computation Event Queue Concurrency", () => {
     network = new LocalNetwork();
     registry = new Registry();
 
-    computation = new Computation("root-promise-1", network, registry, "test-group", "test-pid", 3600, mockProcessor);
+    computation = new Computation(
+      "root-promise-1",
+      network,
+      registry,
+      "test-group",
+      "test-pid",
+      3600,
+      new NoHeartbeat(),
+      mockProcessor,
+    );
   });
 
   test("should process all events serially even when they complete concurrently", async () => {

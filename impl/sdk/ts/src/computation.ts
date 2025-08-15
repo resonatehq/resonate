@@ -1,3 +1,4 @@
+import type { Heartbeat } from "heartbeat";
 import { Context } from "./context";
 import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler } from "./handler";
@@ -25,6 +26,7 @@ export class Computation {
   private registry: Registry;
   private handler: Handler;
   private processor: Processor;
+  private heartbeat: Heartbeat;
   private seenTodos: Set<string>;
   private task?: Task;
   private callback?: (res: CompResult) => void;
@@ -37,6 +39,7 @@ export class Computation {
     group: string,
     pid: string,
     ttl: number,
+    heartbeat: Heartbeat,
     processor?: Processor,
   ) {
     this.promiseId = promiseId;
@@ -47,6 +50,7 @@ export class Computation {
     this.group = group;
     this.ttl = ttl;
     this.processor = processor ?? new AsyncProcessor();
+    this.heartbeat = heartbeat;
     this.seenTodos = new Set();
   }
 
@@ -98,6 +102,8 @@ export class Computation {
     this.eventQueue = [];
     this.isProcessing = false;
     this.handler.updateCache(task.rootPromise);
+
+    this.heartbeat.startHeartbeat(this.ttl / 2);
 
     const registered = this.registry.get(task.rootPromise.param?.func ?? "");
     if (!registered) {

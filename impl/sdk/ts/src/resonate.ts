@@ -1,3 +1,4 @@
+import { AsyncHeartbeat } from "heartbeat";
 import { LocalNetwork } from "../dev/network";
 import type {
   CreatePromiseAndTaskRes,
@@ -35,7 +36,7 @@ export class Resonate {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
-    this.inner = new ResonateInner(network, config);
+    this.inner = new ResonateInner(network, { ...config, heartbeat: new AsyncHeartbeat(network, config.pid) });
   }
 
   /**
@@ -64,7 +65,7 @@ export class Resonate {
   ): Resonate {
     const pid = config.pid ?? crypto.randomUUID();
     const group = config.group ?? "default";
-    const ttl = config.ttl ?? 10 * util.SEC;
+    const ttl = config.ttl ?? 30 * util.SEC;
 
     const { host, storePort, messageSourcePort } = config;
     const network = new HttpNetwork({
