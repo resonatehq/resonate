@@ -1,7 +1,7 @@
 import type * as context from "../src/context";
 import type { RequestMsg } from "../src/network/network";
 import { ServerProcess } from "./src/server";
-import { Message, Simulator, unicast } from "./src/simulator";
+import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
 // Define a resonate function
@@ -15,18 +15,34 @@ function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any
   return (yield p1) + (yield p2);
 }
 
-const options = { seed: 0, steps: 100, randomDelay: 0, dropProb: 0, duplProb: 0 };
+const options = { seed: 0, steps: 10000, randomDelay: 0, dropProb: 0, duplProb: 0, charFlipProb: 0 };
 
-const sim = new Simulator(options.seed, {
+const rnd = new Random(options.seed);
+const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
   dropProb: options.dropProb,
   duplProb: options.duplProb,
 });
 
 const server = new ServerProcess("server");
-const worker1 = new WorkerProcess("worker-1", "default");
-const worker2 = new WorkerProcess("worker-2", "default");
-const worker3 = new WorkerProcess("worker-3", "default");
+const worker1 = new WorkerProcess(
+  rnd,
+  { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+  "worker-1",
+  "default",
+);
+const worker2 = new WorkerProcess(
+  rnd,
+  { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+  "worker-2",
+  "default",
+);
+const worker3 = new WorkerProcess(
+  rnd,
+  { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+  "worker-3",
+  "default",
+);
 
 const workers = [worker1, worker2, worker3] as const;
 

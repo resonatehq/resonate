@@ -102,8 +102,8 @@ export class Simulator {
   public outbox: Message<any>[] = [];
   public deliveryOptions: Required<DeliveryOptions>;
 
-  constructor(seed: number, { dropProb = 0, randomDelay = 0, duplProb = 0 }: DeliveryOptions = {}) {
-    this.prng = new Random(seed);
+  constructor(prng: Random, { dropProb = 0, randomDelay = 0, duplProb = 0 }: DeliveryOptions = {}) {
+    this.prng = prng;
     this.deliveryOptions = { dropProb, randomDelay, duplProb };
   }
 

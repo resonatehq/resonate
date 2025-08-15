@@ -137,34 +137,36 @@ program
 
 program.parse(process.argv);
 
-const options = program.opts<{
+type Options = {
   seed: number;
   steps: number;
   func?: string;
   randomDelay?: number;
   dropProb?: number;
   duplProb?: number;
-}>();
+  charFlipProb?: number;
+};
+
+const options = program.opts<Options>();
+
 // ------------------------------------------------------------------------------------------
-export function run(options: {
-  seed: number;
-  steps: number;
-  func?: string;
-  randomDelay?: number;
-  dropProb?: number;
-  duplProb?: number;
-}) {
+export function run(options: Options) {
   const rnd = new Random(options.seed);
-  const sim = new Simulator(options.seed, {
+  const sim = new Simulator(rnd, {
     randomDelay: options.randomDelay ?? rnd.random(0.5),
     dropProb: options.dropProb ?? rnd.random(0.5),
     duplProb: options.duplProb ?? rnd.random(0.5),
   });
 
   const server = new ServerProcess("server");
-  const worker1 = new WorkerProcess("worker-1", "default");
-  const worker2 = new WorkerProcess("worker-2", "default");
-  const worker3 = new WorkerProcess("worker-3", "default");
+  const worker1 = new WorkerProcess(
+    rnd,
+    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+    "worker-1",
+    "default",
+  );
+  const worker2 = new WorkerProcess(rnd, {}, "worker-2", "default");
+  const worker3 = new WorkerProcess(rnd, {}, "worker-3", "default");
 
   const workers = [worker1, worker2, worker3] as const;
 

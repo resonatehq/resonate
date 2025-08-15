@@ -1,7 +1,7 @@
 import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
 import type { CompResult } from "../../src/types";
-import { type Address, Message, Process, anycast, unicast } from "./simulator";
+import { type Address, Message, Process, type Random, anycast, unicast } from "./simulator";
 
 class SimulatedNetwork implements Network {
   private correlationId = 1;
@@ -9,11 +9,18 @@ class SimulatedNetwork implements Network {
   private callbacks: Record<number, { callback: (timeout: boolean, response: ResponseMsg) => void; timeout: number }> =
     {};
   private currentTime = 0;
+  private prng: Random;
+  public deliveryOptions: Required<DeliveryOptions>;
 
   constructor(
+    prng: Random,
+    { charFlipProb = 0 }: DeliveryOptions,
     public readonly source: Address,
     public readonly target: Address,
-  ) {}
+  ) {
+    this.prng = prng;
+    this.deliveryOptions = { charFlipProb };
+  }
   send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
     const message = new Message<RequestMsg>(this.source, this.target, request, {
       requ: true,
@@ -24,7 +31,9 @@ class SimulatedNetwork implements Network {
   }
 
   recv(msg: Message<RecvMsg>): void {
-    this.onMessage?.(msg.data, () => {});
+    //Randomly change response format
+
+    this.onMessage?.(this.maybeCorruptData(msg.data), () => {});
   }
 
   stop(): void {}
@@ -49,12 +58,30 @@ class SimulatedNetwork implements Network {
     }
   }
 
+  maybeCorruptData(data: ResponseMsg | RecvMsg): any {
+    // Serialize the data to a string
+    let jsonStr = JSON.stringify(data);
+
+    // Randomly decide whether to corrupt
+    const shouldCorrupt = this.prng.next() < this.deliveryOptions.charFlipProb;
+    if (!shouldCorrupt) return data;
+
+    // Pick a random index to corrupt
+    const idx = Math.floor(this.prng.next() * jsonStr.length);
+
+    // Corrupt that character
+    jsonStr = `${jsonStr.slice(0, idx)}X${jsonStr.slice(idx + 1)}`;
+
+    // Return corrupted string, even if it's invalid JSON
+    return jsonStr;
+  }
+
   process(message: Message<ResponseMsg | RecvMsg>): void {
     if (message.isResponse()) {
       const correlationId = message.head?.correlationId;
       const entry = correlationId && this.callbacks[correlationId];
       if (entry) {
-        entry.callback(false, message.data);
+        entry.callback(false, this.maybeCorruptData(message.data));
         delete this.callbacks[correlationId];
       }
     } else {
@@ -69,16 +96,21 @@ class SimulatedNetwork implements Network {
   }
 }
 
+interface DeliveryOptions {
+  charFlipProb?: number;
+}
 export class WorkerProcess extends Process {
   private network: SimulatedNetwork;
   resonate: ResonateInner;
 
   constructor(
+    prng: Random,
+    { charFlipProb = 0 }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
-    this.network = new SimulatedNetwork(anycast(gaddr, iaddr), unicast("server"));
+    this.network = new SimulatedNetwork(prng, { charFlipProb }, anycast(gaddr, iaddr), unicast("server"));
     this.resonate = new ResonateInner(this.network, { pid: iaddr, group: gaddr, ttl: 5000 });
   }
 
