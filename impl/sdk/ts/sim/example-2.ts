@@ -15,7 +15,7 @@ function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any
   return (yield p1) + (yield p2);
 }
 
-const options = { seed: 0, steps: 10000, randomDelay: 0, dropProb: 0, duplProb: 0 };
+const options = { seed: 0, steps: 100, randomDelay: 0, dropProb: 0, duplProb: 0 };
 
 const sim = new Simulator(options.seed, {
   randomDelay: options.randomDelay,

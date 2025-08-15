@@ -21,7 +21,6 @@
     "test": "jest --config jest.config.js",
     "build": "tsc --build tsconfig.build.json",
     "prepare": "npm run build",
-    "serve:web": "esbuild sim/browser.ts --bundle --format=esm --outfile=public/main.js && npx serve public",
     "fmt": "npx @biomejs/biome format ./ --write",
     "check": "npx @biomejs/biome check ./",
     "check:fix": "npx @biomejs/biome check ./ --write",

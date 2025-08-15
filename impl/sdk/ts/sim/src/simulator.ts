@@ -1,3 +1,5 @@
+declare const document: any;
+
 export class Random {
   // Internal state of the random number generator (RNG)
   private state: number;
@@ -71,7 +73,17 @@ export class Process {
   }
 
   log(time: number, ...args: any[]): void {
-    console.log(`[tick: ${time}] [proc: ${this.iaddr}]`, ...args);
+    const message = `[tick: ${time}] [proc: ${this.iaddr}] ${args.map(JSON.stringify as any)}`;
+
+    // Always log to console
+    console.log(message);
+
+    // Only append to the DOM if running in the browser
+    if (typeof document !== "undefined") {
+      const logEl = document.createElement("div");
+      logEl.textContent = message;
+      document.body.appendChild(logEl);
+    }
   }
 }
 

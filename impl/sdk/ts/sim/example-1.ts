@@ -21,7 +21,7 @@ const options: {
   randomDelay?: number;
   dropProb?: number;
   duplProb?: number;
-} = { seed: 0, steps: 100, randomDelay: 0, dropProb: 0, duplProb: 0 };
+} = { seed: 0, steps: 200, randomDelay: 0, dropProb: 0, duplProb: 0 };
 
 // Run Simulation
 
@@ -64,9 +64,14 @@ const msg = new Message<RequestMsg>(
 );
 sim.send(msg);
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 let i = 0;
 while (i < options.steps) {
   sim.tick();
+  await sleep(500);
   i++;
 }
 
