@@ -26,7 +26,9 @@
     "check:fix": "npx @biomejs/biome check ./ --write",
     "docs": "npx typedoc ./src --githubPages",
     "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
-    "type-check": "npx tsc --noEmit"
+    "type-check": "npx tsc --noEmit",
+    "dst": "bun sim/main.ts"
+
   },
   "dependencies": {
     "cron-parser": "^5.3.0",

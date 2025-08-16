@@ -1,7 +1,7 @@
-import { NoHeartbeat } from "../src/heartbeat";
 import { LocalNetwork } from "../dev/network";
 import { Computation } from "../src/computation";
 import type { Context } from "../src/context";
+import { NoHeartbeat } from "../src/heartbeat";
 import type { CreatePromiseAndTaskRes, DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";

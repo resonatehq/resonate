@@ -1,5 +1,5 @@
-import { AsyncHeartbeat } from "./heartbeat";
 import { LocalNetwork } from "../dev/network";
+import { AsyncHeartbeat } from "./heartbeat";
 import type {
   CreatePromiseAndTaskRes,
   CreatePromiseRes,

@@ -133,6 +133,13 @@ program
       throw new Error(`Invalid duplProb: ${value} (must be 0–1)`);
     }
     return n;
+  })
+  .option("--charFlipProb <number>", "Character flip prob (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid charFlipProb: ${value} (must be 0–1)`);
+    }
+    return n;
   });
 
 program.parse(process.argv);
