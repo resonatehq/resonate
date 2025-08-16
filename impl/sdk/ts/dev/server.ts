@@ -4,9 +4,9 @@ import type {
   CallbackRecord,
   DurablePromiseRecord,
   Mesg,
-  RecvMsg,
-  RequestMsg,
-  ResponseMsg,
+  Message,
+  Request,
+  Response,
   ScheduleRecord,
   TaskRecord,
 } from "../src/network/network";
@@ -149,7 +149,7 @@ export class Server {
     return timeout;
   }
 
-  step(time: number): { msg: RecvMsg; recv: string }[] {
+  step(time: number): { msg: Message; recv: string }[] {
     for (const schedule of this.schedules.values()) {
       util.assertDefined(schedule.nextRunTime);
       if (time < schedule.nextRunTime) {
@@ -199,13 +199,13 @@ export class Server {
       }
     }
 
-    const msgs: { msg: RecvMsg; recv: string }[] = [];
+    const msgs: { msg: Message; recv: string }[] = [];
     for (const task of this.tasks.values()) {
       if (task.state !== "init" || inFlightRootPromiseIds.has(task.rootPromiseId)) {
         continue;
       }
 
-      let msg: { msg: RecvMsg; recv: string };
+      let msg: { msg: Message; recv: string };
       if (task.type === "invoke") {
         msg = {
           msg: {
@@ -254,7 +254,7 @@ export class Server {
     return msgs;
   }
 
-  process(requ: RequestMsg, time: number): ResponseMsg {
+  process(requ: Request, time: number): Response {
     try {
       switch (requ.kind) {
         case "createPromise": {

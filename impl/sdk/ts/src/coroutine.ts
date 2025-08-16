@@ -2,84 +2,95 @@ import { Context, type Yieldable } from "./context";
 import { Decorator } from "./decorator";
 import type { Handler } from "./handler";
 import type { DurablePromiseRecord } from "./network/network";
-import { type Literal, type Result, type Value, ko, ok } from "./types";
+import { type Callback, type Literal, type Result, type Value, ko, ok } from "./types";
 import * as util from "./util";
+
+export type Suspended = {
+  type: "suspended";
+  todo: { local: LocalTodo[]; remote: RemoteTodo[] };
+};
+
+export type Completed = {
+  type: "completed";
+  promise: DurablePromiseRecord;
+};
 
 export interface LocalTodo {
   id: string;
-  func: (ctx: Context, ...args: any[]) => any;
   ctx: Context;
+  func: (ctx: Context, ...args: any[]) => any;
   args: any[];
-  // Need function to execute and id to resolve the promise
 }
 
 export interface RemoteTodo {
   id: string;
-  // Probably only need the promiseId to create the callback
 }
 
-export type Suspended = {
-  type: "suspended";
-  localTodos: LocalTodo[];
-  remoteTodos: RemoteTodo[];
+type More = {
+  type: "more";
+  todo: { local: LocalTodo[]; remote: RemoteTodo[] };
 };
 
-export type Completed<T> = {
-  type: "completed";
-  value: Result<T>;
+type Done = {
+  type: "done";
+  result: Result<any>;
 };
-
-function extractResult<T>(durablePromise: DurablePromiseRecord): Literal<T> {
-  util.assert(durablePromise.state !== "pending", "Can not get result from a pending promise");
-  const value: Result<T> = durablePromise.state === "resolved" ? ok(durablePromise.value) : ko(durablePromise.value);
-
-  return {
-    type: "internal.literal",
-    value,
-  };
-}
 
 export class Coroutine<T> {
+  private ctx: Context;
   private decorator: Decorator<T>;
   private handler: Handler;
-  private ctx: Context;
 
   constructor(ctx: Context, decorator: Decorator<T>, handler: Handler) {
+    this.ctx = ctx;
     this.decorator = decorator;
     this.handler = handler;
-    this.ctx = ctx;
   }
 
-  public static exec<T>(
+  public static exec(
     id: string,
-    func: (ctx: Context, ...args: any[]) => Generator<Yieldable, T, any>, // TODO: support any function as well
+    func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
     args: any[],
     handler: Handler,
-    callback: (result: Suspended | Completed<T>) => void,
+    callback: Callback<Suspended | Completed>,
   ): void {
-    handler.createPromise({ id, timeout: Number.MAX_SAFE_INTEGER, tags: {}, func: func.name, args }, (durable) => {
-      if (durable.state === "pending") {
-        const ctx = new Context();
-        const c = new Coroutine(ctx, new Decorator<T>(id, func(ctx, ...args)), handler);
-        c.exec((r) => {
-          if (r.type === "completed") {
-            handler.completePromise(id, r.value, () => {
-              callback(r);
-            });
-          } else {
-            callback(r);
-          }
-        });
-      } else {
-        const f = durable.state === "resolved" ? ok : ko;
-        callback({ type: "completed", value: f(durable.value) });
+    handler.createPromise(id, Number.MAX_SAFE_INTEGER, undefined, {}, (err, res) => {
+      if (err) return callback(err);
+      util.assertDefined(res);
+
+      if (res.state !== "pending") {
+        return callback(false, { type: "completed", promise: res });
       }
+
+      const ctx = new Context();
+      const coroutine = new Coroutine(ctx, new Decorator(id, func(ctx, ...args)), handler);
+
+      coroutine.exec((err, status) => {
+        if (err) return callback(err);
+        util.assertDefined(status);
+
+        switch (status.type) {
+          case "more":
+            callback(false, { type: "suspended", todo: status.todo });
+            break;
+
+          case "done":
+            handler.completePromise(id, status.result, (err, promise) => {
+              if (err) return callback(err);
+              util.assertDefined(promise);
+
+              callback(false, { type: "completed", promise });
+            });
+            break;
+        }
+      });
     });
   }
 
-  private exec(callback: (result: Suspended | Completed<T>) => void): void {
-    const localTodos: LocalTodo[] = [];
-    const remoteTodos: RemoteTodo[] = [];
+  private exec(callback: Callback<More | Done>) {
+    const local: LocalTodo[] = [];
+    const remote: RemoteTodo[] = [];
+
     let input: Value<any> = {
       type: "internal.nothing",
     };
@@ -91,12 +102,15 @@ export class Coroutine<T> {
 
         // Handle internal.async.l (lfi/lfc)
         if (action.type === "internal.async.l") {
-          this.handler.createPromise({ id: action.id, timeout: Number.MAX_SAFE_INTEGER, tags: {} }, (durable) => {
-            if (durable.state === "pending") {
+          this.handler.createPromise(action.id, Number.MAX_SAFE_INTEGER, undefined, {}, (err, res) => {
+            if (err) return callback(err);
+            util.assertDefined(res);
+
+            if (res.state === "pending") {
               if (!util.isGeneratorFunction(action.func)) {
-                localTodos.push({
-                  ctx: this.ctx,
+                local.push({
                   id: action.id,
+                  ctx: this.ctx,
                   func: action.func,
                   args: action.args,
                 });
@@ -109,15 +123,18 @@ export class Coroutine<T> {
                 return;
               }
 
-              const c = new Coroutine(
+              const coroutine = new Coroutine(
                 this.ctx,
                 new Decorator(action.id, action.func(this.ctx, ...action.args)),
                 this.handler,
               );
-              c.exec((r) => {
-                if (r.type === "suspended") {
-                  localTodos.push(...r.localTodos);
-                  remoteTodos.push(...r.remoteTodos);
+              coroutine.exec((err, status) => {
+                if (err) return callback(err);
+                util.assertDefined(status);
+
+                if (status.type === "more") {
+                  local.push(...status.todo.local);
+                  remote.push(...status.todo.remote);
                   input = {
                     type: "internal.promise",
                     state: "pending",
@@ -125,12 +142,15 @@ export class Coroutine<T> {
                   };
                   next();
                 } else {
-                  this.handler.completePromise(action.id, r.value, (durable) => {
+                  this.handler.completePromise(action.id, status.result, (err, res) => {
+                    if (err) return callback(err);
+                    util.assertDefined(res);
+
                     input = {
                       type: "internal.promise",
                       state: "completed",
                       id: action.id,
-                      value: extractResult(durable),
+                      value: extractResult(res),
                     };
                     next();
                   });
@@ -142,7 +162,7 @@ export class Coroutine<T> {
                 type: "internal.promise",
                 state: "completed",
                 id: action.id,
-                value: extractResult(durable),
+                value: extractResult(res),
               };
               next();
             }
@@ -153,16 +173,16 @@ export class Coroutine<T> {
         // Handle internal.async.r
         if (action.type === "internal.async.r") {
           this.handler.createPromise(
-            {
-              id: action.id,
-              timeout: action.opts.timeout + Date.now(), // TODO(avillega): this is not deterministic, chage it
-              tags: { "resonate:invoke": `poll://any@${action.opts.target}` }, // TODO(avillega): remove the poll assumption, might need server work
-              func: action.func,
-              args: action.args ?? [],
-            },
-            (durable) => {
-              if (durable.state === "pending") {
-                remoteTodos.push({ id: action.id });
+            action.id,
+            action.opts.timeout + Date.now(), // TODO(avillega): this is not deterministic, chage it
+            { func: action.func, args: action.args ?? [] },
+            { "resonate:invoke": `poll://any@${action.opts.target}` }, // TODO(avillega): remove the poll assumption, might need server work
+            (err, res) => {
+              if (err) return callback(err);
+              util.assertDefined(res);
+
+              if (res.state === "pending") {
+                remote.push({ id: action.id });
                 input = {
                   type: "internal.promise",
                   state: "pending",
@@ -173,7 +193,7 @@ export class Coroutine<T> {
                   type: "internal.promise",
                   state: "completed",
                   id: action.id,
-                  value: extractResult(durable),
+                  value: extractResult(res),
                 };
               }
               next();
@@ -184,6 +204,11 @@ export class Coroutine<T> {
 
         // Handle await
         if (action.type === "internal.await" && action.promise.state === "completed") {
+          util.assert(
+            action.promise.value.type === "internal.literal",
+            "promise value must be an 'internal.literal' type",
+          );
+          util.assertDefined(action.promise.value);
           input = action.promise.value;
           continue;
         }
@@ -191,16 +216,16 @@ export class Coroutine<T> {
         // invoke the callback when awaiting a pending "Future" the list of todos will include
         // the global callbacks to create.
         if (action.type === "internal.await" && action.promise.state === "pending") {
-          callback({ type: "suspended", localTodos, remoteTodos });
+          callback(false, { type: "more", todo: { local, remote } });
           return;
         }
 
         // Handle return
         if (action.type === "internal.return") {
-          callback({
-            type: "completed",
-            value: action.value.value,
-          });
+          util.assert(action.value.type === "internal.literal", "promise value must be an 'internal.literal' type");
+          util.assertDefined(action.value);
+
+          callback(false, { type: "done", result: action.value.value });
           return;
         }
       }
@@ -208,4 +233,14 @@ export class Coroutine<T> {
 
     next();
   }
+}
+
+function extractResult<T>(durablePromise: DurablePromiseRecord): Literal<T> {
+  util.assert(durablePromise.state !== "pending", "Can not get result from a pending promise");
+  const value: Result<T> = durablePromise.state === "resolved" ? ok(durablePromise.value) : ko(durablePromise.value);
+
+  return {
+    type: "internal.literal",
+    value,
+  };
 }

@@ -1,5 +1,3 @@
-import type { CompResult } from "../types";
-
 export interface DurablePromiseRecord {
   id: string;
   state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
@@ -164,7 +162,7 @@ export type HeartbeatTasksReq = {
 };
 
 // Union of all request types
-export type RequestMsg =
+export type Request =
   | CreatePromiseReq
   | CreatePromiseAndTaskReq
   | ReadPromiseReq
@@ -254,7 +252,7 @@ export type ErrorRes = {
 };
 
 // Union of all response types
-export type ResponseMsg =
+export type Response =
   | CreatePromiseRes
   | CreatePromiseAndTaskRes
   | ReadPromiseRes
@@ -270,15 +268,13 @@ export type ResponseMsg =
   | HeartbeatTasksRes
   | ErrorRes;
 
-export type RecvMsg =
+export type Message =
   | { type: "invoke" | "resume"; task: TaskRecord }
   | { type: "notify"; promise: DurablePromiseRecord };
 
 export interface Network {
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void;
-  recv(msg: any): void;
+  send(req: Request, callback: (err: boolean, res: Response) => void): void;
+  recv(msg: Message): void;
   stop(): void;
-
-  // Provided by the user of the network, interface
-  onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
+  subscribe(callback: (msg: Message) => void): void;
 }

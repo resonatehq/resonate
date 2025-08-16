@@ -1,5 +1,5 @@
 import { Server } from "../../dev/server";
-import type { RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
+import type { Message as NetworkMessage, Request, Response } from "../../src/network/network";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 export class ServerProcess extends Process {
@@ -9,18 +9,18 @@ export class ServerProcess extends Process {
     super(iaddr);
   }
 
-  tick(time: number, messages: Message<RequestMsg>[]): Message<ResponseMsg | RecvMsg>[] {
+  tick(time: number, messages: Message<Request>[]): Message<Response | NetworkMessage>[] {
     this.log(time, "[recv]", messages);
 
-    const responses: Message<ResponseMsg | RecvMsg>[] = [];
+    const responses: Message<Response | NetworkMessage>[] = [];
 
     for (const message of messages) {
       if (message.isRequest()) {
         responses.push(message.resp(this.server.process(message.data, time)));
       }
     }
-    const taskMgs = this.server.step(time);
-    for (const message of taskMgs) {
+
+    for (const message of this.server.step(time)) {
       const url = new URL(message.recv);
       let target: Address;
       if (url.username === "any") {
@@ -30,9 +30,11 @@ export class ServerProcess extends Process {
       } else {
         throw new Error(`not handled ${url}`);
       }
-      const msg = new Message<RecvMsg>(unicast(this.iaddr), target, message.msg, { requ: true });
+
+      const msg = new Message<NetworkMessage>(unicast(this.iaddr), target, message.msg, { requ: true });
       responses.push(msg);
     }
+
     this.log(time, "[send]", responses);
     return responses;
   }

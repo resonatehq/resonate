@@ -1,267 +1,256 @@
 import type { Heartbeat } from "heartbeat";
 import { Context } from "./context";
-import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
+import { Coroutine } from "./coroutine";
 import { Handler } from "./handler";
-import type { Network } from "./network/network";
+import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
+import { Nursery } from "./nursery";
 import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
-import type { ClaimedTask, CompResult, Task } from "./types";
+import type { Callback, ClaimedTask, Func, Task } from "./types";
 import * as util from "./util";
 
-interface InvocationParams {
-  func: (ctx: Context, ...args: any[]) => any;
-  args: any[];
-}
+export type Status = Completed | Suspended;
 
-type Event = "invoke" | "return";
+export type Completed = {
+  kind: "completed";
+  promise: DurablePromiseRecord;
+};
+
+export type Suspended = {
+  kind: "suspended";
+  callbacks: CallbackRecord[];
+};
 
 export class Computation {
-  private promiseId: string;
+  private id: string;
   private pid: string;
-  private group: string;
   private ttl: number;
-  private eventQueue: Event[] = [];
-  private isProcessing = false;
+  private group: string;
   private network: Network;
-  private registry: Registry;
   private handler: Handler;
-  private processor: Processor;
+  private registry: Registry;
   private heartbeat: Heartbeat;
-  private seenTodos: Set<string>;
-  private task?: Task;
-  private callback?: (res: CompResult) => void;
-  private invocationParams?: InvocationParams;
+  private processor: Processor;
+
+  private seen: Set<string> = new Set();
 
   constructor(
-    promiseId: string,
-    network: Network,
-    registry: Registry,
-    group: string,
+    id: string,
     pid: string,
     ttl: number,
+    group: string,
+    network: Network,
+    registry: Registry,
     heartbeat: Heartbeat,
     processor?: Processor,
   ) {
-    this.promiseId = promiseId;
-    this.handler = new Handler(network);
-    this.network = network;
-    this.registry = registry;
+    this.id = id;
     this.pid = pid;
-    this.group = group;
     this.ttl = ttl;
-    this.processor = processor ?? new AsyncProcessor();
+    this.group = group;
+    this.network = network;
+    this.handler = new Handler(network);
+    this.registry = registry;
     this.heartbeat = heartbeat;
-    this.seenTodos = new Set();
+    this.processor = processor ?? new AsyncProcessor();
   }
 
-  process(task: Task, cb: (res: CompResult) => void): void {
-    if (this.task) {
-      cb({ kind: "failure", task });
-      return;
-    }
+  public process(task: Task, done: Callback<Status>) {
+    switch (task.kind) {
+      case "claimed":
+        this._process(task, done);
+        break;
 
-    util.assert(
-      task.rootPromiseId === this.promiseId,
-      "trying to execute a task in a computation for another root promise",
-    );
+      case "unclaimed":
+        this.network.send(
+          {
+            kind: "claimTask",
+            id: task.id,
+            counter: task.counter,
+            processId: this.pid,
+            ttl: this.ttl,
+          },
+          (err, res) => {
+            if (err) return done(true);
+            util.assertDefined(res);
 
-    if (task.kind === "claimed") {
-      this.processClaimed(task, cb);
-    } else if (task.kind === "unclaimed") {
-      this.network.send(
-        {
-          kind: "claimTask",
-          id: task.id,
-          counter: task.counter,
-          processId: this.pid,
-          ttl: this.ttl,
-        },
-        (_timeout, response) => {
-          if (response.kind === "claimedtask") {
-            const { root, leaf } = response.message.promises;
-            util.assertDefined(root);
-            if (leaf) {
-              this.handler.updateCache(leaf.data);
+            if (res.kind === "claimedtask") {
+              const { root, leaf } = res.message.promises;
+              util.assertDefined(root);
+
+              if (leaf) {
+                this.handler.updateCache(leaf.data);
+              }
+
+              this._process({ ...task, kind: "claimed", rootPromise: root.data }, done);
             }
-            this.processClaimed({ ...task, kind: "claimed", rootPromise: root.data }, cb);
-          }
-        },
-      );
+          },
+        );
+        break;
     }
   }
 
-  private processClaimed(task: ClaimedTask, cb: (res: CompResult) => void) {
-    util.assert(
-      this.task === undefined,
-      "Trying to work on a task while another task is in process for the same root promise id",
-    );
+  private _process(task: ClaimedTask, done: Callback<Status>) {
+    if (!("func" in task.rootPromise.param) || !("args" in task.rootPromise.param)) {
+      return done(true);
+    }
 
-    this.task = task;
-    this.callback = cb;
-    this.seenTodos.clear();
-    this.eventQueue = [];
-    this.isProcessing = false;
+    const registered = this.registry.get(task.rootPromise.param.func);
+    if (!registered) {
+      return done(true);
+    }
+
+    const func = registered.func;
+    const args = task.rootPromise.param.args;
+
+    // I don't think this is okay
+    // what if the promise is "stale"?
     this.handler.updateCache(task.rootPromise);
 
+    // start heartbeat
     this.heartbeat.startHeartbeat(this.ttl / 2);
 
-    const registered = this.registry.get(task.rootPromise.param?.func ?? "");
-    if (!registered) {
-      // TODO(avillega): drop the task here and call the callback with an error
-      console.warn("couldn't find func in the registry");
-      return;
-    }
+    return new Nursery((nursery) => {
+      if (util.isGeneratorFunction(func)) {
+        this.process_generator(nursery, func, args, (err?: boolean, res?: any) => {
+          if (err) {
+            return nursery.done(err);
+          }
+          if (!err && !res) {
+            return nursery.done();
+          }
 
-    if (!this.invocationParams) {
-      this.invocationParams = {
-        func: registered.func,
-        args: task.rootPromise.param?.args ?? [],
-      };
-    }
-    this.enqueue(task.id, "invoke");
-  }
-
-  // Enqueues work to do by the run function.
-  // Only enqueues work if the given taskId matches the current this.task.id
-  private enqueue(taskId: string, event: Event) {
-    if (this.task?.id === taskId) {
-      this.eventQueue.push(event);
-      this.run(taskId);
-    }
-  }
-
-  // Run needs to take a task to prevent callbacks that might complete in the future, after the task they
-  // were associated with has possible been completed, to enter the run function when another task
-  // is being run
-  private run(taskId: string): void {
-    // Guard against concurrent processing of todos
-    if (this.task?.id !== taskId || this.isProcessing || this.eventQueue.length === 0) {
-      return;
-    }
-    this.doRun(taskId);
-  }
-
-  private doRun(taskId: string): void {
-    util.assert(!this.isProcessing, "should not execute doRun concurrently");
-    this.isProcessing = true;
-
-    const event = this.eventQueue.shift();
-    util.assertDefined(event);
-
-    const { func, args } = this.invocationParams!;
-
-    if (!util.isGeneratorFunction(func)) {
-      this.processor.process(
-        this.promiseId,
-        async () => {
-          return await func(new Context(), ...args);
-        },
-        (result) => {
-          this.handler.completePromise(this.promiseId, result, (durablePromise) => {
-            util.assertDefined(this.task);
-            this.completeTask({ kind: "completed", durablePromise });
-          });
-        },
-      );
-      return;
-    }
-
-    // Is generator function case
-    Coroutine.exec(this.promiseId, func, args, this.handler, (result) => {
-      // it is safe to unset isProcessing at this point, there are three possible "result"
-      // - the coroutine is completed: we will complete the durablepromise and there should be no more work to do
-      // - there are local todos: We need to unset isProccessing so as results come back they retrigger the processing
-      // - there are only remote todos:
-
-      if (result.type === "completed") {
-        this.handler.completePromise(this.promiseId, result.value, (durablePromise) => {
-          util.assertDefined(this.task);
-          util.assert(taskId === this.task.id, "Trying to complete a current task from a stale task callback");
-          this.completeTask({ kind: "completed", durablePromise });
+          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) =>
+            nursery.done(err, res),
+          );
         });
-        // We don't need to retrigger a run there is no more work to do for this task
-        return;
-      }
-
-      util.assert(
-        result.localTodos.length > 0 || result.remoteTodos.length > 0,
-        "There must be local todos or remote todos if the coroutine is suspended",
-      );
-
-      if (result.localTodos.length !== 0) {
-        this.handleLocalTodos(taskId, result.localTodos);
       } else {
-        this.handleRemoteTodos(taskId, result.remoteTodos);
-      }
-
-      // This is the end of the coroutine callback, if we still have work to do we call run
-      // After sending all the todos to the processor or creating the callbacks
-      this.isProcessing = false;
-      if (this.eventQueue.length > 0 && this.task) {
-        this.run(taskId);
-      }
-    });
-  }
-
-  private handleLocalTodos(taskId: string, todos: LocalTodo[]) {
-    for (const localTodo of todos) {
-      if (this.seenTodos.has(localTodo.id)) {
-        continue;
-      }
-      this.seenTodos.add(localTodo.id);
-      const { id, func, ctx, args } = localTodo;
-      this.processor.process(
-        id,
-        async () => {
-          return await func(ctx, ...args);
-        },
-        (result) => {
-          this.handler.completePromise(id, result, (_) => {
-            this.enqueue(taskId, "return");
-          });
-        },
-      );
-    }
-  }
-
-  private handleRemoteTodos(taskId: string, todos: RemoteTodo[]) {
-    let createdCallbacks = 0;
-    let returnedTodo = false;
-    const totalCallbacks = todos.length;
-
-    for (const remoteTodo of todos) {
-      const { id } = remoteTodo;
-      this.handler.createCallback(
-        id,
-        this.promiseId,
-        Number.MAX_SAFE_INTEGER, // TODO (avillega): use the promise timeout
-        `poll://any@${this.group}/${this.pid}`,
-        (result) => {
-          if (result.kind === "promise" && !returnedTodo) {
-            returnedTodo = true;
-            this.enqueue(taskId, "return");
-            return;
+        this.process_function(this.id, new Context(), func, args, (err?: boolean, res?: any) => {
+          if (err) {
+            return nursery.done(err);
           }
-          if (result.kind === "callback") {
-            createdCallbacks++;
-            if (createdCallbacks === totalCallbacks) {
-              this.completeTask({ kind: "suspended", durablePromiseId: this.promiseId });
-              return;
+          if (!err && !res) {
+            return nursery.done();
+          }
+
+          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) =>
+            nursery.done(err, res),
+          );
+        });
+      }
+    }, done);
+  }
+
+  private process_generator(nursery: Nursery, func: Func, args: any[], done: (err?: any, res?: any) => void) {
+    Coroutine.exec(this.id, func, args, this.handler, (err, status) => {
+      if (err) return done(err);
+      util.assertDefined(status);
+
+      switch (status.type) {
+        case "completed":
+          done(false, { kind: "completed", promise: status.promise });
+          break;
+
+        case "suspended":
+          // local todos
+          if (status.todo.local.length > 0) {
+            for (const { id, ctx, func, args } of status.todo.local) {
+              if (this.seen.has(id)) {
+                continue;
+              }
+
+              this.seen.add(id);
+              nursery.hold((next) => {
+                this.process_function(id, ctx, func, args, (err) => {
+                  if (err) return done(err);
+                  next();
+                });
+              });
             }
-          }
-        },
-      );
-    }
-  }
 
-  private completeTask(result: CompResult) {
-    util.assertDefined(this.task);
-    this.network.send({ kind: "completeTask", id: this.task.id, counter: this.task.counter }, () => {
-      // Once the task is completed reset the computation
-      this.task = undefined;
-      this.eventQueue = [];
-      this.callback?.(result);
-      this.callback = undefined;
+            // once all local todos are processed we can call done
+            done();
+          }
+
+          // remote todos
+          if (status.todo.remote.length > 0) {
+            all(
+              status.todo.remote,
+              (
+                { id },
+                done: Callback<
+                  { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
+                >,
+              ) =>
+                this.handler.createCallback(
+                  id,
+                  this.id,
+                  Number.MAX_SAFE_INTEGER,
+                  `poll://any@${this.group}/${this.pid}`,
+                  done,
+                ),
+              (err, results) => {
+                if (err) done(err);
+                util.assertDefined(results);
+
+                const callbacks: CallbackRecord[] = [];
+
+                for (const res of results) {
+                  switch (res.kind) {
+                    case "promise":
+                      nursery.hold((next) => next());
+                      return done();
+
+                    case "callback":
+                      callbacks.push(res.callback);
+                      break;
+                  }
+                }
+
+                // once all callbacks are created we can call done
+                done(false, { kind: "suspended", callbacks });
+              },
+            );
+          }
+          break;
+      }
     });
   }
+
+  private process_function(id: string, ctx: Context, func: Func, args: any[], done: (err?: any, res?: any) => void) {
+    this.processor.process(
+      id,
+      async () => await func(ctx, ...args),
+      (res) => this.handler.completePromise(id, res, done),
+    );
+  }
+}
+
+function all<T, U>(list: U[], func: (item: U, done: Callback<T>) => void, done: Callback<T[]>) {
+  const results: T[] = new Array(list.length);
+
+  let remaining = list.length;
+  let completed = false;
+
+  const finalize = (err: boolean) => {
+    if (completed) return;
+    completed = true;
+    err ? done(err) : done(err, results);
+  };
+
+  list.forEach((item, index) => {
+    func(item, (err, res) => {
+      if (completed) return;
+
+      if (err) finalize(err);
+      util.assertDefined(res);
+
+      results[index] = res;
+      remaining--;
+
+      if (remaining === 0) {
+        finalize(false);
+      }
+    });
+  });
 }

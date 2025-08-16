@@ -1,12 +1,12 @@
 import { Server } from "./server";
 
-import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../src/network/network";
-import type { CompResult } from "../src/types";
+import type { Message, Network, Request, Response } from "../src/network/network";
 
 export class LocalNetwork implements Network {
   private server: Server;
   private timeoutId: ReturnType<typeof setTimeout> | undefined;
   private shouldStop = false;
+  private subscriptions: Array<(msg: Message) => void> = new Array();
 
   constructor(server: Server = new Server()) {
     this.server = server;
@@ -26,14 +26,15 @@ export class LocalNetwork implements Network {
 
     if (n !== undefined && !this.shouldStop) {
       this.timeoutId = setTimeout((): void => {
-        const msgs = this.server.step(time);
+        for (const { msg } of this.server.step(time)) {
+          this.recv(msg);
+        }
         this.enqueueNext();
-        this.recv(msgs);
       }, n);
     }
   }
 
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
+  send(request: Request, callback: (timeout: boolean, response: Response) => void): void {
     setTimeout(() => {
       const response = this.server.process(request, Date.now());
       clearTimeout(this.timeoutId);
@@ -42,12 +43,13 @@ export class LocalNetwork implements Network {
     });
   }
 
-  recv(msg: any): void {
-    const msgs = msg as { msg: RecvMsg; recv: string }[];
-    for (const m of msgs) {
-      this.onMessage?.(m.msg, () => {});
+  recv(msg: Message): void {
+    for (const callback of this.subscriptions) {
+      callback(msg);
     }
   }
 
-  public onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
+  public subscribe(callback: (msg: Message) => void): void {
+    this.subscriptions.push(callback);
+  }
 }

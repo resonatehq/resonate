@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import type * as context from "../src/context";
-import type { RequestMsg } from "../src/network/network";
+import type { Request } from "../src/network/network";
 import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
@@ -199,13 +199,13 @@ export function run(options: Options) {
     if (!options.func || i === 0) {
       const id = `${funcName}-${i}`;
       const timeout = rnd.randint(0, options.steps);
-      let msg: Message<RequestMsg>;
+      let msg: Message<Request>;
       switch (funcName) {
         case "fibLfi":
         case "fibLfc":
         case "fibRfi":
         case "fibRfc": {
-          msg = new Message<RequestMsg>(
+          msg = new Message<Request>(
             unicast("environment"),
             unicast("server"),
             {
@@ -223,7 +223,7 @@ export function run(options: Options) {
         case "foo":
         case "bar":
         case "baz": {
-          msg = new Message<RequestMsg>(
+          msg = new Message<Request>(
             unicast("environment"),
             unicast("server"),
             {
