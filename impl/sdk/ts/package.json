@@ -1,54 +1,53 @@
 {
-    "name": "@resonatehq/sdk",
-    "version": "0.6.3",
-    "description": "TypeScript SDK for Resonate",
-    "author": "Resonate Developers",
-    "license": "Apache-2.0",
-    "type": "commonjs",
-    "main": "dist/index.js",
-    "types": "dist/index.d.ts",
-    "repository": {
-        "type": "git",
-        "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
-    },
-    "publishConfig": {
-        "provenance": true
-    },
-    "files": [
-        "dist"
-    ],
-    "scripts": {
-        "test": "jest --config jest.config.js",
-        "build": "tsc --build tsconfig.build.json",
-        "lint": "eslint .",
-        "lint:fix": "eslint . --fix",
-        "prettier": "prettier . --check",
-        "prettier:fix": "prettier . --write",
-        "docs": "npx typedoc lib/index.ts --githubPages",
-        "debug": "node --inspect-brk ./node_modules/.bin/jest -i"
-    },
-    "dependencies": {
-        "cron-parser": "^4.9.0"
-    },
-    "devDependencies": {
-        "@jest/globals": "^29.7.0",
-        "@types/node": "^20.11.19",
-        "@typescript-eslint/eslint-plugin": "^6.10.0",
-        "eslint": "^8.53.0",
-        "eslint-config-prettier": "^9.0.0",
-        "eslint-config-standard-with-typescript": "^39.1.1",
-        "eslint-import-resolver-typescript": "^3.6.1",
-        "eslint-plugin-import": "^2.29.1",
-        "eslint-plugin-n": "^16.3.1",
-        "eslint-plugin-promise": "^6.1.1",
-        "prettier": "^3.2.5",
-        "ts-jest": "^29.1.1",
-        "ts-node": "^10.9.2",
-        "typedoc": "^0.25.7",
-        "typedoc-material-theme": "^1.0.2",
-        "typescript": "^5.2.2"
-    },
-    "engines": {
-        "node": ">= 18"
-    }
+  "name": "@resonatehq/sdk",
+  "version": "0.6.3",
+  "description": "TypeScript SDK for Resonate",
+  "author": "Resonate Developers",
+  "license": "Apache-2.0",
+  "type": "commonjs",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/resonatehq/resonate-sdk-ts.git"
+  },
+  "publishConfig": {
+    "provenance": true
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "test": "jest --config jest.config.js",
+    "build": "tsc --build tsconfig.build.json",
+    "prepare": "npm run build",
+    "fmt": "npx @biomejs/biome format ./ --write",
+    "check": "npx @biomejs/biome check ./",
+    "check:fix": "npx @biomejs/biome check ./ --write",
+    "docs": "npx typedoc ./src --githubPages",
+    "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
+    "type-check": "npx tsc --noEmit",
+    "dst": "npx ts-node sim/main.ts"
+
+  },
+  "dependencies": {
+    "cron-parser": "^5.3.0",
+    "eventsource": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@jest/globals": "^30.0.0",
+    "@types/jest": "29.5.14",
+    "@types/node": "^24.0.0",
+    "commander": "^14.0.0",
+    "esbuild": "^0.25.5",
+    "ts-jest": "^29.3.4",
+    "ts-node": "^10.9.2",
+    "typedoc": "^0.28.0",
+    "typedoc-material-theme": "^1.4.0",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">= 22"
+  }
 }

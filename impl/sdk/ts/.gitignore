@@ -5,3 +5,6 @@ dist/
 docs/
 coverage/
 .next/
+bun.lock
+public/
+*.log
