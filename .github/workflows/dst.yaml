@@ -168,12 +168,12 @@ jobs:
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
       - name: Download logs from run 1
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs1 }}
           path: logs-1.txt
       - name: Download logs from run 2
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs2 }}
           path: logs-2.txt
