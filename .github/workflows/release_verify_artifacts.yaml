@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Download and test GHCR image
         env:
           ACTOR: ${{ github.actor }}
@@ -58,7 +58,7 @@ jobs:
             runner: macos-14
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Download and test GH release
         env:
           REPO: ${{ github.repository }}
