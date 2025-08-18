@@ -27,7 +27,7 @@
     "docs": "npx typedoc ./src --githubPages",
     "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
     "type-check": "npx tsc --noEmit",
-    "dst": "bun sim/main.ts"
+    "dst": "npx ts-node sim/main.ts"
 
   },
   "dependencies": {
