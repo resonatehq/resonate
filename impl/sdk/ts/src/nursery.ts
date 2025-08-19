@@ -1,8 +1,19 @@
 export class Nursery<E, R> {
+  // event queue, these functions are ensured to execute sequentially
   private q: Array<() => void> = [];
+
+  // the function the nursery is instantiated with, added to the
+  // queue when holds are released
   private f: () => void;
+
+  // the callback the nursery is instantiated with, called once when
+  // the nursery is done and all holds are released
   private c: (e?: E, r?: R) => void;
+
+  // the error value done is called with, if any
   private e?: E;
+
+  // the return value done is called with, if any
   private r?: R;
 
   private holds = 0;
