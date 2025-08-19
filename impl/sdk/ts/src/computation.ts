@@ -122,30 +122,37 @@ export class Computation {
 
     this.nurseries.set(
       task.rootPromise.id,
-      new Nursery<boolean, Status>((nursery) => {
-        const done = (err: boolean, res?: Status) => {
-          if (err) {
-            this.nurseries.delete(task.rootPromise.id);
-            return nursery.done(err);
+      new Nursery<boolean, Status>(
+        (nursery) => {
+          const done = (err: boolean, res?: Status) => {
+            if (err) {
+              this.nurseries.delete(task.rootPromise.id);
+              return nursery.done(err);
+            }
+
+            this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) => {
+              this.nurseries.delete(task.rootPromise.id);
+              nursery.done(err, res);
+            });
+          };
+
+          if (util.isGeneratorFunction(func)) {
+            this.processGenerator(nursery, func, args, done);
+          } else {
+            this.processFunction(this.id, new Context(), func, args, (err, promise) => {
+              if (err) return done(true);
+              util.assertDefined(promise);
+
+              done(false, { kind: "completed", promise });
+            });
           }
-
-          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) => {
-            this.nurseries.delete(task.rootPromise.id);
-            nursery.done(err, res);
-          });
-        };
-
-        if (util.isGeneratorFunction(func)) {
-          this.processGenerator(nursery, func, args, done);
-        } else {
-          this.processFunction(this.id, new Context(), func, args, (err, promise) => {
-            if (err) return done(true);
-            util.assertDefined(promise);
-
-            done(false, { kind: "completed", promise });
-          });
-        }
-      }, done),
+        },
+        (err, res) => {
+          if (err) return done(true);
+          util.assertDefined(res);
+          done(false, res);
+        },
+      ),
     );
   }
 
@@ -162,13 +169,9 @@ export class Computation {
         case "suspended":
           util.assert(status.todo.local.length > 0 || status.todo.remote.length > 0, "must be at least one todo");
 
-          // local todos
           if (status.todo.local.length > 0) {
             this.processLocalTodo(nursery, status.todo.local, done);
-          }
-
-          // remote todos
-          if (status.todo.remote.length > 0) {
+          } else if (status.todo.remote.length > 0) {
             this.processRemoteTodo(nursery, status.todo.remote, done);
           }
           break;
@@ -205,14 +208,13 @@ export class Computation {
   }
 
   private processRemoteTodo(nursery: Nursery<boolean, Status>, todo: RemoteTodo[], done: Callback<Status>) {
-    all(
+    nursery.all<
+      RemoteTodo,
+      { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord },
+      boolean
+    >(
       todo,
-      (
-        { id },
-        done: Callback<
-          { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
-        >,
-      ) =>
+      ({ id }, done) =>
         this.handler.createCallback(id, this.id, Number.MAX_SAFE_INTEGER, `poll://any@${this.group}/${this.pid}`, done),
       (err, results) => {
         if (err) return done(err);
@@ -237,33 +239,4 @@ export class Computation {
       },
     );
   }
-}
-
-function all<T, U>(list: U[], func: (item: U, done: Callback<T>) => void, done: Callback<T[]>) {
-  const results: T[] = new Array(list.length);
-
-  let remaining = list.length;
-  let completed = false;
-
-  const finalize = (err: boolean) => {
-    if (completed) return;
-    completed = true;
-    err ? done(err) : done(err, results);
-  };
-
-  list.forEach((item, index) => {
-    func(item, (err, res) => {
-      if (completed) return;
-
-      if (err) return finalize(err);
-      util.assertDefined(res);
-
-      results[index] = res;
-      remaining--;
-
-      if (remaining === 0) {
-        finalize(false);
-      }
-    });
-  });
 }

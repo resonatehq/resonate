@@ -1,7 +1,7 @@
 export class Nursery<E, R> {
   private q: Array<() => void> = [];
   private f: () => void;
-  private c: (e: E, r: R) => void;
+  private c: (e?: E, r?: R) => void;
   private e?: E;
   private r?: R;
 
@@ -9,7 +9,7 @@ export class Nursery<E, R> {
   private running = false;
   private completed = false;
 
-  constructor(f: (n: Nursery<E, R>) => void, c: (e: any, r: any) => void) {
+  constructor(f: (n: Nursery<E, R>) => void, c: (e?: E, r?: R) => void) {
     this.f = () => f(this);
     this.c = c;
 
@@ -34,9 +34,15 @@ export class Nursery<E, R> {
 
   cont() {
     this.running = false;
+
+    if (this.completed) {
+      this.complete();
+    } else {
+      this.execute();
+    }
   }
 
-  done(err: E, res?: R) {
+  done(err?: E, res?: R) {
     if (!this.running || this.completed) return;
 
     this.e = err;
@@ -44,6 +50,37 @@ export class Nursery<E, R> {
     this.running = false;
     this.completed = true;
     this.complete();
+  }
+
+  all<T, U, E>(
+    list: T[],
+    func: (item: T, done: (err?: E, res?: U) => void) => void,
+    done: (err?: E, res?: U[]) => void,
+  ) {
+    const results: U[] = new Array(list.length);
+
+    let remaining = list.length;
+    let completed = false;
+
+    const finalize = (err?: E) => {
+      if (completed) return;
+      completed = true;
+      done(err, results);
+    };
+
+    list.forEach((item, index) => {
+      func(item, (err, res) => {
+        if (completed) return;
+        if (err) return finalize(err);
+
+        results[index] = res!;
+        remaining--;
+
+        if (remaining === 0) {
+          finalize();
+        }
+      });
+    });
   }
 
   private enqueue(f: () => void) {
@@ -63,6 +100,6 @@ export class Nursery<E, R> {
 
   private complete() {
     if (!this.completed || this.holds > 0) return;
-    this.c(this.e!, this.r!);
+    this.c(this.e, this.r);
   }
 }
