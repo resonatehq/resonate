@@ -1,17 +1,21 @@
 import { NoHeartbeat } from "../../src/heartbeat";
-import type { Network, RecvMsg, RequestMsg, ResponseMsg } from "../../src/network/network";
+import type { Network, Message as NetworkMessage, Request, Response } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
-import type { CompResult } from "../../src/types";
 import { type Address, Message, Process, type Random, anycast, unicast } from "./simulator";
 
+interface DeliveryOptions {
+  charFlipProb?: number;
+}
+
 class SimulatedNetwork implements Network {
-  private correlationId = 1;
-  private buffer: Message<RequestMsg>[] = [];
-  private callbacks: Record<number, { callback: (timeout: boolean, response: ResponseMsg) => void; timeout: number }> =
-    {};
+  private correlationId = 0;
   private currentTime = 0;
+
   private prng: Random;
-  public deliveryOptions: Required<DeliveryOptions>;
+  private deliveryOptions: Required<DeliveryOptions>;
+  private buffer: Message<Request>[] = [];
+  private callbacks: Record<number, { callback: (err: boolean, res: Response) => void; timeout: number }> = {};
+  private subscriptions: ((msg: NetworkMessage) => void)[] = [];
 
   constructor(
     prng: Random,
@@ -22,24 +26,28 @@ class SimulatedNetwork implements Network {
     this.prng = prng;
     this.deliveryOptions = { charFlipProb };
   }
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
-    const message = new Message<RequestMsg>(this.source, this.target, request, {
+
+  send(request: Request, callback: (err: boolean, res: Response) => void): void {
+    const message = new Message<Request>(this.source, this.target, request, {
       requ: true,
       correlationId: this.correlationId++,
     });
+
     this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 5000 };
     this.buffer.push(message);
   }
 
-  recv(msg: Message<RecvMsg>): void {
-    //Randomly change response format
+  recv(msg: NetworkMessage): void {
+    for (const callback of this.subscriptions) {
+      callback(this.maybeCorruptData(msg));
+    }
+  }
 
-    this.onMessage?.(this.maybeCorruptData(msg.data), () => {});
+  subscribe(callback: (msg: NetworkMessage) => void): void {
+    this.subscriptions.push(callback);
   }
 
   stop(): void {}
-
-  onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
 
   time(time: number): void {
     this.currentTime = time;
@@ -59,7 +67,27 @@ class SimulatedNetwork implements Network {
     }
   }
 
-  maybeCorruptData(data: ResponseMsg | RecvMsg): any {
+  process(message: Message<Response | NetworkMessage>): void {
+    if (message.isResponse()) {
+      const correlationId = message.head?.correlationId;
+      const entry = correlationId && this.callbacks[correlationId];
+      if (entry) {
+        entry.callback(false, this.maybeCorruptData(message.data));
+        delete this.callbacks[correlationId];
+      }
+    } else {
+      this.recv((message as Message<NetworkMessage>).data);
+    }
+  }
+
+  flush(): Message<any>[] {
+    // Finally, flush the buffer
+    const flushed = this.buffer;
+    this.buffer = [];
+    return flushed;
+  }
+
+  private maybeCorruptData(data: Response | NetworkMessage): any {
     // Serialize the data to a string
     let jsonStr = JSON.stringify(data);
 
@@ -76,30 +104,8 @@ class SimulatedNetwork implements Network {
     // Return corrupted string, even if it's invalid JSON
     return jsonStr;
   }
-
-  process(message: Message<ResponseMsg | RecvMsg>): void {
-    if (message.isResponse()) {
-      const correlationId = message.head?.correlationId;
-      const entry = correlationId && this.callbacks[correlationId];
-      if (entry) {
-        entry.callback(false, this.maybeCorruptData(message.data));
-        delete this.callbacks[correlationId];
-      }
-    } else {
-      this.recv(message as Message<RecvMsg>);
-    }
-  }
-  flush(): Message<any>[] {
-    // Finally, flush the buffer
-    const flushed = this.buffer;
-    this.buffer = [];
-    return flushed;
-  }
 }
 
-interface DeliveryOptions {
-  charFlipProb?: number;
-}
 export class WorkerProcess extends Process {
   private network: SimulatedNetwork;
   resonate: ResonateInner;
@@ -120,7 +126,7 @@ export class WorkerProcess extends Process {
     });
   }
 
-  tick(time: number, messages: Message<ResponseMsg | RecvMsg>[]): Message<RequestMsg>[] {
+  tick(time: number, messages: Message<Response | NetworkMessage>[]): Message<Request>[] {
     this.log(time, "[recv]", messages);
 
     this.network.time(time);

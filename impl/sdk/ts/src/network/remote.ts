@@ -13,18 +13,17 @@ import type {
   DurablePromiseRecord,
   ErrorRes,
   HeartbeatTasksReq,
+  Message,
   Network,
   ReadPromiseReq,
   ReadScheduleReq,
-  RecvMsg,
-  RequestMsg,
-  ResponseMsg,
+  Request,
+  Response,
   ScheduleRecord,
   TaskRecord,
 } from "./network"; // Assuming types are in a separate file
 
 import { EventSource } from "eventsource";
-import type { CompResult } from "../types";
 import * as util from "../util";
 
 // API Value format from OpenAPI spec
@@ -206,8 +205,6 @@ export interface HttpNetworkConfig {
   encoder?: Encoder;
 }
 
-export type Msg = { type: "invoke" | "resume"; task: TaskRecord } | { type: "notify"; promise: DurablePromiseRecord };
-
 export class HttpNetwork implements Network {
   private url: string;
   private msgUrl: string;
@@ -215,14 +212,12 @@ export class HttpNetwork implements Network {
   private baseHeaders: Record<string, string>;
   private encoder: Encoder;
   private eventSource: EventSource;
-
-  public onMessage?: (msg: RecvMsg, cb: (res: CompResult) => void) => void;
+  private subscriptions: Array<(msg: Message) => void> = new Array();
 
   constructor(config: HttpNetworkConfig) {
     const { host, storePort, msgSrcPort, pid, group } = config;
     this.url = `${host}:${storePort}`;
     this.msgUrl = new URL(`/${encodeURIComponent(group)}/${encodeURIComponent(pid)}`, `${host}:${msgSrcPort}`).href;
-    console.log("poller:", this.msgUrl);
     this.timeout = config.timeout || 30 * util.SEC;
 
     this.baseHeaders = {
@@ -232,10 +227,10 @@ export class HttpNetwork implements Network {
     this.encoder = config.encoder ?? new JsonEncoder();
 
     this.eventSource = new EventSource(this.msgUrl);
-    this.eventSource.addEventListener("message", (event) => this.recv(event)); // TODO(avillega): Handle errors on the event source
+    this.eventSource.addEventListener("message", (event) => this._recv(event));
   }
 
-  send(request: RequestMsg, callback: (timeout: boolean, response: ResponseMsg) => void): void {
+  send(request: Request, callback: (timeout: boolean, response: Response) => void): void {
     this.handleRequest(request)
       .then((response) => callback(false, response))
       .catch((error) => {
@@ -247,28 +242,37 @@ export class HttpNetwork implements Network {
       });
   }
 
-  recv(event: any): void {
-    const e = event as MessageEvent;
-    const data = JSON.parse(e.data);
+  private _recv(event: MessageEvent): void {
+    let msg: Message;
+    const data = JSON.parse(event.data);
 
     if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
-      this.onMessage?.({ type: data.type, task: data.task }, () => {});
+      msg = { type: data.type, task: data.task };
+    } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
+      msg = { type: data.type, promise: this.mapPromiseDtoToRecord(data.promise) };
+    } else {
+      console.warn("Received invalid message:", data);
       return;
     }
 
-    if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
-      this.onMessage?.({ type: "notify", promise: this.mapPromiseDtoToRecord(data.promise) }, () => {});
-      return;
-    }
+    this.recv(msg);
+  }
 
-    console.warn("couldn't parse", data, "as a message");
+  recv(msg: Message): void {
+    for (const callback of this.subscriptions) {
+      callback(msg);
+    }
   }
 
   public stop(): void {
     this.eventSource.close();
   }
 
-  private async handleRequest(request: RequestMsg): Promise<ResponseMsg> {
+  public subscribe(callback: (msg: Message) => void): void {
+    this.subscriptions.push(callback);
+  }
+
+  private async handleRequest(request: Request): Promise<Response> {
     switch (request.kind) {
       case "createPromise":
         return this.createPromise(request);
@@ -301,7 +305,7 @@ export class HttpNetwork implements Network {
     }
   }
 
-  private async createPromise(req: CreatePromiseReq): Promise<ResponseMsg> {
+  private async createPromise(req: CreatePromiseReq): Promise<Response> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -324,7 +328,7 @@ export class HttpNetwork implements Network {
     return { kind: "createPromise", promise };
   }
 
-  private async createPromiseAndTask(req: CreatePromiseAndTaskReq): Promise<ResponseMsg> {
+  private async createPromiseAndTask(req: CreatePromiseAndTaskReq): Promise<Response> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -356,7 +360,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async readPromise(req: ReadPromiseReq): Promise<ResponseMsg> {
+  private async readPromise(req: ReadPromiseReq): Promise<Response> {
     const response = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, {
       method: "GET",
       headers: this.baseHeaders,
@@ -367,7 +371,7 @@ export class HttpNetwork implements Network {
     return { kind: "readPromise", promise };
   }
 
-  private async completePromise(req: CompletePromiseReq): Promise<ResponseMsg> {
+  private async completePromise(req: CompletePromiseReq): Promise<Response> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -388,7 +392,7 @@ export class HttpNetwork implements Network {
     return { kind: "completePromise", promise };
   }
 
-  private async createCallback(req: CreateCallbackReq): Promise<ResponseMsg> {
+  private async createCallback(req: CreateCallbackReq): Promise<Response> {
     const body = {
       rootPromiseId: req.rootPromiseId,
       timeout: req.timeout,
@@ -409,7 +413,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async createSubscription(req: CreateSubscriptionReq): Promise<ResponseMsg> {
+  private async createSubscription(req: CreateSubscriptionReq): Promise<Response> {
     const body = {
       id: req.id,
       timeout: req.timeout,
@@ -430,7 +434,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async createSchedule(req: CreateScheduleReq): Promise<ResponseMsg> {
+  private async createSchedule(req: CreateScheduleReq): Promise<Response> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
 
@@ -458,7 +462,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async readSchedule(req: ReadScheduleReq): Promise<ResponseMsg> {
+  private async readSchedule(req: ReadScheduleReq): Promise<Response> {
     const response = await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, {
       method: "GET",
       headers: this.baseHeaders,
@@ -471,7 +475,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async deleteSchedule(req: DeleteScheduleReq): Promise<ResponseMsg> {
+  private async deleteSchedule(req: DeleteScheduleReq): Promise<Response> {
     await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, {
       method: "DELETE",
       headers: this.baseHeaders,
@@ -480,7 +484,7 @@ export class HttpNetwork implements Network {
     return { kind: "deleteSchedule" };
   }
 
-  private async claimTask(req: ClaimTaskReq): Promise<ResponseMsg> {
+  private async claimTask(req: ClaimTaskReq): Promise<Response> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -521,7 +525,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async completeTask(req: CompleteTaskReq): Promise<ResponseMsg> {
+  private async completeTask(req: CompleteTaskReq): Promise<Response> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -540,7 +544,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async dropTask(req: DropTaskReq): Promise<ResponseMsg> {
+  private async dropTask(req: DropTaskReq): Promise<Response> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -555,7 +559,7 @@ export class HttpNetwork implements Network {
     return { kind: "droppedtask" };
   }
 
-  private async heartbeatTasks(req: HeartbeatTasksReq): Promise<ResponseMsg> {
+  private async heartbeatTasks(req: HeartbeatTasksReq): Promise<Response> {
     const body = {
       processId: req.processId,
     };
@@ -573,7 +577,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async fetch(path: string, options: RequestInit): Promise<Response> {
+  private async fetch(path: string, options: RequestInit) {
     const url = `${this.url}${path}`;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeout);

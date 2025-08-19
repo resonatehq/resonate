@@ -15,11 +15,12 @@ export type Options = {
   timeout: number;
 };
 
-export type Completed = { kind: "completed"; durablePromise: DurablePromiseRecord };
-export type Suspended = { kind: "suspended"; durablePromiseId: string };
-export type Failure = { kind: "failure"; task: Task };
-export type PlatformError = { kind: "platformError"; cause: any; msg: string };
-export type CompResult = Completed | Suspended | Failure | PlatformError;
+export type Callback<T> = {
+  (err: false, res: T): void;
+  (err: true, res?: undefined): void;
+};
+
+export type Task = UnclaimedTask | ClaimedTask;
 
 export type ClaimedTask = {
   kind: "claimed";
@@ -36,14 +37,14 @@ export type UnclaimedTask = {
   rootPromiseId: string;
 };
 
-export type Task = UnclaimedTask | ClaimedTask;
-
 // Return type of a function or a generator
 export type Return<T> = T extends (...args: any[]) => Generator<infer __, infer R, infer _>
   ? R // Return type of generator
   : T extends (...args: any[]) => infer R
     ? Awaited<R> // Return type of regular function
     : never;
+
+export type Result<T> = Ok<T> | Ko;
 
 type Ok<T> = {
   success: true;
@@ -54,8 +55,6 @@ type Ko = {
   success: false;
   error: any;
 };
-
-export type Result<T> = Ok<T> | Ko;
 
 // Expression
 export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalReturn<T>;

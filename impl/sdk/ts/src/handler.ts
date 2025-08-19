@@ -9,17 +9,11 @@ import type {
 import type { Result } from "./types";
 import * as util from "./util";
 
-export interface DurablePromiseProto {
-  id: string;
-  timeout: number;
-  tags: Record<string, string>;
-  func?: string;
-  args?: any[];
-}
+import type { Callback } from "./types";
 
 export class Handler {
-  private promises: Map<string, DurablePromiseRecord>;
   private network: Network;
+  private promises: Map<string, DurablePromiseRecord>;
 
   constructor(network: Network, initialPromises?: DurablePromiseRecord[]) {
     this.network = network;
@@ -34,12 +28,15 @@ export class Handler {
   }
 
   public createPromise(
-    { id, timeout, tags, func, args }: DurablePromiseProto,
-    callback: (res: DurablePromiseRecord) => void,
+    id: string,
+    timeout: number,
+    param: any,
+    tags: Record<string, string>,
+    callback: Callback<DurablePromiseRecord>,
   ): void {
     const promise = this.promises.get(id);
     if (promise) {
-      callback(promise);
+      callback(false, promise);
       return;
     }
 
@@ -49,32 +46,29 @@ export class Handler {
         id,
         iKey: id,
         timeout,
+        param,
         tags,
-        param: {
-          func,
-          args,
-        },
         strict: false,
       },
-      (timeout, response) => {
-        if (timeout) {
-          return;
+      (err, res) => {
+        if (err) {
+          return callback(err);
         }
 
-        util.assert(response.kind === "createPromise");
-        const { promise } = response as CreatePromiseRes;
+        util.assert(res.kind === "createPromise", "response must be kind createPromise");
+        const { promise } = res as CreatePromiseRes;
         this.promises.set(promise.id, promise);
-        callback(promise);
+        callback(false, promise);
       },
     );
   }
 
-  public completePromise(id: string, result: Result<any>, callback: (res: DurablePromiseRecord) => void): void {
+  public completePromise(id: string, result: Result<any>, callback: Callback<DurablePromiseRecord>): void {
     const promise = this.promises.get(id);
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {
-      callback(promise);
+      callback(false, promise);
       return;
     }
 
@@ -85,20 +79,20 @@ export class Handler {
       {
         kind: "completePromise",
         id,
+        iKey: id,
         state,
         value,
-        iKey: id,
         strict: false,
       },
-      (timeout, response) => {
-        if (timeout) {
-          console.log("got a timeout, nope out of here, what does it mean?");
-          return;
+      (err, res) => {
+        if (err) {
+          return callback(err);
         }
-        util.assert(response.kind === "completePromise", "Response must be complete promise");
-        const { promise } = response as CompletePromiseRes;
+
+        util.assert(res.kind === "completePromise", "response must be completePromise");
+        const { promise } = res as CompletePromiseRes;
         this.promises.set(promise.id, promise);
-        callback(promise);
+        callback(false, promise);
       },
     );
   }
@@ -108,32 +102,31 @@ export class Handler {
     rootPromiseId: string,
     timeout: number,
     recv: string,
-    cb: (
-      result: { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord },
-    ) => void,
+    callback: Callback<
+      { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
+    >,
   ): void {
     this.network.send(
       {
         kind: "createCallback",
-        id: id,
-        rootPromiseId: rootPromiseId,
-        timeout: timeout,
-        recv: recv,
+        id,
+        rootPromiseId,
+        timeout,
+        recv,
       },
-      (timeout, response) => {
-        if (timeout) {
-          console.log("got a timeout, nope out of here, what does it mean?");
-          return;
-        }
-        util.assert(response.kind === "createCallback", "Response must be complete promise");
-        const { callback, promise } = response as CreateCallbackRes;
-        if (callback) {
-          cb({ kind: "callback", callback });
-          return;
+      (err, res) => {
+        if (err) {
+          return callback(true);
         }
 
-        this.promises.set(promise.id, promise);
-        cb({ kind: "promise", promise });
+        util.assert(res.kind === "createCallback", "response must be createCallback");
+        const { callback: cb, promise } = res as CreateCallbackRes;
+
+        if (promise) {
+          this.promises.set(promise.id, promise);
+        }
+
+        callback(false, cb ? { kind: "callback", callback: cb } : { kind: "promise", promise });
       },
     );
   }

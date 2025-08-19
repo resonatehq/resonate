@@ -1,8 +1,9 @@
 import type { Heartbeat } from "heartbeat";
-import { Computation } from "./computation";
-import type { DurablePromiseRecord, Network, RecvMsg } from "./network/network";
+import { Computation, type Status } from "./computation";
+import type { DurablePromiseRecord, Message, Network } from "./network/network";
 import { Registry } from "./registry";
-import type { CompResult, Func, Task } from "./types";
+import type { Callback, Func, Task } from "./types";
+import * as util from "./util";
 
 export class ResonateInner {
   public registry: Registry; // TODO(avillega): Who should own the registry? the resonate class?
@@ -25,38 +26,42 @@ export class ResonateInner {
     this.heartbeat = heartbeat;
     this.registry = new Registry();
     this.network = network;
-    this.network.onMessage = this.onMessage.bind(this);
+    this.network.subscribe(this.onMessage.bind(this));
   }
 
-  public process(t: Task, cb: (res: CompResult) => void) {
-    let computation = this.computations.get(t.rootPromiseId);
+  public process(task: Task, callback: Callback<Status>) {
+    let computation = this.computations.get(task.rootPromiseId);
     if (!computation) {
       computation = new Computation(
-        t.rootPromiseId,
-        this.network,
-        this.registry,
-        this.group,
+        task.rootPromiseId,
         this.pid,
         this.ttl,
+        this.group,
+        this.network,
+        this.registry,
         this.heartbeat,
       );
-      this.computations.set(t.rootPromiseId, computation);
+      this.computations.set(task.rootPromiseId, computation);
     }
 
-    computation.process(t, (res) => {
-      // notify subscribers
-      if (res.kind === "completed") {
-        this.notify(res.durablePromise);
+    computation.process(task, (err, status) => {
+      if (err) return callback(err);
+      util.assertDefined(status);
+
+      callback(false, status);
+
+      if (status.kind === "completed") {
+        // notify subscribers of the completed promise
+        this.notify(status.promise);
       }
-      cb(res);
     });
   }
 
-  private onMessage(msg: RecvMsg, cb: (res: CompResult) => void): void {
+  private onMessage(msg: Message): void {
     switch (msg.type) {
       case "invoke":
       case "resume":
-        this.process({ ...msg.task, kind: "unclaimed" }, cb);
+        this.process({ ...msg.task, kind: "unclaimed" }, () => {});
         break;
 
       case "notify":
