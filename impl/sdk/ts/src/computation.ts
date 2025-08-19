@@ -92,10 +92,7 @@ export class Computation {
   }
 
   private processClaimed(task: ClaimedTask, done: Callback<Status>) {
-    util.assert(
-      task.rootPromiseId === this.id,
-      "task root promise id must match computation id",
-    );
+    util.assert(task.rootPromiseId === this.id, "task root promise id must match computation id");
 
     if (this.nurseries.has(task.rootPromise.id)) {
       // TODO: log something useful
@@ -158,10 +155,7 @@ export class Computation {
           break;
 
         case "suspended":
-        util.assert(
-          status.todo.local.length > 0 || status.todo.remote.length > 0,
-          "must be at least one todo",
-        );
+          util.assert(status.todo.local.length > 0 || status.todo.remote.length > 0, "must be at least one todo");
 
           // local todos
           if (status.todo.local.length > 0) {
