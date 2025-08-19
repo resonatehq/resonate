@@ -1,15 +1,15 @@
-export class Nursery {
+export class Nursery<E, R> {
   private q: Array<() => void> = [];
   private f: () => void;
-  private c: (e: any, r: any) => void;
-  private e?: any;
-  private r?: any;
+  private c: (e: E, r: R) => void;
+  private e?: E;
+  private r?: R;
 
   private holds = 0;
   private running = false;
   private completed = false;
 
-  constructor(f: (n: Nursery) => void, c: (e: any, r: any) => void) {
+  constructor(f: (n: Nursery<E, R>) => void, c: (e: any, r: any) => void) {
     this.f = () => f(this);
     this.c = c;
 
@@ -36,7 +36,7 @@ export class Nursery {
     this.running = false;
   }
 
-  done(err: any, res?: any) {
+  done(err: E, res?: R) {
     if (!this.running || this.completed) return;
 
     this.e = err;
@@ -63,6 +63,6 @@ export class Nursery {
 
   private complete() {
     if (!this.completed || this.holds > 0) return;
-    this.c(this.e, this.r);
+    this.c(this.e!, this.r!);
   }
 }

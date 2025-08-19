@@ -33,7 +33,7 @@ export class Computation {
   private processor: Processor;
 
   private seen: Set<string> = new Set();
-  private nurseries: Map<string, Nursery> = new Map();
+  private nurseries: Map<string, Nursery<boolean, Status>> = new Map();
 
   constructor(
     id: string,
@@ -122,8 +122,8 @@ export class Computation {
 
     this.nurseries.set(
       task.rootPromise.id,
-      new Nursery((nursery) => {
-        const done = (err: boolean, res?: any) => {
+      new Nursery<boolean, Status>((nursery) => {
+        const done = (err: boolean, res?: Status) => {
           if (err) {
             this.nurseries.delete(task.rootPromise.id);
             return nursery.done(err);
@@ -138,13 +138,18 @@ export class Computation {
         if (util.isGeneratorFunction(func)) {
           this.processGenerator(nursery, func, args, done);
         } else {
-          this.processFunction(this.id, new Context(), func, args, done);
+          this.processFunction(this.id, new Context(), func, args, (err, promise) => {
+            if (err) return done(true);
+            util.assertDefined(promise);
+
+            done(false, { kind: "completed", promise });
+          });
         }
       }, done),
     );
   }
 
-  private processGenerator(nursery: Nursery, func: Func, args: any[], done: (err: boolean, res?: any) => void) {
+  private processGenerator(nursery: Nursery<boolean, Status>, func: Func, args: any[], done: Callback<Status>) {
     Coroutine.exec(this.id, func, args, this.handler, (err, status) => {
       if (err) return done(err);
       util.assertDefined(status);
@@ -171,7 +176,7 @@ export class Computation {
     });
   }
 
-  private processFunction(id: string, ctx: Context, func: Func, args: any[], done: (err: boolean, res?: any) => void) {
+  private processFunction(id: string, ctx: Context, func: Func, args: any[], done: Callback<DurablePromiseRecord>) {
     this.processor.process(
       id,
       async () => await func(ctx, ...args),
@@ -179,7 +184,7 @@ export class Computation {
     );
   }
 
-  private processLocalTodo(nursery: Nursery, todo: LocalTodo[], done: (err: boolean, res?: any) => void) {
+  private processLocalTodo(nursery: Nursery<boolean, Status>, todo: LocalTodo[], done: Callback<Status>) {
     for (const { id, ctx, func, args } of todo) {
       if (this.seen.has(id)) {
         continue;
@@ -199,7 +204,7 @@ export class Computation {
     return nursery.cont();
   }
 
-  private processRemoteTodo(nursery: Nursery, todo: RemoteTodo[], done: (err: boolean, res?: any) => void) {
+  private processRemoteTodo(nursery: Nursery<boolean, Status>, todo: RemoteTodo[], done: Callback<Status>) {
     all(
       todo,
       (
