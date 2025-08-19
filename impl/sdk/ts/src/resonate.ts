@@ -203,22 +203,28 @@ export class Resonate {
   public async beginRpc<T>(id: string, func: string, ...args: any[]): Promise<Handle<T>>;
   public async beginRpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<Handle<any>>;
   public async beginRpc(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<Handle<any>> {
-    const registered = this.inner.registry.get(funcOrName); // TODO(avillega): should the register be owned by Resonate?
-    if (!registered) {
-      throw new Error(`${funcOrName} does not exist`);
+    let name: string;
+    if (typeof funcOrName === "string") {
+      name = funcOrName;
+    } else {
+      const registered = this.inner.registry.get(funcOrName);
+      if (!registered) {
+        throw new Error(`${funcOrName} is not registered`);
+      }
+      name = registered.name;
     }
 
-    // TODO(dfarr): use the options
-    const [args, _] = util.splitArgsAndOpts(argsWithOpts, this.options());
+    // TODO(dfarr): use the all options
+    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
     return new Promise<Handle<any>>((resolve) => {
       this.network.send(
         {
           kind: "createPromise",
           id: id,
-          timeout: 24 * util.HOUR + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
-          param: { func: registered.name, args },
-          tags: { "resonate:invoke": `poll://any@${this.group}` }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
+          timeout: opts.timeout + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
+          param: { func: name, args },
+          tags: { "resonate:invoke": opts.target },
           iKey: id,
           strict: false,
         },
@@ -251,7 +257,7 @@ export class Resonate {
   public options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
     return {
       id: "",
-      target: "default",
+      target: `poll://any@${this.group}`,
       timeout: 24 * util.HOUR,
       ...opts,
       [RESONATE_OPTIONS]: true,

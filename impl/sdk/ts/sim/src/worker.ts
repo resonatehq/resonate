@@ -117,7 +117,7 @@ export class WorkerProcess extends Process {
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
-    this.network = new SimulatedNetwork(prng, { charFlipProb }, anycast(gaddr, iaddr), unicast("server"));
+    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, anycast(gaddr, iaddr), unicast("server"));
     this.resonate = new ResonateInner(this.network, {
       pid: iaddr,
       group: gaddr,
