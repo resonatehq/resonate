@@ -45,7 +45,7 @@ export class ResonateInner {
     }
 
     computation.process(task, (err, status) => {
-      if (err) callback(err);
+      if (err) return callback(err);
       util.assertDefined(status);
 
       callback(false, status);

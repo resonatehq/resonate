@@ -5,8 +5,9 @@ export class Nursery {
   private e?: any;
   private r?: any;
 
-  private running = false;
   private holds = 0;
+  private running = false;
+  private completed = false;
 
   constructor(f: (n: Nursery) => void, c: (e: any, r: any) => void) {
     this.f = () => f(this);
@@ -14,10 +15,6 @@ export class Nursery {
 
     // kick off the nursery
     this.enqueue(this.f);
-  }
-
-  get completed() {
-    return this.e || this.r;
   }
 
   hold(f: (f: () => void) => void) {
@@ -35,15 +32,18 @@ export class Nursery {
     });
   }
 
-  done(err?: any, res?: any) {
-    if (!this.running || this.completed) return;
+  cont() {
     this.running = false;
+  }
 
-    if (err || res) {
-      this.e = err;
-      this.r = res;
-      this.complete();
-    }
+  done(err: any, res?: any) {
+    if (!this.running || this.completed) return;
+
+    this.e = err;
+    this.r = res;
+    this.running = false;
+    this.completed = true;
+    this.complete();
   }
 
   private enqueue(f: () => void) {

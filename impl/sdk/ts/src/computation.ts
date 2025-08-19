@@ -1,6 +1,6 @@
 import type { Heartbeat } from "heartbeat";
 import { Context } from "./context";
-import { Coroutine } from "./coroutine";
+import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler } from "./handler";
 import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
 import { Nursery } from "./nursery";
@@ -33,6 +33,7 @@ export class Computation {
   private processor: Processor;
 
   private seen: Set<string> = new Set();
+  private nurseries: Map<string, Nursery> = new Map();
 
   constructor(
     id: string,
@@ -58,7 +59,7 @@ export class Computation {
   public process(task: Task, done: Callback<Status>) {
     switch (task.kind) {
       case "claimed":
-        this._process(task, done);
+        this.processClaimed(task, done);
         break;
 
       case "unclaimed":
@@ -82,7 +83,7 @@ export class Computation {
                 this.handler.updateCache(leaf.data);
               }
 
-              this._process({ ...task, kind: "claimed", rootPromise: root.data }, done);
+              this.processClaimed({ ...task, kind: "claimed", rootPromise: root.data }, done);
             }
           },
         );
@@ -90,58 +91,63 @@ export class Computation {
     }
   }
 
-  private _process(task: ClaimedTask, done: Callback<Status>) {
+  private processClaimed(task: ClaimedTask, done: Callback<Status>) {
+    util.assert(
+      task.rootPromiseId === this.id,
+      "task root promise id must match computation id",
+    );
+
+    if (this.nurseries.has(task.rootPromise.id)) {
+      // TODO: log something useful
+      return done(true);
+    }
+
     if (!("func" in task.rootPromise.param) || !("args" in task.rootPromise.param)) {
+      // TODO: log something useful
       return done(true);
     }
 
     const registered = this.registry.get(task.rootPromise.param.func);
     if (!registered) {
+      // TODO: log something useful
       return done(true);
     }
 
     const func = registered.func;
     const args = task.rootPromise.param.args;
 
-    // I don't think this is okay
-    // what if the promise is "stale"?
+    // TODO: investigate if it is possible to update a completed
+    // promise with a pending promise
     this.handler.updateCache(task.rootPromise);
 
     // start heartbeat
     this.heartbeat.startHeartbeat(this.ttl / 2);
 
-    return new Nursery((nursery) => {
-      if (util.isGeneratorFunction(func)) {
-        this.process_generator(nursery, func, args, (err?: boolean, res?: any) => {
+    this.nurseries.set(
+      task.rootPromise.id,
+      new Nursery((nursery) => {
+        const done = (err: boolean, res?: any) => {
           if (err) {
+            this.nurseries.delete(task.rootPromise.id);
             return nursery.done(err);
           }
-          if (!err && !res) {
-            return nursery.done();
-          }
 
-          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) =>
-            nursery.done(err, res),
-          );
-        });
-      } else {
-        this.process_function(this.id, new Context(), func, args, (err?: boolean, res?: any) => {
-          if (err) {
-            return nursery.done(err);
-          }
-          if (!err && !res) {
-            return nursery.done();
-          }
+          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) => {
+            this.nurseries.delete(task.rootPromise.id);
+            nursery.done(err, res);
+          });
+        };
 
-          this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) =>
-            nursery.done(err, res),
-          );
-        });
-      }
-    }, done);
+        if (util.isGeneratorFunction(func)) {
+          this.processGenerator(nursery, func, args, done);
+        } else {
+          this.processFunction(this.id, new Context(), func, args, done);
+        }
+      }, done),
+    );
   }
 
-  private process_generator(nursery: Nursery, func: Func, args: any[], done: (err?: any, res?: any) => void) {
+  private processGenerator(nursery: Nursery, func: Func, args: any[], done: (err: boolean, res?: any) => void) {
     Coroutine.exec(this.id, func, args, this.handler, (err, status) => {
       if (err) return done(err);
       util.assertDefined(status);
@@ -152,76 +158,84 @@ export class Computation {
           break;
 
         case "suspended":
+        util.assert(
+          status.todo.local.length > 0 || status.todo.remote.length > 0,
+          "must be at least one todo",
+        );
+
           // local todos
           if (status.todo.local.length > 0) {
-            for (const { id, ctx, func, args } of status.todo.local) {
-              if (this.seen.has(id)) {
-                continue;
-              }
-
-              this.seen.add(id);
-              nursery.hold((next) => {
-                this.process_function(id, ctx, func, args, (err) => {
-                  if (err) return done(err);
-                  next();
-                });
-              });
-            }
-
-            // once all local todos are processed we can call done
-            done();
+            this.processLocalTodo(nursery, status.todo.local, done);
           }
 
           // remote todos
           if (status.todo.remote.length > 0) {
-            all(
-              status.todo.remote,
-              (
-                { id },
-                done: Callback<
-                  { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
-                >,
-              ) =>
-                this.handler.createCallback(
-                  id,
-                  this.id,
-                  Number.MAX_SAFE_INTEGER,
-                  `poll://any@${this.group}/${this.pid}`,
-                  done,
-                ),
-              (err, results) => {
-                if (err) done(err);
-                util.assertDefined(results);
-
-                const callbacks: CallbackRecord[] = [];
-
-                for (const res of results) {
-                  switch (res.kind) {
-                    case "promise":
-                      nursery.hold((next) => next());
-                      return done();
-
-                    case "callback":
-                      callbacks.push(res.callback);
-                      break;
-                  }
-                }
-
-                // once all callbacks are created we can call done
-                done(false, { kind: "suspended", callbacks });
-              },
-            );
+            this.processRemoteTodo(nursery, status.todo.remote, done);
           }
           break;
       }
     });
   }
 
-  private process_function(id: string, ctx: Context, func: Func, args: any[], done: (err?: any, res?: any) => void) {
+  private processFunction(id: string, ctx: Context, func: Func, args: any[], done: (err: boolean, res?: any) => void) {
     this.processor.process(
       id,
       async () => await func(ctx, ...args),
       (res) => this.handler.completePromise(id, res, done),
+    );
+  }
+
+  private processLocalTodo(nursery: Nursery, todo: LocalTodo[], done: (err: boolean, res?: any) => void) {
+    for (const { id, ctx, func, args } of todo) {
+      if (this.seen.has(id)) {
+        continue;
+      }
+
+      this.seen.add(id);
+
+      nursery.hold((next) => {
+        this.processFunction(id, ctx, func, args, (err) => {
+          if (err) return done(err);
+          next();
+        });
+      });
+    }
+
+    // once all local todos are submitted we can call continue
+    return nursery.cont();
+  }
+
+  private processRemoteTodo(nursery: Nursery, todo: RemoteTodo[], done: (err: boolean, res?: any) => void) {
+    all(
+      todo,
+      (
+        { id },
+        done: Callback<
+          { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }
+        >,
+      ) =>
+        this.handler.createCallback(id, this.id, Number.MAX_SAFE_INTEGER, `poll://any@${this.group}/${this.pid}`, done),
+      (err, results) => {
+        if (err) return done(err);
+        util.assertDefined(results);
+
+        const callbacks: CallbackRecord[] = [];
+
+        for (const res of results) {
+          switch (res.kind) {
+            case "promise":
+              nursery.hold((next) => next());
+              return nursery.cont();
+
+            case "callback":
+              callbacks.push(res.callback);
+              break;
+          }
+        }
+
+        // once all callbacks are created we can call done
+        return done(false, { kind: "suspended", callbacks });
+      },
     );
   }
 }
@@ -242,7 +256,7 @@ function all<T, U>(list: U[], func: (item: U, done: Callback<T>) => void, done: 
     func(item, (err, res) => {
       if (completed) return;
 
-      if (err) finalize(err);
+      if (err) return finalize(err);
       util.assertDefined(res);
 
       results[index] = res;
