@@ -29,7 +29,7 @@ describe("schedule transitions", () => {
 
   test("test case 2: create twice without ikey", async () => {
     await schedules.create(id, "* * * * *", "foo", 10);
-    await expect(schedules.create(id, "* * * * *", "foo", 10)).rejects.toMatchObject({ kind: "error" });
+    await expect(schedules.create(id, "* * * * *", "foo", 10)).rejects.toThrow();
   });
 
   test("test case 3: create twich with ikey", async () => {

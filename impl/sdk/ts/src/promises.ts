@@ -1,7 +1,6 @@
 import { LocalNetwork } from "../dev/network";
 import type { CallbackRecord, DurablePromiseRecord, Network, TaskRecord } from "./network/network";
 
-import * as util from "./util";
 export class Promises {
   private network: Network;
   constructor(network: Network = new LocalNetwork()) {
@@ -10,21 +9,14 @@ export class Promises {
 
   get(id: string): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "readPromise", id: id }, (timeout, response) => {
-        if (timeout) {
-          util.assert(response.kind === "error");
-          throw new Error("not implemented");
+      this.network.send({ kind: "readPromise", id: id }, (err, res) => {
+        if (err) {
+          // TODO: reject with more information
+          reject(Error("not implemented"));
+          return;
         }
 
-        if (response.kind === "error") {
-          util.assert(!timeout);
-          reject(response);
-        } else {
-          if (response.kind !== "readPromise") {
-            throw new Error("unexpected response");
-          }
-          resolve(response.promise);
-        }
+        resolve(res!.promise);
       });
     });
   }
@@ -48,21 +40,14 @@ export class Promises {
           iKey: iKey,
           strict: strict,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "createPromise") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.promise);
-          }
+          resolve(res!.promise);
         },
       );
     });
@@ -95,21 +80,14 @@ export class Promises {
           iKey: iKey,
           strict: strict,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "createPromiseAndTask") {
-              throw new Error("unexpected response");
-            }
-            resolve(response);
-          }
+          resolve({ promise: res!.promise, task: res!.task });
         },
       );
     });
@@ -131,21 +109,14 @@ export class Promises {
           iKey: iKey,
           strict: strict,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "completePromise") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.promise);
-          }
+          resolve(res!.promise);
         },
       );
     });
@@ -166,21 +137,14 @@ export class Promises {
           iKey: iKey,
           strict: strict,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "completePromise") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.promise);
-          }
+          resolve(res!.promise);
         },
       );
     });
@@ -201,21 +165,14 @@ export class Promises {
           iKey: iKey,
           strict: strict,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "completePromise") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.promise);
-          }
+          resolve(res!.promise);
         },
       );
     });
@@ -239,21 +196,14 @@ export class Promises {
           timeout: timeout,
           recv: recv,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "createCallback") {
-              throw new Error("unexpected response");
-            }
-            resolve({ promise: response.promise, callback: response.callback });
-          }
+          resolve({ promise: res!.promise, callback: res!.callback });
         },
       );
     });
@@ -268,21 +218,14 @@ export class Promises {
     callback: CallbackRecord | undefined;
   }> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "createSubscription", id: id, timeout: timeout, recv: recv }, (timeout, response) => {
-        if (timeout) {
-          util.assert(response.kind === "error");
-          throw new Error("not implemented");
+      this.network.send({ kind: "createSubscription", id: id, timeout: timeout, recv: recv }, (err, res) => {
+        if (err) {
+          // TODO: reject with more information
+          reject(Error("not implemented"));
+          return;
         }
 
-        if (response.kind === "error") {
-          util.assert(!timeout);
-          reject(response);
-        } else {
-          if (response.kind !== "createSubscription") {
-            throw new Error("unexpected response");
-          }
-          resolve({ promise: response.promise, callback: response.callback });
-        }
+        resolve({ promise: res!.promise, callback: res!.callback });
       });
     });
   }

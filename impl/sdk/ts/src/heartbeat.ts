@@ -1,8 +1,9 @@
 import type { Network } from "./network/network";
+import * as util from "./util";
 
 export interface Heartbeat {
-  startHeartbeat(delay: number): void;
-  stopHeartbeat(): void;
+  start(delay: number): void;
+  stop(): void;
 }
 
 export class AsyncHeartbeat implements Heartbeat {
@@ -16,7 +17,7 @@ export class AsyncHeartbeat implements Heartbeat {
     this.pid = pid;
   }
 
-  startHeartbeat(delay: number): void {
+  start(delay: number): void {
     this.counter++;
     if (!this.intervalId) {
       this.heartbeat(delay);
@@ -31,12 +32,13 @@ export class AsyncHeartbeat implements Heartbeat {
             kind: "heartbeatTasks",
             processId: this.pid,
           },
-          (_timeout, response) => {
-            if (response.kind === "heartbeatTasks" && response.tasksAffected === 0) {
+          (err, res) => {
+            if (err) return;
+            util.assertDefined(res);
+
+            if (res.tasksAffected === 0) {
               this.clearIntervalIfMatch(intervalId, counter);
-              return;
             }
-            // Ignore any errors and keep heartbeating
           },
         );
       },
@@ -46,7 +48,7 @@ export class AsyncHeartbeat implements Heartbeat {
     );
   }
 
-  stopHeartbeat(): void {
+  stop(): void {
     this.clearIntervalIfMatch(this.intervalId, this.counter);
   }
 
@@ -59,6 +61,6 @@ export class AsyncHeartbeat implements Heartbeat {
 }
 
 export class NoHeartbeat implements Heartbeat {
-  startHeartbeat(delay: number): void {}
-  stopHeartbeat(): void {}
+  start(delay: number): void {}
+  stop(): void {}
 }

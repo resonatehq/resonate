@@ -1,12 +1,13 @@
 import type { Context } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
-import type { DurablePromiseRecord, Message, Network, Request, Response } from "../src/network/network";
-import { type Result, ok } from "../src/types";
+import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
+import { type Callback, type Result, ok } from "../src/types";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
-  send(request: Request, callback: (timeout: boolean, response: Response) => void): void {
+
+  send<T extends Request>(request: T, callback: Callback<ResponseFor<T>>): void {
     switch (request.kind) {
       case "createPromise": {
         const p: DurablePromiseRecord = {
@@ -22,7 +23,7 @@ class DummyNetwork implements Network {
         callback(false, {
           kind: "createPromise",
           promise: p,
-        });
+        } as ResponseFor<T>);
         return;
       }
 
@@ -34,16 +35,18 @@ class DummyNetwork implements Network {
         callback(false, {
           kind: "completePromise",
           promise: p,
-        });
+        } as ResponseFor<T>);
         break;
       }
       default:
         throw new Error("All other kind will not be implemented");
     }
   }
+
   recv(_msg: Message): void {
     throw new Error("Method not implemented.");
   }
+
   stop() {}
   subscribe(_callback: (msg: Message) => void) {}
 }

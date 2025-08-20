@@ -1,6 +1,8 @@
 import { Server } from "./server";
 
-import type { Message, Network, Request, Response } from "../src/network/network";
+import type { Callback } from "types";
+import type { Message, Network, Request, ResponseFor } from "../src/network/network";
+import * as util from "../src/util";
 
 export class LocalNetwork implements Network {
   private server: Server;
@@ -14,32 +16,23 @@ export class LocalNetwork implements Network {
   }
 
   stop() {
-    this.shouldStop = true;
     clearTimeout(this.timeoutId);
+    this.shouldStop = true;
     this.timeoutId = undefined;
   }
 
-  private enqueueNext(): void {
-    const time = Date.now();
-    clearTimeout(this.timeoutId);
-    const n = this.server.next(time);
-
-    if (n !== undefined && !this.shouldStop) {
-      this.timeoutId = setTimeout((): void => {
-        for (const { msg } of this.server.step(time)) {
-          this.recv(msg);
-        }
-        this.enqueueNext();
-      }, n);
-    }
-  }
-
-  send(request: Request, callback: (timeout: boolean, response: Response) => void): void {
+  send<T extends Request>(req: Request, callback: Callback<ResponseFor<T>>): void {
     setTimeout(() => {
-      const response = this.server.process(request, Date.now());
-      clearTimeout(this.timeoutId);
-      this.enqueueNext();
-      callback(false, response);
+      try {
+        const res = this.server.process(req, Date.now());
+        util.assert(res.kind === req.kind, "res kind must match req kind");
+
+        callback(false, res as ResponseFor<T>);
+        this.enqueueNext();
+      } catch (e) {
+        // TODO: log error
+        callback(true);
+      }
     });
   }
 
@@ -49,7 +42,23 @@ export class LocalNetwork implements Network {
     }
   }
 
-  public subscribe(callback: (msg: Message) => void): void {
+  subscribe(callback: (msg: Message) => void): void {
     this.subscriptions.push(callback);
+  }
+
+  private enqueueNext(): void {
+    clearTimeout(this.timeoutId);
+
+    const time = Date.now();
+    const next = this.server.next(time);
+
+    if (next !== undefined && !this.shouldStop) {
+      this.timeoutId = setTimeout((): void => {
+        for (const { msg } of this.server.step(time)) {
+          this.recv(msg);
+        }
+        this.enqueueNext();
+      }, next);
+    }
   }
 }

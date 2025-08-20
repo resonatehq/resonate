@@ -1,7 +1,5 @@
 import { LocalNetwork } from "../dev/network";
-import type { Mesg, Network, TaskRecord } from "./network/network";
-
-import * as util from "./util";
+import type { ClaimTaskRes, Network, TaskRecord } from "./network/network";
 
 export class Tasks {
   private network: Network;
@@ -10,7 +8,7 @@ export class Tasks {
     this.network = network;
   }
 
-  claim(id: string, counter: number, processId: string, ttl: number): Promise<Mesg> {
+  claim(id: string, counter: number, processId: string, ttl: number): Promise<ClaimTaskRes["message"]> {
     return new Promise((resolve, reject) => {
       this.network.send(
         {
@@ -20,21 +18,14 @@ export class Tasks {
           processId: processId,
           ttl: ttl,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "claimedtask") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.message);
-          }
+          resolve(res!.message);
         },
       );
     });
@@ -48,21 +39,14 @@ export class Tasks {
           id: id,
           counter: counter,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "completedtask") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.task);
-          }
+          resolve(res!.task);
         },
       );
     });
@@ -75,22 +59,14 @@ export class Tasks {
           kind: "heartbeatTasks",
           processId: processId,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "heartbeatTasks") {
-              throw new Error("unexpected response");
-            }
-
-            resolve(response.tasksAffected);
-          }
+          resolve(res!.tasksAffected);
         },
       );
     });

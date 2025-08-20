@@ -1,12 +1,6 @@
 import { LocalNetwork } from "../dev/network";
 import { AsyncHeartbeat } from "./heartbeat";
-import type {
-  CreatePromiseAndTaskRes,
-  CreatePromiseRes,
-  CreateSubscriptionRes,
-  DurablePromiseRecord,
-  Network,
-} from "./network/network";
+import type { DurablePromiseRecord, Network } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { ResonateInner } from "./resonate-inner";
 import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
@@ -144,14 +138,10 @@ export class Resonate {
           iKey: id,
           strict: false,
         },
-        (timeout, response) => {
-          const res = response as CreatePromiseAndTaskRes;
-
-          if (timeout) {
-            // TODO(avillega): Handle platform level error
-            console.error("Platform error");
-            return;
-          }
+        (err, res) => {
+          // TODO(avillega): Handle platform level error
+          if (err) return;
+          util.assertDefined(res);
 
           // create and resolve a handle now that the durable promise
           // has been created
@@ -228,14 +218,10 @@ export class Resonate {
           iKey: id,
           strict: false,
         },
-        (timeout, response) => {
-          const res = response as CreatePromiseRes;
-
-          if (timeout) {
-            // TODO(avillega): Handle platform level error
-            console.error("Platform error");
-            return;
-          }
+        (err, res) => {
+          // TODO(avillega): Handle platform level error
+          if (err) return;
+          util.assertDefined(res);
 
           // create and resolve a handle now that the durable promise
           // has been created
@@ -272,14 +258,10 @@ export class Resonate {
         timeout: 24 * util.HOUR + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
         recv: `poll://uni@${this.group}/${this.pid}`,
       },
-      (timeout, response) => {
-        const res = response as CreateSubscriptionRes;
-
-        if (timeout) {
-          // TODO(avillega): Handle platform level error
-          console.error("Platform error");
-          return;
-        }
+      (err, res) => {
+        // TODO(avillega): Handle platform level error
+        if (err) return;
+        util.assertDefined(res);
 
         // once again check if the promise is complete and early exit
         if (this.complete(res.promise, resolve, reject)) {

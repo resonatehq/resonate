@@ -75,16 +75,14 @@ export class Computation {
             if (err) return done(true);
             util.assertDefined(res);
 
-            if (res.kind === "claimedtask") {
-              const { root, leaf } = res.message.promises;
-              util.assertDefined(root);
+            const { root, leaf } = res.message.promises;
+            util.assertDefined(root);
 
-              if (leaf) {
-                this.handler.updateCache(leaf.data);
-              }
-
-              this.processClaimed({ ...task, kind: "claimed", rootPromise: root.data }, done);
+            if (leaf) {
+              this.handler.updateCache(leaf.data);
             }
+
+            this.processClaimed({ ...task, kind: "claimed", rootPromise: root.data }, done);
           },
         );
         break;
@@ -118,7 +116,7 @@ export class Computation {
     this.handler.updateCache(task.rootPromise);
 
     // start heartbeat
-    this.heartbeat.startHeartbeat(this.ttl / 2);
+    this.heartbeat.start(this.ttl / 2);
 
     this.nurseries.set(
       task.rootPromise.id,

@@ -1,11 +1,4 @@
-import type {
-  CallbackRecord,
-  CompletePromiseRes,
-  CreateCallbackRes,
-  CreatePromiseRes,
-  DurablePromiseRecord,
-  Network,
-} from "./network/network";
+import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
 import type { Result } from "./types";
 import * as util from "./util";
 
@@ -51,14 +44,11 @@ export class Handler {
         strict: false,
       },
       (err, res) => {
-        if (err) {
-          return callback(err);
-        }
+        if (err) return callback(err);
+        util.assertDefined(res);
 
-        util.assert(res.kind === "createPromise", "response must be kind createPromise");
-        const { promise } = res as CreatePromiseRes;
-        this.promises.set(promise.id, promise);
-        callback(false, promise);
+        this.promises.set(res.promise.id, res.promise);
+        callback(false, res.promise);
       },
     );
   }
@@ -85,14 +75,11 @@ export class Handler {
         strict: false,
       },
       (err, res) => {
-        if (err) {
-          return callback(err);
-        }
+        if (err) return callback(err);
+        util.assertDefined(res);
 
-        util.assert(res.kind === "completePromise", "response must be completePromise");
-        const { promise } = res as CompletePromiseRes;
-        this.promises.set(promise.id, promise);
-        callback(false, promise);
+        this.promises.set(res.promise.id, res.promise);
+        callback(false, res.promise);
       },
     );
   }
@@ -115,18 +102,17 @@ export class Handler {
         recv,
       },
       (err, res) => {
-        if (err) {
-          return callback(true);
+        if (err) return callback(true);
+        util.assertDefined(res);
+
+        if (res.promise) {
+          this.promises.set(res.promise.id, res.promise);
         }
 
-        util.assert(res.kind === "createCallback", "response must be createCallback");
-        const { callback: cb, promise } = res as CreateCallbackRes;
-
-        if (promise) {
-          this.promises.set(promise.id, promise);
-        }
-
-        callback(false, cb ? { kind: "callback", callback: cb } : { kind: "promise", promise });
+        callback(
+          false,
+          res.callback ? { kind: "callback", callback: res.callback } : { kind: "promise", promise: res.promise },
+        );
       },
     );
   }

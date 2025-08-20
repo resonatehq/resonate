@@ -1,29 +1,43 @@
 import type {
   CallbackRecord,
   ClaimTaskReq,
+  ClaimTaskRes,
   CompletePromiseReq,
+  CompletePromiseRes,
   CompleteTaskReq,
+  CompleteTaskRes,
   CreateCallbackReq,
+  CreateCallbackRes,
   CreatePromiseAndTaskReq,
+  CreatePromiseAndTaskRes,
   CreatePromiseReq,
+  CreatePromiseRes,
   CreateScheduleReq,
+  CreateScheduleRes,
   CreateSubscriptionReq,
+  CreateSubscriptionRes,
   DeleteScheduleReq,
+  DeleteScheduleRes,
   DropTaskReq,
+  DropTaskRes,
   DurablePromiseRecord,
-  ErrorRes,
   HeartbeatTasksReq,
+  HeartbeatTasksRes,
   Message,
   Network,
   ReadPromiseReq,
+  ReadPromiseRes,
   ReadScheduleReq,
+  ReadScheduleRes,
   Request,
   Response,
+  ResponseFor,
   ScheduleRecord,
   TaskRecord,
 } from "./network"; // Assuming types are in a separate file
 
 import { EventSource } from "eventsource";
+import type { Callback } from "types";
 import * as util from "../util";
 
 // API Value format from OpenAPI spec
@@ -230,16 +244,17 @@ export class HttpNetwork implements Network {
     this.eventSource.addEventListener("message", (event) => this._recv(event));
   }
 
-  send(request: Request, callback: (timeout: boolean, response: Response) => void): void {
-    this.handleRequest(request)
-      .then((response) => callback(false, response))
-      .catch((error) => {
-        if (error.name === "TimeoutError") {
-          callback(true, this.createErrorResponse("invalid_request", "Request timeout"));
-        } else {
-          callback(false, this.createErrorResponse("invalid_request", error.message));
-        }
-      });
+  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>): void {
+    this.handleRequest(req).then(
+      (res) => {
+        util.assert(res.kind === req.kind, "res kind must match req kind");
+        callback(false, res as ResponseFor<T>);
+      },
+      () => {
+        // TODO: log error here
+        callback(true);
+      },
+    );
   }
 
   private _recv(event: MessageEvent): void {
@@ -305,7 +320,7 @@ export class HttpNetwork implements Network {
     }
   }
 
-  private async createPromise(req: CreatePromiseReq): Promise<Response> {
+  private async createPromise(req: CreatePromiseReq): Promise<CreatePromiseRes> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -328,7 +343,7 @@ export class HttpNetwork implements Network {
     return { kind: "createPromise", promise };
   }
 
-  private async createPromiseAndTask(req: CreatePromiseAndTaskReq): Promise<Response> {
+  private async createPromiseAndTask(req: CreatePromiseAndTaskReq): Promise<CreatePromiseAndTaskRes> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -360,7 +375,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async readPromise(req: ReadPromiseReq): Promise<Response> {
+  private async readPromise(req: ReadPromiseReq): Promise<ReadPromiseRes> {
     const response = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, {
       method: "GET",
       headers: this.baseHeaders,
@@ -371,7 +386,7 @@ export class HttpNetwork implements Network {
     return { kind: "readPromise", promise };
   }
 
-  private async completePromise(req: CompletePromiseReq): Promise<Response> {
+  private async completePromise(req: CompletePromiseReq): Promise<CompletePromiseRes> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
@@ -392,7 +407,7 @@ export class HttpNetwork implements Network {
     return { kind: "completePromise", promise };
   }
 
-  private async createCallback(req: CreateCallbackReq): Promise<Response> {
+  private async createCallback(req: CreateCallbackReq): Promise<CreateCallbackRes> {
     const body = {
       rootPromiseId: req.rootPromiseId,
       timeout: req.timeout,
@@ -413,7 +428,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async createSubscription(req: CreateSubscriptionReq): Promise<Response> {
+  private async createSubscription(req: CreateSubscriptionReq): Promise<CreateSubscriptionRes> {
     const body = {
       id: req.id,
       timeout: req.timeout,
@@ -434,7 +449,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async createSchedule(req: CreateScheduleReq): Promise<Response> {
+  private async createSchedule(req: CreateScheduleReq): Promise<CreateScheduleRes> {
     const headers: Record<string, string> = { ...this.baseHeaders };
     if (req.iKey) headers["idempotency-key"] = req.iKey;
 
@@ -462,7 +477,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async readSchedule(req: ReadScheduleReq): Promise<Response> {
+  private async readSchedule(req: ReadScheduleReq): Promise<ReadScheduleRes> {
     const response = await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, {
       method: "GET",
       headers: this.baseHeaders,
@@ -475,7 +490,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async deleteSchedule(req: DeleteScheduleReq): Promise<Response> {
+  private async deleteSchedule(req: DeleteScheduleReq): Promise<DeleteScheduleRes> {
     await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, {
       method: "DELETE",
       headers: this.baseHeaders,
@@ -484,7 +499,7 @@ export class HttpNetwork implements Network {
     return { kind: "deleteSchedule" };
   }
 
-  private async claimTask(req: ClaimTaskReq): Promise<Response> {
+  private async claimTask(req: ClaimTaskReq): Promise<ClaimTaskRes> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -504,7 +519,7 @@ export class HttpNetwork implements Network {
     }
 
     return {
-      kind: "claimedtask",
+      kind: "claimTask",
       message: {
         kind: message.type,
         promises: {
@@ -525,7 +540,7 @@ export class HttpNetwork implements Network {
     };
   }
 
-  private async completeTask(req: CompleteTaskReq): Promise<Response> {
+  private async completeTask(req: CompleteTaskReq): Promise<CompleteTaskRes> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -539,12 +554,12 @@ export class HttpNetwork implements Network {
 
     const task = (await response.json()) as TaskDto;
     return {
-      kind: "completedtask",
+      kind: "completeTask",
       task: this.mapTaskDtoToRecord(task),
     };
   }
 
-  private async dropTask(req: DropTaskReq): Promise<Response> {
+  private async dropTask(req: DropTaskReq): Promise<DropTaskRes> {
     const body = {
       id: req.id,
       counter: req.counter,
@@ -556,10 +571,10 @@ export class HttpNetwork implements Network {
       body: JSON.stringify(body),
     });
 
-    return { kind: "droppedtask" };
+    return { kind: "dropTask" };
   }
 
-  private async heartbeatTasks(req: HeartbeatTasksReq): Promise<Response> {
+  private async heartbeatTasks(req: HeartbeatTasksReq): Promise<HeartbeatTasksRes> {
     const body = {
       processId: req.processId,
     };
@@ -596,13 +611,6 @@ export class HttpNetwork implements Network {
       }
 
       return response;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        const timeoutError = new Error("Request timeout");
-        timeoutError.name = "TimeoutError";
-        throw timeoutError;
-      }
-      throw error;
     } finally {
       clearTimeout(timeoutId);
     }
@@ -678,13 +686,5 @@ export class HttpNetwork implements Network {
       default:
         throw new Error(`Unknown API state: ${apiState}`);
     }
-  }
-
-  private createErrorResponse(code: ErrorRes["code"], message: string): ErrorRes {
-    return {
-      kind: "error",
-      code,
-      message,
-    };
   }
 }

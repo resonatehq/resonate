@@ -107,6 +107,6 @@ export class ResonateInner {
 
   public stop() {
     this.network.stop();
-    this.heartbeat.stopHeartbeat();
+    this.heartbeat.stop();
   }
 }

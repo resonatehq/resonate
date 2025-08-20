@@ -2,7 +2,7 @@ import { LocalNetwork } from "../dev/network";
 import { Computation, type Status } from "../src/computation";
 import type { Context } from "../src/context";
 import { NoHeartbeat } from "../src/heartbeat";
-import type { CreatePromiseAndTaskRes, DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
+import type { DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
 import type { ClaimedTask, Result } from "../src/types";
@@ -34,9 +34,8 @@ async function createPromiseAndTask(
         iKey: id,
         strict: false,
       },
-      (_timeout, res) => {
-        const { promise, task } = res as CreatePromiseAndTaskRes;
-        resolve({ promise, task: task! });
+      (_err, res) => {
+        resolve({ promise: res!.promise, task: res!.task! });
       },
     );
   });

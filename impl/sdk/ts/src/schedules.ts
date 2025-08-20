@@ -1,8 +1,6 @@
 import { LocalNetwork } from "../dev/network";
 import type { Network, ScheduleRecord } from "./network/network";
 
-import * as util from "./util";
-
 export class Schedules {
   private network: Network;
 
@@ -17,21 +15,14 @@ export class Schedules {
           kind: "readSchedule",
           id: id,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "readSchedule") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.schedule);
-          }
+          resolve(res!.schedule);
         },
       );
     });
@@ -62,21 +53,14 @@ export class Schedules {
           promiseTags: promiseTags,
           iKey: iKey,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err, res) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "createSchedule") {
-              throw new Error("unexpected response");
-            }
-            resolve(response.schedule);
-          }
+          resolve(res!.schedule);
         },
       );
     });
@@ -89,21 +73,14 @@ export class Schedules {
           kind: "deleteSchedule",
           id: id,
         },
-        (timeout, response) => {
-          if (timeout) {
-            util.assert(response.kind === "error");
-            throw new Error("not implemented");
+        (err) => {
+          if (err) {
+            // TODO: reject with more information
+            reject(Error("not implemented"));
+            return;
           }
 
-          if (response.kind === "error") {
-            util.assert(!timeout);
-            reject(response);
-          } else {
-            if (response.kind !== "deleteSchedule") {
-              throw new Error("unexpected response");
-            }
-            resolve();
-          }
+          resolve();
         },
       );
     });

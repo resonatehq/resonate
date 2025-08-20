@@ -1,6 +1,8 @@
+import type { Callback } from "types";
 import { NoHeartbeat } from "../../src/heartbeat";
-import type { Network, Message as NetworkMessage, Request, Response } from "../../src/network/network";
+import type { Network, Message as NetworkMessage, Request, Response, ResponseFor } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
+import * as util from "../../src/util";
 import { type Address, Message, Process, type Random, anycast, unicast } from "./simulator";
 
 interface DeliveryOptions {
@@ -14,7 +16,7 @@ class SimulatedNetwork implements Network {
   private prng: Random;
   private deliveryOptions: Required<DeliveryOptions>;
   private buffer: Message<Request>[] = [];
-  private callbacks: Record<number, { callback: (err: boolean, res: Response) => void; timeout: number }> = {};
+  private callbacks: Record<number, { callback: Callback<Response>; timeout: number }> = {};
   private subscriptions: ((msg: NetworkMessage) => void)[] = [];
 
   constructor(
@@ -27,11 +29,16 @@ class SimulatedNetwork implements Network {
     this.deliveryOptions = { charFlipProb };
   }
 
-  send(request: Request, callback: (err: boolean, res: Response) => void): void {
-    const message = new Message<Request>(this.source, this.target, request, {
+  send<T extends Request>(req: T, cb: (err: boolean, res?: ResponseFor<T>) => void): void {
+    const message = new Message<Request>(this.source, this.target, req, {
       requ: true,
       correlationId: this.correlationId++,
     });
+
+    const callback = (err: boolean, res?: Response) => {
+      util.assert(err || (res !== undefined && res.kind === req.kind), "res kind must match req kind");
+      cb(err, res as ResponseFor<T>);
+    };
 
     this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 5000 };
     this.buffer.push(message);
@@ -57,11 +64,7 @@ class SimulatedNetwork implements Network {
       const cb = this.callbacks[key];
       const hasTimedOut = cb.timeout < this.currentTime;
       if (hasTimedOut) {
-        cb.callback(true, {
-          kind: "error",
-          code: "invalid_request",
-          message: "timedout",
-        });
+        cb.callback(true);
         delete this.callbacks[key];
       }
     }

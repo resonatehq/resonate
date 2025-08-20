@@ -1,3 +1,7 @@
+// Records
+
+import type { Callback } from "types";
+
 export interface DurablePromiseRecord {
   id: string;
   state: "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout";
@@ -43,21 +47,23 @@ export interface CallbackRecord {
   createdOn?: number;
 }
 
-export interface Mesg {
-  kind: "invoke" | "resume";
-  promises: {
-    root?: {
-      id: string;
-      data: DurablePromiseRecord;
-    };
-    leaf?: {
-      id: string;
-      data: DurablePromiseRecord;
-    };
-  };
-}
+// Request
 
-// Request message types
+export type Request =
+  | CreatePromiseReq
+  | CreatePromiseAndTaskReq
+  | ReadPromiseReq
+  | CompletePromiseReq
+  | CreateCallbackReq
+  | CreateSubscriptionReq
+  | CreateScheduleReq
+  | ReadScheduleReq
+  | DeleteScheduleReq
+  | ClaimTaskReq
+  | CompleteTaskReq
+  | DropTaskReq
+  | HeartbeatTasksReq;
+
 export type CreatePromiseReq = {
   kind: "createPromise";
   id: string;
@@ -161,23 +167,23 @@ export type HeartbeatTasksReq = {
   processId: string;
 };
 
-// Union of all request types
-export type Request =
-  | CreatePromiseReq
-  | CreatePromiseAndTaskReq
-  | ReadPromiseReq
-  | CompletePromiseReq
-  | CreateCallbackReq
-  | CreateSubscriptionReq
-  | CreateScheduleReq
-  | ReadScheduleReq
-  | DeleteScheduleReq
-  | ClaimTaskReq
-  | CompleteTaskReq
-  | DropTaskReq
-  | HeartbeatTasksReq;
+// Response
 
-// Response message types
+export type Response =
+  | CreatePromiseRes
+  | CreatePromiseAndTaskRes
+  | ReadPromiseRes
+  | CompletePromiseRes
+  | CreateCallbackRes
+  | CreateSubscriptionRes
+  | CreateScheduleRes
+  | ReadScheduleRes
+  | DeleteScheduleRes
+  | ClaimTaskRes
+  | CompleteTaskRes
+  | DropTaskRes
+  | HeartbeatTasksRes;
+
 export type CreatePromiseRes = {
   kind: "createPromise";
   promise: DurablePromiseRecord;
@@ -226,17 +232,29 @@ export type DeleteScheduleRes = {
 };
 
 export type ClaimTaskRes = {
-  kind: "claimedtask";
-  message: Mesg;
+  kind: "claimTask";
+  message: {
+    kind: "invoke" | "resume";
+    promises: {
+      root?: {
+        id: string;
+        data: DurablePromiseRecord;
+      };
+      leaf?: {
+        id: string;
+        data: DurablePromiseRecord;
+      };
+    };
+  };
 };
 
 export type CompleteTaskRes = {
-  kind: "completedtask";
+  kind: "completeTask";
   task: TaskRecord;
 };
 
 export type DropTaskRes = {
-  kind: "droppedtask";
+  kind: "dropTask";
 };
 
 export type HeartbeatTasksRes = {
@@ -244,36 +262,18 @@ export type HeartbeatTasksRes = {
   tasksAffected: number;
 };
 
-// Error response types
-export type ErrorRes = {
-  kind: "error";
-  code: "invalid_request" | "forbidden" | "not_found" | "conflict";
-  message: string;
-};
-
-// Union of all response types
-export type Response =
-  | CreatePromiseRes
-  | CreatePromiseAndTaskRes
-  | ReadPromiseRes
-  | CompletePromiseRes
-  | CreateCallbackRes
-  | CreateSubscriptionRes
-  | CreateScheduleRes
-  | ReadScheduleRes
-  | DeleteScheduleRes
-  | ClaimTaskRes
-  | CompleteTaskRes
-  | DropTaskRes
-  | HeartbeatTasksRes
-  | ErrorRes;
+// Message
 
 export type Message =
   | { type: "invoke" | "resume"; task: TaskRecord }
   | { type: "notify"; promise: DurablePromiseRecord };
 
+// Network
+
+export type ResponseFor<T extends Request> = Extract<Response, { kind: T["kind"] }>;
+
 export interface Network {
-  send(req: Request, callback: (err: boolean, res: Response) => void): void;
+  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>): void;
   recv(msg: Message): void;
   stop(): void;
   subscribe(callback: (msg: Message) => void): void;
