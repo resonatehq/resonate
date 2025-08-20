@@ -188,8 +188,8 @@ export function run(options: Options) {
     sim.register(worker);
   }
 
-  let i = 0;
-  while (i < options.steps) {
+  sim.repeat(1, () => {
+    const i = sim.time - 1;
     const useExplicit = options.func && i === 0;
 
     const funcName = useExplicit
@@ -244,10 +244,9 @@ export function run(options: Options) {
 
       sim.send(msg);
     }
+  });
 
-    sim.tick();
-    i++;
-  }
+  sim.exec(options.steps);
   console.log("[outbox]: ", sim.outbox);
 }
 

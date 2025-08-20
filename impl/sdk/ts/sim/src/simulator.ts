@@ -95,12 +95,14 @@ export interface DeliveryOptions {
 
 export class Simulator {
   private prng: Random;
-  private time = 0;
+  public time = 0;
   private init = false;
   private process: Process[] = [];
   private network: Message<any>[] = [];
   public outbox: Message<any>[] = [];
   public deliveryOptions: Required<DeliveryOptions>;
+  private scheduledRepeat: { interval: number; fn: () => void }[] = [];
+  private scheduledDelay: { runAt: number; fn: () => void }[] = [];
 
   constructor(prng: Random, { dropProb = 0, randomDelay = 0, duplProb = 0 }: DeliveryOptions = {}) {
     this.prng = prng;
@@ -125,19 +127,23 @@ export class Simulator {
   register(process: Process): void {
     this.process.push(process);
   }
+
   more(): boolean {
     // Simulator can make progress if it is not initialized or if there are messages in the network
     return !this.init || this.network.length > 0;
   }
+
   send(message: Message<any>): void {
     this.network.push(message);
   }
+
   tick(): void {
     if (!this.init) {
       this.init = true;
     }
 
     this.time += 1;
+
     const retained: Message<any>[] = [];
     const consumed: Message<any>[] = [];
 
@@ -196,5 +202,39 @@ export class Simulator {
     }
 
     this.network = retained.concat(newMessages);
+  }
+
+  exec(steps: number): void {
+    let i = 0;
+    while (i < steps) {
+      this.tick();
+
+      for (const task of this.scheduledRepeat) {
+        if (this.time % task.interval === 0) {
+          task.fn();
+        }
+      }
+
+      if (this.scheduledDelay.length > 0) {
+        const remaining: { runAt: number; fn: () => void }[] = [];
+        for (const task of this.scheduledDelay) {
+          if (task.runAt === this.time) {
+            task.fn();
+          } else if (task.runAt > this.time) {
+            remaining.push(task);
+          }
+        }
+        this.scheduledDelay = remaining;
+      }
+
+      i++;
+    }
+  }
+
+  repeat(interval: number, fn: () => void): void {
+    this.scheduledRepeat.push({ interval, fn });
+  }
+  delay(runAt: number, fn: () => void): void {
+    this.scheduledDelay.push({ runAt, fn });
   }
 }

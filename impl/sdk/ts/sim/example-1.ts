@@ -4,27 +4,20 @@ import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
-// Function definition
+import * as util from "../src/util";
+
+// Define a resonate function
 function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const p1 = yield ctx.beginRpc("fibonacci", n - 1);
-  const p2 = yield ctx.beginRpc("fibonacci", n - 2);
+  const p1 = yield ctx.beginRun(fibonacci, n - 1);
+  const p2 = yield ctx.beginRun(fibonacci, n - 2);
 
   return (yield p1) + (yield p2);
 }
 
-const options: {
-  seed: number;
-  steps: number;
-  randomDelay?: number;
-  dropProb?: number;
-  duplProb?: number;
-  charFlipProb?: number;
-} = { seed: 0, steps: 100, randomDelay: 0, dropProb: 0, duplProb: 0, charFlipProb: 0 };
-
-// Run Simulation
+const options = { seed: 0, steps: 10000, randomDelay: 0, dropProb: 0, duplProb: 0, charFlipProb: 0 };
 
 const rnd = new Random(options.seed);
 const sim = new Simulator(rnd, {
@@ -55,6 +48,7 @@ const worker3 = new WorkerProcess(
 
 const workers = [worker1, worker2, worker3] as const;
 
+// Register defined function to the workers
 for (const worker of workers) {
   worker.resonate.register("fibonacci", fibonacci);
 }
@@ -66,30 +60,25 @@ for (const worker of workers) {
 
 const n = 10;
 const id = `fibonacci-${n}`;
-const msg = new Message<RequestMsg>(
-  unicast("environment"),
-  unicast("server"),
-  {
-    kind: "createPromise",
-    id,
-    timeout: 10000000000,
-    iKey: id,
-    tags: { "resonate:invoke": "local://any@default" },
-    param: { func: "fibonacci", args: [n] },
-  },
-  { requ: true, correlationId: 1 },
-);
-sim.send(msg);
 
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+sim.delay(1, () => {
+  const msg = new Message<RequestMsg>(
+    unicast("environment"),
+    unicast("server"),
+    {
+      kind: "createPromise",
+      id,
+      timeout: 10000000000,
+      iKey: id,
+      tags: { "resonate:invoke": "local://any@default" },
+      param: { func: "fibonacci", args: [n] },
+    },
+    { requ: true, correlationId: 1 },
+  );
 
-let i = 0;
-while (i < options.steps) {
-  sim.tick();
-  await sleep(500);
-  i++;
-}
+  sim.send(msg);
+});
 
-console.log(server.server.promises.get(id));
+sim.exec(options.steps);
+
+util.assert(server.server.promises.get(id)?.value === 55);
