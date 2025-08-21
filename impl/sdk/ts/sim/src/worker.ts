@@ -10,7 +10,7 @@ interface DeliveryOptions {
 }
 
 class SimulatedNetwork implements Network {
-  private correlationId = 0;
+  private correlationId = 1;
   private currentTime = 0;
 
   private prng: Random;
@@ -70,12 +70,19 @@ class SimulatedNetwork implements Network {
     }
   }
 
-  process(message: Message<Response | NetworkMessage>): void {
+  process(message: Message<{ err?: any; res?: Response } | NetworkMessage>): void {
     if (message.isResponse()) {
       const correlationId = message.head?.correlationId;
       const entry = correlationId && this.callbacks[correlationId];
       if (entry) {
-        entry.callback(false, this.maybeCorruptData(message.data));
+        const msg = message as Message<{ err?: any; res?: Response }>;
+        if (msg.data.err) {
+          util.assert(msg.data.res === undefined);
+          entry.callback(true);
+        } else {
+          util.assertDefined(msg.data.res);
+          entry.callback(false, this.maybeCorruptData(msg.data.res));
+        }
         delete this.callbacks[correlationId];
       }
     } else {
@@ -129,7 +136,7 @@ export class WorkerProcess extends Process {
     });
   }
 
-  tick(time: number, messages: Message<Response | NetworkMessage>[]): Message<Request>[] {
+  tick(time: number, messages: Message<{ err?: any; res?: Response } | NetworkMessage>[]): Message<Request>[] {
     this.log(time, "[recv]", messages);
 
     this.network.time(time);

@@ -207,8 +207,6 @@ export class Simulator {
   exec(steps: number): void {
     let i = 0;
     while (i < steps) {
-      this.tick();
-
       for (const task of this.scheduledRepeat) {
         if (this.time % task.interval === 0) {
           task.fn();
@@ -226,6 +224,8 @@ export class Simulator {
         }
         this.scheduledDelay = remaining;
       }
+
+      this.tick();
 
       i++;
     }

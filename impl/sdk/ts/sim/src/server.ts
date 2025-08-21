@@ -9,14 +9,20 @@ export class ServerProcess extends Process {
     super(iaddr);
   }
 
-  tick(time: number, messages: Message<Request>[]): Message<Response | NetworkMessage>[] {
+  tick(time: number, messages: Message<Request>[]): Message<{ err?: any; res?: Response } | NetworkMessage>[] {
     this.log(time, "[recv]", messages);
 
-    const responses: Message<Response | NetworkMessage>[] = [];
+    const responses: Message<{ err?: any; res?: Response } | NetworkMessage>[] = [];
 
     for (const message of messages) {
       if (message.isRequest()) {
-        responses.push(message.resp(this.server.process(message.data, time)));
+        let res: { err?: any; res?: Response };
+        try {
+          res = { res: this.server.process(message.data, time) };
+        } catch (err: any) {
+          res = { err: err };
+        }
+        responses.push(message.resp(res));
       }
     }
 
