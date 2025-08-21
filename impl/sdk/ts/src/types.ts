@@ -1,5 +1,5 @@
 import type { Context } from "./context";
-import type { DurablePromiseRecord } from "./network/network";
+import type { CreatePromiseReq, DurablePromiseRecord } from "./network/network";
 
 export type Func = (ctx: Context, ...args: any[]) => any;
 
@@ -12,6 +12,7 @@ export type ParamsWithOptions<F> = [...Params<F>, (Partial<Options> & { [RESONAT
 export type Options = {
   id: string;
   target: string;
+  tags: Record<string, string>;
   timeout: number;
 };
 
@@ -62,10 +63,7 @@ export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T>
 export type InternalAsyncR = {
   type: "internal.async.r";
   id: string;
-  func: string;
-  args: any[];
-  opts: Options;
-  mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
+  createReq: CreatePromiseReq;
 };
 
 export type InternalAsyncL = {
@@ -73,7 +71,7 @@ export type InternalAsyncL = {
   id: string;
   func: Func;
   args: any[];
-  mode: "eager" | "defer"; // TODO(avillega): Right now it is unused, review its usage
+  createReq: CreatePromiseReq;
 };
 export type InternalAwait<T> = {
   type: "internal.await";

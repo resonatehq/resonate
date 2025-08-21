@@ -1,72 +1,72 @@
 import { Command } from "commander";
-import type * as context from "../src/context";
+import type { Context } from "../src/context";
 import type { Request } from "../src/network/network";
 import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
 // Function definition
-function* fibLfi(ctx: context.Context, n: number): Generator<any, number, any> {
+function* fibLfi(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const p1 = yield ctx.lfi(fibLfi, n - 1, ctx.options({ id: `fibLfi-${n - 1}` }));
-  const p2 = yield ctx.lfi(fibLfi, n - 2, ctx.options({ id: `fibLfi-${n - 2}` }));
+  const p1 = yield ctx.beginRun(fibLfi, n - 1, ctx.options({ id: `fibLfi-${n - 1}` }));
+  const p2 = yield ctx.beginRun(fibLfi, n - 2, ctx.options({ id: `fibLfi-${n - 2}` }));
 
   return (yield p1) + (yield p2);
 }
 
-function* fibRfi(ctx: context.Context, n: number): Generator<any, number, any> {
+function* fibRfi(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const p1 = yield ctx.rfi("fibRfi", n - 1, ctx.options({ id: `fibRfi-${n - 1}` }));
-  const p2 = yield ctx.rfi("fibRfi", n - 2, ctx.options({ id: `fibRfi-${n - 2}` }));
+  const p1 = yield ctx.beginRpc("fibRfi", n - 1, ctx.options({ id: `fibRfi-${n - 1}` }));
+  const p2 = yield ctx.beginRpc("fibRfi", n - 2, ctx.options({ id: `fibRfi-${n - 2}` }));
 
   return (yield p1) + (yield p2);
 }
 
-function* fibLfc(ctx: context.Context, n: number): Generator<any, number, any> {
+function* fibLfc(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const v1 = yield ctx.lfc(fibLfc, n - 1, ctx.options({ id: `fibLfc-${n - 1}` }));
-  const v2 = yield ctx.lfc(fibLfc, n - 2, ctx.options({ id: `fibLfc-${n - 2}` }));
+  const v1 = yield ctx.run(fibLfc, n - 1, ctx.options({ id: `fibLfc-${n - 1}` }));
+  const v2 = yield ctx.run(fibLfc, n - 2, ctx.options({ id: `fibLfc-${n - 2}` }));
   return v1 + v2;
 }
 
-function* fibRfc(ctx: context.Context, n: number): Generator<any, number, any> {
+function* fibRfc(ctx: Context, n: number): Generator<any, number, any> {
   if (n <= 1) {
     return n;
   }
-  const v1 = yield ctx.rfc("fibRfc", n - 1, ctx.options({ id: `fibRfc-${n - 1}` }));
-  const v2 = yield ctx.rfc("fibRfc", n - 2, ctx.options({ id: `fibRfc-${n - 2}` }));
+  const v1 = yield ctx.rpc("fibRfc", n - 1, ctx.options({ id: `fibRfc-${n - 1}` }));
+  const v2 = yield ctx.rpc("fibRfc", n - 2, ctx.options({ id: `fibRfc-${n - 2}` }));
   return v1 + v2;
 }
 
-function* foo(ctx: context.Context): Generator<any, any, any> {
-  const p1 = yield ctx.lfi(bar);
-  const p2 = yield ctx.rfi("bar");
-  yield ctx.lfi(bar);
-  yield ctx.rfi("bar");
-  yield ctx.lfc(bar);
-  yield ctx.rfc("bar");
+function* foo(ctx: Context): Generator<any, any, any> {
+  const p1 = yield ctx.beginRun(bar);
+  const p2 = yield ctx.beginRpc("bar");
+  yield ctx.beginRun(bar);
+  yield ctx.beginRpc("bar");
+  yield ctx.run(bar);
+  yield ctx.rpc("bar");
 
   return [yield p1, yield p2];
 }
 
-function* bar(ctx: context.Context): Generator<any, any, any> {
-  const p1 = yield ctx.lfi(baz);
-  const p2 = yield ctx.rfi("baz");
-  yield ctx.lfi(baz);
-  yield ctx.rfi("baz");
-  yield ctx.lfc(baz);
-  yield ctx.rfc("baz");
+function* bar(ctx: Context): Generator<any, any, any> {
+  const p1 = yield ctx.beginRun(baz);
+  const p2 = yield ctx.beginRpc("baz");
+  yield ctx.beginRun(baz);
+  yield ctx.beginRpc("baz");
+  yield ctx.run(baz);
+  yield ctx.rpc("baz");
 
   return [yield p1, yield p2];
 }
 
-function* baz(ctx: context.Context): Generator<any, any, any> {
+function* baz(ctx: Context): Generator<any, any, any> {
   return "baz";
 }
 

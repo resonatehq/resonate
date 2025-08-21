@@ -13,15 +13,11 @@ import {
 import * as util from "./util";
 
 export class Decorator<TRet> {
-  public id: string;
-  private sequ: number;
   private invokes: { kind: "call" | "invoke"; id: string }[];
   private generator: Generator<Yieldable, TRet, any>;
   private nextState: "internal.nothing" | "internal.promise" | "internal.literal" | "over" = "internal.nothing";
 
-  constructor(id: string, generator: Generator<Yieldable, TRet, any>) {
-    this.id = id;
-    this.sequ = 0;
+  constructor(generator: Generator<Yieldable, TRet, any>) {
     this.generator = generator;
     this.invokes = [];
   }
@@ -97,28 +93,23 @@ export class Decorator<TRet> {
     event: LFI<T> | RFI<T> | Future<T> | LFC<T> | RFC<T>,
   ): InternalAsyncL | InternalAsyncR | InternalAwait<T> {
     if (event instanceof LFI || event instanceof LFC) {
-      const id = this.idsequ();
-      this.invokes.push({ kind: event instanceof LFI ? "invoke" : "call", id });
+      this.invokes.push({ kind: event instanceof LFI ? "invoke" : "call", id: event.createReq.id });
       this.nextState = "internal.promise";
       return {
         type: "internal.async.l",
-        id,
+        id: event.createReq.id,
         func: event.func,
         args: event.args ?? [],
-        mode: "eager", // default, adjust if needed
+        createReq: event.createReq,
       };
     }
     if (event instanceof RFI || event instanceof RFC) {
-      const id = this.idsequ();
-      this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id });
+      this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id: event.createReq.id });
       this.nextState = "internal.promise";
       return {
         type: "internal.async.r",
-        id,
-        func: event.func,
-        args: event.args ?? [],
-        opts: event.opts,
-        mode: "eager", // default, adjust if needed
+        id: event.createReq.id,
+        createReq: event.createReq,
       };
     }
     if (event instanceof Future) {
@@ -155,10 +146,6 @@ export class Decorator<TRet> {
       };
     }
     throw new Error("Unexpected input to extToInt");
-  }
-
-  private idsequ(): string {
-    return `${this.id}.${this.sequ++}`;
   }
 
   private toLiteral<T>(result: Result<T>): Literal<T> {

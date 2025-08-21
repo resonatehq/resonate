@@ -118,8 +118,7 @@ export class Resonate {
       throw new Error(`${funcOrName} does not exist`);
     }
 
-    // TODO(dfarr): use the options
-    const [args, _] = util.splitArgsAndOpts(argsWithOpts, this.options());
+    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
     return new Promise<Handle<any>>((resolve) => {
       this.network.send(
@@ -127,9 +126,13 @@ export class Resonate {
           kind: "createPromiseAndTask",
           promise: {
             id: id,
-            timeout: 24 * util.HOUR + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
+            timeout: opts.timeout + Date.now(),
             param: { func: registered.name, args },
-            tags: { "resonate:invoke": `poll://any@${this.group}/${this.pid}` }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
+            tags: {
+              "resonate:invoke": `poll://any@${this.group}/${this.pid}`,
+              "resonate:scope": "global",
+              ...opts.tags,
+            }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
           },
           task: {
             processId: this.pid,
@@ -212,9 +215,9 @@ export class Resonate {
         {
           kind: "createPromise",
           id: id,
-          timeout: opts.timeout + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
+          timeout: opts.timeout + Date.now(),
           param: { func: name, args },
-          tags: { "resonate:invoke": opts.target },
+          tags: { "resonate:invoke": opts.target, "resonate:scope": "global", ...opts.tags },
           iKey: id,
           strict: false,
         },
@@ -245,6 +248,7 @@ export class Resonate {
       id: "",
       target: `poll://any@${this.group}`,
       timeout: 24 * util.HOUR,
+      tags: {},
       ...opts,
       [RESONATE_OPTIONS]: true,
     };
@@ -255,7 +259,7 @@ export class Resonate {
       {
         kind: "createSubscription",
         id: id,
-        timeout: 24 * util.HOUR + Date.now(), // TODO(avillega): use option timeout or 24h. Check the  usage of Date here, seems fine
+        timeout: 24 * util.HOUR + Date.now(),
         recv: `poll://uni@${this.group}/${this.pid}`,
       },
       (err, res) => {

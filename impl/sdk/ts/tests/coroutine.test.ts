@@ -1,4 +1,5 @@
-import type { Context } from "../src/context";
+import { WallClock } from "../src/clock";
+import { type Context, InnerContext } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
@@ -55,7 +56,7 @@ describe("Coroutine", () => {
   // Helper functions to write test easily
   const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
     return new Promise<any>((resolve) => {
-      Coroutine.exec(uuid, func, args, handler, (err, res) => {
+      Coroutine.exec(uuid, InnerContext.root(uuid, new WallClock()), func, args, handler, (err, res) => {
         expect(err).toBe(false);
         resolve(res);
       });
@@ -77,7 +78,7 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p = yield* ctx.lfi(bar);
+      const p = yield* ctx.beginRun(bar);
       const v = yield* p;
       return v;
     }
@@ -96,8 +97,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p = yield* ctx.lfi(bar);
-      const p2 = yield* ctx.lfi(baz);
+      const p = yield* ctx.beginRun(bar);
+      const p2 = yield* ctx.beginRun(baz);
       const v = yield* p;
       const v2 = yield* p2;
       return v + v2;
@@ -124,8 +125,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const p1 = yield* ctx.lfi(bar);
-      const p2 = yield* ctx.rfi("bar");
+      const p1 = yield* ctx.beginRun(bar);
+      const p2 = yield* ctx.beginRpc("bar");
       const v1 = yield* p1;
       const vx = yield* p1;
       const v2 = yield* p2;
@@ -150,8 +151,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      yield* ctx.rfi("bar");
-      yield* ctx.rfi("bar");
+      yield* ctx.beginRpc("bar");
+      yield* ctx.beginRpc("bar");
       return 99;
     }
 
@@ -181,8 +182,8 @@ describe("Coroutine", () => {
     }
 
     function* foo(ctx: Context) {
-      const v1: number = yield* ctx.lfc(bar);
-      const v2: number = yield* ctx.rfc<number>("bar");
+      const v1: number = yield* ctx.run(bar);
+      const v2: number = yield* ctx.rpc<number>("bar");
       return v1 + v2;
     }
 

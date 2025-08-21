@@ -1,7 +1,8 @@
-import type { Heartbeat } from "heartbeat";
-import { Context } from "./context";
+import { type Clock, WallClock } from "./clock";
+import { InnerContext } from "./context";
 import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler } from "./handler";
+import type { Heartbeat } from "./heartbeat";
 import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
 import { Nursery } from "./nursery";
 import { AsyncProcessor, type Processor } from "./processor/processor";
@@ -25,6 +26,7 @@ export class Computation {
   private id: string;
   private pid: string;
   private ttl: number;
+  private clock: Clock;
   private group: string;
   private network: Network;
   private handler: Handler;
@@ -44,6 +46,7 @@ export class Computation {
     registry: Registry,
     heartbeat: Heartbeat,
     processor?: Processor,
+    clock?: Clock,
   ) {
     this.id = id;
     this.pid = pid;
@@ -54,6 +57,7 @@ export class Computation {
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.processor = processor ?? new AsyncProcessor();
+    this.clock = clock ?? new WallClock();
   }
 
   public process(task: Task, done: Callback<Status>) {
@@ -134,10 +138,11 @@ export class Computation {
             });
           };
 
+          const ctx = InnerContext.root(this.id, this.clock);
           if (util.isGeneratorFunction(func)) {
-            this.processGenerator(nursery, func, args, done);
+            this.processGenerator(nursery, ctx, func, args, done);
           } else {
-            this.processFunction(this.id, new Context(), func, args, (err, promise) => {
+            this.processFunction(this.id, ctx, func, args, (err, promise) => {
               if (err) return done(true);
               util.assertDefined(promise);
 
@@ -154,8 +159,14 @@ export class Computation {
     );
   }
 
-  private processGenerator(nursery: Nursery<boolean, Status>, func: Func, args: any[], done: Callback<Status>) {
-    Coroutine.exec(this.id, func, args, this.handler, (err, status) => {
+  private processGenerator(
+    nursery: Nursery<boolean, Status>,
+    ctx: InnerContext,
+    func: Func,
+    args: any[],
+    done: Callback<Status>,
+  ) {
+    Coroutine.exec(this.id, ctx, func, args, this.handler, (err, status) => {
       if (err) return done(err);
       util.assertDefined(status);
 
@@ -177,7 +188,13 @@ export class Computation {
     });
   }
 
-  private processFunction(id: string, ctx: Context, func: Func, args: any[], done: Callback<DurablePromiseRecord>) {
+  private processFunction(
+    id: string,
+    ctx: InnerContext,
+    func: Func,
+    args: any[],
+    done: Callback<DurablePromiseRecord>,
+  ) {
     this.processor.process(
       id,
       async () => await func(ctx, ...args),

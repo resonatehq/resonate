@@ -1,4 +1,4 @@
-import { Context, type Yieldable } from "./context";
+import type { Context, InnerContext, Yieldable } from "./context";
 import { Decorator } from "./decorator";
 import type { Handler } from "./handler";
 import type { DurablePromiseRecord } from "./network/network";
@@ -17,7 +17,7 @@ export type Completed = {
 
 export interface LocalTodo {
   id: string;
-  ctx: Context;
+  ctx: InnerContext;
   func: (ctx: Context, ...args: any[]) => any;
   args: any[];
 }
@@ -37,11 +37,11 @@ type Done = {
 };
 
 export class Coroutine<T> {
-  private ctx: Context;
+  private ctx: InnerContext;
   private decorator: Decorator<T>;
   private handler: Handler;
 
-  constructor(ctx: Context, decorator: Decorator<T>, handler: Handler) {
+  constructor(ctx: InnerContext, decorator: Decorator<T>, handler: Handler) {
     this.ctx = ctx;
     this.decorator = decorator;
     this.handler = handler;
@@ -49,42 +49,50 @@ export class Coroutine<T> {
 
   public static exec(
     id: string,
+    ctx: InnerContext,
     func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
     args: any[],
     handler: Handler,
     callback: Callback<Suspended | Completed>,
   ): void {
-    handler.createPromise(id, Number.MAX_SAFE_INTEGER, undefined, {}, (err, res) => {
-      if (err) return callback(err);
-      util.assertDefined(res);
-
-      if (res.state !== "pending") {
-        return callback(false, { type: "completed", promise: res });
-      }
-
-      const ctx = new Context();
-      const coroutine = new Coroutine(ctx, new Decorator(id, func(ctx, ...args)), handler);
-
-      coroutine.exec((err, status) => {
+    handler.createPromise(
+      {
+        // The createReq for this specific creation is not relevant,
+        // this promise is guaranteed to have been created already.
+        kind: "createPromise",
+        id,
+        timeout: 0,
+      },
+      (err, res) => {
         if (err) return callback(err);
-        util.assertDefined(status);
+        util.assertDefined(res);
 
-        switch (status.type) {
-          case "more":
-            callback(false, { type: "suspended", todo: status.todo });
-            break;
-
-          case "done":
-            handler.completePromise(id, status.result, (err, promise) => {
-              if (err) return callback(err);
-              util.assertDefined(promise);
-
-              callback(false, { type: "completed", promise });
-            });
-            break;
+        if (res.state !== "pending") {
+          return callback(false, { type: "completed", promise: res });
         }
-      });
-    });
+
+        const coroutine = new Coroutine(ctx, new Decorator(func(ctx, ...args)), handler);
+        coroutine.exec((err, status) => {
+          if (err) return callback(err);
+          util.assertDefined(status);
+
+          switch (status.type) {
+            case "more":
+              callback(false, { type: "suspended", todo: status.todo });
+              break;
+
+            case "done":
+              handler.completePromise(id, status.result, (err, promise) => {
+                if (err) return callback(err);
+                util.assertDefined(promise);
+
+                callback(false, { type: "completed", promise });
+              });
+              break;
+          }
+        });
+      },
+    );
   }
 
   private exec(callback: Callback<More | Done>) {
@@ -102,7 +110,7 @@ export class Coroutine<T> {
 
         // Handle internal.async.l (lfi/lfc)
         if (action.type === "internal.async.l") {
-          this.handler.createPromise(action.id, Number.MAX_SAFE_INTEGER, undefined, {}, (err, res) => {
+          this.handler.createPromise(action.createReq, (err, res) => {
             if (err) return callback(err);
             util.assertDefined(res);
 
@@ -125,7 +133,7 @@ export class Coroutine<T> {
 
               const coroutine = new Coroutine(
                 this.ctx,
-                new Decorator(action.id, action.func(this.ctx, ...action.args)),
+                new Decorator(action.func(this.ctx, ...action.args)),
                 this.handler,
               );
               coroutine.exec((err, status) => {
@@ -172,33 +180,27 @@ export class Coroutine<T> {
 
         // Handle internal.async.r
         if (action.type === "internal.async.r") {
-          this.handler.createPromise(
-            action.id,
-            action.opts.timeout + Date.now(), // TODO(avillega): this is not deterministic, chage it
-            { func: action.func, args: action.args ?? [] },
-            { "resonate:invoke": `poll://any@${action.opts.target}` }, // TODO(avillega): remove the poll assumption, might need server work
-            (err, res) => {
-              if (err) return callback(err);
-              util.assertDefined(res);
+          this.handler.createPromise(action.createReq, (err, res) => {
+            if (err) return callback(err);
+            util.assertDefined(res);
 
-              if (res.state === "pending") {
-                remote.push({ id: action.id });
-                input = {
-                  type: "internal.promise",
-                  state: "pending",
-                  id: action.id,
-                };
-              } else {
-                input = {
-                  type: "internal.promise",
-                  state: "completed",
-                  id: action.id,
-                  value: extractResult(res),
-                };
-              }
-              next();
-            },
-          );
+            if (res.state === "pending") {
+              remote.push({ id: action.id });
+              input = {
+                type: "internal.promise",
+                state: "pending",
+                id: action.id,
+              };
+            } else {
+              input = {
+                type: "internal.promise",
+                state: "completed",
+                id: action.id,
+                value: extractResult(res),
+              };
+            }
+            next();
+          });
           return; // Exit the while loop to wait for async callback
         }
 

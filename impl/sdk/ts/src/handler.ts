@@ -1,4 +1,4 @@
-import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/network";
+import type { CallbackRecord, CreatePromiseReq, DurablePromiseRecord, Network } from "./network/network";
 import type { Result } from "./types";
 import * as util from "./util";
 
@@ -20,37 +20,20 @@ export class Handler {
     this.promises.set(durablePromise.id, durablePromise);
   }
 
-  public createPromise(
-    id: string,
-    timeout: number,
-    param: any,
-    tags: Record<string, string>,
-    callback: Callback<DurablePromiseRecord>,
-  ): void {
-    const promise = this.promises.get(id);
+  public createPromise(createReq: CreatePromiseReq, callback: Callback<DurablePromiseRecord>): void {
+    const promise = this.promises.get(createReq.id);
     if (promise) {
       callback(false, promise);
       return;
     }
 
-    this.network.send(
-      {
-        kind: "createPromise",
-        id,
-        iKey: id,
-        timeout,
-        param,
-        tags,
-        strict: false,
-      },
-      (err, res) => {
-        if (err) return callback(err);
-        util.assertDefined(res);
+    this.network.send(createReq, (err, res) => {
+      if (err) return callback(err);
+      util.assertDefined(res);
 
-        this.promises.set(res.promise.id, res.promise);
-        callback(false, res.promise);
-      },
-    );
+      this.promises.set(res.promise.id, res.promise);
+      callback(false, res.promise);
+    });
   }
 
   public completePromise(id: string, result: Result<any>, callback: Callback<DurablePromiseRecord>): void {
