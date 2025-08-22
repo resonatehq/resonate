@@ -2,7 +2,7 @@ import type { Network } from "./network/network";
 import * as util from "./util";
 
 export interface Heartbeat {
-  start(delay: number): void;
+  start(): void;
   stop(): void;
 }
 
@@ -11,49 +11,48 @@ export class AsyncHeartbeat implements Heartbeat {
   private intervalId: ReturnType<typeof setInterval> | undefined;
   private pid: string;
   private counter = 0;
+  private delay: number;
 
-  constructor(network: Network, pid: string) {
-    this.network = network;
+  constructor(pid: string, delay: number, network: Network) {
     this.pid = pid;
+    this.delay = delay;
+    this.network = network;
   }
 
-  start(delay: number): void {
+  start(): void {
     this.counter++;
     if (!this.intervalId) {
-      this.heartbeat(delay);
+      this.heartbeat();
     }
   }
 
-  private heartbeat(delay: number): void {
-    this.intervalId = setInterval(
-      (intervalId, counter) => {
-        this.network.send(
-          {
-            kind: "heartbeatTasks",
-            processId: this.pid,
-          },
-          (err, res) => {
-            if (err) return;
-            util.assertDefined(res);
+  private heartbeat(): void {
+    this.intervalId = setInterval(() => {
+      const counter = this.counter;
 
-            if (res.tasksAffected === 0) {
-              this.clearIntervalIfMatch(intervalId, counter);
-            }
-          },
-        );
-      },
-      delay,
-      this.intervalId,
-      this.counter,
-    );
+      this.network.send(
+        {
+          kind: "heartbeatTasks",
+          processId: this.pid,
+        },
+        (err, res) => {
+          if (err) return;
+          util.assertDefined(res);
+
+          if (res.tasksAffected === 0) {
+            this.clearIntervalIfMatch(counter);
+          }
+        },
+      );
+    }, this.delay);
   }
 
   stop(): void {
-    this.clearIntervalIfMatch(this.intervalId, this.counter);
+    this.clearIntervalIfMatch(this.counter);
   }
 
-  private clearIntervalIfMatch(interval: ReturnType<typeof setInterval> | undefined, counter: number) {
-    if (this.intervalId === interval && this.counter === counter) {
+  private clearIntervalIfMatch(counter: number) {
+    if (this.counter === counter) {
       clearInterval(this.intervalId);
       this.intervalId = undefined;
     }
@@ -61,6 +60,6 @@ export class AsyncHeartbeat implements Heartbeat {
 }
 
 export class NoHeartbeat implements Heartbeat {
-  start(delay: number): void {}
+  start(): void {}
   stop(): void {}
 }

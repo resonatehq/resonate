@@ -30,7 +30,10 @@ export class Resonate {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
-    this.inner = new ResonateInner(network, { ...config, heartbeat: new AsyncHeartbeat(network, config.pid) });
+    this.inner = new ResonateInner(network, {
+      ...config,
+      heartbeat: new AsyncHeartbeat(config.pid, this.ttl / 2, network),
+    });
   }
 
   /**

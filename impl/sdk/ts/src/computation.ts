@@ -120,7 +120,7 @@ export class Computation {
     this.handler.updateCache(task.rootPromise);
 
     // start heartbeat
-    this.heartbeat.start(this.ttl / 2);
+    this.heartbeat.start();
 
     this.nurseries.set(
       task.rootPromise.id,
