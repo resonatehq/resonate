@@ -1,5 +1,5 @@
-import type { Heartbeat } from "heartbeat";
 import { Computation, type Status } from "./computation";
+import type { Heartbeat } from "./heartbeat";
 import type { DurablePromiseRecord, Message, Network } from "./network/network";
 import { Registry } from "./registry";
 import type { Callback, Func, Task } from "./types";

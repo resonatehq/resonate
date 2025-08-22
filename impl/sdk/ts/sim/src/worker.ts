@@ -1,9 +1,9 @@
-import type { Callback } from "types";
 import { NoHeartbeat } from "../../src/heartbeat";
 import type { Network, Message as NetworkMessage, Request, Response, ResponseFor } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
+import type { Callback } from "../../src/types";
 import * as util from "../../src/util";
-import { type Address, Message, Process, type Random, anycast, unicast } from "./simulator";
+import { type Address, Message, Process, type Random, unicast } from "./simulator";
 
 interface DeliveryOptions {
   charFlipProb?: number;
@@ -72,6 +72,8 @@ class SimulatedNetwork implements Network {
 
   process(message: Message<{ err?: any; res?: Response } | NetworkMessage>): void {
     if (message.isResponse()) {
+      util.assert(message.source === this.target);
+      util.assert(message.target === this.source);
       const correlationId = message.head?.correlationId;
       const entry = correlationId && this.callbacks[correlationId];
       if (entry) {
@@ -86,6 +88,7 @@ class SimulatedNetwork implements Network {
         delete this.callbacks[correlationId];
       }
     } else {
+      util.assert(message.source.kind === this.target.kind && message.source.iaddr === this.target.iaddr);
       this.recv((message as Message<NetworkMessage>).data);
     }
   }
@@ -127,7 +130,7 @@ export class WorkerProcess extends Process {
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
-    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, anycast(gaddr, iaddr), unicast("server"));
+    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
     this.resonate = new ResonateInner(this.network, {
       pid: iaddr,
       group: gaddr,

@@ -37,7 +37,8 @@ import type {
 } from "./network"; // Assuming types are in a separate file
 
 import { EventSource } from "eventsource";
-import type { Callback } from "types";
+
+import type { Callback } from "../types";
 import * as util from "../util";
 
 // API Value format from OpenAPI spec

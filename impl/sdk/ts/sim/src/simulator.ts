@@ -21,7 +21,7 @@ export class Random {
     return this.state / 0x100000000; // Equivalent to 2^32
   }
 
-  pick<T>(list: T[]): T {
+  pick<T>(list: T[]): T | undefined {
     return list[Math.floor(this.next() * list.length)];
   }
 
@@ -91,6 +91,8 @@ export interface DeliveryOptions {
   dropProb?: number;
   randomDelay?: number;
   duplProb?: number;
+  deactivateProb?: number;
+  activateProb?: number;
 }
 
 export class Simulator {
@@ -104,9 +106,12 @@ export class Simulator {
   private scheduledRepeat: { interval: number; fn: () => void }[] = [];
   private scheduledDelay: { runAt: number; fn: () => void }[] = [];
 
-  constructor(prng: Random, { dropProb = 0, randomDelay = 0, duplProb = 0 }: DeliveryOptions = {}) {
+  constructor(
+    prng: Random,
+    { dropProb = 0, randomDelay = 0, duplProb = 0, deactivateProb = 0, activateProb = 0 }: DeliveryOptions = {},
+  ) {
     this.prng = prng;
-    this.deliveryOptions = { dropProb, randomDelay, duplProb };
+    this.deliveryOptions = { dropProb, randomDelay, duplProb, deactivateProb, activateProb };
   }
 
   addMessage(message: Message<any>): void {
@@ -143,6 +148,21 @@ export class Simulator {
     }
 
     this.time += 1;
+
+    const { deactivateProb, activateProb } = this.deliveryOptions;
+    if ((deactivateProb > 0 || activateProb > 0) && this.process.length > 0) {
+      for (const proc of this.process) {
+        if (proc.active) {
+          if (this.prng.next() < deactivateProb) {
+            proc.active = false;
+          }
+        } else {
+          if (this.prng.next() < activateProb) {
+            proc.active = true;
+          }
+        }
+      }
+    }
 
     const retained: Message<any>[] = [];
     const consumed: Message<any>[] = [];
@@ -181,7 +201,9 @@ export class Simulator {
           inboxes[preference.iaddr].push(message);
         } else {
           const process = this.prng.pick(this.process.filter((p) => p.active && target.gaddr === p.gaddr));
-          inboxes[process.iaddr].push(message);
+          if (process) {
+            inboxes[process.iaddr].push(message);
+          }
         }
       } else {
         throw new Error("unknown target.kind");

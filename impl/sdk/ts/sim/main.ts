@@ -140,6 +140,20 @@ program
       throw new Error(`Invalid charFlipProb: ${value} (must be 0–1)`);
     }
     return n;
+  })
+  .option("--deactivateProb <number>", "Deactivate probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid deactivateProb: ${value} (must be 0–1)`);
+    }
+    return n;
+  })
+  .option("--activateProb <number>", "Activate probability (0-1)", (value) => {
+    const n = Number.parseFloat(value);
+    if (Number.isNaN(n) || n < 0 || n > 1) {
+      throw new Error(`Invalid activateProb: ${value} (must be 0–1)`);
+    }
+    return n;
   });
 
 program.parse(process.argv);
@@ -152,6 +166,8 @@ type Options = {
   dropProb?: number;
   duplProb?: number;
   charFlipProb?: number;
+  deactivateProb?: number;
+  activateProb?: number;
 };
 
 const options = program.opts<Options>();
@@ -163,6 +179,8 @@ export function run(options: Options) {
     randomDelay: options.randomDelay ?? rnd.random(0.5),
     dropProb: options.dropProb ?? rnd.random(0.5),
     duplProb: options.duplProb ?? rnd.random(0.5),
+    deactivateProb: options.deactivateProb ?? rnd.random(0.01),
+    activateProb: options.activateProb ?? rnd.random(0.5),
   });
 
   const server = new ServerProcess("server");
@@ -172,8 +190,18 @@ export function run(options: Options) {
     "worker-1",
     "default",
   );
-  const worker2 = new WorkerProcess(rnd, {}, "worker-2", "default");
-  const worker3 = new WorkerProcess(rnd, {}, "worker-3", "default");
+  const worker2 = new WorkerProcess(
+    rnd,
+    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+    "worker-2",
+    "default",
+  );
+  const worker3 = new WorkerProcess(
+    rnd,
+    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+    "worker-3",
+    "default",
+  );
 
   const workers = [worker1, worker2, worker3] as const;
 

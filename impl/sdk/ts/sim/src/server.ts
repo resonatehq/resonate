@@ -1,5 +1,6 @@
 import { Server } from "../../dev/server";
 import type { Message as NetworkMessage, Request, Response } from "../../src/network/network";
+import * as util from "../../src/util";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 export class ServerProcess extends Process {
@@ -15,6 +16,7 @@ export class ServerProcess extends Process {
     const responses: Message<{ err?: any; res?: Response } | NetworkMessage>[] = [];
 
     for (const message of messages) {
+      util.assert(message.target.iaddr === this.iaddr);
       if (message.isRequest()) {
         let res: { err?: any; res?: Response };
         try {
@@ -22,6 +24,7 @@ export class ServerProcess extends Process {
         } catch (err: any) {
           res = { err: err };
         }
+
         responses.push(message.resp(res));
       }
     }
