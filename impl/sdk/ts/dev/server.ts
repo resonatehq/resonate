@@ -44,6 +44,7 @@ interface Task {
   recv: string;
   rootPromiseId: string;
   leafPromiseId: string;
+  timeout: number;
   processId?: string;
   ttl?: number;
   expiry?: number;
@@ -369,7 +370,8 @@ export class Server {
       }
 
       case "dropTask": {
-        throw new Error("not implemented");
+        this.dropTask({ ...requ, time });
+        return { kind: "dropTask" };
       }
 
       default:
@@ -667,10 +669,13 @@ export class Server {
   private completeTask({ id, counter, time }: { id: string; counter: number; time: number }): TaskRecord {
     const { task } = this.transitionTask({ id, to: "completed", counter, time });
 
-    return {
-      ...task,
-      timeout: this.getPromise({ id: task.rootPromiseId }).timeout,
-    };
+    return task;
+  }
+
+  private dropTask({ id, counter, time }: { id: string; counter: number; time: number }) {
+    const { applied } = this.transitionTask({ id, to: "init", counter, time });
+    util.assert(applied);
+    return;
   }
 
   private heartbeatTasks({ processId, time }: { processId: string; time: number }): number {
@@ -798,6 +803,7 @@ export class Server {
             recv: this.targets[recv] ?? recv,
             rootPromiseId: promise.id,
             leafPromiseId: promise.id,
+            timeout: promise.timeout,
             time,
           });
           util.assert(applied, `transitionPromise: failed to init invoke task for promise '${id}' on route '${recv}'`);
@@ -1010,6 +1016,7 @@ export class Server {
     to,
     type,
     recv,
+    timeout,
     rootPromiseId,
     leafPromiseId,
     counter,
@@ -1024,6 +1031,7 @@ export class Server {
     recv?: string;
     rootPromiseId?: string;
     leafPromiseId?: string;
+    timeout?: number;
     counter?: number;
     processId?: string;
     ttl?: number;
@@ -1037,10 +1045,12 @@ export class Server {
       util.assertDefined(recv);
       util.assertDefined(rootPromiseId);
       util.assertDefined(leafPromiseId);
+      util.assertDefined(timeout);
 
       record = {
         id,
         counter: 1,
+        timeout,
         state: to,
         type,
         recv,
@@ -1048,6 +1058,7 @@ export class Server {
         leafPromiseId,
         createdOn: time,
       };
+
       this.tasks.set(id, record);
       return { task: record, applied: true };
     }
@@ -1063,8 +1074,9 @@ export class Server {
     }
 
     if (record?.state === "init" && to === "claimed" && record.counter === counter) {
-      util.assertDefined(ttl);
       util.assertDefined(processId);
+      util.assertDefined(ttl);
+      util.assertDefined(counter);
 
       record = {
         ...record,
@@ -1080,6 +1092,7 @@ export class Server {
 
     if (record?.state === "enqueued" && to === "claimed" && record.counter === counter) {
       util.assertDefined(ttl);
+      util.assertDefined(counter);
       util.assertDefined(processId);
 
       record = {
@@ -1110,6 +1123,19 @@ export class Server {
       return { task: record, applied: true };
     }
 
+    if (record !== undefined && record.state === "claimed" && record.counter === counter && to === "init") {
+      record = {
+        ...record,
+        counter: record.counter + 1,
+        state: to,
+        processId: undefined,
+        ttl: undefined,
+        expiry: undefined,
+      };
+      this.tasks.set(id, record);
+      return { task: record, applied: true };
+    }
+
     if (record !== undefined && ["enqueued", "claimed"].includes(record.state) && to === "init") {
       util.assertDefined(record.expiry);
       util.assert(
@@ -1121,6 +1147,9 @@ export class Server {
         ...record,
         counter: record.counter + 1,
         state: to,
+        processId: undefined,
+        ttl: undefined,
+        expiry: undefined,
       };
 
       this.tasks.set(id, record);
