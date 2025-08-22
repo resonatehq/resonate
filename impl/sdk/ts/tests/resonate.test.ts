@@ -183,4 +183,25 @@ describe("Resonate usage tests", () => {
     expect(v).toBe("myValue");
     resonate.stop();
   });
+
+  test("Basic Durable sleep", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const promises = new Promises(network);
+
+    const time = Date.now();
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.sleep(1 * util.SEC);
+      return "myValue";
+    });
+
+    const p = await f.beginRun("f");
+    const durable = await promises.get("f.0");
+    expect(durable.tags).toMatchObject({ "resonate:timeout": "true" });
+    expect(durable.timeout).toBeLessThan(time + 1 * util.SEC + 100);
+
+    const v = await p.result;
+    expect(v).toBe("myValue");
+    resonate.stop();
+  });
 });

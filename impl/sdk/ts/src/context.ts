@@ -115,6 +115,8 @@ export interface Context {
 
   promise<T>(options?: Partial<Options> & { [RESONATE_OPTIONS]: true }): RFI<T>;
 
+  sleep(ms: number): RFC<void>;
+
   options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
 }
 
@@ -178,6 +180,10 @@ export class InnerContext implements Context {
     return new RFI(this.latentCreateOpts(this.options(options)));
   }
 
+  sleep(ms: number): RFC<void> {
+    return new RFC(this.sleepCreateOpts(this.options({ timeout: ms })));
+  }
+
   options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
     return {
       id: this.seqid(),
@@ -207,6 +213,7 @@ export class InnerContext implements Context {
       strict: false,
     };
   }
+
   remoteCreateReq(func: string, args: any[], opts: Options): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
@@ -235,6 +242,26 @@ export class InnerContext implements Context {
       "resonate:scope": "global",
       "resonate:root": this.rId,
       "resonate:parent": this.pId,
+      ...opts.tags,
+    };
+
+    return {
+      kind: "createPromise",
+      id: opts.id,
+      timeout: opts.timeout + this.clock.now(),
+      param: {},
+      tags,
+      iKey: opts.id,
+      strict: false,
+    };
+  }
+
+  sleepCreateOpts(opts: Options): CreatePromiseReq {
+    const tags = {
+      "resonate:scope": "global",
+      "resonate:root": this.rId,
+      "resonate:parent": this.pId,
+      "resonate:timeout": "true",
       ...opts.tags,
     };
 
