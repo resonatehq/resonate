@@ -1,5 +1,5 @@
 import { LocalNetwork } from "../dev/network";
-import { AsyncHeartbeat } from "./heartbeat";
+import { AsyncHeartbeat, NoHeartbeat } from "./heartbeat";
 import type { DurablePromiseRecord, Network } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Promises } from "./promises";
@@ -34,9 +34,13 @@ export class Resonate {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
+
+    const heartbeat =
+      network instanceof LocalNetwork ? new NoHeartbeat() : new AsyncHeartbeat(config.pid, this.ttl / 2, network);
+
     this.inner = new ResonateInner(network, {
       ...config,
-      heartbeat: new AsyncHeartbeat(config.pid, this.ttl / 2, network),
+      heartbeat: heartbeat,
     });
     this.promises = new Promises(network);
     this.schedules = new Schedules(network);
@@ -49,7 +53,7 @@ export class Resonate {
     return new Resonate(new LocalNetwork(), {
       group: "default",
       pid: "default",
-      ttl: 1 * util.MIN,
+      ttl: Number.MAX_SAFE_INTEGER,
     });
   }
 
