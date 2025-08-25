@@ -7,8 +7,13 @@ if TYPE_CHECKING:
 
 
 class Handle[T]:
-    def __init__(self, f: Future[T]) -> None:
+    def __init__(self, id: str, f: Future[T]) -> None:
+        self._id = id
         self._f = f
+
+    @property
+    def id(self) -> str:
+        return self._id
 
     def done(self) -> bool:
         return self._f.done()

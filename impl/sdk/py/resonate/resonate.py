@@ -419,7 +419,7 @@ class Resonate:
         opts = self._opts.merge(version=version)
 
         self._bridge.run(Remote(id, id, id, name, args, kwargs, opts), func, args, kwargs, opts, future)
-        return Handle(future)
+        return Handle(id, future)
 
     @overload
     def rpc[**P, R](
@@ -520,7 +520,7 @@ class Resonate:
 
         opts = self._opts.merge(version=version)
         self._bridge.rpc(Remote(id, id, id, name, args, kwargs, opts), opts, future)
-        return Handle(future)
+        return Handle(id, future)
 
     def get(self, id: str) -> Handle[Any]:
         """Subscribe to an execution.
@@ -537,7 +537,7 @@ class Resonate:
         future = Future()
 
         self._bridge.get(id, self._opts, future)
-        return Handle(future)
+        return Handle(id, future)
 
     def set_dependency(self, name: str, obj: Any) -> None:
         """Store a named dependency for use with `Context`.
