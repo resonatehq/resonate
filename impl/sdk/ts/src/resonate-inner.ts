@@ -1,9 +1,21 @@
 import { Computation, type Status } from "./computation";
 import type { Heartbeat } from "./heartbeat";
-import type { DurablePromiseRecord, Message, Network } from "./network/network";
+import type {
+  CreatePromiseAndTaskReq,
+  CreatePromiseReq,
+  DurablePromiseRecord,
+  Message,
+  Network,
+  ResponseFor,
+} from "./network/network";
 import { Registry } from "./registry";
 import type { Callback, Func, Task } from "./types";
 import * as util from "./util";
+
+export type PromiseHandler = {
+  addEventListener: (event: "created" | "completed", callback: (p: DurablePromiseRecord) => void) => void;
+  subscribe: () => Promise<void>;
+};
 
 export class ResonateInner {
   public registry: Registry; // TODO(avillega): Who should own the registry? the resonate class?
@@ -15,7 +27,7 @@ export class ResonateInner {
   private ttl: number;
   private heartbeat: Heartbeat;
   private notifications: Map<string, DurablePromiseRecord> = new Map();
-  private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => void>> = new Map();
+  private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => boolean>> = new Map();
 
   constructor(network: Network, config: { group: string; pid: string; ttl: number; heartbeat: Heartbeat }) {
     const { group, pid, ttl, heartbeat } = config;
@@ -29,11 +41,36 @@ export class ResonateInner {
     this.network.subscribe(this.onMessage.bind(this));
   }
 
-  public process(task: Task, callback: Callback<Status>) {
-    let computation = this.computations.get(task.rootPromiseId);
+  public run(req: CreatePromiseAndTaskReq): PromiseHandler {
+    return this.runOrRpc(req, (err, res) => {
+      util.assert(!err, "retry forever ensures err is false");
+      util.assertDefined(res);
+
+      // notify
+      this.notify(res.promise);
+
+      // if we have the task, process it
+      if (res.task) {
+        this.process({ kind: "claimed", task: res.task, rootPromise: res.promise }, () => {});
+      }
+    });
+  }
+
+  public rpc(req: CreatePromiseReq): PromiseHandler {
+    return this.runOrRpc(req, (err, res) => {
+      util.assert(!err, "retry forever ensures err is false");
+      util.assertDefined(res);
+
+      // notify
+      this.notify(res.promise);
+    });
+  }
+
+  public process(task: Task, done: Callback<Status>) {
+    let computation = this.computations.get(task.task.rootPromiseId);
     if (!computation) {
       computation = new Computation(
-        task.rootPromiseId,
+        task.task.rootPromiseId,
         this.pid,
         this.ttl,
         this.group,
@@ -41,34 +78,63 @@ export class ResonateInner {
         this.registry,
         this.heartbeat,
       );
-      this.computations.set(task.rootPromiseId, computation);
+      this.computations.set(task.task.rootPromiseId, computation);
     }
 
-    computation.process(task, (err, status) => {
-      if (err) return callback(err);
-      util.assertDefined(status);
-
-      callback(false, status);
-
-      if (status.kind === "completed") {
-        // notify subscribers of the completed promise
-        this.notify(status.promise);
-      }
-    });
+    computation.process(task, done);
   }
 
-  private onMessage(msg: Message): void {
-    switch (msg.type) {
-      case "invoke":
-      case "resume":
-        this.process({ ...msg.task, kind: "unclaimed" }, () => {});
-        break;
+  private runOrRpc<T extends CreatePromiseReq | CreatePromiseAndTaskReq>(
+    req: T,
+    done: Callback<ResponseFor<T>>,
+  ): PromiseHandler {
+    const id = req.kind === "createPromise" ? req.id : req.promise.id;
+    const timeout = req.kind === "createPromise" ? req.timeout : req.promise.timeout;
 
-      case "notify":
-        // TODO(avillega): assert that the promise is completed
-        this.notify(msg.promise);
-        break;
-    }
+    this.network.send(req, done, true);
+
+    return {
+      addEventListener: (event: "created" | "completed", callback: (p: DurablePromiseRecord) => void) => {
+        const subscriptions = this.subscriptions.get(id) || [];
+
+        subscriptions.push((p: DurablePromiseRecord): boolean => {
+          if (event === "created" || (event === "completed" && p.state !== "pending")) {
+            callback(p);
+            return true;
+          }
+
+          return false;
+        });
+
+        this.subscriptions.set(id, subscriptions);
+
+        // immediately notify if we already have a promise
+        const promise = this.notifications.get(id);
+        if (promise) {
+          this.notify(promise);
+        }
+      },
+      subscribe: () =>
+        new Promise<void>((resolve) => {
+          // attempt to subscribe forever
+          this.network.send(
+            {
+              kind: "createSubscription",
+              id: id,
+              timeout: timeout,
+              recv: `poll://uni@${this.group}/${this.pid}`,
+            },
+            (err, res) => {
+              util.assert(!err, "retry forever ensures err is false");
+              util.assertDefined(res);
+
+              this.notify(res.promise);
+              resolve();
+            },
+            true,
+          );
+        }),
+    };
   }
 
   public register<F extends Func>(name: string, func: F) {
@@ -79,17 +145,18 @@ export class ResonateInner {
     this.registry.set(name, func);
   }
 
-  public subscribe(id: string, callback: (promise: DurablePromiseRecord) => void): void {
-    // immediately notify if we already have a notification
-    if (this.notifications.has(id)) {
-      callback(this.notifications.get(id)!);
-      return;
-    }
+  private onMessage(msg: Message): void {
+    switch (msg.type) {
+      case "invoke":
+      case "resume":
+        this.process({ kind: "unclaimed", task: msg.task }, () => {});
+        break;
 
-    // otherwise add callback to the subscriptions
-    const subscriptions = this.subscriptions.get(id) ?? [];
-    this.subscriptions.set(id, subscriptions);
-    subscriptions.push(callback);
+      case "notify":
+        // TODO(avillega): assert that the promise is completed
+        this.notify(msg.promise);
+        break;
+    }
   }
 
   private notify(promise: DurablePromiseRecord) {
@@ -97,12 +164,15 @@ export class ResonateInner {
     this.notifications.set(promise.id, promise);
 
     // notify subscribers
-    for (const callback of this.subscriptions.get(promise.id) ?? []) {
-      callback(promise);
+    const subscriptions = this.subscriptions.get(promise.id) ?? [];
+    for (const [i, f] of subscriptions.entries()) {
+      if (f(promise)) {
+        subscriptions.splice(i, 1);
+      }
     }
 
-    // clear subscribers
-    this.subscriptions.delete(promise.id);
+    // remove any subscriber that was notified
+    this.subscriptions.set(promise.id, subscriptions);
   }
 
   public stop() {

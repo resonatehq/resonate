@@ -102,21 +102,39 @@ export class Future<T> implements Iterable<Future<T>> {
 }
 
 export interface Context {
+  // core four
+  lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
+  lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
+  rfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
+  rfi<T>(func: string, ...args: any[]): RFI<T>;
+  rfi(func: Func | string, ...args: any[]): RFI<any>;
+  rfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
+  rfc<T>(func: string, ...args: any[]): RFC<T>;
+  rfc(func: Func | string, ...args: any[]): RFC<any>;
+
+  // beginRun (lfi alias)
   beginRun<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
+
+  // run (lfc alias)
   run<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
 
+  // beginRpc (rfi alias)
   beginRpc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   beginRpc<T>(func: string, ...args: any[]): RFI<T>;
   beginRpc(func: Func | string, ...args: any[]): RFI<any>;
 
+  // rpc (rfc alias)
   rpc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
   rpc<T>(func: string, ...args: any[]): RFC<T>;
   rpc(func: Func | string, ...args: any[]): RFC<any>;
 
-  promise<T>(options?: Partial<Options> & { [RESONATE_OPTIONS]: true }): RFI<T>;
-
+  // sleep
   sleep(ms: number): RFC<void>;
 
+  // promise
+  promise<T>(options?: Partial<Options> & { [RESONATE_OPTIONS]: true }): RFI<T>;
+
+  // options
   options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
 }
 

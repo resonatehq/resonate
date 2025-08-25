@@ -273,7 +273,7 @@ export type Message =
 export type ResponseFor<T extends Request> = Extract<Response, { kind: T["kind"] }>;
 
 export interface Network {
-  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>): void;
+  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever?: boolean): void;
   recv(msg: Message): void;
   stop(): void;
   subscribe(callback: (msg: Message) => void): void;

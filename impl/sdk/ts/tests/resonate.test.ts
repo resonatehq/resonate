@@ -24,7 +24,7 @@ describe("Resonate usage tests", () => {
 
     const startTime = Date.now();
     const h = await f.beginRun("test");
-    const r = await h.result;
+    const r = await h.result();
     const endTime = Date.now();
     const executionTime = endTime - startTime;
 
@@ -51,7 +51,7 @@ describe("Resonate usage tests", () => {
 
     const startTime = Date.now();
     const h = await f.beginRun("test");
-    const r = await h.result;
+    const r = await h.result();
     const endTime = Date.now();
     const executionTime = endTime - startTime;
 
@@ -76,7 +76,7 @@ describe("Resonate usage tests", () => {
     });
 
     const h = await f.beginRun("f");
-    await expect(h.result).rejects.toBe("this is an error");
+    await expect(h.result()).rejects.toBe("this is an error");
     resonate.stop();
   });
 
@@ -92,13 +92,13 @@ describe("Resonate usage tests", () => {
     });
 
     const h = await f.beginRun("f");
-    await expect(h.result).rejects.toBe("this is an error");
+    await expect(h.result()).rejects.toBe("this is an error");
     resonate.stop();
   });
 
   test("Correctly sets options on inner functions", async () => {
     const network = new LocalNetwork();
-    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
     const promises = new Promises(network);
 
     const g = async (_ctx: Context, msg: string) => {
@@ -121,7 +121,7 @@ describe("Resonate usage tests", () => {
 
   test("Correctly sets options on inner functions without defined opts", async () => {
     const network = new LocalNetwork();
-    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
     const promises = new Promises(network);
 
     const g = async (_ctx: Context, msg: string) => {
@@ -144,7 +144,7 @@ describe("Resonate usage tests", () => {
 
   test("Basic human in the loop", async () => {
     const network = new LocalNetwork();
-    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
     const promises = new Promises(network);
 
     const f = resonate.register("f", function* foo(ctx: Context) {
@@ -155,14 +155,14 @@ describe("Resonate usage tests", () => {
 
     const p = await f.beginRun("f");
     await promises.resolve("myId", "myId", false, "myValue");
-    const v = await p.result;
+    const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
   });
 
   test("Correctly sets timeout", async () => {
     const network = new LocalNetwork();
-    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
     const promises = new Promises(network);
 
     const time = Date.now();
@@ -179,14 +179,14 @@ describe("Resonate usage tests", () => {
     expect(durable.timeout).toBeLessThan(time + 5 * util.HOUR + 1000);
 
     await promises.resolve("myId", "myId", false, "myValue");
-    const v = await p.result;
+    const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
   });
 
   test("Basic Durable sleep", async () => {
     const network = new LocalNetwork();
-    const resonate = new Resonate(network, { group: "default", pid: "0", ttl: 50_000 });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
     const promises = new Promises(network);
 
     const time = Date.now();
@@ -200,7 +200,7 @@ describe("Resonate usage tests", () => {
     expect(durable.tags).toMatchObject({ "resonate:timeout": "true" });
     expect(durable.timeout).toBeLessThan(time + 1 * util.SEC + 100);
 
-    const v = await p.result;
+    const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
   });

@@ -1,15 +1,17 @@
 import { LocalNetwork } from "../dev/network";
 import { AsyncHeartbeat, NoHeartbeat } from "./heartbeat";
-import type { DurablePromiseRecord, Network } from "./network/network";
+import type { Network } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Promises } from "./promises";
+import type { PromiseHandler } from "./resonate-inner";
 import { ResonateInner } from "./resonate-inner";
 import { Schedules } from "./schedules";
 import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
 import * as util from "./util";
 
 export interface Handle<T> {
-  result: Promise<T>;
+  id: string;
+  result(): Promise<T>;
 }
 
 export interface ResonateFunc<F extends Func> {
@@ -22,15 +24,13 @@ export interface ResonateFunc<F extends Func> {
 
 export class Resonate {
   private inner: ResonateInner;
-  private network: Network;
   private group: string;
   private pid: string;
   private ttl: number;
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
-  constructor(network: Network, config: { group: string; pid: string; ttl: number }) {
-    this.network = network;
+  constructor(config: { group: string; pid: string; ttl: number }, network: Network) {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
@@ -42,6 +42,7 @@ export class Resonate {
       ...config,
       heartbeat: heartbeat,
     });
+
     this.promises = new Promises(network);
     this.schedules = new Schedules(network);
   }
@@ -50,41 +51,44 @@ export class Resonate {
    * Create a local Resonate instance
    */
   static local(): Resonate {
-    return new Resonate(new LocalNetwork(), {
-      group: "default",
-      pid: "default",
-      ttl: Number.MAX_SAFE_INTEGER,
-    });
+    return new Resonate(
+      {
+        group: "default",
+        pid: "default",
+        ttl: Number.MAX_SAFE_INTEGER,
+      },
+      new LocalNetwork(),
+    );
   }
 
   /**
    * Create a remote Resonate instance
    */
-  static remote(
-    config: {
-      host?: string;
-      storePort?: string;
-      messageSourcePort?: string;
-      group?: string;
-      pid?: string;
-      ttl?: number;
-    } = {},
-  ): Resonate {
-    const pid = config.pid ?? crypto.randomUUID();
-    const group = config.group ?? "default";
-    const ttl = config.ttl ?? 30 * util.SEC;
-
-    const { host, storePort, messageSourcePort } = config;
+  static remote({
+    host = "http://localhost",
+    storePort = "8001",
+    messageSourcePort = "8002",
+    group = "default",
+    pid = crypto.randomUUID().replace(/-/g, ""),
+    ttl = 1 * util.MIN,
+  }: {
+    host?: string;
+    storePort?: string;
+    messageSourcePort?: string;
+    group?: string;
+    pid?: string;
+    ttl?: number;
+  } = {}): Resonate {
     const network = new HttpNetwork({
-      host: host ?? "http://localhost",
-      storePort: storePort ?? "8001",
-      msgSrcPort: messageSourcePort ?? "8002",
-      pid: pid,
-      group: group,
+      host,
+      storePort,
+      messageSourcePort,
+      pid,
+      group,
       timeout: 1 * util.MIN,
       headers: {},
     });
-    return new Resonate(network, { pid, group, ttl });
+    return new Resonate({ pid, group, ttl }, network);
   }
 
   /**
@@ -116,7 +120,7 @@ export class Resonate {
   public async run<T>(id: string, name: string, ...args: any[]): Promise<T>;
   public async run<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
   public async run(id: string, funcOrName: Func | string, ...args: any[]): Promise<any> {
-    return (await this.beginRun(id, funcOrName, ...args)).result;
+    return (await this.beginRun(id, funcOrName, ...args)).result();
   }
 
   /**
@@ -133,63 +137,27 @@ export class Resonate {
 
     const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
-    return new Promise<Handle<any>>((resolve) => {
-      this.network.send(
-        {
-          kind: "createPromiseAndTask",
-          promise: {
-            id: id,
-            timeout: opts.timeout + Date.now(),
-            param: { func: registered.name, args },
-            tags: {
-              "resonate:invoke": `poll://any@${this.group}/${this.pid}`,
-              "resonate:scope": "global",
-              ...opts.tags,
-            }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
-          },
-          task: {
-            processId: this.pid,
-            ttl: this.ttl,
-          },
-          iKey: id,
-          strict: false,
-        },
-        (err, res) => {
-          // TODO(avillega): Handle platform level error
-          if (err) return;
-          util.assertDefined(res);
-
-          // create and resolve a handle now that the durable promise
-          // has been created
-          const promise = Promise.withResolvers();
-          resolve({ result: promise.promise });
-
-          // check if the promise is complete and early exit
-          if (this.complete(res.promise, promise.resolve, promise.reject)) {
-            return;
-          }
-
-          // if there is no task create subscription
-          if (!res.task) {
-            this.subscribe(id, promise.resolve, promise.reject);
-            return;
-          }
-
-          // otherwise subscribe and process
-          this.inner.subscribe(id, (p) => this.complete(p, promise.resolve, promise.reject));
-
-          // TODO(avillega): Handle failure and platform errors in callback
-          this.inner.process(
-            {
-              kind: "claimed",
-              rootPromise: res.promise,
-              ...res.task,
-            },
-            () => {},
-          );
-        },
-      );
+    const promiseHandler = this.inner.run({
+      kind: "createPromiseAndTask",
+      promise: {
+        id: id,
+        timeout: opts.timeout + Date.now(),
+        param: { func: registered.name, args },
+        tags: {
+          ...opts.tags,
+          "resonate:invoke": `poll://any@${this.group}/${this.pid}`,
+          "resonate:scope": "global",
+        }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
+      },
+      task: {
+        processId: this.pid,
+        ttl: this.ttl,
+      },
+      iKey: id,
+      strict: false,
     });
+
+    return this.handle(promiseHandler);
   }
 
   /**
@@ -199,7 +167,7 @@ export class Resonate {
   public async rpc<T>(id: string, name: string, ...args: any[]): Promise<T>;
   public async rpc<T>(id: string, funcOrName: Func | string, ...args: any[]): Promise<T>;
   public async rpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<any> {
-    return (await this.beginRpc(id, funcOrName, ...args)).result;
+    return (await this.beginRpc(id, funcOrName, ...args)).result();
   }
 
   /**
@@ -220,40 +188,19 @@ export class Resonate {
       name = registered.name;
     }
 
-    // TODO(dfarr): use the all options
     const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
-    return new Promise<Handle<any>>((resolve) => {
-      this.network.send(
-        {
-          kind: "createPromise",
-          id: id,
-          timeout: opts.timeout + Date.now(),
-          param: { func: name, args },
-          tags: { "resonate:invoke": opts.target, "resonate:scope": "global", ...opts.tags },
-          iKey: id,
-          strict: false,
-        },
-        (err, res) => {
-          // TODO(avillega): Handle platform level error
-          if (err) return;
-          util.assertDefined(res);
-
-          // create and resolve a handle now that the durable promise
-          // has been created
-          const promise = Promise.withResolvers();
-          resolve({ result: promise.promise });
-
-          // check if the promise is complete and early exit
-          if (this.complete(res.promise, promise.resolve, promise.reject)) {
-            return;
-          }
-
-          // otherwise create subscription
-          this.subscribe(id, promise.resolve, promise.reject);
-        },
-      );
+    const promiseHandler = this.inner.rpc({
+      kind: "createPromise",
+      id: id,
+      timeout: Date.now() + opts.timeout,
+      param: { func: name, args },
+      tags: { ...opts.tags, "resonate:invoke": opts.target, "resonate:scope": "global" },
+      iKey: id,
+      strict: false,
     });
+
+    return this.handle(promiseHandler);
   }
 
   public options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
@@ -267,54 +214,44 @@ export class Resonate {
     };
   }
 
-  private subscribe(id: string, resolve: (v: any) => void, reject: (e?: any) => void) {
-    this.network.send(
-      {
-        kind: "createSubscription",
-        id: id,
-        timeout: 24 * util.HOUR + Date.now(),
-        recv: `poll://uni@${this.group}/${this.pid}`,
-      },
-      (err, res) => {
-        // TODO(avillega): Handle platform level error
-        if (err) return;
-        util.assertDefined(res);
-
-        // once again check if the promise is complete and early exit
-        if (this.complete(res.promise, resolve, reject)) {
-          return;
-        }
-
-        // otherwise register a subscription
-        this.inner.subscribe(id, (promise) => this.complete(promise, resolve, reject));
-      },
-    );
-  }
-
-  private complete(promise: DurablePromiseRecord, resolve: (v: any) => void, reject: (e?: any) => void) {
-    if (promise.state === "resolved") {
-      resolve(promise.value);
-      return true;
-    }
-    if (promise.state === "rejected") {
-      reject(promise.value);
-      return true;
-    }
-    if (promise.state === "rejected_canceled") {
-      // TODO: reject with specific error
-      reject(new Error("Promise canceled"));
-      return true;
-    }
-    if (promise.state === "rejected_timedout") {
-      // TODO: reject with specific error
-      reject(new Error("Promise timedout"));
-      return true;
-    }
-
-    return false;
-  }
-
   public stop() {
     this.inner.stop();
+  }
+
+  private handle(promiseHandler: PromiseHandler): Promise<Handle<any>> {
+    // resolves with a handle
+    const handle = Promise.withResolvers<Handle<any>>();
+
+    // resolves with the result
+    const result = Promise.withResolvers<any>();
+
+    // listen for created and resolve p1 with a handle
+    promiseHandler.addEventListener("created", (promise) => {
+      handle.resolve({
+        id: promise.id,
+        result: async () => {
+          // subscribe lazily, no need to await
+          promiseHandler.subscribe();
+          return await result.promise;
+        },
+      });
+    });
+
+    // listen for completed and resolve p2 with the value
+    promiseHandler.addEventListener("completed", (promise) => {
+      util.assert(promise.state !== "pending", "promise must be completed");
+
+      if (promise.state === "resolved") {
+        result.resolve(promise.value);
+      } else if (promise.state === "rejected") {
+        result.reject(promise.value);
+      } else if (promise.state === "rejected_canceled") {
+        result.reject(new Error("Promise canceled"));
+      } else if (promise.state === "rejected_timedout") {
+        result.reject(new Error("Promise timedout"));
+      }
+    });
+
+    return handle.promise;
   }
 }

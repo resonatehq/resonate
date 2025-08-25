@@ -36,6 +36,7 @@ export class Computation {
 
   private seen: Set<string> = new Set();
   private nurseries: Map<string, Nursery<boolean, Status>> = new Map();
+  private processing = false;
 
   constructor(
     id: string,
@@ -61,22 +62,32 @@ export class Computation {
   }
 
   public process(task: Task, done: Callback<Status>) {
+    // If we are already processing there is nothing to do, the
+    // caller will be notified via the promise handler
+    if (this.processing) return done(true);
+    this.processing = true;
+
+    const doneProcessing = (err: boolean, res?: Status) => {
+      this.processing = false;
+      err ? done(err) : done(err, res!);
+    };
+
     switch (task.kind) {
       case "claimed":
-        this.processClaimed(task, done);
+        this.processClaimed(task, doneProcessing);
         break;
 
       case "unclaimed":
         this.network.send(
           {
             kind: "claimTask",
-            id: task.id,
-            counter: task.counter,
+            id: task.task.id,
+            counter: task.task.counter,
             processId: this.pid,
             ttl: this.ttl,
           },
           (err, res) => {
-            if (err) return done(true);
+            if (err) return doneProcessing(true);
             util.assertDefined(res);
 
             const { root, leaf } = res.message.promises;
@@ -86,7 +97,7 @@ export class Computation {
               this.handler.updateCache(leaf.data);
             }
 
-            this.processClaimed({ ...task, kind: "claimed", rootPromise: root.data }, done);
+            this.processClaimed({ kind: "claimed", task: task.task, rootPromise: root.data }, doneProcessing);
           },
         );
         break;
@@ -94,22 +105,30 @@ export class Computation {
   }
 
   private processClaimed(task: ClaimedTask, done: Callback<Status>) {
-    util.assert(task.rootPromiseId === this.id, "task root promise id must match computation id");
+    util.assert(task.task.rootPromiseId === this.id, "task root promise id must match computation id");
+    util.assert(!this.nurseries.has(task.rootPromise.id), "task must not have nursery");
 
-    if (this.nurseries.has(task.rootPromise.id)) {
-      // TODO: log something useful
-      return done(true);
-    }
+    const doneAndDropTaskIfErr = (err?: boolean, res?: Status) => {
+      if (err) {
+        return this.network.send({ kind: "dropTask", id: task.task.id, counter: task.task.counter }, () => {
+          // ignore the drop task response, if the request failed the
+          // task will eventually expire anyways
+          done(true);
+        });
+      }
+
+      done(false, res!);
+    };
 
     if (!("func" in task.rootPromise.param) || !("args" in task.rootPromise.param)) {
       // TODO: log something useful
-      return done(true);
+      return doneAndDropTaskIfErr(true);
     }
 
     const registered = this.registry.get(task.rootPromise.param.func);
     if (!registered) {
       // TODO: log something useful
-      return done(true);
+      return doneAndDropTaskIfErr(true);
     }
 
     const func = registered.func;
@@ -124,38 +143,31 @@ export class Computation {
 
     this.nurseries.set(
       task.rootPromise.id,
-      new Nursery<boolean, Status>(
-        (nursery) => {
-          const done = (err: boolean, res?: Status) => {
-            if (err) {
-              this.nurseries.delete(task.rootPromise.id);
-              return nursery.done(err);
-            }
-
-            this.network.send({ kind: "completeTask", id: task.id, counter: task.counter }, (err) => {
-              this.nurseries.delete(task.rootPromise.id);
-              nursery.done(err, res);
-            });
-          };
-
-          const ctx = InnerContext.root(this.id, this.clock);
-          if (util.isGeneratorFunction(func)) {
-            this.processGenerator(nursery, ctx, func, args, done);
-          } else {
-            this.processFunction(this.id, ctx, func, args, (err, promise) => {
-              if (err) return done(true);
-              util.assertDefined(promise);
-
-              done(false, { kind: "completed", promise });
-            });
+      new Nursery<boolean, Status>((nursery) => {
+        const done = (err: boolean, res?: Status) => {
+          if (err) {
+            this.nurseries.delete(task.rootPromise.id);
+            return nursery.done(err);
           }
-        },
-        (err, res) => {
-          if (err) return done(true);
-          util.assertDefined(res);
-          done(false, res);
-        },
-      ),
+
+          this.network.send({ kind: "completeTask", id: task.task.id, counter: task.task.counter }, (err) => {
+            this.nurseries.delete(task.rootPromise.id);
+            nursery.done(err, res);
+          });
+        };
+
+        const ctx = InnerContext.root(this.id, this.clock);
+        if (util.isGeneratorFunction(func)) {
+          this.processGenerator(nursery, ctx, func, args, done);
+        } else {
+          this.processFunction(this.id, ctx, func, args, (err, promise) => {
+            if (err) return done(true);
+            util.assertDefined(promise);
+
+            done(false, { kind: "completed", promise });
+          });
+        }
+      }, doneAndDropTaskIfErr),
     );
   }
 

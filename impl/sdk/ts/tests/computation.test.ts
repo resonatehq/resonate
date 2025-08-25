@@ -130,9 +130,8 @@ describe("Computation Event Queue Concurrency", () => {
     const { promise, task } = await createPromiseAndTask(network, "root-promise-1", "testCoro", []);
 
     const testTask: ClaimedTask = {
-      ...task,
       kind: "claimed",
-      rootPromiseId: "root-promise-1",
+      task: task,
       rootPromise: promise,
     };
 

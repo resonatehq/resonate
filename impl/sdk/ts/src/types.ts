@@ -1,5 +1,5 @@
 import type { Context } from "./context";
-import type { CreatePromiseReq, DurablePromiseRecord } from "./network/network";
+import type { CreatePromiseReq, DurablePromiseRecord, TaskRecord } from "./network/network";
 
 export type Func = (ctx: Context, ...args: any[]) => any;
 
@@ -21,21 +21,17 @@ export type Callback<T> = {
   (err: true, res?: undefined): void;
 };
 
-export type Task = UnclaimedTask | ClaimedTask;
+export type Task = ClaimedTask | UnclaimedTask;
 
 export type ClaimedTask = {
   kind: "claimed";
-  id: string;
-  counter: number;
-  rootPromiseId: string;
+  task: TaskRecord;
   rootPromise: DurablePromiseRecord;
 };
 
 export type UnclaimedTask = {
   kind: "unclaimed";
-  id: string;
-  counter: number;
-  rootPromiseId: string;
+  task: TaskRecord;
 };
 
 // Return type of a function or a generator
