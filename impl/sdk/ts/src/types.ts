@@ -59,6 +59,7 @@ export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T>
 export type InternalAsyncR = {
   type: "internal.async.r";
   id: string;
+  mode: "attached" | "detached";
   createReq: CreatePromiseReq;
 };
 
@@ -93,6 +94,7 @@ export type Promise<T> = PromisePending | PromiseCompleted<T>;
 export type PromisePending = {
   type: "internal.promise";
   state: "pending";
+  mode: "attached" | "detached";
   id: string;
 };
 

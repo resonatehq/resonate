@@ -176,6 +176,62 @@ describe("Coroutine", () => {
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 99 } });
   });
 
+  test("Detached concurrency", async () => {
+    function* bar() {
+      return 42;
+    }
+
+    function* foo(ctx: Context) {
+      yield* ctx.beginRpc("bar");
+      yield* ctx.detached("bar");
+      return 99;
+    }
+
+    const h = new Handler(new DummyNetwork());
+    let r = await exec("foo.1", foo, [], h);
+
+    expect(r.type).toBe("suspended");
+    r = r as Suspended;
+    expect(r.todo.remote).toHaveLength(1);
+
+    await completePromise(h, "foo.1.0", ok(42));
+    r = await exec("foo.1", foo, [], h);
+
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 99 } });
+  });
+
+  test("Return the detached todo if explicitly awaited", async () => {
+    function* bar() {
+      return 42;
+    }
+
+    function* foo(ctx: Context) {
+      yield* ctx.beginRpc("bar");
+      const df = yield* ctx.detached("bar");
+      const v = yield* df;
+      return v;
+    }
+
+    const h = new Handler(new DummyNetwork());
+    let r = await exec("foo.1", foo, [], h);
+
+    expect(r.type).toBe("suspended");
+    r = r as Suspended;
+    expect(r.todo.remote).toHaveLength(2);
+
+    await completePromise(h, "foo.1.0", ok(42));
+    r = await exec("foo.1", foo, [], h);
+
+    expect(r.type).toBe("suspended");
+    r = r as Suspended;
+    expect(r.todo.remote).toHaveLength(1);
+
+    await completePromise(h, "foo.1.1", ok(42));
+    r = await exec("foo.1", foo, [], h);
+
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: 42 } });
+  });
+
   test("lfc/rfc", async () => {
     function* bar() {
       return 42;

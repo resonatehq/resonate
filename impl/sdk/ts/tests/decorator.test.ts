@@ -100,6 +100,7 @@ describe("Decorator", () => {
     r = d.next({
       type: "internal.promise",
       state: "pending",
+      mode: "attached",
       id: "abc",
     });
 
@@ -157,6 +158,7 @@ describe("Decorator", () => {
     d.next({
       type: "internal.promise",
       state: "pending",
+      mode: "attached",
       id: "abc.1",
     }); // B -> yield an invoke, get a pending promise back
     const r = d.next({

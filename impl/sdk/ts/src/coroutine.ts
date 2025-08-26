@@ -125,6 +125,7 @@ export class Coroutine<T> {
                 input = {
                   type: "internal.promise",
                   state: "pending",
+                  mode: "attached",
                   id: action.id,
                 };
                 next(); // Go back to the top of the loop
@@ -146,6 +147,7 @@ export class Coroutine<T> {
                   input = {
                     type: "internal.promise",
                     state: "pending",
+                    mode: "attached",
                     id: action.id,
                   };
                   next();
@@ -185,10 +187,12 @@ export class Coroutine<T> {
             util.assertDefined(res);
 
             if (res.state === "pending") {
-              remote.push({ id: action.id });
+              if (action.mode === "attached") remote.push({ id: action.id });
+
               input = {
                 type: "internal.promise",
                 state: "pending",
+                mode: action.mode,
                 id: action.id,
               };
             } else {
@@ -218,6 +222,11 @@ export class Coroutine<T> {
         // invoke the callback when awaiting a pending "Future" the list of todos will include
         // the global callbacks to create.
         if (action.type === "internal.await" && action.promise.state === "pending") {
+          if (action.promise.mode === "detached") {
+            // We didn't add the associated todo of this promise, since the user is explicitly awaiting it we need to add the todo now.
+            // All detached are remotes.
+            remote.push({ id: action.id });
+          }
           callback(false, { type: "more", todo: { local, remote } });
           return;
         }

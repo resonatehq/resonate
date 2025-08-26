@@ -43,9 +43,11 @@ export class LFC<T> implements Iterable<LFC<T>> {
 
 export class RFI<T> implements Iterable<RFI<T>> {
   public createReq: CreatePromiseReq;
+  public mode: "attached" | "detached";
 
-  constructor(createReq: CreatePromiseReq) {
+  constructor(createReq: CreatePromiseReq, mode: "attached" | "detached" = "attached") {
     this.createReq = createReq;
+    this.mode = mode;
   }
 
   *[Symbol.iterator](): Generator<RFI<T>, Future<T>, any> {
@@ -57,6 +59,7 @@ export class RFI<T> implements Iterable<RFI<T>> {
 
 export class RFC<T> implements Iterable<RFC<T>> {
   public createReq: CreatePromiseReq;
+  public mode = "attached" as const;
 
   constructor(createReq: CreatePromiseReq) {
     this.createReq = createReq;
@@ -72,14 +75,17 @@ export class RFC<T> implements Iterable<RFC<T>> {
 export class Future<T> implements Iterable<Future<T>> {
   private readonly value?: Result<T>;
   public readonly state: "pending" | "completed";
+  private mode: "attached" | "detached";
 
   constructor(
     public id: string,
     state: "pending" | "completed",
     value?: Result<T>,
+    mode: "attached" | "detached" = "attached",
   ) {
     this.value = value;
     this.state = state;
+    this.mode = mode;
   }
 
   getValue() {
@@ -132,7 +138,17 @@ export interface Context {
   sleep(ms: number): RFC<void>;
 
   // promise
-  promise<T>(options?: Partial<Options> & { [RESONATE_OPTIONS]: true }): RFI<T>;
+  promise<T>({
+    id,
+    timeout,
+    data,
+    tags,
+  }: { id?: string; timeout?: number; data?: any; tags?: Record<string, string> }): RFI<T>;
+
+  // detached
+  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
+  detached<T>(func: string, ...args: any[]): RFI<T>;
+  detached(func: Func | string, ...args: any[]): RFI<any>;
 
   // options
   options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
@@ -194,12 +210,27 @@ export class InnerContext implements Context {
     return new RFC(this.remoteCreateReq(func, argu, opts));
   }
 
-  promise<T>(options: Partial<Options> & { [RESONATE_OPTIONS]: true }): RFI<T> {
-    return new RFI(this.latentCreateOpts(this.options(options)));
+  promise<T>({
+    id,
+    timeout,
+    data,
+    tags,
+  }: { id?: string; timeout?: number; data?: any; tags?: Record<string, string> }): RFI<T> {
+    return new RFI(this.latentCreateOpts(id, timeout, data, tags));
   }
 
   sleep(ms: number): RFC<void> {
     return new RFC(this.sleepCreateOpts(this.options({ timeout: ms })));
+  }
+
+  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
+  detached<T>(func: string, ...args: any[]): RFI<T>;
+  detached(func: Func | string, ...args: any[]): RFI<any> {
+    if (typeof func === "function") {
+      throw new Error("not implemented");
+    }
+    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    return new RFI(this.remoteCreateReq(func, argu, opts), "detached");
   }
 
   options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
@@ -255,21 +286,24 @@ export class InnerContext implements Context {
     };
   }
 
-  latentCreateOpts(opts: Options): CreatePromiseReq {
-    const tags = {
+  latentCreateOpts(id?: string, timeout?: number, data?: any, tags?: Record<string, string>): CreatePromiseReq {
+    const cTags = {
       "resonate:scope": "global",
       "resonate:root": this.rId,
       "resonate:parent": this.pId,
-      ...opts.tags,
+      ...tags,
     };
+
+    const cTimeout = timeout ?? 24 * util.HOUR;
+    const cId = id ?? this.seqid();
 
     return {
       kind: "createPromise",
-      id: opts.id,
-      timeout: opts.timeout + this.clock.now(),
-      param: {},
-      tags,
-      iKey: opts.id,
+      id: cId,
+      timeout: cTimeout + this.clock.now(),
+      param: data,
+      tags: cTags,
+      iKey: cId,
       strict: false,
     };
   }

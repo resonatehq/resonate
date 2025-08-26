@@ -56,6 +56,7 @@ export class Decorator<TRet> {
           promise: {
             type: "internal.promise",
             state: "pending",
+            mode: "attached",
             id: val.id,
           },
         };
@@ -77,7 +78,7 @@ export class Decorator<TRet> {
         return ok(undefined);
       case "internal.promise":
         if (value.state === "pending") {
-          return ok(new Future<T>(value.id, "pending", undefined));
+          return ok(new Future<T>(value.id, "pending", undefined, value.mode));
         }
         // promise === "complete"
         // We know for sure this promise relates to the last invoke inserted
@@ -104,11 +105,15 @@ export class Decorator<TRet> {
       };
     }
     if (event instanceof RFI || event instanceof RFC) {
-      this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id: event.createReq.id });
+      if (event.mode === "attached") {
+        this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id: event.createReq.id });
+      }
+
       this.nextState = "internal.promise";
       return {
         type: "internal.async.r",
         id: event.createReq.id,
+        mode: event.mode,
         createReq: event.createReq,
       };
     }
@@ -141,6 +146,8 @@ export class Decorator<TRet> {
         promise: {
           type: "internal.promise",
           state: "pending",
+          // biome-ignore lint/complexity/useLiteralKeys: We need to access this private member, it is only private to the user
+          mode: event["mode"],
           id: event.id,
         },
       };
