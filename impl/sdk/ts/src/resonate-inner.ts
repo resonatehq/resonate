@@ -22,20 +22,25 @@ export class ResonateInner {
 
   private computations: Map<string, Computation>;
   private network: Network;
-  private group: string;
+  private anycast: string;
+  private unicast: string;
   private pid: string;
   private ttl: number;
   private heartbeat: Heartbeat;
   private notifications: Map<string, DurablePromiseRecord> = new Map();
   private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => boolean>> = new Map();
 
-  constructor(network: Network, config: { group: string; pid: string; ttl: number; heartbeat: Heartbeat }) {
-    const { group, pid, ttl, heartbeat } = config;
+  constructor(
+    network: Network,
+    config: { anycast: string; unicast: string; pid: string; ttl: number; heartbeat: Heartbeat },
+  ) {
+    const { anycast, unicast, pid, ttl, heartbeat } = config;
     this.computations = new Map();
-    this.group = group;
     this.pid = pid;
     this.ttl = ttl;
     this.heartbeat = heartbeat;
+    this.anycast = anycast;
+    this.unicast = unicast;
     this.registry = new Registry();
     this.network = network;
     this.network.subscribe(this.onMessage.bind(this));
@@ -73,7 +78,8 @@ export class ResonateInner {
         task.task.rootPromiseId,
         this.pid,
         this.ttl,
-        this.group,
+        this.anycast,
+        this.unicast,
         this.network,
         this.registry,
         this.heartbeat,
@@ -122,7 +128,7 @@ export class ResonateInner {
               kind: "createSubscription",
               id: id,
               timeout: timeout,
-              recv: `poll://uni@${this.group}/${this.pid}`,
+              recv: this.unicast,
             },
             (err, res) => {
               util.assert(!err, "retry forever ensures err is false");

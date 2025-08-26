@@ -27,6 +27,8 @@ export class Resonate {
   private group: string;
   private pid: string;
   private ttl: number;
+  private anycast: string;
+  private unicast: string;
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
@@ -34,6 +36,8 @@ export class Resonate {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
+    this.anycast = `poll://any@${this.group}/${this.pid}`;
+    this.unicast = `poll://uni@${this.group}/${this.pid}`;
 
     const heartbeat =
       network instanceof LocalNetwork ? new NoHeartbeat() : new AsyncHeartbeat(config.pid, this.ttl / 2, network);
@@ -41,6 +45,8 @@ export class Resonate {
     this.inner = new ResonateInner(network, {
       ...config,
       heartbeat: heartbeat,
+      anycast: this.anycast,
+      unicast: this.unicast,
     });
 
     this.promises = new Promises(network);
@@ -206,7 +212,7 @@ export class Resonate {
   public options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
     return {
       id: "",
-      target: `poll://any@${this.group}`,
+      target: "poll://any@default",
       timeout: 24 * util.HOUR,
       tags: {},
       ...opts,

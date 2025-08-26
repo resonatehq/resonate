@@ -133,7 +133,8 @@ export class WorkerProcess extends Process {
     this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
     this.resonate = new ResonateInner(this.network, {
       pid: iaddr,
-      group: gaddr,
+      anycast: `sim://any@${gaddr}/${iaddr}`,
+      unicast: `sim://uni@${gaddr}/${iaddr}`,
       ttl: 5000,
       heartbeat: new NoHeartbeat(),
     });

@@ -27,7 +27,8 @@ export class Computation {
   private pid: string;
   private ttl: number;
   private clock: Clock;
-  private group: string;
+  private anycast: string;
+  private unicast: string;
   private network: Network;
   private handler: Handler;
   private registry: Registry;
@@ -42,7 +43,8 @@ export class Computation {
     id: string,
     pid: string,
     ttl: number,
-    group: string,
+    anycast: string,
+    unicast: string,
     network: Network,
     registry: Registry,
     heartbeat: Heartbeat,
@@ -52,7 +54,8 @@ export class Computation {
     this.id = id;
     this.pid = pid;
     this.ttl = ttl;
-    this.group = group;
+    this.anycast = anycast;
+    this.unicast = unicast;
     this.network = network;
     this.handler = new Handler(network);
     this.registry = registry;
@@ -241,8 +244,7 @@ export class Computation {
       boolean
     >(
       todo,
-      ({ id }, done) =>
-        this.handler.createCallback(id, this.id, Number.MAX_SAFE_INTEGER, `poll://any@${this.group}/${this.pid}`, done),
+      ({ id }, done) => this.handler.createCallback(id, this.id, Number.MAX_SAFE_INTEGER, this.anycast, done),
       (err, results) => {
         if (err) return done(err);
         util.assertDefined(results);
