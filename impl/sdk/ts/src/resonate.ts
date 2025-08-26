@@ -32,7 +32,7 @@ export class Resonate {
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
-  constructor(config: { group: string; pid: string; ttl: number }, network: Network) {
+  constructor(config: { group: string; pid: string; ttl: number; dependencies?: Map<string, any> }, network: Network) {
     this.group = config.group;
     this.pid = config.pid;
     this.ttl = config.ttl;
@@ -47,6 +47,7 @@ export class Resonate {
       heartbeat: heartbeat,
       anycast: this.anycast,
       unicast: this.unicast,
+      dependencies: config.dependencies ?? new Map(),
     });
 
     this.promises = new Promises(network);
@@ -222,6 +223,16 @@ export class Resonate {
 
   public stop() {
     this.inner.stop();
+  }
+
+  /** Store a named dependency for use with `Context`.
+   *  The dependency is made available to all functions via
+   *  their execution `Context`.
+   *  Setting a dependency for a name that already exists will
+   *  overwrite the previously set dependency.
+   */
+  public setDependency(name: string, obj: any): void {
+    this.inner.setDependency(name, obj);
   }
 
   private handle(promiseHandler: PromiseHandler): Promise<Handle<any>> {

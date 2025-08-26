@@ -150,6 +150,9 @@ export interface Context {
   detached<T>(func: string, ...args: any[]): RFI<T>;
   detached(func: Func | string, ...args: any[]): RFI<any>;
 
+  // getDependency
+  getDependency(key: string): any | undefined;
+
   // options
   options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
 }
@@ -167,17 +170,18 @@ export class InnerContext implements Context {
     private id: string,
     private rId: string,
     private pId: string,
+    private dependencies: Map<string, any>,
     private clock: Clock,
   ) {
     this.seq = 0;
   }
 
-  static root(id: string, clock: Clock) {
-    return new InnerContext(id, id, id, clock);
+  static root(id: string, dependencies: Map<string, any>, clock: Clock) {
+    return new InnerContext(id, id, id, dependencies, clock);
   }
 
   child(id: string) {
-    return new InnerContext(id, this.rId, this.id, this.clock);
+    return new InnerContext(id, this.rId, this.id, this.dependencies, this.clock);
   }
 
   lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>> {
@@ -231,6 +235,10 @@ export class InnerContext implements Context {
     }
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
     return new RFI(this.remoteCreateReq(func, argu, opts), "detached");
+  }
+
+  getDependency(key: string): any | undefined {
+    return this.dependencies.get(key);
   }
 
   options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {

@@ -27,14 +27,22 @@ export class ResonateInner {
   private pid: string;
   private ttl: number;
   private heartbeat: Heartbeat;
+  private dependencies: Map<string, any>;
   private notifications: Map<string, DurablePromiseRecord> = new Map();
   private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => boolean>> = new Map();
 
   constructor(
     network: Network,
-    config: { anycast: string; unicast: string; pid: string; ttl: number; heartbeat: Heartbeat },
+    config: {
+      anycast: string;
+      unicast: string;
+      pid: string;
+      ttl: number;
+      heartbeat: Heartbeat;
+      dependencies: Map<string, any>;
+    },
   ) {
-    const { anycast, unicast, pid, ttl, heartbeat } = config;
+    const { anycast, unicast, pid, ttl, dependencies, heartbeat } = config;
     this.computations = new Map();
     this.pid = pid;
     this.ttl = ttl;
@@ -43,6 +51,7 @@ export class ResonateInner {
     this.unicast = unicast;
     this.registry = new Registry();
     this.network = network;
+    this.dependencies = dependencies;
     this.network.subscribe(this.onMessage.bind(this));
   }
 
@@ -83,6 +92,7 @@ export class ResonateInner {
         this.network,
         this.registry,
         this.heartbeat,
+        this.dependencies,
       );
       this.computations.set(task.task.rootPromiseId, computation);
     }
@@ -149,6 +159,10 @@ export class ResonateInner {
     }
 
     this.registry.set(name, func);
+  }
+
+  public setDependency(name: string, obj: any): void {
+    this.dependencies.set(name, obj);
   }
 
   private onMessage(msg: Message): void {

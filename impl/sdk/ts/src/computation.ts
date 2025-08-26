@@ -32,6 +32,7 @@ export class Computation {
   private network: Network;
   private handler: Handler;
   private registry: Registry;
+  private dependencies: Map<string, any>;
   private heartbeat: Heartbeat;
   private processor: Processor;
 
@@ -48,6 +49,7 @@ export class Computation {
     network: Network,
     registry: Registry,
     heartbeat: Heartbeat,
+    dependencies: Map<string, any>,
     processor?: Processor,
     clock?: Clock,
   ) {
@@ -60,6 +62,7 @@ export class Computation {
     this.handler = new Handler(network);
     this.registry = registry;
     this.heartbeat = heartbeat;
+    this.dependencies = dependencies;
     this.processor = processor ?? new AsyncProcessor();
     this.clock = clock ?? new WallClock();
   }
@@ -159,7 +162,7 @@ export class Computation {
           });
         };
 
-        const ctx = InnerContext.root(this.id, this.clock);
+        const ctx = InnerContext.root(this.id, this.dependencies, this.clock);
         if (util.isGeneratorFunction(func)) {
           this.processGenerator(nursery, ctx, func, args, done);
         } else {

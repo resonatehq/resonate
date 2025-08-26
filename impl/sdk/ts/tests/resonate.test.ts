@@ -227,4 +227,25 @@ describe("Resonate usage tests", () => {
 
     resonate.stop();
   });
+
+  test("Basic use of dependencies", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
+
+    const g = (ctx: Context, name: string): string => {
+      const greeting = ctx.getDependency("greeting") as string;
+      return `${greeting} ${name}`;
+    };
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      const v = yield* ctx.run(g, "World!");
+      return v;
+    });
+
+    resonate.setDependency("greeting", "Hello");
+    const v = await f.run("f");
+    expect(v).toBe("Hello World!");
+
+    resonate.stop();
+  });
 });

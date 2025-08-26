@@ -110,6 +110,7 @@ describe("Computation Event Queue Concurrency", () => {
       network,
       registry,
       new NoHeartbeat(),
+      new Map(),
       mockProcessor,
     );
   });

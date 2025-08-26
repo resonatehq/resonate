@@ -137,6 +137,7 @@ export class WorkerProcess extends Process {
       unicast: `sim://uni@${gaddr}/${iaddr}`,
       ttl: 5000,
       heartbeat: new NoHeartbeat(),
+      dependencies: new Map(),
     });
   }
 
