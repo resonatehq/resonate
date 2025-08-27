@@ -1,3 +1,4 @@
+import type { StepClock } from "../../src/clock";
 import { NoHeartbeat } from "../../src/heartbeat";
 import type { Network, Message as NetworkMessage, Request, Response, ResponseFor } from "../../src/network/network";
 import { ResonateInner } from "../../src/resonate-inner";
@@ -120,17 +121,20 @@ class SimulatedNetwork implements Network {
 }
 
 export class WorkerProcess extends Process {
+  private clock: StepClock;
   private network: SimulatedNetwork;
   resonate: ResonateInner;
 
   constructor(
     prng: Random,
+    clock: StepClock,
     { charFlipProb = 0 }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
     this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
+    this.clock = clock;
     this.resonate = new ResonateInner(this.network, {
       pid: iaddr,
       anycast: `sim://any@${gaddr}/${iaddr}`,
@@ -138,20 +142,21 @@ export class WorkerProcess extends Process {
       ttl: 5000,
       heartbeat: new NoHeartbeat(),
       dependencies: new Map(),
+      clock: this.clock,
     });
   }
 
-  tick(time: number, messages: Message<{ err?: any; res?: Response } | NetworkMessage>[]): Message<Request>[] {
-    this.log(time, "[recv]", messages);
+  tick(tick: number, messages: Message<{ err?: any; res?: Response } | NetworkMessage>[]): Message<Request>[] {
+    this.log(tick, "[recv]", messages);
 
-    this.network.time(time);
+    this.network.time(this.clock.time);
     for (const message of messages) {
       this.network.process(message);
     }
 
     const responses = this.network.flush();
 
-    this.log(time, "[send]", responses);
+    this.log(tick, "[send]", responses);
 
     return responses;
   }

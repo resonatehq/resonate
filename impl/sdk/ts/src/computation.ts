@@ -1,4 +1,4 @@
-import { type Clock, WallClock } from "./clock";
+import type { Clock } from "./clock";
 import { InnerContext } from "./context";
 import { Coroutine, type LocalTodo, type RemoteTodo } from "./coroutine";
 import { Handler } from "./handler";
@@ -50,8 +50,8 @@ export class Computation {
     registry: Registry,
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
+    clock: Clock,
     processor?: Processor,
-    clock?: Clock,
   ) {
     this.id = id;
     this.pid = pid;
@@ -63,8 +63,8 @@ export class Computation {
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
+    this.clock = clock;
     this.processor = processor ?? new AsyncProcessor();
-    this.clock = clock ?? new WallClock();
   }
 
   public process(task: Task, done: Callback<Status>) {

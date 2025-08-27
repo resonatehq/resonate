@@ -4,6 +4,7 @@ import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
+import { StepClock } from "../src/clock";
 import * as util from "../src/util";
 
 // Define a resonate function
@@ -20,27 +21,31 @@ function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any
 const options = { seed: 0, steps: 1000, randomDelay: 0, dropProb: 0, duplProb: 0, charFlipProb: 0 };
 
 const rnd = new Random(options.seed);
+const clock = new StepClock();
 const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
   dropProb: options.dropProb,
   duplProb: options.duplProb,
 });
 
-const server = new ServerProcess("server");
+const server = new ServerProcess(clock, "server");
 const worker1 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-1",
   "default",
 );
 const worker2 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-2",
   "default",
 );
 const worker3 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-3",
   "default",

@@ -1,17 +1,23 @@
 import { Server } from "../../dev/server";
+import type { StepClock } from "../../src/clock";
 import type { Message as NetworkMessage, Request, Response } from "../../src/network/network";
 import * as util from "../../src/util";
 import { type Address, Message, Process, anycast, unicast } from "./simulator";
 
 export class ServerProcess extends Process {
+  private clock: StepClock;
   server: Server = new Server();
 
-  constructor(public readonly iaddr: string) {
+  constructor(
+    clock: StepClock,
+    public readonly iaddr: string,
+  ) {
     super(iaddr);
+    this.clock = clock;
   }
 
-  tick(time: number, messages: Message<Request>[]): Message<{ err?: any; res?: Response } | NetworkMessage>[] {
-    this.log(time, "[recv]", messages);
+  tick(tick: number, messages: Message<Request>[]): Message<{ err?: any; res?: Response } | NetworkMessage>[] {
+    this.log(tick, "[recv]", messages);
 
     const responses: Message<{ err?: any; res?: Response } | NetworkMessage>[] = [];
 
@@ -20,7 +26,7 @@ export class ServerProcess extends Process {
       if (message.isRequest()) {
         let res: { err?: any; res?: Response };
         try {
-          res = { res: this.server.process(message.data, time) };
+          res = { res: this.server.process(message.data, this.clock.time) };
         } catch (err: any) {
           res = { err: err };
         }
@@ -29,7 +35,7 @@ export class ServerProcess extends Process {
       }
     }
 
-    for (const message of this.server.step(time)) {
+    for (const message of this.server.step(this.clock.time)) {
       const url = new URL(message.recv);
       let target: Address;
       if (url.username === "any") {
@@ -44,7 +50,7 @@ export class ServerProcess extends Process {
       responses.push(msg);
     }
 
-    this.log(time, "[send]", responses);
+    this.log(tick, "[send]", responses);
     return responses;
   }
 }

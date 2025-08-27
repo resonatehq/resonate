@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { StepClock } from "../src/clock";
 import type { Context } from "../src/context";
 import type { Request } from "../src/network/network";
 import { ServerProcess } from "./src/server";
@@ -175,6 +176,7 @@ const options = program.opts<Options>();
 // ------------------------------------------------------------------------------------------
 export function run(options: Options) {
   const rnd = new Random(options.seed);
+  const clock = new StepClock();
   const sim = new Simulator(rnd, {
     randomDelay: options.randomDelay ?? rnd.random(0.5),
     dropProb: options.dropProb ?? rnd.random(0.5),
@@ -183,21 +185,24 @@ export function run(options: Options) {
     activateProb: options.activateProb ?? rnd.random(0.5),
   });
 
-  const server = new ServerProcess("server");
+  const server = new ServerProcess(clock, "server");
   const worker1 = new WorkerProcess(
     rnd,
+    clock,
     { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
     "worker-1",
     "default",
   );
   const worker2 = new WorkerProcess(
     rnd,
+    clock,
     { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
     "worker-2",
     "default",
   );
   const worker3 = new WorkerProcess(
     rnd,
+    clock,
     { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
     "worker-3",
     "default",
@@ -217,7 +222,7 @@ export function run(options: Options) {
   }
 
   sim.repeat(1, () => {
-    const i = sim.time - 1;
+    const i = sim.step - 1;
     const useExplicit = options.func && i === 0;
 
     const funcName = useExplicit

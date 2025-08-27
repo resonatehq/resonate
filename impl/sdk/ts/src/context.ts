@@ -263,7 +263,7 @@ export class InnerContext implements Context {
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: opts.timeout + this.clock.now(),
+      timeout: this.clock.now() + opts.timeout,
       param: {},
       tags,
       iKey: opts.id,
@@ -283,7 +283,7 @@ export class InnerContext implements Context {
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: opts.timeout + this.clock.now(),
+      timeout: this.clock.now() + opts.timeout,
       tags,
       param: {
         func,
@@ -308,7 +308,7 @@ export class InnerContext implements Context {
     return {
       kind: "createPromise",
       id: cId,
-      timeout: cTimeout + this.clock.now(),
+      timeout: this.clock.now() + cTimeout,
       param: data,
       tags: cTags,
       iKey: cId,
@@ -328,7 +328,7 @@ export class InnerContext implements Context {
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: opts.timeout + this.clock.now(),
+      timeout: this.clock.now() + opts.timeout,
       param: {},
       tags,
       iKey: opts.id,

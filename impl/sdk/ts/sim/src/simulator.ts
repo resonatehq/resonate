@@ -68,12 +68,12 @@ export class Process {
     public readonly gaddr?: string,
   ) {}
 
-  tick(time: number, messages: Message<any>[]): Message<any>[] {
+  tick(tick: number, messages: Message<any>[]): Message<any>[] {
     throw new Error("not implemented");
   }
 
-  log(time: number, ...args: any[]): void {
-    const message = `[tick: ${time}] [proc: ${this.iaddr}] ${args.map(JSON.stringify as any)}`;
+  log(tick: number, ...args: any[]): void {
+    const message = `[tick: ${tick}] [proc: ${this.iaddr}] ${args.map(JSON.stringify as any)}`;
 
     // Always log to console
     console.log(message);
@@ -97,7 +97,7 @@ export interface DeliveryOptions {
 
 export class Simulator {
   private prng: Random;
-  public time = 0;
+  public step = 0;
   private init = false;
   private process: Process[] = [];
   private network: Message<any>[] = [];
@@ -147,7 +147,7 @@ export class Simulator {
       this.init = true;
     }
 
-    this.time += 1;
+    this.step += 1;
 
     const { deactivateProb, activateProb } = this.deliveryOptions;
     if ((deactivateProb > 0 || activateProb > 0) && this.process.length > 0) {
@@ -214,7 +214,7 @@ export class Simulator {
       if (!process.active) {
         continue;
       }
-      for (const msg of process.tick(this.time, inboxes[process.iaddr])) {
+      for (const msg of process.tick(this.step, inboxes[process.iaddr])) {
         if (msg.target.kind === "unicast" && msg.target.iaddr === "environment") {
           this.outbox.push(msg);
         } else {
@@ -230,7 +230,7 @@ export class Simulator {
     let i = 0;
     while (i < steps) {
       for (const task of this.scheduledRepeat) {
-        if (this.time % task.interval === 0) {
+        if (this.step % task.interval === 0) {
           task.fn();
         }
       }
@@ -238,9 +238,9 @@ export class Simulator {
       if (this.scheduledDelay.length > 0) {
         const remaining: { runAt: number; fn: () => void }[] = [];
         for (const task of this.scheduledDelay) {
-          if (task.runAt === this.time) {
+          if (task.runAt === this.step) {
             task.fn();
-          } else if (task.runAt > this.time) {
+          } else if (task.runAt > this.step) {
             remaining.push(task);
           }
         }

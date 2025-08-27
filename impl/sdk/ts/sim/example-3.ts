@@ -4,6 +4,7 @@ import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
+import { StepClock } from "../src/clock";
 import * as util from "../src/util";
 
 // Function definition
@@ -29,27 +30,31 @@ const options: {
 // Run Simulation
 
 const rnd = new Random(options.seed);
+const clock = new StepClock();
 const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
   dropProb: options.dropProb,
   duplProb: options.duplProb,
 });
 
-const server = new ServerProcess("server");
+const server = new ServerProcess(clock, "server");
 const worker1 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-1",
   "default",
 );
 const worker2 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-2",
   "default",
 );
 const worker3 = new WorkerProcess(
   rnd,
+  clock,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-3",
   "default",

@@ -1138,10 +1138,6 @@ export class Server {
 
     if (record !== undefined && ["enqueued", "claimed"].includes(record.state) && to === "init") {
       util.assertDefined(record.expiry);
-      util.assert(
-        time >= record.expiry,
-        `transitionTask(init): cannot re-init task '${id}' before expiry (${record.expiry})`,
-      );
 
       record = {
         ...record,
