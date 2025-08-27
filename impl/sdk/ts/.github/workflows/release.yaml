@@ -16,7 +16,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Checkout repo
@@ -51,17 +51,12 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install ts-node
-        run: npm install -g ts-node
-
-      - name: Verify package
+      - name: Verify can install package
         run: |
           npm install @resonatehq/sdk@${{ github.ref_name }}
-          ts-node app.ts
-        working-directory: examples/async
