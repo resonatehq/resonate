@@ -833,7 +833,7 @@ class Computation:
 
                     case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                         f.ctx.logger.error(
-                            "Function %s(%s) failed with %s",
+                            "RuntimeError. Function %s(%s) failed with %s",
                             f.func.__name__,
                             utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
                             utils.truncate(repr(e), self.max_len),
@@ -847,7 +847,7 @@ class Computation:
 
                     case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                         f.ctx.logger.error(
-                            "Function %s(%s) failed with %s",
+                            "RuntimeError. Function %s(%s) failed with %s",
                             f.func.__name__,
                             utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
                             utils.truncate(repr(e), self.max_len),
@@ -859,7 +859,7 @@ class Computation:
                     case Ko(e), _, d:
                         assert d is not None, "Delay must be set."
                         f.ctx.logger.warning(
-                            "Function %s(%s) failed with %s (retrying in %.1fs)",
+                            "RuntimeError. Function %s(%s) failed with %s (retrying in %.1fs)",
                             f.func.__name__,
                             utils.truncate(utils.format_args_and_kwargs(f.args, f.kwargs), self.max_len),
                             utils.truncate(repr(e), self.max_len),
@@ -983,7 +983,7 @@ class Computation:
 
                             case Ko(e), True, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                                 c.ctx.logger.error(
-                                    "Function %s(%s) failed with %s",
+                                    "RuntimeError. Function %s(%s) failed with %s",
                                     c.func.__name__,
                                     utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
                                     utils.truncate(repr(e), self.max_len),
@@ -997,7 +997,7 @@ class Computation:
 
                             case Ko(e), False, d if d is None or clock.time() + d > timeout or type(e) in opts.non_retryable_exceptions:
                                 c.ctx.logger.error(
-                                    "Function %s(%s) failed with %s",
+                                    "RuntimeError. Function %s(%s) failed with %s",
                                     c.func.__name__,
                                     utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
                                     utils.truncate(repr(e), self.max_len),
@@ -1009,7 +1009,7 @@ class Computation:
                             case Ko(e), _, d:
                                 assert d is not None, "Delay must be set."
                                 c.ctx.logger.warning(
-                                    "Function %s(%s) failed with %s (retrying in %.1fs)",
+                                    "RuntimeError. Function %s(%s) failed with %s (retrying in %.1fs)",
                                     c.func.__name__,
                                     utils.truncate(utils.format_args_and_kwargs(c.args, c.kwargs), self.max_len),
                                     utils.truncate(repr(e), self.max_len),

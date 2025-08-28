@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -19,6 +21,8 @@ if TYPE_CHECKING:
     from resonate.models.encoder import Encoder
     from resonate.models.retry_policy import RetryPolicy
 
+logger = logging.getLogger(__name__)
+
 
 class RemoteStore:
     def __init__(
@@ -35,7 +39,7 @@ class RemoteStore:
         self._auth = auth or ((os.getenv("RESONATE_USERNAME", ""), os.getenv("RESONATE_PASSWORD", "")) if "RESONATE_USERNAME" in os.environ else None)
         self._encoder = encoder or Base64Encoder()
         self._timeout = timeout
-        self._retry_policy = retry_policy or Constant(delay=1, max_retries=3)
+        self._retry_policy = retry_policy or Constant(delay=1, max_retries=sys.maxsize)  # We will retry forever until we implement the drop task strategy
 
         self._promises = RemotePromiseStore(self)
         self._tasks = RemoteTaskStore(self)
@@ -92,12 +96,18 @@ class RemoteStore:
                 except requests.exceptions.Timeout as e:
                     if delay is None:
                         raise ResonateStoreError(mesg="Request timed out", code=0) from e
+
+                    logger.warning("Networking. Cannot connect to %s. Retrying in %s sec", self.url, delay)
                 except requests.exceptions.ConnectionError as e:
                     if delay is None:
                         raise ResonateStoreError(mesg="Failed to connect", code=0) from e
+
+                    logger.warning("Networking. Cannot connect to %s. Retrying in %s sec", self.url, delay)
                 except Exception as e:
                     if delay is None:
                         raise ResonateStoreError(mesg="Unknown exception", code=0) from e
+
+                    logger.warning("Networking. Cannot connect to %s. Retrying in %s sec", self.url, delay)
                 else:
                     return data
 
