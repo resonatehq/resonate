@@ -94,7 +94,7 @@ export class Future<T> implements Iterable<Future<T>> {
     }
 
     if (this.value.success) {
-      return this.value.data;
+      return this.value.value;
     }
     throw this.value.error; // Should be unreachble
   }
@@ -108,6 +108,9 @@ export class Future<T> implements Iterable<Future<T>> {
 }
 
 export interface Context {
+  readonly id: string;
+  readonly timeout: number;
+
   // core four
   lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
   lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
@@ -158,30 +161,43 @@ export interface Context {
 }
 
 export class InnerContext implements Context {
+  readonly id: string;
+  readonly timeout: number;
+
+  private rId: string;
+  private pId: string;
+  private clock: Clock;
+  private dependencies: Map<string, any>;
+  private seq = 0;
+
   run = this.lfc.bind(this);
   rpc = this.rfc.bind(this);
   beginRun = this.lfi.bind(this);
   beginRpc = this.rfi.bind(this);
 
-  private seq: number;
-
   // TODO(avillega): set the parent timeout to be used to calculate the actual timeout for the createReq
   private constructor(
-    private id: string,
-    private rId: string,
-    private pId: string,
-    private dependencies: Map<string, any>,
-    private clock: Clock,
+    id: string,
+    rId: string,
+    pId: string,
+    timeout: number,
+    clock: Clock,
+    dependencies: Map<string, any>,
   ) {
-    this.seq = 0;
+    this.id = id;
+    this.rId = rId;
+    this.pId = pId;
+    this.timeout = timeout;
+    this.clock = clock;
+    this.dependencies = dependencies;
   }
 
-  static root(id: string, dependencies: Map<string, any>, clock: Clock) {
-    return new InnerContext(id, id, id, dependencies, clock);
+  static root(id: string, timeout: number, clock: Clock, dependencies: Map<string, any>) {
+    return new InnerContext(id, id, id, timeout, clock, dependencies);
   }
 
-  child(id: string) {
-    return new InnerContext(id, this.rId, this.id, this.dependencies, this.clock);
+  child(id: string, timeout: number) {
+    return new InnerContext(id, this.rId, this.id, timeout, this.clock, this.dependencies);
   }
 
   lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>> {
@@ -234,7 +250,7 @@ export class InnerContext implements Context {
       throw new Error("not implemented");
     }
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new RFI(this.remoteCreateReq(func, argu, opts), "detached");
+    return new RFI(this.remoteCreateReq(func, argu, opts, Number.MAX_SAFE_INTEGER), "detached");
   }
 
   getDependency(key: string): any | undefined {
@@ -260,10 +276,13 @@ export class InnerContext implements Context {
       ...opts.tags,
     };
 
+    // timeout cannot be greater than parent timeout
+    const timeout = Math.min(this.clock.now() + opts.timeout, this.timeout);
+
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: this.clock.now() + opts.timeout,
+      timeout: timeout,
       param: {},
       tags,
       iKey: opts.id,
@@ -271,7 +290,7 @@ export class InnerContext implements Context {
     };
   }
 
-  remoteCreateReq(func: string, args: any[], opts: Options): CreatePromiseReq {
+  remoteCreateReq(func: string, args: any[], opts: Options, maxTimeout = this.timeout): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
@@ -280,10 +299,13 @@ export class InnerContext implements Context {
       ...opts.tags,
     };
 
+    // timeout cannot be greater than parent timeout (unless detached)
+    const timeout = Math.min(this.clock.now() + opts.timeout, maxTimeout);
+
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: this.clock.now() + opts.timeout,
+      timeout: timeout,
       tags,
       param: {
         func,
@@ -302,13 +324,15 @@ export class InnerContext implements Context {
       ...tags,
     };
 
-    const cTimeout = timeout ?? 24 * util.HOUR;
     const cId = id ?? this.seqid();
+
+    // timeout cannot be greater than parent timeout
+    const cTimeout = Math.min(this.clock.now() + (timeout ?? 24 * util.HOUR), this.timeout);
 
     return {
       kind: "createPromise",
       id: cId,
-      timeout: this.clock.now() + cTimeout,
+      timeout: cTimeout,
       param: data,
       tags: cTags,
       iKey: cId,
@@ -325,10 +349,13 @@ export class InnerContext implements Context {
       ...opts.tags,
     };
 
+    // timeout cannot be greater than parent timeout
+    const timeout = Math.min(this.clock.now() + opts.timeout, this.timeout);
+
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: this.clock.now() + opts.timeout,
+      timeout: timeout,
       param: {},
       tags,
       iKey: opts.id,

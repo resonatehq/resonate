@@ -1,7 +1,6 @@
 import { setTimeout } from "node:timers/promises";
 import { LocalNetwork } from "../dev/network";
 import type { Context } from "../src/context";
-import { Promises } from "../src/promises";
 import { Resonate } from "../src/resonate";
 import * as util from "../src/util";
 
@@ -99,7 +98,6 @@ describe("Resonate usage tests", () => {
   test("Correctly sets options on inner functions", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
-    const promises = new Promises(network);
 
     const g = async (_ctx: Context, msg: string) => {
       return { msg };
@@ -113,7 +111,7 @@ describe("Resonate usage tests", () => {
 
     const v = await f.run("f");
     expect(v.msg).toBe("this is a function");
-    const durable = await promises.get("altId");
+    const durable = await resonate.promises.get("altId");
     expect(durable.id).toBe("altId");
     expect(durable.tags).toMatchObject({ myTag: "value", "resonate:scope": "local" });
     resonate.stop();
@@ -122,7 +120,6 @@ describe("Resonate usage tests", () => {
   test("Correctly sets options on inner functions without defined opts", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
-    const promises = new Promises(network);
 
     const g = async (_ctx: Context, msg: string) => {
       return { msg };
@@ -136,7 +133,7 @@ describe("Resonate usage tests", () => {
 
     const v = await f.run("f");
     expect(v.msg).toBe("this is a function");
-    const durable = await promises.get("f.0");
+    const durable = await resonate.promises.get("f.0");
     expect(durable.id).toBe("f.0");
     expect(durable.tags).toStrictEqual({ "resonate:scope": "local", "resonate:root": "f", "resonate:parent": "f" });
     resonate.stop();
@@ -145,7 +142,6 @@ describe("Resonate usage tests", () => {
   test("Basic human in the loop", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
-    const promises = new Promises(network);
 
     const f = resonate.register("f", function* foo(ctx: Context) {
       const fu = yield* ctx.promise({ id: "myId" });
@@ -154,7 +150,9 @@ describe("Resonate usage tests", () => {
     });
 
     const p = await f.beginRun("f");
-    await promises.resolve("myId", "myId", false, "myValue");
+    await setTimeout(100); // Ensure myId promise is created
+
+    await resonate.promises.resolve("myId", "myId", false, "myValue");
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
@@ -163,7 +161,6 @@ describe("Resonate usage tests", () => {
   test("Correctly sets timeout", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
-    const promises = new Promises(network);
 
     const time = Date.now();
 
@@ -174,11 +171,13 @@ describe("Resonate usage tests", () => {
     });
 
     const p = await f.beginRun("f");
-    const durable = await promises.get("myId");
+    await setTimeout(100); // Ensure myId promise is created
+
+    const durable = await resonate.promises.get("myId");
     expect(durable.timeout).toBeGreaterThanOrEqual(time + 5 * util.HOUR);
     expect(durable.timeout).toBeLessThan(time + 5 * util.HOUR + 1000);
 
-    await promises.resolve("myId", "myId", false, "myValue");
+    await resonate.promises.resolve("myId", "myId", false, "myValue");
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
@@ -187,7 +186,6 @@ describe("Resonate usage tests", () => {
   test("Basic Durable sleep", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
-    const promises = new Promises(network);
 
     const time = Date.now();
     const f = resonate.register("f", function* foo(ctx: Context) {
@@ -196,7 +194,9 @@ describe("Resonate usage tests", () => {
     });
 
     const p = await f.beginRun("f");
-    const durable = await promises.get("f.0");
+    await setTimeout(100); // Ensure f.0 promise is created
+
+    const durable = await resonate.promises.get("f.0");
     expect(durable.tags).toMatchObject({ "resonate:timeout": "true" });
     expect(durable.timeout).toBeLessThan(time + 1 * util.SEC + 100);
 
@@ -208,7 +208,6 @@ describe("Resonate usage tests", () => {
   test("Basic Detached", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
-    const promises = new Promises(network);
 
     resonate.register("d", async (_ctx: Context): Promise<void> => {
       await setTimeout(1000);
@@ -222,7 +221,7 @@ describe("Resonate usage tests", () => {
     const v = await f.run("f");
     expect(v).toBe("myValue");
 
-    const durable = await promises.get("f.0");
+    const durable = await resonate.promises.get("f.0");
     expect(durable).toMatchObject({ state: "pending" });
 
     resonate.stop();

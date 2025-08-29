@@ -1,6 +1,8 @@
 import type { StepClock } from "../../src/clock";
-import { NoHeartbeat } from "../../src/heartbeat";
+import { Handler } from "../../src/handler";
+import { NoopHeartbeat } from "../../src/heartbeat";
 import type { Network, Message as NetworkMessage, Request, Response, ResponseFor } from "../../src/network/network";
+import type { Registry } from "../../src/registry";
 import { ResonateInner } from "../../src/resonate-inner";
 import type { Callback } from "../../src/types";
 import * as util from "../../src/util";
@@ -123,26 +125,32 @@ class SimulatedNetwork implements Network {
 export class WorkerProcess extends Process {
   private clock: StepClock;
   private network: SimulatedNetwork;
-  resonate: ResonateInner;
+  private registry: Registry;
+  private resonate: ResonateInner;
 
   constructor(
     prng: Random,
     clock: StepClock,
+    registry: Registry,
     { charFlipProb = 0 }: DeliveryOptions,
     public readonly iaddr: string,
     public readonly gaddr: string,
   ) {
     super(iaddr, gaddr);
-    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
     this.clock = clock;
-    this.resonate = new ResonateInner(this.network, {
-      pid: iaddr,
-      anycast: `sim://any@${gaddr}/${iaddr}`,
+    this.network = new SimulatedNetwork(prng, { charFlipProb: 0 }, unicast(iaddr), unicast("server"));
+    this.registry = registry;
+    this.resonate = new ResonateInner({
       unicast: `sim://uni@${gaddr}/${iaddr}`,
+      anycast: `sim://any@${gaddr}/${iaddr}`,
+      pid: iaddr,
       ttl: 5000,
-      heartbeat: new NoHeartbeat(),
-      dependencies: new Map(),
       clock: this.clock,
+      network: this.network,
+      handler: new Handler(this.network),
+      registry: registry,
+      heartbeat: new NoopHeartbeat(),
+      dependencies: new Map(),
     });
   }
 

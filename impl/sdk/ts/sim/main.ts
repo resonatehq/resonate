@@ -2,6 +2,7 @@ import { Command } from "commander";
 import { StepClock } from "../src/clock";
 import type { Context } from "../src/context";
 import type { Request } from "../src/network/network";
+import { Registry } from "../src/registry";
 import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
@@ -176,7 +177,7 @@ const options = program.opts<Options>();
 // ------------------------------------------------------------------------------------------
 export function run(options: Options) {
   const rnd = new Random(options.seed);
-  const clock = new StepClock();
+
   const sim = new Simulator(rnd, {
     randomDelay: options.randomDelay ?? rnd.random(0.5),
     dropProb: options.dropProb ?? rnd.random(0.5),
@@ -185,40 +186,28 @@ export function run(options: Options) {
     activateProb: options.activateProb ?? rnd.random(0.5),
   });
 
-  const server = new ServerProcess(clock, "server");
-  const worker1 = new WorkerProcess(
-    rnd,
-    clock,
-    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
-    "worker-1",
-    "default",
-  );
-  const worker2 = new WorkerProcess(
-    rnd,
-    clock,
-    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
-    "worker-2",
-    "default",
-  );
-  const worker3 = new WorkerProcess(
-    rnd,
-    clock,
-    { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
-    "worker-3",
-    "default",
-  );
-
-  const workers = [worker1, worker2, worker3] as const;
+  const clock = new StepClock();
+  const registry = new Registry();
 
   for (const [name, func] of Object.entries(availableFuncs)) {
-    for (const worker of workers) {
-      worker.resonate.register(name, func);
-    }
+    registry.set(name, func);
   }
 
-  sim.register(server);
-  for (const worker of workers) {
-    sim.register(worker);
+  // server
+  sim.register(new ServerProcess(clock, "server"));
+
+  // workers
+  for (let i = 1; i <= 3; i++) {
+    sim.register(
+      new WorkerProcess(
+        rnd,
+        clock,
+        registry,
+        { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
+        `worker-${i}`,
+        "default",
+      ),
+    );
   }
 
   sim.repeat(1, () => {

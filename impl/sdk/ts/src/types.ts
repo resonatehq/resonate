@@ -45,7 +45,7 @@ export type Result<T> = Ok<T> | Ko;
 
 type Ok<T> = {
   success: true;
-  data: T;
+  value: T;
 };
 
 type Ko = {
@@ -113,7 +113,7 @@ export type Literal<T> = {
 // Helper functions to create some of the types defined in this file
 
 export function ok<T>(data: T): Result<T> {
-  return { success: true, data };
+  return { success: true, value: data };
 }
 
 export function ko(error: any): Result<any> {

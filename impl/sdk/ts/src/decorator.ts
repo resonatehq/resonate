@@ -91,10 +91,13 @@ export class Decorator<TRet> {
 
   // From external type to internal type
   private toInternal<T>(
-    event: LFI<T> | RFI<T> | Future<T> | LFC<T> | RFC<T>,
+    event: LFI<T> | RFI<T> | LFC<T> | RFC<T> | Future<T>,
   ): InternalAsyncL | InternalAsyncR | InternalAwait<T> {
     if (event instanceof LFI || event instanceof LFC) {
-      this.invokes.push({ kind: event instanceof LFI ? "invoke" : "call", id: event.createReq.id });
+      this.invokes.push({
+        kind: event instanceof LFI ? "invoke" : "call",
+        id: event.createReq.id,
+      });
       this.nextState = "internal.promise";
       return {
         type: "internal.async.l",
@@ -106,7 +109,10 @@ export class Decorator<TRet> {
     }
     if (event instanceof RFI || event instanceof RFC) {
       if (event.mode === "attached") {
-        this.invokes.push({ kind: event instanceof RFI ? "invoke" : "call", id: event.createReq.id });
+        this.invokes.push({
+          kind: event instanceof RFI ? "invoke" : "call",
+          id: event.createReq.id,
+        });
       }
 
       this.nextState = "internal.promise";
@@ -168,7 +174,7 @@ export class Decorator<TRet> {
       if (!value.success) {
         itResult = this.generator.throw(value.error);
       } else {
-        itResult = this.generator.next(value.data);
+        itResult = this.generator.next(value.value);
       }
 
       if (!itResult.done) {

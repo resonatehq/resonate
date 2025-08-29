@@ -29,8 +29,7 @@ export class LocalNetwork implements Network {
 
         callback(false, res as ResponseFor<T>);
         this.enqueueNext();
-      } catch (e) {
-        // TODO: log error
+      } catch (err) {
         callback(true);
       }
     });

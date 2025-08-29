@@ -19,7 +19,7 @@ export class AsyncProcessor implements Processor {
 
     func()
       .then((data) => {
-        const result: Result<unknown> = { success: true, data };
+        const result: Result<unknown> = { success: true, value: data };
         cb(result);
       })
       .catch((error) => {

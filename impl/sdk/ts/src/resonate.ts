@@ -1,6 +1,8 @@
 import { LocalNetwork } from "../dev/network";
+import { Handler } from "../src/handler";
+import { Registry } from "../src/registry";
 import { WallClock } from "./clock";
-import { AsyncHeartbeat, NoHeartbeat } from "./heartbeat";
+import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat";
 import type { Network } from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Promises } from "./promises";
@@ -24,32 +26,42 @@ export interface ResonateFunc<F extends Func> {
 }
 
 export class Resonate {
-  private inner: ResonateInner;
-  private group: string;
+  private unicast: string;
+  private anycast: string;
   private pid: string;
   private ttl: number;
-  private anycast: string;
-  private unicast: string;
+
+  private inner: ResonateInner;
+  private network: Network;
+  private registry: Registry;
+  private heartbeat: Heartbeat;
+  private dependencies: Map<string, any>;
+
   public readonly promises: Promises;
   public readonly schedules: Schedules;
 
-  constructor(config: { group: string; pid: string; ttl: number; dependencies?: Map<string, any> }, network: Network) {
-    this.group = config.group;
-    this.pid = config.pid;
-    this.ttl = config.ttl;
-    this.anycast = `poll://any@${this.group}/${this.pid}`;
-    this.unicast = `poll://uni@${this.group}/${this.pid}`;
+  constructor({ group, pid, ttl }: { group: string; pid: string; ttl: number }, network: Network) {
+    this.unicast = `poll://uni@${group}/${pid}`;
+    this.anycast = `poll://any@${group}/${pid}`;
+    this.pid = pid;
+    this.ttl = ttl;
 
-    const heartbeat =
-      network instanceof LocalNetwork ? new NoHeartbeat() : new AsyncHeartbeat(config.pid, this.ttl / 2, network);
+    this.network = network;
+    this.registry = new Registry();
+    this.heartbeat = network instanceof LocalNetwork ? new NoopHeartbeat() : new AsyncHeartbeat(pid, ttl / 2, network);
+    this.dependencies = new Map();
 
-    this.inner = new ResonateInner(network, {
-      ...config,
-      heartbeat: heartbeat,
-      anycast: this.anycast,
+    this.inner = new ResonateInner({
       unicast: this.unicast,
-      dependencies: config.dependencies ?? new Map(),
+      anycast: this.anycast,
+      pid: this.pid,
+      ttl: this.ttl,
       clock: new WallClock(),
+      network: this.network,
+      handler: new Handler(this.network),
+      registry: this.registry,
+      heartbeat: this.heartbeat,
+      dependencies: this.dependencies,
     });
 
     this.promises = new Promises(network);
@@ -109,7 +121,11 @@ export class Resonate {
     const name = typeof nameOrFunc === "string" ? nameOrFunc : nameOrFunc.name;
     const func = typeof nameOrFunc === "string" ? maybeFunc! : nameOrFunc;
 
-    this.inner.register(name ?? func.name, func);
+    if (this.registry.has(name)) {
+      throw new Error(`'${name}' already registered`);
+    }
+
+    this.registry.set(name, func);
 
     return {
       run: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.run(id, func, ...args),
@@ -139,7 +155,7 @@ export class Resonate {
   public async beginRun<T>(id: string, func: string, ...args: any[]): Promise<Handle<T>>;
   public async beginRun(id: string, funcOrName: Func | string, ...args: any[]): Promise<Handle<any>>;
   public async beginRun(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<Handle<any>> {
-    const registered = this.inner.registry.get(funcOrName); // TODO(avillega): should the register be owned by Resonate?
+    const registered = this.registry.get(funcOrName);
     if (!registered) {
       throw new Error(`${funcOrName} does not exist`);
     }
@@ -150,13 +166,13 @@ export class Resonate {
       kind: "createPromiseAndTask",
       promise: {
         id: id,
-        timeout: opts.timeout + Date.now(),
+        timeout: Date.now() + opts.timeout,
         param: { func: registered.name, args },
         tags: {
           ...opts.tags,
-          "resonate:invoke": `poll://any@${this.group}/${this.pid}`,
+          "resonate:invoke": this.anycast,
           "resonate:scope": "global",
-        }, // TODO(avillega): use the real anycast address or change the server to not require `poll://`
+        },
       },
       task: {
         processId: this.pid,
@@ -190,7 +206,7 @@ export class Resonate {
     if (typeof funcOrName === "string") {
       name = funcOrName;
     } else {
-      const registered = this.inner.registry.get(funcOrName);
+      const registered = this.registry.get(funcOrName);
       if (!registered) {
         throw new Error(`${funcOrName} is not registered`);
       }
@@ -223,10 +239,6 @@ export class Resonate {
     };
   }
 
-  public stop() {
-    this.inner.stop();
-  }
-
   /** Store a named dependency for use with `Context`.
    *  The dependency is made available to all functions via
    *  their execution `Context`.
@@ -234,7 +246,12 @@ export class Resonate {
    *  overwrite the previously set dependency.
    */
   public setDependency(name: string, obj: any): void {
-    this.inner.setDependency(name, obj);
+    this.dependencies.set(name, obj);
+  }
+
+  public stop() {
+    this.network.stop();
+    this.heartbeat.stop();
   }
 
   private handle(promiseHandler: PromiseHandler): Promise<Handle<any>> {

@@ -59,7 +59,7 @@ export class AsyncHeartbeat implements Heartbeat {
   }
 }
 
-export class NoHeartbeat implements Heartbeat {
+export class NoopHeartbeat implements Heartbeat {
   start(): void {}
   stop(): void {}
 }

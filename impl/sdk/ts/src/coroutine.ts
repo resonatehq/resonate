@@ -24,6 +24,7 @@ export interface LocalTodo {
 
 export interface RemoteTodo {
   id: string;
+  timeout: number;
 }
 
 type More = {
@@ -62,6 +63,8 @@ export class Coroutine<T> {
         kind: "createPromise",
         id,
         timeout: 0,
+        iKey: id,
+        strict: false,
       },
       (err, res) => {
         if (err) return callback(err);
@@ -82,12 +85,22 @@ export class Coroutine<T> {
               break;
 
             case "done":
-              handler.completePromise(id, status.result, (err, promise) => {
-                if (err) return callback(err);
-                util.assertDefined(promise);
+              handler.completePromise(
+                {
+                  kind: "completePromise",
+                  id: id,
+                  state: status.result.success ? "resolved" : "rejected",
+                  value: status.result.success ? status.result.value : status.result.error,
+                  iKey: id,
+                  strict: false,
+                },
+                (err, promise) => {
+                  if (err) return callback(err);
+                  util.assertDefined(promise);
 
-                callback(false, { type: "completed", promise });
-              });
+                  callback(false, { type: "completed", promise });
+                },
+              );
               break;
           }
         });
@@ -98,6 +111,7 @@ export class Coroutine<T> {
   private exec(callback: Callback<More | Done>) {
     const local: LocalTodo[] = [];
     const remote: RemoteTodo[] = [];
+    const detached: Map<string, RemoteTodo> = new Map();
 
     let input: Value<any> = {
       type: "internal.nothing",
@@ -114,11 +128,13 @@ export class Coroutine<T> {
             if (err) return callback(err);
             util.assertDefined(res);
 
+            const ctx = this.ctx.child(res.id, res.timeout);
+
             if (res.state === "pending") {
               if (!util.isGeneratorFunction(action.func)) {
                 local.push({
                   id: action.id,
-                  ctx: this.ctx,
+                  ctx: ctx,
                   func: action.func,
                   args: action.args,
                 });
@@ -132,11 +148,7 @@ export class Coroutine<T> {
                 return;
               }
 
-              const coroutine = new Coroutine(
-                this.ctx,
-                new Decorator(action.func(this.ctx, ...action.args)),
-                this.handler,
-              );
+              const coroutine = new Coroutine(ctx, new Decorator(action.func(ctx, ...action.args)), this.handler);
               coroutine.exec((err, status) => {
                 if (err) return callback(err);
                 util.assertDefined(status);
@@ -152,18 +164,28 @@ export class Coroutine<T> {
                   };
                   next();
                 } else {
-                  this.handler.completePromise(action.id, status.result, (err, res) => {
-                    if (err) return callback(err);
-                    util.assertDefined(res);
-
-                    input = {
-                      type: "internal.promise",
-                      state: "completed",
+                  this.handler.completePromise(
+                    {
+                      kind: "completePromise",
                       id: action.id,
-                      value: extractResult(res),
-                    };
-                    next();
-                  });
+                      state: status.result.success ? "resolved" : "rejected",
+                      value: status.result.success ? status.result.value : status.result.error,
+                      iKey: action.id,
+                      strict: false,
+                    },
+                    (err, res) => {
+                      if (err) return callback(err);
+                      util.assertDefined(res);
+
+                      input = {
+                        type: "internal.promise",
+                        state: "completed",
+                        id: action.id,
+                        value: extractResult(res),
+                      };
+                      next();
+                    },
+                  );
                 }
               });
             } else {
@@ -187,7 +209,8 @@ export class Coroutine<T> {
             util.assertDefined(res);
 
             if (res.state === "pending") {
-              if (action.mode === "attached") remote.push({ id: action.id });
+              if (action.mode === "attached") remote.push({ id: action.id, timeout: res.timeout });
+              if (action.mode === "detached") detached.set(action.id, { id: action.id, timeout: res.timeout });
 
               input = {
                 type: "internal.promise",
@@ -223,9 +246,12 @@ export class Coroutine<T> {
         // the global callbacks to create.
         if (action.type === "internal.await" && action.promise.state === "pending") {
           if (action.promise.mode === "detached") {
+            const todo = detached.get(action.id);
+            util.assertDefined(todo);
+
             // We didn't add the associated todo of this promise, since the user is explicitly awaiting it we need to add the todo now.
             // All detached are remotes.
-            remote.push({ id: action.id });
+            remote.push(todo);
           }
           callback(false, { type: "more", todo: { local, remote } });
           return;

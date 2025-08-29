@@ -1,5 +1,6 @@
 import type { Clock } from "./clock";
 import { Computation, type Status } from "./computation";
+import type { Handler } from "./handler";
 import type { Heartbeat } from "./heartbeat";
 import type {
   CreatePromiseAndTaskReq,
@@ -7,10 +8,9 @@ import type {
   DurablePromiseRecord,
   Message,
   Network,
-  ResponseFor,
 } from "./network/network";
-import { Registry } from "./registry";
-import type { Callback, Func, Task } from "./types";
+import type { Registry } from "./registry";
+import type { Callback, Task } from "./types";
 import * as util from "./util";
 
 export type PromiseHandler = {
@@ -19,69 +19,93 @@ export type PromiseHandler = {
 };
 
 export class ResonateInner {
-  public registry: Registry; // TODO(avillega): Who should own the registry? the resonate class?
-
-  private computations: Map<string, Computation>;
-  private network: Network;
-  private anycast: string;
   private unicast: string;
+  private anycast: string;
   private pid: string;
   private ttl: number;
+  private clock: Clock;
+  private network: Network;
+  private handler: Handler;
+  private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
-  private clock: Clock;
+
+  private computations: Map<string, Computation> = new Map();
   private notifications: Map<string, DurablePromiseRecord> = new Map();
   private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => boolean>> = new Map();
 
-  constructor(
-    network: Network,
-    config: {
-      anycast: string;
-      unicast: string;
-      pid: string;
-      ttl: number;
-      heartbeat: Heartbeat;
-      dependencies: Map<string, any>;
-      clock: Clock;
-    },
-  ) {
-    const { anycast, unicast, pid, ttl, dependencies, heartbeat, clock } = config;
-    this.computations = new Map();
+  constructor({
+    unicast,
+    anycast,
+    pid,
+    ttl,
+    clock,
+    network,
+    handler,
+    registry,
+    heartbeat,
+    dependencies,
+  }: {
+    unicast: string;
+    anycast: string;
+    pid: string;
+    ttl: number;
+    clock: Clock;
+    network: Network;
+    handler: Handler;
+    registry: Registry;
+    heartbeat: Heartbeat;
+    dependencies: Map<string, any>;
+  }) {
+    this.unicast = unicast;
+    this.anycast = anycast;
     this.pid = pid;
     this.ttl = ttl;
-    this.heartbeat = heartbeat;
-    this.anycast = anycast;
-    this.unicast = unicast;
-    this.registry = new Registry();
-    this.network = network;
-    this.dependencies = dependencies;
     this.clock = clock;
+    this.network = network;
+    this.handler = handler;
+    this.registry = registry;
+    this.heartbeat = heartbeat;
+    this.dependencies = dependencies;
+
+    // subscribe to network messages
     this.network.subscribe(this.onMessage.bind(this));
   }
 
   public run(req: CreatePromiseAndTaskReq): PromiseHandler {
-    return this.runOrRpc(req, (err, res) => {
-      util.assert(!err, "retry forever ensures err is false");
-      util.assertDefined(res);
+    this.handler.createPromiseAndTask(
+      req,
+      (err, res) => {
+        util.assert(!err, "retry forever ensures err is false");
+        util.assertDefined(res);
 
-      // notify
-      this.notify(res.promise);
+        // notify
+        this.notify(res.promise);
 
-      // if we have the task, process it
-      if (res.task) {
-        this.process({ kind: "claimed", task: res.task, rootPromise: res.promise }, () => {});
-      }
-    });
+        // if we have the task, process it
+        if (res.task) {
+          this.process({ kind: "claimed", task: res.task, rootPromise: res.promise }, () => {});
+        }
+      },
+      true,
+    );
+
+    return this.promiseHandler(req.promise.id, req.promise.timeout);
   }
 
   public rpc(req: CreatePromiseReq): PromiseHandler {
-    return this.runOrRpc(req, (err, res) => {
-      util.assert(!err, "retry forever ensures err is false");
-      util.assertDefined(res);
+    this.handler.createPromise(
+      req,
+      (err, res) => {
+        util.assert(!err, "retry forever ensures err is false");
+        util.assertDefined(res);
 
-      // notify
-      this.notify(res.promise);
-    });
+        // notify
+        this.notify(res);
+      },
+      true,
+    );
+    return this.promiseHandler(req.id, req.timeout);
   }
 
   public process(task: Task, done: Callback<Status>) {
@@ -89,15 +113,16 @@ export class ResonateInner {
     if (!computation) {
       computation = new Computation(
         task.task.rootPromiseId,
+        this.unicast,
+        this.anycast,
         this.pid,
         this.ttl,
-        this.anycast,
-        this.unicast,
+        this.clock,
         this.network,
+        this.handler,
         this.registry,
         this.heartbeat,
         this.dependencies,
-        this.clock,
       );
       this.computations.set(task.task.rootPromiseId, computation);
     }
@@ -105,15 +130,7 @@ export class ResonateInner {
     computation.process(task, done);
   }
 
-  private runOrRpc<T extends CreatePromiseReq | CreatePromiseAndTaskReq>(
-    req: T,
-    done: Callback<ResponseFor<T>>,
-  ): PromiseHandler {
-    const id = req.kind === "createPromise" ? req.id : req.promise.id;
-    const timeout = req.kind === "createPromise" ? req.timeout : req.promise.timeout;
-
-    this.network.send(req, done, true);
-
+  private promiseHandler(id: string, timeout: number): PromiseHandler {
     return {
       addEventListener: (event: "created" | "completed", callback: (p: DurablePromiseRecord) => void) => {
         const subscriptions = this.subscriptions.get(id) || [];
@@ -137,8 +154,7 @@ export class ResonateInner {
       },
       subscribe: () =>
         new Promise<void>((resolve) => {
-          // attempt to subscribe forever
-          this.network.send(
+          this.handler.createSubscription(
             {
               kind: "createSubscription",
               id: id,
@@ -148,26 +164,13 @@ export class ResonateInner {
             (err, res) => {
               util.assert(!err, "retry forever ensures err is false");
               util.assertDefined(res);
-
-              this.notify(res.promise);
+              this.notify(res);
               resolve();
             },
             true,
           );
         }),
     };
-  }
-
-  public register<F extends Func>(name: string, func: F) {
-    if (this.registry.has(name)) {
-      throw new Error(`'${name}' already registered`);
-    }
-
-    this.registry.set(name, func);
-  }
-
-  public setDependency(name: string, obj: any): void {
-    this.dependencies.set(name, obj);
   }
 
   private onMessage(msg: Message): void {
@@ -198,10 +201,5 @@ export class ResonateInner {
 
     // remove any subscriber that was notified
     this.subscriptions.set(promise.id, subscriptions);
-  }
-
-  public stop() {
-    this.network.stop();
-    this.heartbeat.stop();
   }
 }

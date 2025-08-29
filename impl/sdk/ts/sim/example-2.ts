@@ -5,6 +5,7 @@ import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
 import { StepClock } from "../src/clock";
+import { Registry } from "../src/registry";
 import * as util from "../src/util";
 
 // Function definition
@@ -31,6 +32,9 @@ const options: {
 
 const rnd = new Random(options.seed);
 const clock = new StepClock();
+const registry = new Registry();
+registry.set("fibonacci", fibonacci);
+
 const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
   dropProb: options.dropProb,
@@ -41,6 +45,7 @@ const server = new ServerProcess(clock, "server");
 const worker1 = new WorkerProcess(
   rnd,
   clock,
+  registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-1",
   "default",
@@ -48,6 +53,7 @@ const worker1 = new WorkerProcess(
 const worker2 = new WorkerProcess(
   rnd,
   clock,
+  registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-2",
   "default",
@@ -55,16 +61,13 @@ const worker2 = new WorkerProcess(
 const worker3 = new WorkerProcess(
   rnd,
   clock,
+  registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-3",
   "default",
 );
 
 const workers = [worker1, worker2, worker3] as const;
-
-for (const worker of workers) {
-  worker.resonate.register("fibonacci", fibonacci);
-}
 
 sim.register(server);
 for (const worker of workers) {

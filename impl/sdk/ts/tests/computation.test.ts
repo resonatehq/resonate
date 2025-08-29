@@ -2,7 +2,8 @@ import { LocalNetwork } from "../dev/network";
 import { WallClock } from "../src/clock";
 import { Computation, type Status } from "../src/computation";
 import type { Context } from "../src/context";
-import { NoHeartbeat } from "../src/heartbeat";
+import { Handler } from "../src/handler";
+import { NoopHeartbeat } from "../src/heartbeat";
 import type { DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
@@ -83,7 +84,7 @@ class MockProcessor implements Processor {
     // Fire all callbacks in the same event loop tick to simulate concurrency
     for (const todo of todosToComplete) {
       // We resolve with a simple value for the test
-      todo.callback({ success: true, data: `completed-${todo.id}` });
+      todo.callback({ success: true, value: `completed-${todo.id}` });
     }
   }
 }
@@ -104,15 +105,16 @@ describe("Computation Event Queue Concurrency", () => {
 
     computation = new Computation(
       "root-promise-1",
-      "test-pid",
-      3600,
       "poll://any@test-group/test-pid",
       "poll://uni@test-group/test-pid",
-      network,
-      registry,
-      new NoHeartbeat(),
-      new Map(),
+      "test-pid",
+      3600,
       new WallClock(),
+      network,
+      new Handler(network),
+      registry,
+      new NoopHeartbeat(),
+      new Map(),
       mockProcessor,
     );
   });

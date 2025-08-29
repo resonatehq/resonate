@@ -56,7 +56,7 @@ describe("Coroutine", () => {
   // Helper functions to write test easily
   const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
     return new Promise<any>((resolve) => {
-      Coroutine.exec(uuid, InnerContext.root(uuid, new Map(), new WallClock()), func, args, handler, (err, res) => {
+      Coroutine.exec(uuid, InnerContext.root(uuid, 0, new WallClock(), new Map()), func, args, handler, (err, res) => {
         expect(err).toBe(false);
         resolve(res);
       });
@@ -65,10 +65,20 @@ describe("Coroutine", () => {
 
   const completePromise = (handler: Handler, id: string, result: Result<any>) => {
     return new Promise<any>((resolve) => {
-      handler.completePromise(id, result, (err, res) => {
-        expect(err).toBe(false);
-        resolve(res);
-      });
+      handler.completePromise(
+        {
+          kind: "completePromise",
+          id: id,
+          state: result.success ? "resolved" : "rejected",
+          value: result.success ? result.value : result.error,
+          iKey: id,
+          strict: false,
+        },
+        (err, res) => {
+          expect(err).toBe(false);
+          resolve(res);
+        },
+      );
     });
   };
 
