@@ -1,6 +1,6 @@
 [project]
 name = "resonate-sdk"
-version = "0.6.2"
+version = "0.6.3"
 description = "Distributed Async Await by Resonate HQ, Inc"
 readme = "README.md"
 authors = [{ name = "Resonate HQ, Inc", email = "contact@resonatehq.io" }]
