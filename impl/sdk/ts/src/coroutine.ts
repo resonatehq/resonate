@@ -24,7 +24,6 @@ export interface LocalTodo {
 
 export interface RemoteTodo {
   id: string;
-  timeout: number;
 }
 
 type More = {
@@ -111,7 +110,6 @@ export class Coroutine<T> {
   private exec(callback: Callback<More | Done>) {
     const local: LocalTodo[] = [];
     const remote: RemoteTodo[] = [];
-    const detached: Map<string, RemoteTodo> = new Map();
 
     let input: Value<any> = {
       type: "internal.nothing",
@@ -209,8 +207,7 @@ export class Coroutine<T> {
             util.assertDefined(res);
 
             if (res.state === "pending") {
-              if (action.mode === "attached") remote.push({ id: action.id, timeout: res.timeout });
-              if (action.mode === "detached") detached.set(action.id, { id: action.id, timeout: res.timeout });
+              if (action.mode === "attached") remote.push({ id: action.id });
 
               input = {
                 type: "internal.promise",
@@ -246,12 +243,9 @@ export class Coroutine<T> {
         // the global callbacks to create.
         if (action.type === "internal.await" && action.promise.state === "pending") {
           if (action.promise.mode === "detached") {
-            const todo = detached.get(action.id);
-            util.assertDefined(todo);
-
             // We didn't add the associated todo of this promise, since the user is explicitly awaiting it we need to add the todo now.
             // All detached are remotes.
-            remote.push(todo);
+            remote.push({ id: action.id });
           }
           callback(false, { type: "more", todo: { local, remote } });
           return;

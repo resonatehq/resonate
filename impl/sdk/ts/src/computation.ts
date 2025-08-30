@@ -183,7 +183,7 @@ export class Computation {
           if (status.todo.local.length > 0) {
             this.processLocalTodo(nursery, status.todo.local, done);
           } else if (status.todo.remote.length > 0) {
-            this.processRemoteTodo(nursery, status.todo.remote, done);
+            this.processRemoteTodo(nursery, status.todo.remote, ctx.timeout, done);
           }
           break;
       }
@@ -235,14 +235,19 @@ export class Computation {
     return nursery.cont();
   }
 
-  private processRemoteTodo(nursery: Nursery<boolean, Status>, todo: RemoteTodo[], done: Callback<Status>) {
+  private processRemoteTodo(
+    nursery: Nursery<boolean, Status>,
+    todo: RemoteTodo[],
+    timeout: number,
+    done: Callback<Status>,
+  ) {
     nursery.all<
       RemoteTodo,
       { kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord },
       boolean
     >(
       todo,
-      ({ id, timeout }, done) =>
+      ({ id }, done) =>
         this.handler.createCallback(
           {
             kind: "createCallback",

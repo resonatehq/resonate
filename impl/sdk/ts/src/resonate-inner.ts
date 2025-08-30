@@ -158,7 +158,7 @@ export class ResonateInner {
             {
               kind: "createSubscription",
               id: id,
-              timeout: timeout,
+              timeout: timeout + 1 * util.MIN, // add a buffer
               recv: this.unicast,
             },
             (err, res) => {
