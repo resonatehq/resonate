@@ -659,9 +659,10 @@ export class HttpNetwork implements Network {
 
         return res;
       } catch (err) {
-        if (attempt >= retries || !controller.signal.aborted) {
+        if (attempt >= retries) {
           throw err;
         }
+        console.log(`Networking. Cannot connect to [${this.url}]. Retrying in ${delay / 1000}s.`);
 
         // sleep before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
