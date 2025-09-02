@@ -16,8 +16,6 @@
 
 The Resonate TypeScript SDK enables you to build reliable and scalable applications when paired with at least one [Resonate Server](https://github.com/resonatehq/resonate).
 
-**IMPORTANT - A new release is currently in development which will support full [Distributed Async Await](https://distributed-async-await.io) and will be tested using Deterministic Simulations. We do not recommend using the current version as the new release will be a breaking change.**
-
 - [Contribute to the Resonate Python SDK](./CONTRIBUTING.md)
 - [License](./LICENSE)
 
