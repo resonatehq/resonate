@@ -1,16 +1,63 @@
-import { Future, LFC, LFI, RFC, RFI, type Yieldable } from "./context";
-import {
-  type InternalAsyncL,
-  type InternalAsyncR,
-  type InternalAwait,
-  type InternalExpr,
-  type Literal,
-  type Result,
-  type Value,
-  ko,
-  ok,
-} from "./types";
+import type { CreatePromiseReq } from "network/network";
+import { Future, LFC, LFI, RFC, RFI } from "./context";
+import { type Func, type Result, type Yieldable, ko, ok } from "./types";
 import * as util from "./util";
+
+// Expr
+
+export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalReturn<T>;
+
+export type InternalAsyncR = {
+  type: "internal.async.r";
+  id: string;
+  mode: "attached" | "detached";
+  createReq: CreatePromiseReq;
+};
+
+export type InternalAsyncL = {
+  type: "internal.async.l";
+  id: string;
+  func: Func;
+  args: any[];
+  createReq: CreatePromiseReq;
+};
+export type InternalAwait<T> = {
+  type: "internal.await";
+  id: string;
+  promise: PromisePending | PromiseCompleted<T>;
+};
+
+export type InternalReturn<T> = {
+  type: "internal.return";
+  value: Literal<T>;
+};
+
+// Value
+
+export type Value<T> = Nothing | Literal<T> | PromisePending | PromiseCompleted<T>;
+
+export type Nothing = {
+  type: "internal.nothing";
+};
+
+export type Literal<T> = {
+  type: "internal.literal";
+  value: Result<T>;
+};
+
+export type PromisePending = {
+  type: "internal.promise";
+  state: "pending";
+  mode: "attached" | "detached";
+  id: string;
+};
+
+export type PromiseCompleted<T> = {
+  type: "internal.promise";
+  state: "completed";
+  id: string;
+  value: Literal<T>;
+};
 
 export class Decorator<TRet> {
   private invokes: { kind: "call" | "invoke"; id: string }[];

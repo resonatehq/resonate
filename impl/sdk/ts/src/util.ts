@@ -1,11 +1,14 @@
 import type { DurablePromiseRecord, TaskRecord } from "./network/network";
 import { type Options, RESONATE_OPTIONS } from "./types";
 
-// Base unit: milliseconds
+// time
+
 export const MS = 1;
 export const SEC = 1000;
 export const MIN = 60 * SEC;
 export const HOUR = 60 * MIN;
+
+// assert
 
 export function assert(cond: boolean, msg?: string): void {
   if (cond) return; // Early return if assertion passes
@@ -27,6 +30,8 @@ export function isGeneratorFunction(func: Function): boolean {
   const AsyncGeneratorFunction = Object.getPrototypeOf(async function* () {}).constructor;
   return func instanceof GeneratorFunction || func instanceof AsyncGeneratorFunction;
 }
+
+// guards
 
 export function isTaskRecord(obj: any): obj is TaskRecord {
   return (
@@ -65,6 +70,8 @@ export function isDurablePromiseRecord(obj: unknown): obj is DurablePromiseRecor
 export function isOptions(obj: unknown): obj is Options {
   return typeof obj === "object" && obj !== null && RESONATE_OPTIONS in obj;
 }
+
+// helpers
 
 export function splitArgsAndOpts(args: any[], defaults: Options): [any[], Options] {
   const opts = isOptions(args.at(-1)) ? args.pop() : {};

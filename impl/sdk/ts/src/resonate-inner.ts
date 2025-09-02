@@ -8,14 +8,28 @@ import type {
   DurablePromiseRecord,
   Message,
   Network,
+  TaskRecord,
 } from "./network/network";
 import type { Registry } from "./registry";
-import type { Callback, Task } from "./types";
+import type { Callback } from "./types";
 import * as util from "./util";
 
 export type PromiseHandler = {
   addEventListener: (event: "created" | "completed", callback: (p: DurablePromiseRecord) => void) => void;
   subscribe: () => Promise<void>;
+};
+
+export type Task = ClaimedTask | UnclaimedTask;
+
+export type ClaimedTask = {
+  kind: "claimed";
+  task: TaskRecord;
+  rootPromise: DurablePromiseRecord;
+};
+
+export type UnclaimedTask = {
+  kind: "unclaimed";
+  task: TaskRecord;
 };
 
 export class ResonateInner {

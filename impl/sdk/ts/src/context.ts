@@ -3,8 +3,6 @@ import type { CreatePromiseReq } from "./network/network";
 import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Result, type Return } from "./types";
 import * as util from "./util";
 
-export type Yieldable = LFI<any> | LFC<any> | RFI<any> | RFC<any> | Future<any>;
-
 export class LFI<T> implements Iterable<LFI<T>> {
   public func: Func;
   public args: any[];

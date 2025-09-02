@@ -12,7 +12,7 @@ import { Schedules } from "./schedules";
 import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
 import * as util from "./util";
 
-export interface Handle<T> {
+export interface ResonateHandle<T> {
   id: string;
   result(): Promise<T>;
 }
@@ -20,8 +20,8 @@ export interface Handle<T> {
 export interface ResonateFunc<F extends Func> {
   run: (id: string, ...args: ParamsWithOptions<F>) => Promise<Return<F>>;
   rpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<Return<F>>;
-  beginRun: (id: string, ...args: ParamsWithOptions<F>) => Promise<Handle<Return<F>>>;
-  beginRpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<Handle<Return<F>>>;
+  beginRun: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
+  beginRpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
   options: (opts?: Partial<Options>) => Partial<Options> & { [RESONATE_OPTIONS]: true };
 }
 
@@ -130,9 +130,9 @@ export class Resonate {
     return {
       run: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.run(id, func, ...args),
       rpc: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.rpc(id, func, ...args),
-      beginRun: (id: string, ...args: ParamsWithOptions<F>): Promise<Handle<Return<F>>> =>
+      beginRun: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
         this.beginRun(id, func, ...args),
-      beginRpc: (id: string, ...args: ParamsWithOptions<F>): Promise<Handle<Return<F>>> =>
+      beginRpc: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
         this.beginRpc(id, func, ...args),
       options: this.options,
     };
@@ -151,10 +151,14 @@ export class Resonate {
   /**
    * Invoke a function and return a promise
    */
-  public async beginRun<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Handle<Return<F>>>;
-  public async beginRun<T>(id: string, func: string, ...args: any[]): Promise<Handle<T>>;
-  public async beginRun(id: string, funcOrName: Func | string, ...args: any[]): Promise<Handle<any>>;
-  public async beginRun(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<Handle<any>> {
+  public async beginRun<F extends Func>(
+    id: string,
+    func: F,
+    ...args: ParamsWithOptions<F>
+  ): Promise<ResonateHandle<Return<F>>>;
+  public async beginRun<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
+  public async beginRun(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
+  public async beginRun(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
     const registered = this.registry.get(funcOrName);
     if (!registered) {
       throw new Error(`${funcOrName} does not exist`);
@@ -198,10 +202,14 @@ export class Resonate {
   /**
    * Invoke a remote function and return a promise
    */
-  public async beginRpc<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Handle<Return<F>>>;
-  public async beginRpc<T>(id: string, func: string, ...args: any[]): Promise<Handle<T>>;
-  public async beginRpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<Handle<any>>;
-  public async beginRpc(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<Handle<any>> {
+  public async beginRpc<F extends Func>(
+    id: string,
+    func: F,
+    ...args: ParamsWithOptions<F>
+  ): Promise<ResonateHandle<Return<F>>>;
+  public async beginRpc<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
+  public async beginRpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
+  public async beginRpc(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
     let name: string;
     if (typeof funcOrName === "string") {
       name = funcOrName;
@@ -254,9 +262,9 @@ export class Resonate {
     this.heartbeat.stop();
   }
 
-  private handle(promiseHandler: PromiseHandler): Promise<Handle<any>> {
+  private handle(promiseHandler: PromiseHandler): Promise<ResonateHandle<any>> {
     // resolves with a handle
-    const handle = Promise.withResolvers<Handle<any>>();
+    const handle = Promise.withResolvers<ResonateHandle<any>>();
 
     // resolves with the result
     const result = Promise.withResolvers<any>();

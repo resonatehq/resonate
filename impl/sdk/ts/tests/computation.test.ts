@@ -1,3 +1,4 @@
+import type { ClaimedTask } from "resonate-inner";
 import { LocalNetwork } from "../dev/network";
 import { WallClock } from "../src/clock";
 import { Computation, type Status } from "../src/computation";
@@ -7,7 +8,7 @@ import { NoopHeartbeat } from "../src/heartbeat";
 import type { DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
-import type { ClaimedTask, Result } from "../src/types";
+import type { Result } from "../src/types";
 import * as util from "../src/util";
 
 async function createPromiseAndTask(
