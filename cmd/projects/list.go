@@ -45,20 +45,18 @@ func ListProjectCmd() *cobra.Command {
 
 func display(templates Projects) {
 	fmt.Printf("\n✨ Available templates ✨\n\n")
-	for name, t := range templates {
-		fmt.Printf("✨ %s\n\n\t%s\n\n", name, t.Desc)
+	for id, t := range templates {
+		fmt.Printf("✨ %s\n\n\t%s\n\n", t.Name, t.Desc)
 		fmt.Printf("\tTo use this template, run:\n\n")
-		fmt.Printf("\tresonate project create --name your-project --template %s\n\n", name)
+		fmt.Printf("\tresonate project create --name your-project --template %s\n\n", id)
 	}
 }
 
-
-
 func filterByLang(projects Projects, lang string) Projects {
 	filtered := Projects{}
-	for name, p := range projects {
+	for id, p := range projects {
 		if strings.EqualFold(p.Lang, lang) {
-			filtered[name] = p
+			filtered[id] = p
 		}
 	}
 	return filtered

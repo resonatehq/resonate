@@ -11,9 +11,11 @@ import (
 
 type (
 	Project struct {
-		Href string `json:"href"`
-		Desc string `json:"desc"`
-		Lang string `json:"lang"`
+		TemplateID string `json:"template_id"`
+		Name       string `json:"name"`
+		Href       string `json:"href"`
+		Desc       string `json:"desc"`
+		Lang       string `json:"lang"`
 	}
 
 	Projects map[string]Project
@@ -63,9 +65,14 @@ func GetProjects() (Projects, error) {
 }
 
 func parse(body []byte) (Projects, error) {
-	projects := Projects{}
-	if err := json.Unmarshal(body, &projects); err != nil {
+	var list []Project
+	if err := json.Unmarshal(body, &list); err != nil {
 		return nil, err
+	}
+
+	projects := Projects{}
+	for _, p := range list {
+		projects[p.TemplateID] = p
 	}
 
 	return projects, nil
@@ -74,8 +81,8 @@ func parse(body []byte) (Projects, error) {
 func GetProjectKeys(projects Projects) []string {
 	keys := make([]string, 0)
 
-	for name := range projects {
-		keys = append(keys, name)
+	for id := range projects {
+		keys = append(keys, id)
 	}
 
 	return keys

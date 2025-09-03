@@ -13,13 +13,13 @@ import (
 )
 
 // scaffold orchestrates the setup of the project from source to destination.
-func scaffold(tmpl, name string) error {
+func scaffold(tmpl string, name string) error {
 	projects, err := GetProjects()
 	if err != nil {
 		return err
 	}
 
-	// find the project based on project (key)
+	// find the project based on template ID
 	project, exists := projects[tmpl]
 	if !exists {
 		return fmt.Errorf("unknown project '%s', available projects are: %v", tmpl, GetProjectKeys(projects))

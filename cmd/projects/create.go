@@ -39,7 +39,7 @@ resonate projects create --template basic-workflow-py --name my-app`
 		},
 	}
 
-	cmd.Flags().StringVarP(&template, "template", "t", "", "name of the template, run 'resonate project list' to view available templates")
+	cmd.Flags().StringVarP(&template, "template", "t", "", "id of the template, run 'resonate project list' to view available templates")
 	cmd.Flags().StringVarP(&name, "name", "n", "", "name of the project")
 
 	_ = cmd.MarkFlagRequired("template")
