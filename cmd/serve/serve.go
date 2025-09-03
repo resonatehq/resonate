@@ -23,20 +23,8 @@ import (
 	"github.com/spf13/viper"
 )
 
-func ServeCmd() *cobra.Command {
-	var (
-		config = &config.Config{}
-	)
-
-	cmd := &cobra.Command{
-		Use:   "serve",
-		Short: "Resonate server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := config.Parse(); err != nil {
-				return err
-			}
-
-			// logger
+func RunServe(config *config.Config) error {
+	// logger
 			logLevel, err := log.ParseLevel(config.LogLevel)
 			if err != nil {
 				slog.Error("failed to parse log level", "error", err)
@@ -173,7 +161,22 @@ func ServeCmd() *cobra.Command {
 				return err
 			}
 
-			return nil
+	return nil
+}
+
+func ServeCmd() *cobra.Command {
+	var (
+		config = &config.Config{}
+	)
+
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start Resonate server",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := config.Parse(); err != nil {
+				return err
+			}
+			return RunServe(config)
 		},
 	}
 
