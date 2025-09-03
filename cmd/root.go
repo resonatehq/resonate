@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/resonatehq/resonate/cmd/dev"
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
@@ -34,6 +35,7 @@ func init() {
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands
+	rootCmd.AddCommand(dev.DevCmd())
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
