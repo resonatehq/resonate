@@ -13,7 +13,7 @@ func DevCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "dev",
-		Short: "Start Resonate in development mode with in-memory SQLite store",
+		Short: "Start Resonate server in development mode",
 		Long:  "Start Resonate server with development-friendly defaults (in-memory SQLite store).\n\nThis command is an alias for: resonate serve --aio-store-sqlite-path :memory:",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := config.Parse(); err != nil {
