@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func DevCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	var (
 		config = &config.Config{}
 	)
