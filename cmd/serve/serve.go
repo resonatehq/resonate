@@ -170,7 +170,7 @@ func RunServe(config *config.Config) error {
 	return nil
 }
 
-func ServeCmd() *cobra.Command {
+func NewCmd() *cobra.Command {
 	var (
 		config = &config.Config{}
 	)
