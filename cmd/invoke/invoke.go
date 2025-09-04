@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/cmd/promises"
+	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 )
@@ -71,9 +72,14 @@ func NewCmd() *cobra.Command {
 
 			createArgs := []string{promiseId}
 
-			createCmd.Flags().Set("timeout", timeout.String())
-			createCmd.Flags().Set("data", string(jsonData))
-			createCmd.Flags().Set("tag", fmt.Sprintf("resonate:invoke=%s", target))
+			err = createCmd.Flags().Set("timeout", timeout.String())
+			util.Assert(err != nil, fmt.Sprintf("%v", err))
+
+			err = createCmd.Flags().Set("data", string(jsonData))
+			util.Assert(err != nil, fmt.Sprintf("%v", err))
+
+			err = createCmd.Flags().Set("tag", fmt.Sprintf("resonate:invoke=%s", target))
+			util.Assert(err != nil, fmt.Sprintf("%v", err))
 
 			return createCmd.RunE(createCmd, createArgs)
 		},
