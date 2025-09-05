@@ -156,6 +156,20 @@ export interface Context {
 
   // options
   options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
+
+  // date
+  date: ResonateDate;
+
+  // random
+  math: ResonateMath;
+}
+
+export interface ResonateDate {
+  now(): LFC<number>;
+}
+
+export interface ResonateMath {
+  random(): LFC<number>;
 }
 
 export class InnerContext implements Context {
@@ -251,8 +265,8 @@ export class InnerContext implements Context {
     return new RFI(this.remoteCreateReq(func, argu, opts, Number.MAX_SAFE_INTEGER), "detached");
   }
 
-  getDependency(key: string): any | undefined {
-    return this.dependencies.get(key);
+  getDependency<T = any>(name: string): T | undefined {
+    return this.dependencies.get(name);
   }
 
   options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
@@ -265,6 +279,14 @@ export class InnerContext implements Context {
       [RESONATE_OPTIONS]: true,
     };
   }
+
+  readonly date = {
+    now: () => this.lfc(() => (this.getDependency<DateConstructor>("resonate:date") ?? Date).now()),
+  };
+
+  readonly math = {
+    random: () => this.lfc(() => (this.getDependency<Math>("resonate:math") ?? Math).random()),
+  };
 
   localCreateReq(opts: Options): CreatePromiseReq {
     const tags = {

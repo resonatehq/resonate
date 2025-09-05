@@ -247,4 +247,55 @@ describe("Resonate usage tests", () => {
 
     resonate.stop();
   });
+
+  test("Date", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
+
+    // with default date
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      return yield* ctx.date.now();
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const n = await f.run(`f${i}`);
+      expect(typeof n).toBe("number");
+    }
+
+    // with custom date
+    resonate.setDependency("resonate:date", {
+      now: () => 0,
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const n = await f.run(`g${i}`);
+      expect(n).toBe(0);
+    }
+  });
+
+  test("Math", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
+
+    // with default math
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      return yield* ctx.math.random();
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const r = await f.run(`f${i}`);
+      expect(r).toBeGreaterThanOrEqual(0);
+      expect(r).toBeLessThan(1);
+    }
+
+    // with custom math
+    resonate.setDependency("resonate:math", {
+      random: () => 1,
+    });
+
+    for (let i = 0; i < 5; i++) {
+      const n = await f.run(`g${i}`);
+      expect(n).toBe(1);
+    }
+  });
 });
