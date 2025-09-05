@@ -3,10 +3,17 @@ import { Handler } from "../src/handler";
 import { Registry } from "../src/registry";
 import { WallClock } from "./clock";
 import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat";
-import type { Network } from "./network/network";
+import type {
+  CreatePromiseAndTaskReq,
+  CreatePromiseReq,
+  DurablePromiseRecord,
+  Message,
+  Network,
+  ReadPromiseReq,
+  TaskRecord,
+} from "./network/network";
 import { HttpNetwork } from "./network/remote";
 import { Promises } from "./promises";
-import type { PromiseHandler } from "./resonate-inner";
 import { ResonateInner } from "./resonate-inner";
 import { Schedules } from "./schedules";
 import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
@@ -33,9 +40,11 @@ export class Resonate {
 
   private inner: ResonateInner;
   private network: Network;
+  private handler: Handler;
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
+  private subscriptions: Map<string, Array<(promise: DurablePromiseRecord) => void>> = new Map();
 
   public readonly promises: Promises;
   public readonly schedules: Schedules;
@@ -47,6 +56,7 @@ export class Resonate {
     this.ttl = ttl;
 
     this.network = network;
+    this.handler = new Handler(this.network);
     this.registry = new Registry();
     this.heartbeat = network instanceof LocalNetwork ? new NoopHeartbeat() : new AsyncHeartbeat(pid, ttl / 2, network);
     this.dependencies = new Map();
@@ -58,7 +68,7 @@ export class Resonate {
       ttl: this.ttl,
       clock: new WallClock(),
       network: this.network,
-      handler: new Handler(this.network),
+      handler: this.handler,
       registry: this.registry,
       heartbeat: this.heartbeat,
       dependencies: this.dependencies,
@@ -66,6 +76,9 @@ export class Resonate {
 
     this.promises = new Promises(network);
     this.schedules = new Schedules(network);
+
+    // subscribe to notify
+    this.network.subscribe("notify", this.onMessage.bind(this));
   }
 
   /**
@@ -166,7 +179,7 @@ export class Resonate {
 
     const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
-    const promiseHandler = this.inner.run({
+    const { promise, task } = await this.createPromiseAndTask({
       kind: "createPromiseAndTask",
       promise: {
         id: id,
@@ -186,7 +199,11 @@ export class Resonate {
       strict: false,
     });
 
-    return this.handle(promiseHandler);
+    if (task) {
+      this.inner.process({ kind: "claimed", task: task, rootPromise: promise }, () => {});
+    }
+
+    return this.createHandle(promise);
   }
 
   /**
@@ -223,7 +240,7 @@ export class Resonate {
 
     const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
-    const promiseHandler = this.inner.rpc({
+    const promise = await this.createPromise({
       kind: "createPromise",
       id: id,
       timeout: Date.now() + opts.timeout,
@@ -233,7 +250,19 @@ export class Resonate {
       strict: false,
     });
 
-    return this.handle(promiseHandler);
+    return this.createHandle(promise);
+  }
+
+  /**
+   * Get a promise and return a value
+   */
+  public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
+    const promise = await this.readPromise({
+      kind: "readPromise",
+      id: id,
+    });
+
+    return this.createHandle(promise);
   }
 
   public options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
@@ -262,40 +291,114 @@ export class Resonate {
     this.heartbeat.stop();
   }
 
-  private handle(promiseHandler: PromiseHandler): Promise<ResonateHandle<any>> {
-    // resolves with a handle
-    const handle = Promise.withResolvers<ResonateHandle<any>>();
-
-    // resolves with the result
-    const result = Promise.withResolvers<any>();
-
-    // listen for created and resolve p1 with a handle
-    promiseHandler.addEventListener("created", (promise) => {
-      handle.resolve({
-        id: promise.id,
-        result: async () => {
-          // subscribe lazily, no need to await
-          promiseHandler.subscribe();
-          return await result.promise;
+  private createPromiseAndTask(
+    req: CreatePromiseAndTaskReq,
+  ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
+    return new Promise((resolve, reject) => {
+      this.handler.createPromiseAndTask(
+        req,
+        (err, res) => {
+          if (err) {
+            reject(new Error(`Promise '${req.promise.id}' could not be created`));
+          } else {
+            resolve({ promise: res!.promise, task: res!.task });
+          }
         },
+        true,
+      );
+    });
+  }
+
+  private createPromise(req: CreatePromiseReq): Promise<DurablePromiseRecord> {
+    return new Promise((resolve, reject) => {
+      this.handler.createPromise(
+        req,
+        (err, res) => {
+          if (err) {
+            reject(new Error(`Promise '${req.id}' could not be created`));
+          } else {
+            resolve(res!);
+          }
+        },
+        true,
+      );
+    });
+  }
+
+  private readPromise(req: ReadPromiseReq): Promise<DurablePromiseRecord> {
+    return new Promise((resolve, reject) => {
+      this.handler.readPromise(req, (err, res) => {
+        if (err) {
+          reject(new Error(`Promise '${req.id}' not found`));
+        } else {
+          resolve(res!);
+        }
       });
     });
+  }
 
-    // listen for completed and resolve p2 with the value
-    promiseHandler.addEventListener("completed", (promise) => {
-      util.assert(promise.state !== "pending", "promise must be completed");
+  private createHandle(promise: DurablePromiseRecord): ResonateHandle<any> {
+    return {
+      id: promise.id,
+      result: () =>
+        new Promise((resolve, reject) => {
+          this.subscribe(promise, (promise) => {
+            util.assert(promise.state !== "pending", "promise must be completed");
 
-      if (promise.state === "resolved") {
-        result.resolve(promise.value);
-      } else if (promise.state === "rejected") {
-        result.reject(promise.value);
-      } else if (promise.state === "rejected_canceled") {
-        result.reject(new Error("Promise canceled"));
-      } else if (promise.state === "rejected_timedout") {
-        result.reject(new Error("Promise timedout"));
-      }
-    });
+            if (promise.state === "resolved") {
+              resolve(promise.value);
+            } else if (promise.state === "rejected") {
+              reject(promise.value);
+            } else if (promise.state === "rejected_canceled") {
+              reject(new Error("Promise canceled"));
+            } else if (promise.state === "rejected_timedout") {
+              reject(new Error("Promise timedout"));
+            }
+          });
+        }),
+    };
+  }
 
-    return handle.promise;
+  private onMessage(msg: Message): void {
+    util.assert(msg.type === "notify");
+    if (msg.type === "notify") this.notify(msg.promise);
+  }
+
+  private subscribe(promise: DurablePromiseRecord, callback: (p: DurablePromiseRecord) => void) {
+    const subscriptions = this.subscriptions.get(promise.id) || [];
+    subscriptions.push(callback);
+
+    // store local subscription
+    this.subscriptions.set(promise.id, subscriptions);
+
+    // create remote subscription
+    this.handler.createSubscription(
+      {
+        kind: "createSubscription",
+        id: promise.id,
+        timeout: promise.timeout + 1 * util.MIN, // add a buffer
+        recv: this.unicast,
+      },
+      (err, res) => {
+        if (err) {
+          // TODO
+        } else if (res!.state !== "pending") {
+          this.notify(res!);
+        }
+      },
+      true,
+    );
+  }
+
+  private notify(promise: DurablePromiseRecord) {
+    util.assert(promise.state !== "pending", "promise must be completed");
+
+    // notify subscribers
+    for (const callback of this.subscriptions.get(promise.id) ?? []) {
+      callback(promise);
+    }
+
+    // remove subscriptions
+    this.subscriptions.delete(promise.id);
   }
 }

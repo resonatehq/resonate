@@ -248,6 +248,21 @@ describe("Resonate usage tests", () => {
     resonate.stop();
   });
 
+  test("Basic get", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
+
+    // get throws when promise does not exist
+    expect(resonate.get("foo")).rejects.toThrow();
+
+    // get returns the promise value
+    await resonate.promises.create("foo", Number.MAX_SAFE_INTEGER);
+    await resonate.promises.resolve("foo", "foo", false, "foo");
+
+    const handle = await resonate.get("foo");
+    expect(await handle.result()).toBe("foo");
+  });
+
   test("Date", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);

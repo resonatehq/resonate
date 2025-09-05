@@ -8,6 +8,7 @@ import type {
   CreateSubscriptionReq,
   DurablePromiseRecord,
   Network,
+  ReadPromiseReq,
   TaskRecord,
 } from "./network/network";
 import * as util from "./util";
@@ -62,6 +63,22 @@ export class Handler {
     for (const p of initialPromises ?? []) {
       this.cache.setPromise(p);
     }
+  }
+
+  public readPromise(req: ReadPromiseReq, done: Callback<DurablePromiseRecord>): void {
+    const promise = this.cache.getPromise(req.id);
+    if (promise) {
+      done(false, promise);
+      return;
+    }
+
+    this.network.send(req, (err, res) => {
+      if (err) return done(err);
+      util.assertDefined(res);
+
+      this.cache.setPromise(res.promise);
+      done(false, res.promise);
+    });
   }
 
   public createPromise(req: CreatePromiseReq, done: Callback<DurablePromiseRecord>, retryForever = false): void {

@@ -232,7 +232,11 @@ export class HttpNetwork implements Network {
   private baseHeaders: Record<string, string>;
   private encoder: Encoder;
   private eventSource: EventSource;
-  private subscriptions: Array<(msg: Message) => void> = new Array();
+  private subscriptions: {
+    invoke: Array<(msg: Message) => void>;
+    resume: Array<(msg: Message) => void>;
+    notify: Array<(msg: Message) => void>;
+  } = { invoke: [], resume: [], notify: [] };
 
   constructor(config: HttpNetworkConfig) {
     const { host, storePort, messageSourcePort, pid, group } = config;
@@ -285,7 +289,7 @@ export class HttpNetwork implements Network {
   }
 
   recv(msg: Message): void {
-    for (const callback of this.subscriptions) {
+    for (const callback of this.subscriptions[msg.type]) {
       callback(msg);
     }
   }
@@ -294,8 +298,8 @@ export class HttpNetwork implements Network {
     this.eventSource.close();
   }
 
-  public subscribe(callback: (msg: Message) => void): void {
-    this.subscriptions.push(callback);
+  public subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void {
+    this.subscriptions[type].push(callback);
   }
 
   private async handleRequest(req: Request, retryPolicy: RetryPolicy = {}): Promise<Response> {

@@ -49,7 +49,7 @@ class DummyNetwork implements Network {
   }
 
   stop() {}
-  subscribe(_callback: (msg: Message) => void) {}
+  subscribe(_t: "invoke" | "resume" | "notify", _c: (msg: Message) => void) {}
 }
 
 describe("Coroutine", () => {

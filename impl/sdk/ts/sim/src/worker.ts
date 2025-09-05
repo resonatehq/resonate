@@ -20,7 +20,11 @@ class SimulatedNetwork implements Network {
   private deliveryOptions: Required<DeliveryOptions>;
   private buffer: Message<Request>[] = [];
   private callbacks: Record<number, { callback: Callback<Response>; timeout: number }> = {};
-  private subscriptions: ((msg: NetworkMessage) => void)[] = [];
+  private subscriptions: {
+    invoke: Array<(msg: NetworkMessage) => void>;
+    resume: Array<(msg: NetworkMessage) => void>;
+    notify: Array<(msg: NetworkMessage) => void>;
+  } = { invoke: [], resume: [], notify: [] };
 
   constructor(
     prng: Random,
@@ -48,13 +52,13 @@ class SimulatedNetwork implements Network {
   }
 
   recv(msg: NetworkMessage): void {
-    for (const callback of this.subscriptions) {
+    for (const callback of this.subscriptions[msg.type]) {
       callback(this.maybeCorruptData(msg));
     }
   }
 
-  subscribe(callback: (msg: NetworkMessage) => void): void {
-    this.subscriptions.push(callback);
+  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: NetworkMessage) => void): void {
+    this.subscriptions[type].push(callback);
   }
 
   stop(): void {}

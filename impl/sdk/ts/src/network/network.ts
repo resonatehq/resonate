@@ -276,5 +276,5 @@ export interface Network {
   send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever?: boolean): void;
   recv(msg: Message): void;
   stop(): void;
-  subscribe(callback: (msg: Message) => void): void;
+  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void;
 }

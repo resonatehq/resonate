@@ -8,7 +8,11 @@ export class LocalNetwork implements Network {
   private server: Server;
   private timeoutId: ReturnType<typeof setTimeout> | undefined;
   private shouldStop = false;
-  private subscriptions: Array<(msg: Message) => void> = new Array();
+  private subscriptions: {
+    invoke: Array<(msg: Message) => void>;
+    resume: Array<(msg: Message) => void>;
+    notify: Array<(msg: Message) => void>;
+  } = { invoke: [], resume: [], notify: [] };
 
   constructor(server: Server = new Server()) {
     this.server = server;
@@ -36,13 +40,13 @@ export class LocalNetwork implements Network {
   }
 
   recv(msg: Message): void {
-    for (const callback of this.subscriptions) {
+    for (const callback of this.subscriptions[msg.type]) {
       callback(msg);
     }
   }
 
-  subscribe(callback: (msg: Message) => void): void {
-    this.subscriptions.push(callback);
+  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void {
+    this.subscriptions[type].push(callback);
   }
 
   private enqueueNext(): void {
