@@ -9,7 +9,6 @@ import (
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
-	"github.com/resonatehq/resonate/cmd/quickstart"
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
 	"github.com/resonatehq/resonate/cmd/tasks"
@@ -39,7 +38,6 @@ func init() {
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
-	rootCmd.AddCommand(quickstart.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(serve.ServeCmd())
 	rootCmd.AddCommand(tasks.NewCmd())
