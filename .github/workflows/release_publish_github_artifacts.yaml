@@ -35,14 +35,6 @@ jobs:
             arch: aarch64
             arch_grep: arm64
             runner: macos-14
-          - os: windows
-            arch: x86_64
-            arch_grep: x86-64
-            runner: windows-2022
-          - os: windows
-            arch: aarch64
-            arch_grep: Aarch64
-            runner: windows-11-arm
 
     steps:
       - name: Check out repository
@@ -56,34 +48,21 @@ jobs:
 
       - name: Build resonate
         run: |
-          if [[ "${{ matrix.systems.os }}" == "windows" ]]; then
-            BINARY="resonate.exe"
-            TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.zip"
-            TARBALL_CHECKSUM="${TARBALL}.sha256"
-          else
-            BINARY="resonate"
-            TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
-            TARBALL_CHECKSUM="${TARBALL}.sha256"
-          fi
+          TARBALL="resonate_${{ matrix.systems.os }}_${{ matrix.systems.arch }}.tar.gz"
+          TARBALL_CHECKSUM="${TARBALL}.sha256"
 
           # Build resonate
-          go build -o "${BINARY}" main.go
+          go build -o resonate main.go
 
           # Verify binary
-          file "${BINARY}" | grep "${{ matrix.systems.arch_grep }}"
+          file resonate | grep "${{ matrix.systems.arch_grep }}"
 
           # Compress binary
-          if [[ "${{ matrix.systems.os }}" == "windows" ]]; then
-            7z a "${TARBALL}" "${BINARY}"
-          else
-            tar -czvf "${TARBALL}" "${BINARY}"
-          fi
+          tar -czvf "${TARBALL}" resonate
 
           # Create checksum
           if [[ "${{ matrix.systems.os }}" == "darwin" ]]; then
             shasum -a 256 "${TARBALL}" > "${TARBALL_CHECKSUM}"
-          elif [[ "${{ matrix.systems.os }}" == "windows" ]]; then
-            powershell -Command "Get-FileHash -Algorithm SHA256 '${TARBALL}' | ForEach-Object { \$_.Hash.ToLower() + '  ${TARBALL}' }" > "${TARBALL_CHECKSUM}"
           else
             sha256sum "${TARBALL}" > "${TARBALL_CHECKSUM}"
           fi
