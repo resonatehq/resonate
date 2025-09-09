@@ -33,11 +33,19 @@ export class Schedules {
     cron: string,
     promiseId: string,
     promiseTimeout: number,
-    iKey: string | undefined = undefined,
-    description: string | undefined = undefined,
-    tags: Record<string, string> | undefined = undefined,
-    promiseParam: any | undefined = undefined,
-    promiseTags: Record<string, string> | undefined = undefined,
+    {
+      iKey = undefined,
+      description = undefined,
+      tags = undefined,
+      promiseParam = undefined,
+      promiseTags = undefined,
+    }: {
+      iKey?: string;
+      description?: string;
+      tags?: Record<string, string>;
+      promiseParam?: any;
+      promiseTags?: Record<string, string>;
+    } = {},
   ): Promise<ScheduleRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(

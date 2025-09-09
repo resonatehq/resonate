@@ -33,10 +33,7 @@ describe("tasks transitions", () => {
 
   beforeEach(async () => {
     id = `tid${COUNTER++}`;
-
-    await promises.create(id, Number.MAX_SAFE_INTEGER, undefined, undefined, undefined, {
-      "resonate:invoke": "default",
-    });
+    await promises.create(id, Number.MAX_SAFE_INTEGER, { tags: { "resonate:invoke": "default" } });
   });
 
   afterEach(async () => {
