@@ -330,7 +330,7 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 
 		return &receiver.Recv{Type: "http", Data: data}, true
 	case "poll":
-		cast := "uni"
+		cast := "any"
 		if u.User != nil {
 			if cast = strings.ToLower(u.User.Username()); cast != "uni" && cast != "any" {
 				return nil, false
