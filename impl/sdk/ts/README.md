@@ -18,6 +18,8 @@ The Resonate TypeScript SDK enables developers to build reliable and scalable cl
 
 ### [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
 
+### [Example application library](https://github.com/resonatehq-examples)
+
 ### [The concepts that power Resonate](https://www.distributed-async-await.io/)
 
 ### [Join the Discord](https://resonatehq.io/discord)
