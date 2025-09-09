@@ -12,7 +12,7 @@ The Resonate TypeScript SDK enables developers to build reliable and scalable cl
 
 ### [How to contribute to this SDK](./CONTRIBUTING.md)
 
-### [How to use this SDK](https://docs.resonatehq.io/develop/python)
+### [How to use this SDK](https://docs.resonatehq.io/develop/typescript)
 
 ### [Get started with Resonate](https://docs.resonatehq.io/get-started/)
 
