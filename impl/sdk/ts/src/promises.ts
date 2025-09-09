@@ -9,7 +9,7 @@ export class Promises {
 
   get(id: string): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "readPromise", id: id }, (err, res) => {
+      this.network.send({ kind: "readPromise", id }, (err, res) => {
         if (err) {
           // TODO: reject with more information
           reject(Error("not implemented"));
@@ -24,10 +24,17 @@ export class Promises {
   create(
     id: string,
     timeout: number,
-    iKey: string | undefined = undefined,
-    strict = false,
-    param: any | undefined = undefined,
-    tags: Record<string, string> | undefined = undefined,
+    {
+      iKey = undefined,
+      strict = false,
+      param = undefined,
+      tags = undefined,
+    }: {
+      iKey?: string;
+      strict?: boolean;
+      param?: any;
+      tags?: Record<string, string>;
+    } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
@@ -58,10 +65,17 @@ export class Promises {
     timeout: number,
     processId: string,
     ttl: number,
-    iKey: string | undefined = undefined,
-    strict = false,
-    param: any | undefined = undefined,
-    tags: Record<string, string> | undefined = undefined,
+    {
+      iKey = undefined,
+      strict = false,
+      param = undefined,
+      tags = undefined,
+    }: {
+      iKey?: string;
+      strict?: boolean;
+      param?: any;
+      tags?: Record<string, string>;
+    } = {},
   ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
     return new Promise((resolve, reject) => {
       this.network.send(
@@ -95,9 +109,15 @@ export class Promises {
 
   resolve(
     id: string,
-    iKey: string | undefined = undefined,
-    strict = false,
-    value: any | undefined = undefined,
+    {
+      iKey = undefined,
+      strict = false,
+      value = undefined,
+    }: {
+      iKey?: string;
+      strict?: boolean;
+      value?: any;
+    } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
@@ -123,9 +143,15 @@ export class Promises {
   }
   reject(
     id: string,
-    iKey: string | undefined = undefined,
-    strict = false,
-    value: any | undefined = undefined,
+    {
+      iKey = undefined,
+      strict = false,
+      value = undefined,
+    }: {
+      iKey?: string;
+      strict?: boolean;
+      value?: any;
+    } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
@@ -149,11 +175,18 @@ export class Promises {
       );
     });
   }
+
   cancel(
     id: string,
-    iKey: string | undefined = undefined,
-    strict = false,
-    value: any | undefined = undefined,
+    {
+      iKey = undefined,
+      strict = false,
+      value = undefined,
+    }: {
+      iKey?: string;
+      strict?: boolean;
+      value?: any;
+    } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
       this.network.send(
