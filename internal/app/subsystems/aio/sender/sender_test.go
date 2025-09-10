@@ -70,9 +70,46 @@ func TestUrlParse(t *testing.T) {
 			recv: nil,
 			ok:   false,
 		},
+		// sqs scheme
+		{
+			name: "valid sqs url",
+			url:  "sqs://us-west-2/my-queue",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue":"my-queue","region":"us-west-2"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid sqs url with nested queue name",
+			url:  "sqs://us-east-1/my-queue/sub-queue",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue":"my-queue/sub-queue","region":"us-east-1"}`)},
+			ok:   true,
+		},
+		{
+			name: "sqs url with empty region",
+			url:  "sqs:///my-queue",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "sqs url with empty queue",
+			url:  "sqs://us-west-2/",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "sqs url with missing queue",
+			url:  "sqs://us-west-2",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "sqs url with special characters in queue name",
+			url:  "sqs://us-west-2/my-queue_123-456",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue":"my-queue_123-456","region":"us-west-2"}`)},
+			ok:   true,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, or poll",
+			name: "scheme must be http, https, poll, or sqs",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

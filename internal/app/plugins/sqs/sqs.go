@@ -22,19 +22,18 @@ type Config struct {
 	Timeout time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
 }
 
-// SQSClient defines the interface for SQS operations
 type SQSClient interface {
 	GetQueueUrl(ctx context.Context, params *sqs.GetQueueUrlInput, optFns ...func(*sqs.Options)) (*sqs.GetQueueUrlOutput, error)
 	SendMessage(ctx context.Context, params *sqs.SendMessageInput, optFns ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
 }
 
 type SQSWorker struct {
-	i         int
-	sq        <-chan *aio.Message
-	timeout   time.Duration
-	aio       aio.AIO
-	metrics   *metrics.Metrics
-	sqsClient SQSClient
+	i       int
+	sq      <-chan *aio.Message
+	timeout time.Duration
+	aio     aio.AIO
+	metrics *metrics.Metrics
+	client  SQSClient
 }
 
 type SQS struct {
@@ -51,18 +50,18 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
 	return NewWithClient(a, metrics, config, nil)
 }
 
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, sqsClient SQSClient) (*SQS, error) {
+func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client SQSClient) (*SQS, error) {
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*SQSWorker, config.Workers)
 
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &SQSWorker{
-			i:         i,
-			sq:        sq,
-			timeout:   config.Timeout,
-			aio:       a,
-			metrics:   metrics,
-			sqsClient: sqsClient,
+			i:       i,
+			sq:      sq,
+			timeout: config.Timeout,
+			aio:     a,
+			metrics: metrics,
+			client:  client,
 		}
 	}
 
@@ -140,8 +139,7 @@ func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
 
-	// Use injected client or create a new one
-	client := w.sqsClient
+	client := w.client
 	if client == nil {
 		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(addr.Region))
 		if err != nil {
@@ -150,17 +148,17 @@ func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
 		client = sqs.NewFromConfig(cfg)
 	}
 
-	qURL, err := client.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{
+	q_url, err := client.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{
 		QueueName: &addr.Queue,
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to get queue URL: %w", err)
 	}
 
-	messageBody := string(body)
+	message_body := string(body)
 	_, err = client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    qURL.QueueUrl,
-		MessageBody: &messageBody,
+		QueueUrl:    q_url.QueueUrl,
+		MessageBody: &message_body,
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to send message: %w", err)
