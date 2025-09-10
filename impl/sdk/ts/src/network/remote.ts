@@ -434,7 +434,7 @@ export class HttpNetwork implements Network {
 
   private async createCallback(req: CreateCallbackReq, retryPolicy: RetryPolicy = {}): Promise<CreateCallbackRes> {
     const res = await this.fetch(
-      `/promises/callback/${encodeURIComponent(req.id)}`,
+      `/promises/callback/${encodeURIComponent(req.promiseId)}`,
       {
         method: "POST",
         headers: this.baseHeaders,
@@ -466,7 +466,7 @@ export class HttpNetwork implements Network {
     };
 
     const res = await this.fetch(
-      `/promises/subscribe/${encodeURIComponent(req.id)}`,
+      `/promises/subscribe/${encodeURIComponent(req.promiseId)}`,
       {
         method: "POST",
         headers: this.baseHeaders,

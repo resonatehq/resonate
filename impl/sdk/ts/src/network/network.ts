@@ -106,7 +106,7 @@ export type CompletePromiseReq = {
 
 export type CreateCallbackReq = {
   kind: "createCallback";
-  id: string;
+  promiseId: string;
   rootPromiseId: string;
   timeout: number;
   recv: string;
@@ -115,6 +115,7 @@ export type CreateCallbackReq = {
 export type CreateSubscriptionReq = {
   kind: "createSubscription";
   id: string;
+  promiseId: string;
   timeout: number;
   recv: string;
 };

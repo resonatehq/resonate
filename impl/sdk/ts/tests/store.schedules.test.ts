@@ -34,9 +34,9 @@ describe("schedule transitions", () => {
 
   test("test case 3: create twich with ikey", async () => {
     const schedule = await schedules.create(id, "* * * * *", "foo", 10, {
-      iKey: "foo",
+      ikey: "foo",
     });
-    await schedules.create(id, "* 2 * * *", "bar", 10, { iKey: "foo" });
+    await schedules.create(id, "* 2 * * *", "bar", 10, { ikey: "foo" });
     expect(await schedules.get(schedule.id)).toEqual(schedule);
   });
 });

@@ -178,8 +178,8 @@ export class Handler {
     req: CreateCallbackReq,
     done: Callback<{ kind: "callback"; callback: CallbackRecord } | { kind: "promise"; promise: DurablePromiseRecord }>,
   ): void {
-    const id = `__resume:${req.rootPromiseId}:${req.id}`;
-    const promise = this.cache.getPromise(req.id);
+    const id = `__resume:${req.rootPromiseId}:${req.promiseId}`;
+    const promise = this.cache.getPromise(req.promiseId);
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {
@@ -213,8 +213,8 @@ export class Handler {
   }
 
   public createSubscription(req: CreateSubscriptionReq, done: Callback<DurablePromiseRecord>, retryForever = false) {
-    const id = `__notify:${req.id}:${req.id}`;
-    const promise = this.cache.getPromise(req.id);
+    const id = `__notify:${req.promiseId}:${req.id}`;
+    const promise = this.cache.getPromise(req.promiseId);
     util.assertDefined(promise);
 
     if (promise.state !== "pending") {

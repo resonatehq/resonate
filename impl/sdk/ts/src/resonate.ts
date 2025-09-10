@@ -375,7 +375,8 @@ export class Resonate {
     this.handler.createSubscription(
       {
         kind: "createSubscription",
-        id: promise.id,
+        id: this.pid,
+        promiseId: promise.id,
         timeout: promise.timeout + 1 * util.MIN, // add a buffer
         recv: this.unicast,
       },

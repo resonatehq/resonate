@@ -152,7 +152,7 @@ describe("Resonate usage tests", () => {
     const p = await f.beginRun("f");
     await setTimeout(100); // Ensure myId promise is created
 
-    await resonate.promises.resolve("myId", { iKey: "myId", strict: false, value: "myValue" });
+    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, value: "myValue" });
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
@@ -177,7 +177,7 @@ describe("Resonate usage tests", () => {
     expect(durable.timeout).toBeGreaterThanOrEqual(time + 5 * util.HOUR);
     expect(durable.timeout).toBeLessThan(time + 5 * util.HOUR + 1000);
 
-    await resonate.promises.resolve("myId", { iKey: "myId", strict: false, value: "myValue" });
+    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, value: "myValue" });
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
@@ -257,7 +257,7 @@ describe("Resonate usage tests", () => {
 
     // get returns the promise value
     await resonate.promises.create("foo", Number.MAX_SAFE_INTEGER);
-    await resonate.promises.resolve("foo", { iKey: "foo", strict: false, value: "foo" });
+    await resonate.promises.resolve("foo", { ikey: "foo", strict: false, value: "foo" });
 
     const handle = await resonate.get("foo");
     expect(await handle.result()).toBe("foo");

@@ -534,21 +534,22 @@ export class Server {
 
   private createSubscription({
     id,
+    promiseId,
     timeout,
     recv,
     time,
-  }: { id: string; timeout: number; recv: string; time: number }): {
+  }: { id: string; promiseId: string; timeout: number; recv: string; time: number }): {
     promise: DurablePromiseRecord;
     callback?: CallbackRecord;
   } {
     {
-      const record = this.promises.get(id);
+      const record = this.promises.get(promiseId);
 
       if (!record) {
         throw new ServerError("not found", "not_found");
       }
 
-      const cbId = `__notify:${id}:${id}`;
+      const cbId = `__notify:${promiseId}:${id}`;
 
       if (record.state !== "pending" || record.callbacks?.has(cbId)) {
         return { promise: record, callback: undefined };
@@ -557,8 +558,8 @@ export class Server {
       const callback: Callback = {
         id: cbId,
         type: "notify",
-        promiseId: id,
-        rootPromiseId: id,
+        promiseId: promiseId,
+        rootPromiseId: promiseId,
         recv,
         timeout,
         createdOn: time,
@@ -578,29 +579,29 @@ export class Server {
   }
 
   private createCallback({
-    id,
+    promiseId,
     rootPromiseId,
     timeout,
     recv,
     time,
-  }: { id: string; rootPromiseId: string; timeout: number; recv: string; time: number }): {
+  }: { promiseId: string; rootPromiseId: string; timeout: number; recv: string; time: number }): {
     promise: DurablePromiseRecord;
     callback?: CallbackRecord;
   } {
-    const record = this.promises.get(id);
+    const record = this.promises.get(promiseId);
 
     if (!record) {
       throw new ServerError("not found", "not_found");
     }
 
-    if (record.state !== "pending" || record.callbacks?.has(id)) {
+    if (record.state !== "pending" || record.callbacks?.has(promiseId)) {
       return { promise: record, callback: undefined };
     }
 
     const callback: Callback = {
-      id: `__resume:${rootPromiseId}:${id}`,
+      id: `__resume:${rootPromiseId}:${promiseId}`,
       type: "resume",
-      promiseId: id,
+      promiseId,
       rootPromiseId,
       recv,
       timeout,

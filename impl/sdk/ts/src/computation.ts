@@ -252,7 +252,7 @@ export class Computation {
         this.handler.createCallback(
           {
             kind: "createCallback",
-            id: id,
+            promiseId: id,
             rootPromiseId: this.id,
             timeout: timeout,
             recv: this.anycast,

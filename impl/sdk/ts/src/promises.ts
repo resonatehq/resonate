@@ -25,12 +25,12 @@ export class Promises {
     id: string,
     timeout: number,
     {
-      iKey = undefined,
+      ikey = undefined,
       strict = false,
       param = undefined,
       tags = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       strict?: boolean;
       param?: any;
       tags?: Record<string, string>;
@@ -44,7 +44,7 @@ export class Promises {
           timeout: timeout,
           param: param,
           tags: tags,
-          iKey: iKey,
+          iKey: ikey,
           strict: strict,
         },
         (err, res) => {
@@ -63,15 +63,15 @@ export class Promises {
   createWithTask(
     id: string,
     timeout: number,
-    processId: string,
+    pid: string,
     ttl: number,
     {
-      iKey = undefined,
+      ikey = undefined,
       strict = false,
       param = undefined,
       tags = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       strict?: boolean;
       param?: any;
       tags?: Record<string, string>;
@@ -88,10 +88,10 @@ export class Promises {
             tags: tags,
           },
           task: {
-            processId: processId,
+            processId: pid,
             ttl: ttl,
           },
-          iKey: iKey,
+          iKey: ikey,
           strict: strict,
         },
         (err, res) => {
@@ -110,11 +110,11 @@ export class Promises {
   resolve(
     id: string,
     {
-      iKey = undefined,
+      ikey = undefined,
       strict = false,
       value = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       strict?: boolean;
       value?: any;
     } = {},
@@ -126,7 +126,7 @@ export class Promises {
           id: id,
           state: "resolved",
           value: value,
-          iKey: iKey,
+          iKey: ikey,
           strict: strict,
         },
         (err, res) => {
@@ -144,11 +144,11 @@ export class Promises {
   reject(
     id: string,
     {
-      iKey = undefined,
+      ikey = undefined,
       strict = false,
       value = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       strict?: boolean;
       value?: any;
     } = {},
@@ -160,7 +160,7 @@ export class Promises {
           id: id,
           state: "rejected",
           value: value,
-          iKey: iKey,
+          iKey: ikey,
           strict: strict,
         },
         (err, res) => {
@@ -179,11 +179,11 @@ export class Promises {
   cancel(
     id: string,
     {
-      iKey = undefined,
+      ikey = undefined,
       strict = false,
       value = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       strict?: boolean;
       value?: any;
     } = {},
@@ -195,7 +195,7 @@ export class Promises {
           id: id,
           state: "rejected_canceled",
           value: value,
-          iKey: iKey,
+          iKey: ikey,
           strict: strict,
         },
         (err, res) => {
@@ -224,7 +224,7 @@ export class Promises {
       this.network.send(
         {
           kind: "createCallback",
-          id: promiseId,
+          promiseId: promiseId,
           rootPromiseId: rootPromiseId,
           timeout: timeout,
           recv: recv,
@@ -244,6 +244,7 @@ export class Promises {
 
   subscribe(
     id: string,
+    promiseId: string,
     timeout: number,
     recv: string,
   ): Promise<{
@@ -251,7 +252,7 @@ export class Promises {
     callback: CallbackRecord | undefined;
   }> {
     return new Promise((resolve, reject) => {
-      this.network.send({ kind: "createSubscription", id: id, timeout: timeout, recv: recv }, (err, res) => {
+      this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (err, res) => {
         if (err) {
           // TODO: reject with more information
           reject(Error("not implemented"));

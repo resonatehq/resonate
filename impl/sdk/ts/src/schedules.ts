@@ -34,13 +34,13 @@ export class Schedules {
     promiseId: string,
     promiseTimeout: number,
     {
-      iKey = undefined,
+      ikey = undefined,
       description = undefined,
       tags = undefined,
       promiseParam = undefined,
       promiseTags = undefined,
     }: {
-      iKey?: string;
+      ikey?: string;
       description?: string;
       tags?: Record<string, string>;
       promiseParam?: any;
@@ -59,7 +59,7 @@ export class Schedules {
           promiseTimeout: promiseTimeout,
           promiseParam: promiseParam,
           promiseTags: promiseTags,
-          iKey: iKey,
+          iKey: ikey,
         },
         (err, res) => {
           if (err) {
