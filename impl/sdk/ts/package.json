@@ -37,7 +37,7 @@
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "@jest/globals": "^30.0.0",
-    "@types/jest": "29.5.14",
+    "@types/jest": "30.0.0",
     "@types/node": "^24.0.0",
     "commander": "^14.0.0",
     "esbuild": "^0.25.5",
