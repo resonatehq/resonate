@@ -11,7 +11,7 @@
 
 The Resonate Server acts as a supervisor and orchestrator for Resonate Workers — that is, it provides reliability and scalability to applications built with a Resonate SDK.
 
-### [How to contribute to this SDK](./CONTRIBUTING.md)
+### [How to contribute to this repo](./CONTRIBUTING.md)
 
 ### [How to use this SDK](https://docs.resonatehq.io/develop/python)
 
