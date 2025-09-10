@@ -303,10 +303,8 @@ class RemotePromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/callbacks",
+            url=f"{self._store.url}/promises/callback/{promise_id}",
             json={
-                "id": " ",  # TODO(dfarr): remove eventually, for backwards compatibility
-                "promiseId": promise_id,
                 "rootPromiseId": root_promise_id,
                 "timeout": timeout,
                 "recv": recv,
@@ -331,10 +329,9 @@ class RemotePromiseStore:
     ) -> tuple[DurablePromise, Callback | None]:
         req = Request(
             method="post",
-            url=f"{self._store.url}/subscriptions",
+            url=f"{self._store.url}/promises/subscribe/{promise_id}",
             json={
                 "id": id,
-                "promiseId": promise_id,
                 "timeout": timeout,
                 "recv": recv,
             },
