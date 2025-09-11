@@ -13,8 +13,6 @@ The Resonate Server acts as a supervisor and orchestrator for Resonate Workers â
 
 ### [How to contribute to this repo](./CONTRIBUTING.md)
 
-### [How to use this SDK](https://docs.resonatehq.io/develop/python)
-
 ### [Get started with Resonate](https://docs.resonatehq.io/get-started/)
 
 ### [Evaluate Resonate for your next project](https://docs.resonatehq.io/evaluate/)
