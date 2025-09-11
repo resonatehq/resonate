@@ -32,6 +32,10 @@ export interface ResonateFunc<F extends Func> {
   options: (opts?: Partial<Options>) => Partial<Options> & { [RESONATE_OPTIONS]: true };
 }
 
+export interface ResonateSchedule {
+  delete(): Promise<void>;
+}
+
 export class Resonate {
   private unicast: string;
   private anycast: string;
@@ -251,6 +255,43 @@ export class Resonate {
     });
 
     return this.createHandle(promise);
+  }
+
+  public async schedule<F extends Func>(
+    name: string,
+    cron: string,
+    func: F,
+    ...args: ParamsWithOptions<F>
+  ): Promise<ResonateSchedule>;
+  public async schedule(name: string, cron: string, func: string, ...args: any[]): Promise<ResonateSchedule>;
+  public async schedule(
+    name: string,
+    cron: string,
+    func: Func | string,
+    ...argsWithOpts: any[]
+  ): Promise<ResonateSchedule> {
+    let funcName: string;
+    if (typeof func === "string") {
+      funcName = func;
+    } else {
+      const registered = this.registry.get(func);
+      if (!registered) {
+        throw new Error(`${func} is not registered`);
+      }
+      funcName = registered.name;
+    }
+
+    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
+
+    await this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", opts.timeout, {
+      ikey: name,
+      promiseParam: { func: funcName, args },
+      promiseTags: { ...opts.tags, "resonate:invoke": opts.target },
+    });
+
+    return {
+      delete: () => this.schedules.delete(name),
+    };
   }
 
   /**

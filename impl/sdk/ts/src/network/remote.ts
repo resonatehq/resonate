@@ -499,7 +499,7 @@ export class HttpNetwork implements Network {
           tags: req.tags,
           promiseId: req.promiseId,
           promiseTimeout: req.promiseTimeout,
-          promiseParam: req.promiseParam,
+          promiseParam: this.encoder.encode(req.promiseParam),
           promiseTags: req.promiseTags,
         }),
       },

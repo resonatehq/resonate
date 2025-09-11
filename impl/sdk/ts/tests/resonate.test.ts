@@ -5,6 +5,36 @@ import { Resonate } from "../src/resonate";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
+  test("function is executed on schedule", async () => {
+    const resonate = Resonate.local();
+
+    // A promise that resolves when the scheduled function runs
+    let resolveRun!: () => void;
+    const ran = new Promise<void>((resolve) => {
+      resolveRun = resolve;
+    });
+
+    resonate.register("onSchedule", async (ctx: Context) => {
+      resolveRun();
+    });
+
+    const scheduleId = `on-schedule-${crypto.randomUUID().replace(/-/g, "")}`;
+    const schedule = await resonate.schedule(
+      scheduleId,
+      "* * * * * *", // every second (if seconds are supported)
+      "onSchedule",
+    );
+
+    // Wait until the scheduled function fires
+    await ran;
+
+    // If we reach here, the function executed
+    expect(true).toBe(true);
+
+    await schedule.delete();
+    resonate.stop();
+  });
+
   test("concurrent execution must be concurrent", async () => {
     const resonate = Resonate.local();
 
