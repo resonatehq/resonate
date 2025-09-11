@@ -1,22 +1,12 @@
 import type { Context, Future, LFC, LFI, RFC, RFI } from "./context";
-
-// Resonate options
-
-export const RESONATE_OPTIONS: unique symbol = Symbol("ResonateOptions");
-
-export type Options = {
-  id: string;
-  target: string;
-  tags: Record<string, string>;
-  timeout: number;
-};
+import type { Options } from "./options";
 
 // Resonate functions
 
 export type Func = (ctx: Context, ...args: any[]) => any;
 
 export type Params<F> = F extends (ctx: Context, ...args: infer P) => any ? P : never;
-export type ParamsWithOptions<F> = [...Params<F>, (Partial<Options> & { [RESONATE_OPTIONS]: true })?];
+export type ParamsWithOptions<F> = [...Params<F>, Options?];
 
 export type Yieldable<T = any> = LFI<T> | LFC<T> | RFI<T> | RFC<T> | Future<T>;
 

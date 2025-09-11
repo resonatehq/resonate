@@ -13,10 +13,11 @@ import type {
   TaskRecord,
 } from "./network/network";
 import { HttpNetwork } from "./network/remote";
+import { Options } from "./options";
 import { Promises } from "./promises";
 import { ResonateInner } from "./resonate-inner";
 import { Schedules } from "./schedules";
-import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Return } from "./types";
+import type { Func, ParamsWithOptions, Return } from "./types";
 import * as util from "./util";
 
 export interface ResonateHandle<T> {
@@ -29,7 +30,7 @@ export interface ResonateFunc<F extends Func> {
   rpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<Return<F>>;
   beginRun: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
   beginRpc: (id: string, ...args: ParamsWithOptions<F>) => Promise<ResonateHandle<Return<F>>>;
-  options: (opts?: Partial<Options>) => Partial<Options> & { [RESONATE_OPTIONS]: true };
+  options: (opts?: Partial<Options>) => Options;
 }
 
 export interface ResonateSchedule {
@@ -306,15 +307,8 @@ export class Resonate {
     return this.createHandle(promise);
   }
 
-  public options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
-    return {
-      id: "",
-      target: "poll://any@default",
-      timeout: 24 * util.HOUR,
-      tags: {},
-      ...opts,
-      [RESONATE_OPTIONS]: true,
-    };
+  public options(opts: Partial<Options> = {}): Options {
+    return new Options(opts);
   }
 
   /** Store a named dependency for use with `Context`.

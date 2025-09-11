@@ -1,5 +1,5 @@
 import type { DurablePromiseRecord, TaskRecord } from "./network/network";
-import { type Options, RESONATE_OPTIONS } from "./types";
+import { type Options, RESONATE_OPTIONS } from "./options";
 
 // time
 
@@ -76,4 +76,13 @@ export function isOptions(obj: unknown): obj is Options {
 export function splitArgsAndOpts(args: any[], defaults: Options): [any[], Options] {
   const opts = isOptions(args.at(-1)) ? args.pop() : {};
   return [args, { ...defaults, ...opts }];
+}
+
+export function isUrl(str: string): boolean {
+  try {
+    new URL(str);
+    return true;
+  } catch {
+    return false;
+  }
 }

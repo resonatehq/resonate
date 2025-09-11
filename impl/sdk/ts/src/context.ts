@@ -1,6 +1,7 @@
 import type { Clock } from "./clock";
 import type { CreatePromiseReq } from "./network/network";
-import { type Func, type Options, type ParamsWithOptions, RESONATE_OPTIONS, type Result, type Return } from "./types";
+import { Options } from "./options";
+import type { Func, ParamsWithOptions, Result, Return } from "./types";
 import * as util from "./util";
 
 export class LFI<T> implements Iterable<LFI<T>> {
@@ -155,7 +156,7 @@ export interface Context {
   getDependency(key: string): any | undefined;
 
   // options
-  options(opts: Partial<Options>): Options & { [RESONATE_OPTIONS]: true };
+  options(opts: Partial<Options>): Options;
 
   // date
   date: ResonateDate;
@@ -269,15 +270,8 @@ export class InnerContext implements Context {
     return this.dependencies.get(name);
   }
 
-  options(opts: Partial<Options> = {}): Options & { [RESONATE_OPTIONS]: true } {
-    return {
-      id: this.seqid(),
-      target: "poll://any@default",
-      timeout: 24 * util.HOUR,
-      tags: {},
-      ...opts,
-      [RESONATE_OPTIONS]: true,
-    };
+  options(opts: Partial<Options> = {}): Options {
+    return new Options({ id: this.seqid(), ...opts });
   }
 
   readonly date = {

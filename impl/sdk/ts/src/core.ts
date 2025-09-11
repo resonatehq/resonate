@@ -20,5 +20,8 @@ export { Schedules } from "./schedules";
 // tasks
 export { Tasks } from "./tasks";
 
+// options
+export { Options } from "./options";
+
 // types
-export { Options, Yieldable } from "./types";
+export { Yieldable } from "./types";

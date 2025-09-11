@@ -147,6 +147,45 @@ describe("Resonate usage tests", () => {
     resonate.stop();
   });
 
+  test("Correctly matches target", async () => {
+    const network = new LocalNetwork();
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
+
+    resonate.register("foo", function* (ctx: Context, target: string) {
+      yield* ctx.rfi("bar", ctx.options({ target }));
+    });
+
+    resonate.register("bar", () => "bar");
+
+    // test matched targets
+    for (const [i, target] of ["default", "foo", "bar", "baz"].entries()) {
+      await resonate.rpc(`f${i}`, "foo", target, resonate.options({ target }));
+      const p1 = await resonate.promises.get(`f${i}`);
+      const p2 = await resonate.promises.get(`f${i}.0`);
+
+      expect(p1.tags["resonate:invoke"]).toBe(`poll://any@${target}`);
+      expect(p2.tags["resonate:invoke"]).toBe(`poll://any@${target}`);
+    }
+
+    // test unmatched targets (urls)
+    for (const [i, target] of [
+      "poll://default",
+      "poll://any@default",
+      "poll://any@default/0",
+      "poll://uni@default/0",
+      "http://resonatehq.io",
+      "https://resonatehq.io",
+      "sqs://region/queue",
+    ].entries()) {
+      await resonate.rpc(`g${i}`, "foo", target, resonate.options({ target }));
+      const p1 = await resonate.promises.get(`g${i}`);
+      const p2 = await resonate.promises.get(`g${i}.0`);
+
+      expect(p1.tags["resonate:invoke"]).toBe(target);
+      expect(p2.tags["resonate:invoke"]).toBe(target);
+    }
+  });
+
   test("Correctly sets options on inner functions without defined opts", async () => {
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
