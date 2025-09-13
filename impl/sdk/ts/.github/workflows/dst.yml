@@ -51,7 +51,7 @@ jobs:
 
       - name: Run DST (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }})
         run: |
-          npx ts-node sim/main.ts --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} 2> logs.txt
+          npm run dst -- --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} 2> logs.txt
 
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}

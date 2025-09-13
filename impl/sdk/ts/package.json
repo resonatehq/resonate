@@ -18,17 +18,16 @@
     "dist"
   ],
   "scripts": {
-    "test": "jest --config jest.config.js",
     "build": "tsc --build tsconfig.build.json",
-    "prepare": "npm run build",
-    "fmt": "npx @biomejs/biome format ./ --write",
     "check": "npx @biomejs/biome check ./",
     "check:fix": "npx @biomejs/biome check ./ --write",
-    "docs": "npx typedoc ./src --githubPages",
     "debug": "node --inspect-brk ./node_modules/.bin/jest -i",
-    "type-check": "npx tsc --noEmit",
-    "dst": "npx ts-node sim/main.ts"
-
+    "docs": "npx typedoc ./src --githubPages",
+    "dst": "npx tsx sim/main.ts",
+    "fmt": "npx @biomejs/biome format ./ --write",
+    "prepare": "npm run build",
+    "test": "npx jest --config jest.config.js",
+    "type-check": "npx tsc --noEmit"
   },
   "dependencies": {
     "cron-parser": "^5.3.0",
@@ -42,7 +41,7 @@
     "commander": "^14.0.0",
     "esbuild": "^0.25.5",
     "ts-jest": "^29.3.4",
-    "ts-node": "^10.9.2",
+    "tsx": "^4.20.5",
     "typedoc": "^0.28.0",
     "typedoc-material-theme": "^1.4.0",
     "typescript": "^5.8.3"
