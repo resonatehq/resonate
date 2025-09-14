@@ -11,12 +11,12 @@ import (
 // Example command usage for sending a heartbeat to a task
 var heartbeatTasksExample = `
 # Heartbeat a task
-resonate tasks heartbeat --process-id foo`
+resonate tasks heartbeat --pid bar`
 
 // HeartbeatTaskCmd returns a cobra command for sending a heartbeat to a task.
 func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 	var (
-		processId string // Unique process ID to heartbeat tasks
+		pid string
 	)
 
 	// Define the cobra command
@@ -30,7 +30,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 
 			// Create the body for heartbeat tasks request
 			body := v1.HeartbeatTasksJSONRequestBody{
-				ProcessId: processId,
+				ProcessId: pid,
 			}
 
 			// Call the client method to send the heartbeat (GET request with path params)
@@ -53,10 +53,7 @@ func HeartbeatTaskCmd(c client.Client) *cobra.Command {
 	}
 
 	// Define command flags
-	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "unique id that identifies the claimer")
+	cmd.Flags().StringVarP(&pid, "pid", "p", "default", "claimant pid")
 
-	// Mark flags as required
-	_ = cmd.MarkFlagRequired("process-id")
-
-	return cmd // Return the constructed command
+	return cmd
 }

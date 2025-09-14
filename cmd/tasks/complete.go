@@ -17,7 +17,7 @@ resonate tasks complete foo --counter 1`
 // CompleteTaskCmd returns a cobra command for completing a task.
 func CompleteTaskCmd(c client.Client) *cobra.Command {
 	var (
-		counter int // Counter for the task completion
+		counter int
 	)
 
 	// Define the cobra command
@@ -69,5 +69,5 @@ func CompleteTaskCmd(c client.Client) *cobra.Command {
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("counter")
 
-	return cmd // Return the constructed command
+	return cmd
 }
