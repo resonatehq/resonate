@@ -13,14 +13,14 @@ import (
 // Example command usage for claiming a task
 var claimTasksExample = `
 # Claim a task
-resonate tasks claim foo --counter 1 --process-id bar --ttl 1m`
+resonate tasks claim foo --counter 1 --pid bar --ttl 1m`
 
 // ClaimTaskCmd returns a cobra command for claiming a task.
 func ClaimTaskCmd(c client.Client) *cobra.Command {
 	var (
-		counter   int           // Counter for the task claim
-		processId string        // Unique process ID identifying the claimer
-		ttl       time.Duration // Time to live for the task claim
+		counter int
+		pid     string
+		ttl     time.Duration
 	)
 
 	// Define the cobra command
@@ -39,8 +39,8 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 			if counter <= 0 {
 				return errors.New("counter is required")
 			}
-			if processId == "" {
-				return errors.New("process-id is required")
+			if pid == "" {
+				return errors.New("pid is required")
 			}
 
 			// Create parameters for the claim task request
@@ -50,7 +50,7 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 			body := v1.ClaimTaskJSONRequestBody{
 				Id:        id,
 				Counter:   counter,
-				ProcessId: processId,
+				ProcessId: pid,
 				Ttl:       ttl.Milliseconds(), // Convert duration to milliseconds
 			}
 
@@ -75,14 +75,12 @@ func ClaimTaskCmd(c client.Client) *cobra.Command {
 
 	// Define command flags
 	cmd.Flags().IntVarP(&counter, "counter", "c", 0, "task counter")
-	cmd.Flags().StringVarP(&processId, "process-id", "p", "", "unique id that identifies the claimer")
-	cmd.Flags().DurationVarP(&ttl, "ttl", "t", 0, "task time to live")
+	cmd.Flags().StringVarP(&pid, "pid", "p", "default", "claimant pid")
+	cmd.Flags().DurationVarP(&ttl, "ttl", "t", time.Minute, "task ttl, time before which a heartbeat must be sent")
 
 	// Mark flags as required
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("counter")
-	_ = cmd.MarkFlagRequired("process-id")
-	_ = cmd.MarkFlagRequired("ttl")
 
-	return cmd // Return the constructed command
+	return cmd
 }
