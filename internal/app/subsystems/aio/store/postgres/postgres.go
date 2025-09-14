@@ -52,7 +52,7 @@ const (
 		root_promise_id TEXT,
 		recv            BYTEA,
 		mesg            BYTEA,
-		timeout         INTEGER,
+		timeout         BIGINT,
 		created_on      BIGINT
 	);
 
