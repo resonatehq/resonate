@@ -30,7 +30,7 @@ type Config struct {
 type PluginConfig struct {
 	Http EnabledPlugin[http.Config] `flag:"http"`
 	Poll EnabledPlugin[poll.Config] `flag:"poll"`
-	SQS  EnabledPlugin[sqs.Config]  `flag:"sqs"`
+	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
 }
 
 type EnabledPlugin[T any] struct {
