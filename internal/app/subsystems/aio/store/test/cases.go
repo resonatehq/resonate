@@ -2677,6 +2677,71 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		name: "UpdateTask_LargeTtl",
+		commands: []t_aio.Command{
+			&t_aio.CreatePromiseCommand{
+				Id:    "foo",
+				Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				Tags:  map[string]string{},
+			},
+			&t_aio.CreateCallbackCommand{
+				Id:        "foo",
+				PromiseId: "foo",
+				Recv:      []byte("foo"),
+				Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+			},
+			&t_aio.CreateTasksCommand{
+				PromiseId: "foo",
+			},
+			&t_aio.UpdateTaskCommand{
+				Id:             "foo",
+				ProcessId:      util.ToPointer("pid"),
+				State:          task.Claimed,
+				Counter:        1,
+				Attempt:        1,
+				Ttl:            31556952000, // 1 year
+				ExpiresAt:      1,
+				CurrentStates:  []task.State{task.Init},
+				CurrentCounter: 1,
+			},
+			&t_aio.ReadTaskCommand{
+				Id: "foo",
+			},
+		},
+		expected: []t_aio.Result{
+			&t_aio.AlterPromisesResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterCallbacksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterTasksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterTasksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.QueryTasksResult{
+				RowsReturned: 1,
+				Records: []*task.TaskRecord{
+					{
+						Id:            "foo",
+						ProcessId:     util.ToPointer("pid"),
+						State:         task.Claimed,
+						RootPromiseId: "foo",
+						Recv:          []byte("foo"),
+						Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+						Counter:       1,
+						Attempt:       1,
+						Ttl:           31556952000,
+						ExpiresAt:     1,
+						CreatedOn:     util.ToPointer[int64](0),
+					},
+				},
+			},
+		},
+	},
+	{
 		name: "CompleteTasks_MultipleTasksSameRoot",
 		commands: []t_aio.Command{
 			&t_aio.CreatePromiseCommand{
@@ -3180,6 +3245,77 @@ var TestCases = []*testCase{
 			},
 			&t_aio.AlterTasksResult{
 				RowsAffected: 0,
+			},
+		},
+	},
+	{
+		name: "HeartbeatTasksWithTimes",
+		commands: []t_aio.Command{
+			&t_aio.CreatePromiseCommand{
+				Id:    "foo",
+				Param: promise.Value{Headers: map[string]string{}, Data: []byte{}},
+				Tags:  map[string]string{},
+			},
+			&t_aio.CreateCallbackCommand{
+				Id:        "foo",
+				PromiseId: "foo",
+				Recv:      []byte("foo"),
+				Mesg:      &message.Mesg{Type: message.Resume, Root: "foo", Leaf: "foo"},
+			},
+			&t_aio.CreateTasksCommand{
+				PromiseId: "foo",
+			},
+			&t_aio.UpdateTaskCommand{
+				Id:             "foo",
+				ProcessId:      util.ToPointer("foo"),
+				Counter:        1,
+				Attempt:        1,
+				Ttl:            30000, // 30s
+				State:          task.Claimed,
+				CurrentStates:  []task.State{task.Init},
+				CurrentCounter: 1,
+			},
+			&t_aio.HeartbeatTasksCommand{
+				ProcessId: "foo",
+				Time:      1735689600000, // 2025-01-01T00:00:00Z
+			},
+			&t_aio.ReadTaskCommand{
+				Id: "foo",
+			},
+		},
+		expected: []t_aio.Result{
+			&t_aio.AlterPromisesResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterCallbacksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterTasksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterTasksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.AlterTasksResult{
+				RowsAffected: 1,
+			},
+			&t_aio.QueryTasksResult{
+				RowsReturned: 1,
+				Records: []*task.TaskRecord{
+					{
+						Id:            "foo",
+						ProcessId:     util.ToPointer("foo"),
+						State:         task.Claimed,
+						RootPromiseId: "foo",
+						Recv:          []byte("foo"),
+						Mesg:          []byte(`{"type":"resume","root":"foo","leaf":"foo"}`),
+						Counter:       1,
+						Attempt:       1,
+						Ttl:           30000,
+						ExpiresAt:     1735689630000,
+						CreatedOn:     util.ToPointer[int64](0),
+					},
+				},
 			},
 		},
 	},

@@ -201,7 +201,7 @@ type CreateTaskCommand struct {
 	Timeout   int64
 	ProcessId *string
 	State     task.State
-	Ttl       int
+	Ttl       int64
 	ExpiresAt int64
 	CreatedOn int64
 }
@@ -234,7 +234,7 @@ type UpdateTaskCommand struct {
 	State          task.State
 	Counter        int
 	Attempt        int
-	Ttl            int
+	Ttl            int64
 	ExpiresAt      int64
 	CompletedOn    *int64
 	CurrentStates  []task.State

@@ -210,7 +210,7 @@ func (d *DST) Run(r *rand.Rand, api api.API, aio aio.AIO, system *system.System)
 						Id:        obj.Id,
 						Counter:   counter,
 						ProcessId: obj.Id,
-						Ttl:       RangeIntn(r, 1000, 5000),
+						Ttl:       RangeInt63n(r, 1000, 5000),
 					},
 				})
 			case *promise.Promise:

@@ -18,7 +18,7 @@ type Task struct {
 	Recv          json.RawMessage `json:"-"`
 	Mesg          *message.Mesg   `json:"-"`
 	Attempt       int             `json:"-"`
-	Ttl           int             `json:"-"`
+	Ttl           int64           `json:"-"`
 	ExpiresAt     int64           `json:"-"`
 	CreatedOn     *int64          `json:"createdOn,omitempty"`
 	CompletedOn   *int64          `json:"completedOn,omitempty"`
