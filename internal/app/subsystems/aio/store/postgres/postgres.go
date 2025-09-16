@@ -101,7 +101,7 @@ const (
 		timeout         BIGINT,
 		counter         INTEGER DEFAULT 1,
 		attempt         INTEGER DEFAULT 0,
-		ttl             INTEGER DEFAULT 0,
+		ttl             BIGINT DEFAULT 0,
 		expires_at      BIGINT DEFAULT 0,
 		created_on      BIGINT,
 		completed_on    BIGINT,

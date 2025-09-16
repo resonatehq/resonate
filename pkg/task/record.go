@@ -16,7 +16,7 @@ type TaskRecord struct {
 	Timeout       int64
 	Counter       int
 	Attempt       int
-	Ttl           int
+	Ttl           int64
 	ExpiresAt     int64
 	CreatedOn     *int64
 	CompletedOn   *int64

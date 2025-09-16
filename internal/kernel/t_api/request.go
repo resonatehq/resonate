@@ -299,7 +299,7 @@ func (r *HeartbeatLocksRequest) Kind() Kind {
 type CreateTaskRequest struct {
 	PromiseId string `json:"promiseId"`
 	ProcessId string `json:"processId"`
-	Ttl       int    `json:"ttl" binding:"min=0"`
+	Ttl       int64  `json:"ttl" binding:"min=0"`
 	Timeout   int64  `json:"timeout"`
 }
 
@@ -317,7 +317,7 @@ type ClaimTaskRequest struct {
 	Id        string `json:"id"`
 	Counter   int    `json:"counter"`
 	ProcessId string `json:"processId"`
-	Ttl       int    `json:"ttl" binding:"min=0"`
+	Ttl       int64  `json:"ttl" binding:"min=0"`
 }
 
 func (r *ClaimTaskRequest) String() string {
