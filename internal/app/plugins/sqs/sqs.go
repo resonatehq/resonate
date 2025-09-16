@@ -46,19 +46,16 @@ type Addr struct {
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
-	return NewWithClient(a, metrics, config, nil)
+	ctx := context.Background()
+	aws_config, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	client := sqs.NewFromConfig(aws_config)
+	return NewWithClient(a, metrics, config, client)
 }
 
 func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client SQSClient) (*SQS, error) {
-	if client == nil {
-		ctx := context.Background()
-		awsConfig, err := awsconfig.LoadDefaultConfig(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load AWS config: %w", err)
-		}
-		client = sqs.NewFromConfig(awsConfig)
-	}
-
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*SQSWorker, config.Workers)
 

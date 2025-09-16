@@ -358,22 +358,9 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "poll", Data: data}, true
-	case "sqs":
-		parts := strings.SplitN(u.Host+u.Path, "/", 2)
-		if len(parts) != 2 {
-			return nil, false
-		}
-
-		region := parts[0]
-		queue := parts[1]
-
-		if region == "" || queue == "" {
-			return nil, false
-		}
-
+	case "sqs+https":
 		addr := map[string]string{
-			"region": region,
-			"queue":  queue,
+			"url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
 		}
 
 		data, err := json.Marshal(addr)
