@@ -732,6 +732,25 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		Name: "CreatePromiseTimeoutTooLarge",
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises",
+				Headers: map[string]string{
+					"Request-Id": "CreatePromiseTimeoutTooLarge",
+				},
+				Body: []byte(`{
+					"id": "foo",
+					"timeout": 9223372036854775808
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 400,
+			},
+		},
+	},
+	{
 		Name: "ResolvePromise",
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "ResolvePromise", "name": "CompletePromise"},
@@ -2491,6 +2510,27 @@ var TestCases = []*testCase{
 						},
 					},
 				},
+			},
+		},
+	},
+	{
+		Name: "ClaimTaskTtlTooLarge",
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "tasks/claim",
+				Headers: map[string]string{
+					"Request-Id": "ClaimTaskTtlTooLarge",
+				},
+				Body: []byte(`{
+					"id": "foo",
+					"processId": "bar",
+					"counter": 1,
+					"ttl": 9223372036854775808
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 400,
 			},
 		},
 	},

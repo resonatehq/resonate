@@ -75,6 +75,11 @@ func TestGrpc(t *testing.T) {
 	}
 
 	for _, tc := range test.TestCases {
+		// skip non-grpc tests
+		if tc.Grpc == nil {
+			continue
+		}
+
 		t.Run(tc.Name, func(t *testing.T) {
 			if tc.Req != nil {
 				// set protocol specific header
