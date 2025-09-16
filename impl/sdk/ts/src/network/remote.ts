@@ -215,6 +215,8 @@ export interface HttpNetworkConfig {
   messageSourcePort: string;
   pid: string;
   group: string;
+  auth?: { username: string; password: string };
+  messageSourceAuth?: { username: string; password: string };
   timeout?: number;
   headers?: Record<string, string>;
   encoder?: Encoder;
@@ -228,8 +230,11 @@ export type RetryPolicy = {
 export class HttpNetwork implements Network {
   private url: string;
   private msgUrl: string;
+  private group: string;
+  private pid: string;
   private timeout: number;
-  private baseHeaders: Record<string, string>;
+  private headers: Record<string, string>;
+  private msgHeaders: Record<string, string>;
   private encoder: Encoder;
   private eventSource: EventSource;
   private subscriptions: {
@@ -238,23 +243,74 @@ export class HttpNetwork implements Network {
     notify: Array<(msg: Message) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor(config: HttpNetworkConfig) {
-    const { host, storePort, messageSourcePort, pid, group } = config;
+  constructor({
+    host,
+    storePort,
+    messageSourcePort,
+    pid,
+    group,
+    auth,
+    messageSourceAuth,
+    timeout = 30 * util.SEC,
+    headers = {},
+    encoder = new JsonEncoder(),
+  }: HttpNetworkConfig) {
     this.url = `${host}:${storePort}`;
-    this.msgUrl = new URL(
-      `/${encodeURIComponent(group)}/${encodeURIComponent(pid)}`,
-      `${host}:${messageSourcePort}`,
-    ).href;
-    this.timeout = config.timeout || 30 * util.SEC;
+    this.msgUrl = `${host}:${messageSourcePort}`;
 
-    this.baseHeaders = {
-      "Content-Type": "application/json",
-      ...config.headers,
-    };
-    this.encoder = config.encoder ?? new JsonEncoder();
+    this.group = group;
+    this.pid = pid;
+    this.timeout = timeout;
+    this.encoder = encoder;
 
-    this.eventSource = new EventSource(this.msgUrl);
-    this.eventSource.addEventListener("message", (event) => this._recv(event));
+    this.headers = { "Content-Type": "application/json", ...headers };
+    if (auth) {
+      this.headers.Authorization = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+    }
+
+    this.msgHeaders = {};
+    if (messageSourceAuth) {
+      this.msgHeaders.Authorization = `Basic ${btoa(`${messageSourceAuth.username}:${messageSourceAuth.password}`)}`;
+    }
+
+    this.eventSource = this.connect();
+  }
+
+  private connect() {
+    const url = new URL(`/${encodeURIComponent(this.group)}/${encodeURIComponent(this.pid)}`, this.msgUrl);
+    this.eventSource = new EventSource(url, {
+      fetch: (url, init) =>
+        fetch(url, {
+          ...init,
+          headers: {
+            ...init.headers,
+            ...this.msgHeaders,
+          },
+        }),
+    });
+
+    this.eventSource.addEventListener("message", (event) => {
+      let msg: Message;
+      const data = JSON.parse(event.data);
+
+      if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
+        msg = { type: data.type, task: data.task };
+      } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
+        msg = { type: data.type, promise: this.mapPromiseDtoToRecord(data.promise) };
+      } else {
+        console.warn("Received invalid message:", data);
+        return;
+      }
+
+      this.recv(msg);
+    });
+
+    this.eventSource.addEventListener("error", () => {
+      console.log(`Networking. Cannot connect to [${this.msgUrl}]. Retrying in 5s.`);
+      setTimeout(() => this.connect(), 5000);
+    });
+
+    return this.eventSource;
   }
 
   send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever = false): void {
@@ -270,22 +326,6 @@ export class HttpNetwork implements Network {
         callback(true);
       },
     );
-  }
-
-  private _recv(event: MessageEvent): void {
-    let msg: Message;
-    const data = JSON.parse(event.data);
-
-    if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
-      msg = { type: data.type, task: data.task };
-    } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
-      msg = { type: data.type, promise: this.mapPromiseDtoToRecord(data.promise) };
-    } else {
-      console.warn("Received invalid message:", data);
-      return;
-    }
-
-    this.recv(msg);
   }
 
   recv(msg: Message): void {
@@ -336,7 +376,7 @@ export class HttpNetwork implements Network {
   }
 
   private async createPromise(req: CreatePromiseReq, retryPolicy: RetryPolicy = {}): Promise<CreatePromiseRes> {
-    const headers: Record<string, string> = { ...this.baseHeaders };
+    const headers: Record<string, string> = {};
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
 
@@ -363,7 +403,7 @@ export class HttpNetwork implements Network {
     req: CreatePromiseAndTaskReq,
     retryPolicy: RetryPolicy = {},
   ): Promise<CreatePromiseAndTaskRes> {
-    const headers: Record<string, string> = { ...this.baseHeaders };
+    const headers: Record<string, string> = {};
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
 
@@ -397,21 +437,14 @@ export class HttpNetwork implements Network {
   }
 
   private async readPromise(req: ReadPromiseReq, retryPolicy: RetryPolicy = {}): Promise<ReadPromiseRes> {
-    const res = await this.fetch(
-      `/promises/${encodeURIComponent(req.id)}`,
-      {
-        method: "GET",
-        headers: this.baseHeaders,
-      },
-      retryPolicy,
-    );
+    const res = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, { method: "GET" }, retryPolicy);
 
     const promise = this.mapPromiseDtoToRecord((await res.json()) as PromiseDto);
     return { kind: "readPromise", promise };
   }
 
   private async completePromise(req: CompletePromiseReq, retryPolicy: RetryPolicy = {}): Promise<CompletePromiseRes> {
-    const headers: Record<string, string> = { ...this.baseHeaders };
+    const headers: Record<string, string> = {};
     if (req.iKey) headers["idempotency-key"] = req.iKey;
     if (req.strict !== undefined) headers.strict = req.strict.toString();
 
@@ -437,7 +470,6 @@ export class HttpNetwork implements Network {
       `/promises/callback/${encodeURIComponent(req.promiseId)}`,
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify({
           rootPromiseId: req.rootPromiseId,
           timeout: req.timeout,
@@ -469,7 +501,6 @@ export class HttpNetwork implements Network {
       `/promises/subscribe/${encodeURIComponent(req.promiseId)}`,
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify(body),
       },
       retryPolicy,
@@ -484,7 +515,7 @@ export class HttpNetwork implements Network {
   }
 
   private async createSchedule(req: CreateScheduleReq, retryPolicy: RetryPolicy = {}): Promise<CreateScheduleRes> {
-    const headers: Record<string, string> = { ...this.baseHeaders };
+    const headers: Record<string, string> = {};
     if (req.iKey) headers["idempotency-key"] = req.iKey;
 
     const res = await this.fetch(
@@ -513,14 +544,7 @@ export class HttpNetwork implements Network {
   }
 
   private async readSchedule(req: ReadScheduleReq, retryPolicy: RetryPolicy = {}): Promise<ReadScheduleRes> {
-    const res = await this.fetch(
-      `/schedules/${encodeURIComponent(req.id)}`,
-      {
-        method: "GET",
-        headers: this.baseHeaders,
-      },
-      retryPolicy,
-    );
+    const res = await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, { method: "GET" }, retryPolicy);
 
     return {
       kind: "readSchedule",
@@ -529,14 +553,7 @@ export class HttpNetwork implements Network {
   }
 
   private async deleteSchedule(req: DeleteScheduleReq, retryPolicy: RetryPolicy = {}): Promise<DeleteScheduleRes> {
-    await this.fetch(
-      `/schedules/${encodeURIComponent(req.id)}`,
-      {
-        method: "DELETE",
-        headers: this.baseHeaders,
-      },
-      retryPolicy,
-    );
+    await this.fetch(`/schedules/${encodeURIComponent(req.id)}`, { method: "DELETE" }, retryPolicy);
 
     return { kind: "deleteSchedule" };
   }
@@ -546,7 +563,6 @@ export class HttpNetwork implements Network {
       "/tasks/claim",
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify({
           id: req.id,
           counter: req.counter,
@@ -590,7 +606,6 @@ export class HttpNetwork implements Network {
       "/tasks/complete",
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify({
           id: req.id,
           counter: req.counter,
@@ -610,7 +625,6 @@ export class HttpNetwork implements Network {
       "/tasks/drop",
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify({
           id: req.id,
           counter: req.counter,
@@ -627,7 +641,6 @@ export class HttpNetwork implements Network {
       "/tasks/heartbeat",
       {
         method: "POST",
-        headers: this.baseHeaders,
         body: JSON.stringify({
           processId: req.processId,
         }),
@@ -648,6 +661,9 @@ export class HttpNetwork implements Network {
     { retries = 0, delay = 1000 }: RetryPolicy = {},
   ): Promise<globalThis.Response> {
     const url = `${this.url}${path}`;
+
+    // add default headers
+    init.headers = { ...this.headers, ...init.headers };
 
     for (let attempt = 0; attempt <= retries; attempt++) {
       const controller = new AbortController();

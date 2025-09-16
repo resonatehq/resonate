@@ -110,6 +110,8 @@ export class Resonate {
     group = "default",
     pid = crypto.randomUUID().replace(/-/g, ""),
     ttl = 1 * util.MIN,
+    auth = undefined,
+    messageSourceAuth = undefined,
   }: {
     host?: string;
     storePort?: string;
@@ -117,6 +119,8 @@ export class Resonate {
     group?: string;
     pid?: string;
     ttl?: number;
+    auth?: { username: string; password: string };
+    messageSourceAuth?: { username: string; password: string };
   } = {}): Resonate {
     const network = new HttpNetwork({
       host,
@@ -124,6 +128,8 @@ export class Resonate {
       messageSourcePort,
       pid,
       group,
+      auth,
+      messageSourceAuth,
       timeout: 1 * util.MIN,
       headers: {},
     });

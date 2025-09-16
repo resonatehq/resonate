@@ -1,6 +1,7 @@
 import { setTimeout } from "node:timers/promises";
 import { LocalNetwork } from "../dev/network";
 import type { Context } from "../src/context";
+import { HttpNetwork } from "../src/network/remote";
 import { Resonate } from "../src/resonate";
 import { Constant, Never } from "../src/retries";
 import * as util from "../src/util";
@@ -408,5 +409,41 @@ describe("Resonate usage tests", () => {
       const n = await f.run(`g${i}`);
       expect(n).toBe(1);
     }
+  });
+
+  test("Basic auth", async () => {
+    const p1 = Promise.withResolvers();
+    const p2 = Promise.withResolvers();
+
+    // mock fetch
+    global.fetch = jest.fn((url, options) => {
+      if (url === "http://localhost:9998/promises") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Basic Zm9vOmJhcg==");
+        p1.resolve(null);
+      }
+
+      if (url instanceof URL && url.origin === "http://localhost:9999") {
+        expect((options?.headers as Record<string, string>).Authorization).toBe("Basic YmF6OnF1eA==");
+        p2.resolve(null);
+      }
+
+      // leave on read
+      return new Promise(() => {});
+    });
+
+    const network = new HttpNetwork({
+      host: "http://localhost",
+      storePort: "9998",
+      messageSourcePort: "9999",
+      pid: "0",
+      group: "default",
+      auth: { username: "foo", password: "bar" },
+      messageSourceAuth: { username: "baz", password: "qux" },
+    });
+    const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
+    resonate.promises.create("foo", 0);
+
+    await p1.promise;
+    await p2.promise;
   });
 });
