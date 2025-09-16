@@ -56,7 +56,7 @@ class MockProcessor implements Processor {
   public pendingTodos: Map<string, PendingTodo> = new Map();
   private todoNotifier?: { expectedCount: number; resolve: () => void };
 
-  process(id: string, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
+  process(id: string, name: string, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
     // Instead of running the work, we just store it.
     this.pendingTodos.set(id, { id, func, callback });
 

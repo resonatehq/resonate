@@ -8,6 +8,7 @@ import type { CallbackRecord, DurablePromiseRecord, Network } from "./network/ne
 import { Nursery } from "./nursery";
 import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
+import { Exponential, Never } from "./retries";
 import type { Callback, Func } from "./types";
 import * as util from "./util";
 
@@ -147,7 +148,13 @@ export class Computation {
         });
       };
 
-      const ctx = InnerContext.root(this.id, rootPromise.timeout, this.clock, this.dependencies);
+      const ctx = InnerContext.root(
+        this.id,
+        rootPromise.timeout,
+        util.isGeneratorFunction(func) ? new Never() : new Exponential(),
+        this.clock,
+        this.dependencies,
+      );
 
       if (util.isGeneratorFunction(func)) {
         this.processGenerator(nursery, ctx, func, args, done);
@@ -200,6 +207,7 @@ export class Computation {
   ) {
     this.processor.process(
       id,
+      func.name,
       async () => await func(ctx, ...args),
       (res) =>
         this.handler.completePromise(
@@ -213,6 +221,7 @@ export class Computation {
           },
           done,
         ),
+      ctx.retryPolicy,
     );
   }
 

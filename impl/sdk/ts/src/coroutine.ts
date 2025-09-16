@@ -126,7 +126,7 @@ export class Coroutine<T> {
             if (err) return callback(err);
             util.assertDefined(res);
 
-            const ctx = this.ctx.child(res.id, res.timeout);
+            const ctx = this.ctx.child(res.id, res.timeout, action.retryPolicy);
 
             if (res.state === "pending") {
               if (!util.isGeneratorFunction(action.func)) {

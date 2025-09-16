@@ -2,9 +2,36 @@ import { setTimeout } from "node:timers/promises";
 import { LocalNetwork } from "../dev/network";
 import type { Context } from "../src/context";
 import { Resonate } from "../src/resonate";
+import { Constant, Never } from "../src/retries";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
+  test("function retries", async () => {
+    const resonate = Resonate.local();
+
+    let tries = 0;
+    const g = async (_ctx: Context, msg: string) => {
+      tries++;
+      throw msg;
+    };
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      const future = yield* ctx.beginRun(
+        g,
+        "this is an error",
+        ctx.options({ retryPolicy: new Constant({ delay: 0, maxRetries: 3 }) }),
+      );
+      yield* future;
+    });
+
+    const h = await f.beginRun("f");
+
+    await expect(h.result()).rejects.toBe("this is an error");
+    expect(tries).toBe(4); // 1 initial try + 3 retries
+
+    resonate.stop();
+  });
+
   test("function is executed on schedule", async () => {
     const resonate = Resonate.local();
 
@@ -100,7 +127,7 @@ describe("Resonate usage tests", () => {
     };
 
     const f = resonate.register("f", function* foo(ctx: Context) {
-      const future = yield* ctx.beginRun(g, "this is an error");
+      const future = yield* ctx.beginRun(g, "this is an error", ctx.options({ retryPolicy: new Never() }));
       yield* future;
     });
 
@@ -117,7 +144,7 @@ describe("Resonate usage tests", () => {
     };
 
     const f = resonate.register("f", function* foo(ctx: Context) {
-      yield* ctx.run(g, "this is an error");
+      yield* ctx.run(g, "this is an error", ctx.options({ retryPolicy: new Never() }));
     });
 
     const h = await f.beginRun("f");

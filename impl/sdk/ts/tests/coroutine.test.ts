@@ -3,6 +3,7 @@ import { type Context, InnerContext } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
+import { Never } from "../src/retries";
 import { type Callback, type Result, ok } from "../src/types";
 
 class DummyNetwork implements Network {
@@ -56,10 +57,17 @@ describe("Coroutine", () => {
   // Helper functions to write test easily
   const exec = (uuid: string, func: (ctx: Context, ...args: any[]) => any, args: any[], handler: Handler) => {
     return new Promise<any>((resolve) => {
-      Coroutine.exec(uuid, InnerContext.root(uuid, 0, new WallClock(), new Map()), func, args, handler, (err, res) => {
-        expect(err).toBe(false);
-        resolve(res);
-      });
+      Coroutine.exec(
+        uuid,
+        InnerContext.root(uuid, 0, new Never(), new WallClock(), new Map()),
+        func,
+        args,
+        handler,
+        (err, res) => {
+          expect(err).toBe(false);
+          resolve(res);
+        },
+      );
     });
   };
 

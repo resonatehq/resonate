@@ -1,5 +1,6 @@
 import type { CreatePromiseReq } from "network/network";
 import { Future, LFC, LFI, RFC, RFI } from "./context";
+import type { RetryPolicy } from "./retries";
 import { type Func, type Result, type Yieldable, ko, ok } from "./types";
 import * as util from "./util";
 
@@ -19,6 +20,7 @@ export type InternalAsyncL = {
   id: string;
   func: Func;
   args: any[];
+  retryPolicy: RetryPolicy;
   createReq: CreatePromiseReq;
 };
 export type InternalAwait<T> = {
@@ -151,6 +153,7 @@ export class Decorator<TRet> {
         id: event.createReq.id,
         func: event.func,
         args: event.args ?? [],
+        retryPolicy: event.retryPolicy,
         createReq: event.createReq,
       };
     }

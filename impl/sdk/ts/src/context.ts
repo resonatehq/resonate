@@ -1,17 +1,20 @@
 import type { Clock } from "./clock";
 import type { CreatePromiseReq } from "./network/network";
 import { Options } from "./options";
+import { Exponential, Never, type RetryPolicy } from "./retries";
 import type { Func, ParamsWithOptions, Result, Return } from "./types";
 import * as util from "./util";
 
 export class LFI<T> implements Iterable<LFI<T>> {
   public func: Func;
   public args: any[];
+  public retryPolicy: RetryPolicy;
   public createReq: CreatePromiseReq;
 
-  constructor(func: Func, args: any[], createReq: CreatePromiseReq) {
+  constructor(func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
     this.func = func;
     this.args = args;
+    this.retryPolicy = retryPolicy;
     this.createReq = createReq;
   }
 
@@ -25,11 +28,13 @@ export class LFI<T> implements Iterable<LFI<T>> {
 export class LFC<T> implements Iterable<LFC<T>> {
   public func: Func;
   public args: any[];
+  public retryPolicy: RetryPolicy;
   public createReq: CreatePromiseReq;
 
-  constructor(func: Func, args: any[], createReq: CreatePromiseReq) {
+  constructor(func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
     this.func = func;
     this.args = args;
+    this.retryPolicy = retryPolicy;
     this.createReq = createReq;
   }
 
@@ -176,6 +181,7 @@ export interface ResonateMath {
 export class InnerContext implements Context {
   readonly id: string;
   readonly timeout: number;
+  readonly retryPolicy: RetryPolicy;
 
   private rId: string;
   private pId: string;
@@ -194,6 +200,7 @@ export class InnerContext implements Context {
     rId: string,
     pId: string,
     timeout: number,
+    retryPolicy: RetryPolicy,
     clock: Clock,
     dependencies: Map<string, any>,
   ) {
@@ -201,26 +208,39 @@ export class InnerContext implements Context {
     this.rId = rId;
     this.pId = pId;
     this.timeout = timeout;
+    this.retryPolicy = retryPolicy;
     this.clock = clock;
     this.dependencies = dependencies;
   }
 
-  static root(id: string, timeout: number, clock: Clock, dependencies: Map<string, any>) {
-    return new InnerContext(id, id, id, timeout, clock, dependencies);
+  static root(id: string, timeout: number, retryPolicy: RetryPolicy, clock: Clock, dependencies: Map<string, any>) {
+    return new InnerContext(id, id, id, timeout, retryPolicy, clock, dependencies);
   }
 
-  child(id: string, timeout: number) {
-    return new InnerContext(id, this.rId, this.id, timeout, this.clock, this.dependencies);
+  child(id: string, timeout: number, retryPolicy: RetryPolicy) {
+    return new InnerContext(id, this.rId, this.id, timeout, retryPolicy, this.clock, this.dependencies);
   }
 
   lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>> {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new LFI(func, argu, this.localCreateReq(opts));
+
+    return new LFI(
+      func,
+      argu,
+      opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
+      this.localCreateReq(opts),
+    );
   }
 
   lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>> {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new LFC(func, argu, this.localCreateReq(opts));
+
+    return new LFC(
+      func,
+      argu,
+      opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
+      this.localCreateReq(opts),
+    );
   }
 
   rfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
