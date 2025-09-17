@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/gin-gonic/gin"
 )
@@ -135,11 +136,16 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
-	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: t_api.FencingToken{
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
 			TaskId:      header.TaskId,
 			TaskCounter: header.TaskCounter,
-		},
+		}
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CreatePromiseRequest{
 			Id:             body.Id,
 			IdempotencyKey: header.IdempotencyKey,
@@ -250,11 +256,16 @@ func (s *server) completePromise(c *gin.Context) {
 		return
 	}
 
-	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: t_api.FencingToken{
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
 			TaskId:      header.TaskId,
 			TaskCounter: header.TaskCounter,
-		},
+		}
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CompletePromiseRequest{
 			Id:             extractId(c.Param("id")),
 			IdempotencyKey: header.IdempotencyKey,
@@ -308,11 +319,16 @@ func (s *server) createCallback(c *gin.Context) {
 		body.PromiseId = extractId(c.Param("id"))
 	}
 
-	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: t_api.FencingToken{
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
 			TaskId:      header.TaskId,
 			TaskCounter: header.TaskCounter,
-		},
+		}
+	}
+
+	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,

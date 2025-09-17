@@ -27,8 +27,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
-				TaskId:      r.Fence.TaskId,
-				TaskCounter: r.Fence.TaskCounter,
+				Fence: r.Fence,
 				Commands: []t_aio.Command{
 					&t_aio.ReadPromiseCommand{
 						Id: req.PromiseId,
@@ -44,7 +43,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	}
 
 	if !completion.Store.Valid {
-		return nil, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
+		return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -72,8 +71,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						TaskId:      r.Fence.TaskId,
-						TaskCounter: r.Fence.TaskCounter,
+						Fence: r.Fence,
 						Commands: []t_aio.Command{
 							&t_aio.CreateCallbackCommand{
 								Id:        req.Id,
@@ -94,7 +92,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			}
 
 			if !completion.Store.Valid {
-				return nil, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
+				return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")

@@ -20,10 +20,8 @@ func (s *StoreSubmission) String() string {
 }
 
 type Transaction struct {
-	// Use as the fencing token
-	TaskId      string
-	TaskCounter int64
-	Commands    []Command
+	Fence    *task.FencingToken
+	Commands []Command
 }
 
 type Command interface {
@@ -341,7 +339,7 @@ func (*HeartbeatLocksCommand) isCommand()       {}
 func (*TimeoutLocksCommand) isCommand()         {}
 
 type StoreCompletion struct {
-	Valid      bool
+	Valid   bool
 	Results []Result
 }
 

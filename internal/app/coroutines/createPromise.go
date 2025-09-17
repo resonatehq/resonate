@@ -60,7 +60,7 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		CreatedOn:      c.Time(),
 	}
 
-	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, t_api.FencingToken{}, cmd, &t_aio.CreateTaskCommand{
+	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, nil, cmd, &t_aio.CreateTaskCommand{
 		Id:        util.InvokeId(req.Task.PromiseId),
 		Recv:      nil,
 		Mesg:      &message.Mesg{Type: message.Invoke, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
@@ -99,7 +99,7 @@ type promiseAndTask struct {
 	task    *task.Task
 }
 
-func createPromise(tags map[string]string, fencingToken t_api.FencingToken, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *promiseAndTask] {
+func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd *t_aio.CreatePromiseCommand, taskCmd *t_aio.CreateTaskCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, *promiseAndTask] {
 	if promiseCmd.Param.Headers == nil {
 		promiseCmd.Param.Headers = map[string]string{}
 	}
@@ -117,8 +117,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					TaskId:      fencingToken.TaskId,
-					TaskCounter: fencingToken.TaskCounter,
+					Fence: fence,
 					Commands: []t_aio.Command{
 						&t_aio.ReadPromiseCommand{
 							Id: promiseCmd.Id,
@@ -134,7 +133,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 		}
 
 		if !completion.Store.Valid {
-			return nil, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
+			return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")
@@ -220,9 +219,8 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 				Tags: tags,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
-						TaskId:      fencingToken.TaskId,
-						TaskCounter: fencingToken.TaskCounter,
-						Commands:    append(commands, additionalCmds...),
+						Fence:    fence,
+						Commands: append(commands, additionalCmds...),
 					},
 				},
 			})
@@ -233,7 +231,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 			}
 
 			if !completion.Store.Valid {
-				return nil, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
+				return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")
@@ -243,7 +241,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 			if result.RowsAffected == 0 {
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
-				return gocoro.SpawnAndAwait(c, createPromise(tags, fencingToken, promiseCmd, taskCmd, additionalCmds...))
+				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil
@@ -256,7 +254,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 		}
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, fencingToken, &t_aio.UpdatePromiseCommand{
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(tags, fence, &t_aio.UpdatePromiseCommand{
 				Id:             promiseCmd.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},
@@ -270,7 +268,7 @@ func createPromise(tags map[string]string, fencingToken t_api.FencingToken, prom
 			if !ok {
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
-				return gocoro.SpawnAndAwait(c, createPromise(tags, fencingToken, promiseCmd, taskCmd, additionalCmds...))
+				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
 			}
 
 			// update promise

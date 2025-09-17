@@ -1635,11 +1635,11 @@ func (w *PostgresStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 
 func (w *PostgresStoreWorker) validFencingToken(tx *sql.Tx, transaction *t_aio.Transaction) (bool, error) {
 	// if the task is not provided continue with the operation
-	if transaction.TaskId == "" {
+	if transaction.Fence == nil {
 		return true, nil
 	}
 	var rowCount int
-	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.TaskId, transaction.TaskCounter).Scan(&rowCount)
+	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.Fence.TaskId, transaction.Fence.TaskCounter).Scan(&rowCount)
 
 	if err != nil {
 		return false, store.StoreErr(err)
