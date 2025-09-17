@@ -1,4 +1,4 @@
-name: Verify GitHub Artifacts
+name: Verify Images and Artifacts
 
 on:
   workflow_call:
@@ -20,15 +20,26 @@ permissions:
   packages: read
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  DOCKERHUB_IMAGE_NAME: resonatehqio/resonate
+  GITHUB_IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
+  verify-dockerhub-image:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download and test DockerHub image
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          # Pull the test image
+          docker pull ${{ env.DOCKERHUB_IMAGE_NAME }}:"${TAG}"
+
+          # Run the test image
+          docker run --rm ${{ env.DOCKERHUB_IMAGE_NAME }}:"${TAG}" dst run
+
   verify-github-image:
     runs-on: ubuntu-24.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
       - name: Download and test GHCR image
         env:
           ACTOR: ${{ github.actor }}
@@ -38,10 +49,10 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${ACTOR}" --password-stdin
 
           # Pull the test image
-          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"${TAG}"
+          docker pull ${{ env.GITHUB_IMAGE_NAME }}:"${TAG}"
 
           # Run the test image
-          docker run --rm ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:"${TAG}" dst run
+          docker run --rm ${{ env.GITHUB_IMAGE_NAME }}:"${TAG}" dst run
 
   verify-github-release:
     runs-on: ${{ matrix.systems.runner }}
@@ -57,8 +68,6 @@ jobs:
           - file: resonate_darwin_aarch64.tar.gz
             runner: macos-14
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
       - name: Download and test GH release
         env:
           REPO: ${{ github.repository }}
