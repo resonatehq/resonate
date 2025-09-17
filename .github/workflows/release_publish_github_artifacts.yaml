@@ -1,4 +1,4 @@
-name: Publish GitHub Release
+name: Publish GitHub Artifacts
 
 on:
   workflow_call:

@@ -1,5 +1,5 @@
 # Release workflow is the main workflow that coordinates various GitHub workflows involved in a release of Resonate.
-name: Release Workflow
+name: Release
 
 on:
   release:
@@ -15,6 +15,12 @@ jobs:
   check-version:
     uses: ./.github/workflows/release_check_version.yaml
 
+  publish-dockerhub-image:
+    needs: [check-version]
+    uses: ./.github/workflows/release_publish_dockerhub_image.yaml
+    with:
+      tag: ${{ github.ref_name }}
+
   publish-github-image:
     needs: [check-version]
     uses: ./.github/workflows/release_publish_github_image.yaml
@@ -28,7 +34,8 @@ jobs:
       tag: ${{ github.ref_name }}
 
   verify-github-artifacts:
-    needs: [publish-github-image, publish-github-artifacts]
+    needs:
+      [publish-dockerhub-image, publish-github-image, publish-github-artifacts]
     uses: ./.github/workflows/release_verify_artifacts.yaml
     with:
       tag: ${{ github.ref_name }}
