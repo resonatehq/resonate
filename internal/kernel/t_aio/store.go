@@ -347,7 +347,7 @@ func (c *StoreCompletion) String() string {
 	if c.Valid {
 		return fmt.Sprintf("Store(results=%s)", c.Results)
 	} else {
-		return fmt.Sprintf("Store(valid=false)")
+		return fmt.Sprint("Store(valid=false)")
 	}
 }
 
