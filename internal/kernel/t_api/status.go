@@ -23,6 +23,7 @@ const (
 	StatusTaskAlreadyCompleted   StatusCode = 40306
 	StatusTaskInvalidCounter     StatusCode = 40307
 	StatusTaskInvalidState       StatusCode = 40308
+	StatusFencingTokenInvalid    StatusCode = 40309
 	StatusPromiseNotFound        StatusCode = 40400
 	StatusScheduleNotFound       StatusCode = 40401
 	StatusLockNotFound           StatusCode = 40402
@@ -68,6 +69,8 @@ func (s StatusCode) String() string {
 		return "The task counter is invalid"
 	case StatusTaskInvalidState:
 		return "The task state is invalid"
+	case StatusFencingTokenInvalid:
+		return "The fencing token is invalid"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:

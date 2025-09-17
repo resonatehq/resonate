@@ -33,15 +33,15 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 			}()
 		}
 
-		results, err := store.Execute([]*t_aio.Transaction{{Commands: c.commands}})
+		completions, err := store.Execute([]*t_aio.Transaction{{Commands: c.commands}})
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		assert.Len(t, results, 1)
+		assert.Len(t, completions, 1)
 
 		// normalize results
-		for _, result := range results[0] {
+		for _, result := range completions[0].Results {
 			switch v := result.(type) {
 			case *t_aio.QueryPromisesResult:
 				for _, record := range v.Records {
@@ -57,7 +57,7 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 			}
 		}
 
-		assert.Equal(t, c.expected, results[0])
+		assert.Equal(t, c.expected, completions[0].Results)
 	})
 }
 

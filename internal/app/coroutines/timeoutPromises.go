@@ -7,6 +7,7 @@ import (
 	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 )
@@ -51,7 +52,7 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 				continue
 			}
 
-			awaiting[i] = gocoro.Spawn(c, completePromise(metadata, &t_aio.UpdatePromiseCommand{
+			awaiting[i] = gocoro.Spawn(c, completePromise(metadata, t_api.FencingToken{}, &t_aio.UpdatePromiseCommand{
 				Id:             p.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},

@@ -18,8 +18,14 @@ type RequestPayload interface {
 	isRequestPayload()
 }
 
+type FencingToken struct {
+	TaskId      string
+	TaskCounter int64
+}
+
 type Request struct {
 	Metadata map[string]string
+	Fence    FencingToken
 	Payload  RequestPayload
 }
 

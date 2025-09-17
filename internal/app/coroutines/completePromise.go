@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -18,6 +19,8 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
+				TaskId:      r.Fence.TaskId,
+				TaskCounter: r.Fence.TaskCounter,
 				Commands: []t_aio.Command{
 					&t_aio.ReadPromiseCommand{
 						Id: req.Id,
@@ -30,6 +33,10 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
 		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+	}
+
+	if !completion.Store.Valid {
+		return nil, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -77,7 +84,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 				}
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, r.Fence, cmd))
 			if err != nil {
 				return nil, err
 			}
@@ -135,7 +142,7 @@ func CompletePromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, an
 	return res, nil
 }
 
-func completePromise(tags map[string]string, updatePromiseCmd *t_aio.UpdatePromiseCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
+func completePromise(tags map[string]string, fencingToken t_api.FencingToken, updatePromiseCmd *t_aio.UpdatePromiseCommand, additionalCmds ...t_aio.Command) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, bool] {
 	if updatePromiseCmd.Value.Headers == nil {
 		updatePromiseCmd.Value.Headers = map[string]string{}
 	}
@@ -167,7 +174,9 @@ func completePromise(tags map[string]string, updatePromiseCmd *t_aio.UpdatePromi
 			Tags: tags,
 			Store: &t_aio.StoreSubmission{
 				Transaction: &t_aio.Transaction{
-					Commands: commands,
+					TaskId:      fencingToken.TaskId,
+					TaskCounter: fencingToken.TaskCounter,
+					Commands:    commands,
 				},
 			},
 		})
@@ -175,6 +184,10 @@ func completePromise(tags map[string]string, updatePromiseCmd *t_aio.UpdatePromi
 		if err != nil {
 			slog.Error("failed to update promise", "err", err)
 			return false, t_api.NewError(t_api.StatusAIOStoreError, err)
+		}
+
+		if !completion.Store.Valid {
+			return false, t_api.NewError(t_api.StatusFencingTokenInvalid, errors.New("Invalid task for requested operation"))
 		}
 
 		util.Assert(completion.Store != nil, "completion must not be nil")

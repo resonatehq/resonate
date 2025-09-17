@@ -61,7 +61,7 @@ func SearchPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		promises = append(promises, p)
 
 		if p.State == promise.Pending && p.Timeout <= c.Time() {
-			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Metadata, &t_aio.UpdatePromiseCommand{
+			awaiting = append(awaiting, gocoro.Spawn(c, completePromise(r.Metadata, t_api.FencingToken{}, &t_aio.UpdatePromiseCommand{
 				Id:             p.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},

@@ -281,6 +281,14 @@ const (
 	WHERE
 		id = $1`
 
+	TASK_VALIDATE_STATEMENT = `
+	SELECT
+		COUNT(*)
+	FROM
+		tasks
+	WHERE
+		id = $1 AND counter  = $2 AND state = 4 -- state == Claimed`
+
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
 		id,
@@ -553,7 +561,7 @@ func (w *PostgresStoreWorker) Process(sqes []*bus.SQE[t_aio.Submission, t_aio.Co
 	return store.Process(w, sqes)
 }
 
-func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]t_aio.Result, error) {
+func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([]*t_aio.StoreCompletion, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.config.TxTimeout)
 	defer cancel()
 
@@ -577,7 +585,7 @@ func (w *PostgresStoreWorker) Execute(transactions []*t_aio.Transaction) ([][]t_
 	return results, nil
 }
 
-func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([][]t_aio.Result, error) {
+func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.Transaction) ([]*t_aio.StoreCompletion, error) {
 	// Lazily defined prepared statements
 	var promiseInsertStmt *sql.Stmt
 	var promiseUpdateStmt *sql.Stmt
@@ -597,11 +605,28 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 	var taskHeartbeatStmt *sql.Stmt
 
 	// Results
-	results := make([][]t_aio.Result, len(transactions))
+	completions := make([]*t_aio.StoreCompletion, len(transactions))
 
 	for i, transaction := range transactions {
 		util.Assert(len(transaction.Commands) > 0, "expected a command")
-		results[i] = make([]t_aio.Result, len(transaction.Commands))
+
+		valid, err := w.validFencingToken(tx, transaction)
+		if err != nil {
+			return nil, err
+		}
+
+		if !valid {
+			completions[i] = &t_aio.StoreCompletion{
+				Valid: false,
+			}
+			continue
+		}
+		results := make([]t_aio.Result, len(transaction.Commands))
+
+		completions[i] = &t_aio.StoreCompletion{
+			Valid:   true,
+			Results: results,
+		}
 
 		for j, command := range transaction.Commands {
 			var err error
@@ -609,11 +634,11 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 			switch v := command.(type) {
 			// Promises
 			case *t_aio.ReadPromiseCommand:
-				results[i][j], err = w.readPromise(tx, v)
+				results[j], err = w.readPromise(tx, v)
 			case *t_aio.ReadPromisesCommand:
-				results[i][j], err = w.readPromises(tx, v)
+				results[j], err = w.readPromises(tx, v)
 			case *t_aio.SearchPromisesCommand:
-				results[i][j], err = w.searchPromises(tx, v)
+				results[j], err = w.searchPromises(tx, v)
 			case *t_aio.CreatePromiseCommand:
 				if promiseInsertStmt == nil {
 					promiseInsertStmt, err = tx.Prepare(PROMISE_INSERT_STATEMENT)
@@ -621,7 +646,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createPromise(tx, promiseInsertStmt, v)
+				results[j], err = w.createPromise(tx, promiseInsertStmt, v)
 			case *t_aio.UpdatePromiseCommand:
 				if promiseUpdateStmt == nil {
 					promiseUpdateStmt, err = tx.Prepare(PROMISE_UPDATE_STATEMENT)
@@ -629,7 +654,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.updatePromise(tx, promiseUpdateStmt, v)
+				results[j], err = w.updatePromise(tx, promiseUpdateStmt, v)
 
 			// Callbacks
 			case *t_aio.CreateCallbackCommand:
@@ -639,7 +664,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createCallback(tx, callbackInsertStmt, v)
+				results[j], err = w.createCallback(tx, callbackInsertStmt, v)
 			case *t_aio.DeleteCallbacksCommand:
 				if callbackDeleteStmt == nil {
 					callbackDeleteStmt, err = tx.Prepare(CALLBACK_DELETE_STATEMENT)
@@ -647,15 +672,15 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.deleteCallbacks(tx, callbackDeleteStmt, v)
+				results[j], err = w.deleteCallbacks(tx, callbackDeleteStmt, v)
 
 			// Schedules
 			case *t_aio.ReadScheduleCommand:
-				results[i][j], err = w.readSchedule(tx, v)
+				results[j], err = w.readSchedule(tx, v)
 			case *t_aio.ReadSchedulesCommand:
-				results[i][j], err = w.readSchedules(tx, v)
+				results[j], err = w.readSchedules(tx, v)
 			case *t_aio.SearchSchedulesCommand:
-				results[i][j], err = w.searchSchedules(tx, v)
+				results[j], err = w.searchSchedules(tx, v)
 			case *t_aio.CreateScheduleCommand:
 				if scheduleInsertStmt == nil {
 					scheduleInsertStmt, err = tx.Prepare(SCHEDULE_INSERT_STATEMENT)
@@ -663,7 +688,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createSchedule(tx, scheduleInsertStmt, v)
+				results[j], err = w.createSchedule(tx, scheduleInsertStmt, v)
 			case *t_aio.UpdateScheduleCommand:
 				if scheduleUpdateStmt == nil {
 					scheduleUpdateStmt, err = tx.Prepare(SCHEDULE_UPDATE_STATEMENT)
@@ -671,7 +696,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.updateSchedule(tx, scheduleUpdateStmt, v)
+				results[j], err = w.updateSchedule(tx, scheduleUpdateStmt, v)
 			case *t_aio.DeleteScheduleCommand:
 				if scheduleDeleteStmt == nil {
 					scheduleDeleteStmt, err = tx.Prepare(SCHEDULE_DELETE_STATEMENT)
@@ -679,11 +704,11 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.deleteSchedule(tx, scheduleDeleteStmt, v)
+				results[j], err = w.deleteSchedule(tx, scheduleDeleteStmt, v)
 
 			// Locks
 			case *t_aio.ReadLockCommand:
-				results[i][j], err = w.readLock(tx, v)
+				results[j], err = w.readLock(tx, v)
 			case *t_aio.AcquireLockCommand:
 				if lockAcquireStmt == nil {
 					lockAcquireStmt, err = tx.Prepare(LOCK_ACQUIRE_STATEMENT)
@@ -691,7 +716,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.acquireLock(tx, lockAcquireStmt, v)
+				results[j], err = w.acquireLock(tx, lockAcquireStmt, v)
 			case *t_aio.ReleaseLockCommand:
 				if lockReleaseStmt == nil {
 					lockReleaseStmt, err = tx.Prepare(LOCK_RELEASE_STATEMENT)
@@ -699,7 +724,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.releaseLock(tx, lockReleaseStmt, v)
+				results[j], err = w.releaseLock(tx, lockReleaseStmt, v)
 			case *t_aio.HeartbeatLocksCommand:
 				if lockHeartbeatStmt == nil {
 					lockHeartbeatStmt, err = tx.Prepare(LOCK_HEARTBEAT_STATEMENT)
@@ -707,7 +732,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, v)
+				results[j], err = w.hearbeatLocks(tx, lockHeartbeatStmt, v)
 			case *t_aio.TimeoutLocksCommand:
 				if lockTimeoutStmt == nil {
 					lockTimeoutStmt, err = tx.Prepare(LOCK_TIMEOUT_STATEMENT)
@@ -715,15 +740,15 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.timeoutLocks(tx, lockTimeoutStmt, v)
+				results[j], err = w.timeoutLocks(tx, lockTimeoutStmt, v)
 
 			// Tasks
 			case *t_aio.ReadTaskCommand:
-				results[i][j], err = w.readTask(tx, v)
+				results[j], err = w.readTask(tx, v)
 			case *t_aio.ReadTasksCommand:
-				results[i][j], err = w.readTasks(tx, v)
+				results[j], err = w.readTasks(tx, v)
 			case *t_aio.ReadEnqueueableTasksCommand:
-				results[i][j], err = w.readEnqueueableTasks(tx, v)
+				results[j], err = w.readEnqueueableTasks(tx, v)
 			case *t_aio.CreateTaskCommand:
 				if taskInsertStmt == nil {
 					taskInsertStmt, err = tx.Prepare(TASK_INSERT_STATEMENT)
@@ -731,7 +756,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createTask(tx, taskInsertStmt, v)
+				results[j], err = w.createTask(tx, taskInsertStmt, v)
 			case *t_aio.CreateTasksCommand:
 				if tasksInsertStmt == nil {
 					tasksInsertStmt, err = tx.Prepare(TASK_INSERT_ALL_STATEMENT)
@@ -739,7 +764,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createTasks(tx, tasksInsertStmt, v)
+				results[j], err = w.createTasks(tx, tasksInsertStmt, v)
 			case *t_aio.UpdateTaskCommand:
 				if taskUpdateStmt == nil {
 					taskUpdateStmt, err = tx.Prepare(TASK_UPDATE_STATEMENT)
@@ -747,7 +772,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.updateTask(tx, taskUpdateStmt, v)
+				results[j], err = w.updateTask(tx, taskUpdateStmt, v)
 			case *t_aio.CompleteTasksCommand:
 				if tasksCompleteStmt == nil {
 					tasksCompleteStmt, err = tx.Prepare(TASK_COMPLETE_BY_ROOT_ID_STATEMENT)
@@ -755,7 +780,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.completeTasks(tx, tasksCompleteStmt, v)
+				results[j], err = w.completeTasks(tx, tasksCompleteStmt, v)
 			case *t_aio.HeartbeatTasksCommand:
 				if taskHeartbeatStmt == nil {
 					taskHeartbeatStmt, err = tx.Prepare(TASK_HEARTBEAT_STATEMENT)
@@ -763,7 +788,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, v)
+				results[j], err = w.heartbeatTasks(tx, taskHeartbeatStmt, v)
 
 			case *t_aio.CreatePromiseAndTaskCommand:
 				if promiseInsertStmt == nil {
@@ -779,7 +804,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 						return nil, err
 					}
 				}
-				results[i][j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, v)
+				results[j], err = w.createPromiseAndTask(tx, promiseInsertStmt, taskInsertStmt, v)
 
 			default:
 				panic(fmt.Sprintf("invalid command: %s", command.String()))
@@ -791,7 +816,7 @@ func (w *PostgresStoreWorker) performCommands(tx *sql.Tx, transactions []*t_aio.
 		}
 	}
 
-	return results, nil
+	return completions, nil
 }
 
 // Promises
@@ -1606,4 +1631,19 @@ func (w *PostgresStoreWorker) heartbeatTasks(tx *sql.Tx, stmt *sql.Stmt, cmd *t_
 	return &t_aio.AlterTasksResult{
 		RowsAffected: rowsAffected,
 	}, nil
+}
+
+func (w *PostgresStoreWorker) validFencingToken(tx *sql.Tx, transaction *t_aio.Transaction) (bool, error) {
+	// if the task is not provided continue with the operation
+	if transaction.TaskId == "" {
+		return true, nil
+	}
+	var rowCount int
+	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.TaskId, transaction.TaskCounter).Scan(&rowCount)
+
+	if err != nil {
+		return false, store.StoreErr(err)
+	}
+	util.Assert(rowCount == 1 || rowCount == 0, "must be zero or one")
+	return rowCount == 1, nil
 }

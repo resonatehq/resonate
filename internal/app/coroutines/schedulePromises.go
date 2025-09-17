@@ -10,6 +10,7 @@ import (
 	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -83,7 +84,7 @@ func SchedulePromises(config *system.Config, metadata map[string]string) gocoro.
 				CreatedOn: c.Time(),
 			}
 
-			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, commands[i], nil, &t_aio.UpdateScheduleCommand{
+			awaiting[i] = gocoro.Spawn(c, createPromise(metadata, t_api.FencingToken{}, commands[i], nil, &t_aio.UpdateScheduleCommand{
 				Id:          s.Id,
 				LastRunTime: &s.NextRunTime,
 				NextRunTime: next,
