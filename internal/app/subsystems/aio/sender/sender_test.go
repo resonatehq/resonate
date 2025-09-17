@@ -70,9 +70,46 @@ func TestUrlParse(t *testing.T) {
 			recv: nil,
 			ok:   false,
 		},
+		// sqs+https scheme
+		{
+			name: "valid sqs url",
+			url:  "sqs+https://sqs.us-west-2.amazonaws.com/123456789012/my-queue",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https://sqs.us-west-2.amazonaws.com/123456789012/my-queue"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid sqs url with nested queue name",
+			url:  "sqs+https://sqs.us-east-1.amazonaws.com/123456789012/my-queue/sub-queue",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https://sqs.us-east-1.amazonaws.com/123456789012/my-queue/sub-queue"}`)},
+			ok:   true,
+		},
+		{
+			name: "sqs url with empty host",
+			url:  "sqs+https:///my-queue",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https:///my-queue"}`)},
+			ok:   true,
+		},
+		{
+			name: "sqs url with empty path",
+			url:  "sqs+https://sqs.us-west-2.amazonaws.com/123456789012/",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https://sqs.us-west-2.amazonaws.com/123456789012/"}`)},
+			ok:   true,
+		},
+		{
+			name: "sqs url with missing path",
+			url:  "sqs+https://sqs.us-west-2.amazonaws.com/123456789012",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https://sqs.us-west-2.amazonaws.com/123456789012"}`)},
+			ok:   true,
+		},
+		{
+			name: "sqs url with special characters in queue name",
+			url:  "sqs+https://sqs.us-west-2.amazonaws.com/123456789012/my-queue_123-456",
+			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"queue_url":"https://sqs.us-west-2.amazonaws.com/123456789012/my-queue_123-456"}`)},
+			ok:   true,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, or poll",
+			name: "scheme must be http, https, poll, or sqs+https",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

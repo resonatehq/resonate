@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
+	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -29,6 +30,7 @@ type Config struct {
 type PluginConfig struct {
 	Http EnabledPlugin[http.Config] `flag:"http"`
 	Poll EnabledPlugin[poll.Config] `flag:"poll"`
+	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -53,6 +55,14 @@ func (c *PluginConfig) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.P
 	}
 	if c.Poll.Enabled {
 		plugin, err := poll.New(a, metrics, &c.Poll.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+	if c.SQS.Enabled {
+		plugin, err := sqs.New(a, metrics, &c.SQS.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -348,6 +358,17 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "poll", Data: data}, true
+	case "sqs+https":
+		addr := map[string]string{
+			"queue_url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "sqs", Data: data}, true
 	default:
 		return nil, false
 	}
