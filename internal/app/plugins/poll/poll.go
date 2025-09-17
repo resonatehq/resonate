@@ -27,6 +27,8 @@ type Config struct {
 	Cors           Cors              `flag:"cors" desc:"http cors settings"`
 	Timeout        time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 	Auth           map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
+	TimeToRetry    time.Duration     `flag:"ttr" desc:"time to retry before resending" default:"15s"`
+	TimeToClaim    time.Duration     `flag:"ttc" desc:"time to claim before resending" default:"1m"`
 }
 
 type Cors struct {
@@ -154,6 +156,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Poll, error) {
 
 	worker := &PollWorker{
 		sq:         sq,
+		config:     config,
 		metrics:    metrics,
 		counter:    counter,
 		connect:    connect,
@@ -220,6 +223,7 @@ func (p *Poll) Enqueue(msg *aio.Message) bool {
 
 type PollWorker struct {
 	sq          <-chan *aio.Message
+	config      *Config
 	metrics     *metrics.Metrics
 	counter     prometheus.Gauge
 	connect     <-chan *connection
@@ -308,23 +312,42 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 	// unmarshal message
 	var addr *Addr
 	if err := json.Unmarshal(mesg.Addr, &addr); err != nil {
-		mesg.Done(false, err)
+		mesg.Done(&t_aio.SenderCompletion{
+			Success:     false,
+			Error:       err,
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 		return
 	}
 
 	// check if we have a connection
 	conn, ok := w.connections.get(addr)
 	if !ok {
-		mesg.Done(false, fmt.Errorf("no %s connection found for group %s and id %s", addr.Cast, addr.Group, addr.Id))
+		mesg.Done(&t_aio.SenderCompletion{
+			Success:     false,
+			Error:       fmt.Errorf("no %s connection found for group '%s' and id '%s'", addr.Cast, addr.Group, addr.Id),
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 		return
 	}
 
 	// send message to connection
 	select {
 	case conn.ch <- mesg.Body:
-		mesg.Done(true, nil)
+		mesg.Done(&t_aio.SenderCompletion{
+			Success:     true,
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 	default:
-		mesg.Done(false, fmt.Errorf("connection full for group %s", addr.Group))
+		mesg.Done(&t_aio.SenderCompletion{
+			Success:     false,
+			Error:       fmt.Errorf("connection full for group '%s'", addr.Group),
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 	}
 }
 

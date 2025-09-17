@@ -44,7 +44,7 @@ func TimeoutTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		commands := make([]t_aio.Command, len(result.Records))
 
 		for i, t := range result.Records {
-			util.Assert(t.State.In((task.Init|task.Enqueued)|task.Claimed), "task must be in state enqueued or claimed")
+			util.Assert(t.State.In(task.Enqueued|task.Claimed), "task must be in state enqueued or claimed")
 
 			if c.Time() < t.Timeout {
 				commands[i] = &t_aio.UpdateTaskCommand{

@@ -14,9 +14,11 @@ import (
 )
 
 type Config struct {
-	Size    int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
+	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	TimeToRetry time.Duration `flag:"ttr" desc:"time to retry before resending" default:"15s"`
+	TimeToClaim time.Duration `flag:"ttc" desc:"time to claim before resending" default:"1m"`
 }
 
 type Http struct {
@@ -37,6 +39,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 		workers[i] = &HttpWorker{
 			i:       i,
 			sq:      sq,
+			config:  config,
 			client:  &http.Client{Timeout: config.Timeout},
 			aio:     a,
 			metrics: metrics,
@@ -84,6 +87,7 @@ func (h *Http) Enqueue(msg *aio.Message) bool {
 type HttpWorker struct {
 	i       int
 	sq      <-chan *aio.Message
+	config  *Config
 	client  *http.Client
 	aio     aio.AIO
 	metrics *metrics.Metrics
@@ -105,7 +109,13 @@ func (w *HttpWorker) Start() {
 		}
 
 		counter.Inc()
-		msg.Done(w.Process(msg.Addr, msg.Body))
+		success, err := w.Process(msg.Addr, msg.Body)
+		msg.Done(&t_aio.SenderCompletion{
+			Success:     success,
+			Error:       err,
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 		counter.Dec()
 	}
 }

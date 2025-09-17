@@ -285,7 +285,7 @@ const (
 	    completed_on
 	FROM tasks
 	WHERE
-		state & ? != 0 AND (expires_at <= ? OR timeout <= ?)
+		state & ? != 0 AND ((expires_at != 0 AND expires_at <= ?) OR timeout <= ?)
 	ORDER BY root_promise_id, sort_id ASC
 	LIMIT ?`
 
@@ -306,7 +306,7 @@ const (
 	    completed_on
 	FROM tasks t1
 	WHERE
-		state = 1 -- State = 1 -> Init
+		state = 1 AND expires_at <= ? -- State = 1 -> Init
 	AND NOT EXISTS (
 		SELECT 1
 		FROM tasks t2
@@ -1444,7 +1444,7 @@ func (w *SqliteStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand) (
 }
 
 func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.QueryTasksResult, error) {
-	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Limit)
+	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Time, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}

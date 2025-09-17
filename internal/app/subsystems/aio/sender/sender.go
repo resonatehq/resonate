@@ -290,21 +290,17 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 		Type: mesgType,
 		Addr: recv.Data,
 		Body: body,
-		Done: func(success bool, err error) {
-			if err != nil {
-				cqe.Error = err
-			} else {
-				cqe.Completion = &t_aio.Completion{
-					Kind:   t_aio.Sender,
-					Tags:   sqe.Submission.Tags,
-					Sender: &t_aio.SenderCompletion{Success: success},
-				}
+		Done: func(completion *t_aio.SenderCompletion) {
+			cqe.Completion = &t_aio.Completion{
+				Kind:   t_aio.Sender,
+				Tags:   sqe.Submission.Tags,
+				Sender: completion,
 			}
 
 			w.aio.EnqueueCQE(cqe)
 
 			counter.Dec()
-			w.metrics.AioTotal.WithLabelValues(plugin.String(), boolToStatus(success)).Inc()
+			w.metrics.AioTotal.WithLabelValues(plugin.String(), boolToStatus(completion.Success)).Inc()
 		},
 	})
 
@@ -339,6 +335,7 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "http", Data: data}, true
+
 	case "poll":
 		cast := "any"
 		if u.User != nil {
@@ -358,9 +355,10 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "poll", Data: data}, true
+
 	case "sqs+https":
 		addr := map[string]string{
-			"queue_url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
+			"url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
 		}
 
 		data, err := json.Marshal(addr)
@@ -369,6 +367,7 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
+
 	default:
 		return nil, false
 	}

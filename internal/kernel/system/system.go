@@ -25,20 +25,18 @@ type Config struct {
 	PromiseBatchSize    int           `flag:"promise-batch-size" desc:"max promises processed per iteration" default:"100" dst:"1:100"`
 	ScheduleBatchSize   int           `flag:"schedule-batch-size" desc:"max schedules processed per iteration" default:"100" dst:"1:100"`
 	TaskBatchSize       int           `flag:"task-batch-size" desc:"max tasks processed per iteration" default:"100" dst:"1:100"`
-	TaskEnqueueDelay    time.Duration `flag:"task-enqueue-delay" desc:"time delay before attempting to reenqueue tasks" default:"10s" dst:"1s:10s"`
 	SignalTimeout       time.Duration `flag:"signal-timeout" desc:"time to wait for api/aio signal" default:"1s" dst:"1s:10s"`
 }
 
 func (c *Config) String() string {
 	return fmt.Sprintf(
-		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d, ted=%s)",
+		"Config(cms=%d, sbs=%d, cbs=%d, pbs=%d, sbs=%d, tbs=%d)",
 		c.CoroutineMaxSize,
 		c.SubmissionBatchSize,
 		c.CompletionBatchSize,
 		c.PromiseBatchSize,
 		c.ScheduleBatchSize,
 		c.TaskBatchSize,
-		c.TaskEnqueueDelay.String(),
 	)
 }
 

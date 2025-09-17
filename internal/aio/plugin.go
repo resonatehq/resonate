@@ -1,12 +1,15 @@
 package aio
 
-import "github.com/resonatehq/resonate/pkg/message"
+import (
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/pkg/message"
+)
 
 type Message struct {
 	Type message.Type
 	Addr []byte
 	Body []byte
-	Done func(bool, error)
+	Done func(*t_aio.SenderCompletion)
 }
 
 type Plugin interface {

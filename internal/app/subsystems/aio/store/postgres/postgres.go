@@ -296,9 +296,10 @@ const (
 		expires_at,
 		created_on,
 		completed_on
-	FROM tasks
+	FROM
+		tasks
 	WHERE
-		state & $1 != 0 AND (expires_at <= $2 OR timeout <= $2)
+		state & $1 != 0 AND ((expires_at != 0 AND expires_at <= $2) OR timeout <= $2)
 	ORDER BY root_promise_id, sort_id ASC
 	LIMIT $3`
 
@@ -319,7 +320,7 @@ const (
 		completed_on
 	FROM tasks t1
 	WHERE
-		state = 1
+		state = 1 AND expires_at <= ? -- State = 1 -> Init
 	AND NOT EXISTS (
 		SELECT 1
 		FROM tasks t2
@@ -1461,7 +1462,7 @@ func (w *PostgresStoreWorker) readTasks(tx *sql.Tx, cmd *t_aio.ReadTasksCommand)
 }
 
 func (w *PostgresStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqueueableTasksCommand) (*t_aio.QueryTasksResult, error) {
-	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Limit)
+	rows, err := tx.Query(TASK_SELECT_ENQUEUEABLE_STATEMENT, cmd.Time, cmd.Limit)
 	if err != nil {
 		return nil, store.StoreErr(err)
 	}

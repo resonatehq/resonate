@@ -77,7 +77,6 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		commands := []t_aio.Command{}
 		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
 
-		expiresAt := c.Time() + config.TaskEnqueueDelay.Milliseconds()
 		for i, r := range tasksResult.Records {
 			if c.Time() < r.Timeout {
 				t, err := r.Task()
@@ -112,7 +111,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 							Mesg:          t.Mesg,
 							Attempt:       t.Attempt,
 							Ttl:           t.Ttl,
-							ExpiresAt:     expiresAt,
+							ExpiresAt:     t.ExpiresAt,
 							CreatedOn:     t.CreatedOn,
 							CompletedOn:   t.CompletedOn,
 						},
@@ -152,7 +151,10 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 
 			completion, err := gocoro.Await(c, awaiting[i])
 			if err != nil && decodedT.Mesg.Type != message.Notify {
-				slog.Warn("failed to enqueue task", "err", err)
+				slog.Warn("failed to send task", "err", err)
+			}
+			if err == nil && completion.Sender.Error != nil && decodedT.Mesg.Type != message.Notify {
+				slog.Warn("failed to send task", "err", completion.Sender.Error)
 			}
 
 			if decodedT.Mesg.Type == message.Notify {
@@ -168,6 +170,13 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 					CurrentCounter: t.Counter,
 				})
 			} else if err == nil && completion.Sender.Success {
+				var expiresAt int64
+				if completion.Sender.TimeToClaim > 0 {
+					expiresAt = c.Time() + completion.Sender.TimeToClaim
+				} else {
+					expiresAt = 0
+				}
+
 				commands = append(commands, &t_aio.UpdateTaskCommand{
 					Id:             t.Id,
 					ProcessId:      nil,
@@ -175,18 +184,27 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 					Counter:        t.Counter,
 					Attempt:        t.Attempt,
 					Ttl:            0,
-					ExpiresAt:      expiresAt, // time to be claimed
+					ExpiresAt:      expiresAt, // time to claim
 					CurrentStates:  []task.State{task.Init},
 					CurrentCounter: t.Counter,
 				})
 			} else {
+				var expiresAt int64
+				if err != nil {
+					expiresAt = c.Time() + 15000 // fallback to 15s
+				} else if completion.Sender.TimeToRetry > 0 {
+					expiresAt = c.Time() + completion.Sender.TimeToRetry
+				} else {
+					expiresAt = 0
+				}
+
 				commands = append(commands, &t_aio.UpdateTaskCommand{
 					Id:             t.Id,
 					State:          task.Init,
 					Counter:        t.Counter,
 					Attempt:        t.Attempt + 1,
 					Ttl:            0,
-					ExpiresAt:      expiresAt, // time until reenqueued
+					ExpiresAt:      expiresAt, // time to retry enqueueing
 					CurrentStates:  []task.State{task.Init},
 					CurrentCounter: t.Counter,
 				})

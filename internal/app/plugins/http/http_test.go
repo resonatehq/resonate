@@ -11,6 +11,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
 )
@@ -18,6 +19,7 @@ import (
 func TestHttpPlugin(t *testing.T) {
 	// create a backchannel
 	ch := make(chan []byte, 1)
+	defer close(ch)
 
 	// start a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -65,9 +67,8 @@ func TestHttpPlugin(t *testing.T) {
 			ok := http.Enqueue(&aio.Message{
 				Addr: data,
 				Body: []byte("ok"),
-				Done: func(ok bool, err error) {
-					assert.Nil(t, err)
-					assert.Equal(t, tc.success, ok)
+				Done: func(completion *t_aio.SenderCompletion) {
+					assert.Equal(t, tc.success, completion.Success)
 				},
 			})
 

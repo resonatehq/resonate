@@ -3,8 +3,8 @@ package sqs
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -18,9 +18,11 @@ import (
 )
 
 type Config struct {
-	Size    int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
+	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
+	Timeout     time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
+	TimeToRetry time.Duration `flag:"ttr" desc:"time to retry before resending" default:"15s"`
+	TimeToClaim time.Duration `flag:"ttc" desc:"time to claim before resending" default:"0"` // never
 }
 
 type SQSClient interface {
@@ -33,6 +35,7 @@ type SQSWorker struct {
 	timeout time.Duration
 	aio     aio.AIO
 	metrics *metrics.Metrics
+	config  *Config
 	client  SQSClient
 }
 
@@ -42,20 +45,21 @@ type SQS struct {
 }
 
 type Addr struct {
-	QueueURL string `json:"queue_url"`
+	Url    string  `json:"url"`
+	Region *string `json:"region,omitempty"`
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
-	ctx := context.Background()
-	aws_config, err := awsconfig.LoadDefaultConfig(ctx)
+	aws_config, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
+
 	client := sqs.NewFromConfig(aws_config)
-	return NewWithClient(a, metrics, config, client)
+	return newWithClient(a, metrics, config, client)
 }
 
-func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client SQSClient) (*SQS, error) {
+func newWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client SQSClient) (*SQS, error) {
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*SQSWorker, config.Workers)
 
@@ -66,6 +70,7 @@ func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client S
 			timeout: config.Timeout,
 			aio:     a,
 			metrics: metrics,
+			config:  config,
 			client:  client,
 		}
 	}
@@ -122,7 +127,13 @@ func (w *SQSWorker) Start() {
 		}
 
 		counter.Inc()
-		msg.Done(w.Process(msg.Addr, msg.Body))
+		success, err := w.Process(msg.Addr, msg.Body)
+		msg.Done(&t_aio.SenderCompletion{
+			Success:     success,
+			Error:       err,
+			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+		})
 		counter.Dec()
 	}
 }
@@ -133,55 +144,37 @@ func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
 		return false, err
 	}
 
-	if addr.QueueURL == "" {
-		return false, errors.New("missing queue_url in address")
-	}
-
-	region, err := parse(addr.QueueURL)
-	if err != nil {
-		return false, fmt.Errorf("failed to parse SQS URL: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
 
-	message_body := string(body)
-	_, err = w.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    &addr.QueueURL,
-		MessageBody: &message_body,
+	messageBody := string(body)
+	_, err := w.client.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:    &addr.Url,
+		MessageBody: &messageBody,
 	}, func(o *sqs.Options) {
-		o.Region = region
+		if addr.Region != nil {
+			o.Region = *addr.Region
+		} else if region, ok := parseSQSRegion(addr.Url); ok {
+			o.Region = region
+		}
 	})
 	if err != nil {
-		return false, fmt.Errorf("failed to send message: %w", err)
+		return false, err
 	}
 
 	return true, nil
 }
 
-// Parse the SQS URL to extract region.
-// Expected format: https://sqs.region.amazonaws.com/account/queue-name
-func parse(queueURL string) (string, error) {
-	url := strings.TrimSpace(queueURL)
-
-	url = strings.TrimPrefix(url, "https://")
-	url = strings.TrimPrefix(url, "http://")
-
-	if !strings.HasPrefix(url, "sqs.") {
-		return "", errors.New("invalid SQS URL format: must start with sqs")
+func parseSQSRegion(sqsURL string) (string, bool) {
+	u, err := url.Parse(sqsURL)
+	if err != nil {
+		return "", false
 	}
 
-	url = strings.TrimPrefix(url, "sqs.")
-
-	parts := strings.Split(url, ".")
-	if len(parts) < 2 {
-		return "", errors.New("invalid SQS URL format: missing region")
+	hostParts := strings.Split(u.Host, ".") // generally: [sqs, <region>, ...]
+	if hostParts[0] != "sqs" || len(hostParts) < 2 {
+		return "", false
 	}
 
-	region := parts[0]
-	if region == "" {
-		return "", errors.New("invalid SQS URL format: empty region")
-	}
-
-	return region, nil
+	return hostParts[1], true
 }
