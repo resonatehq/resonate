@@ -360,7 +360,7 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		return &receiver.Recv{Type: "poll", Data: data}, true
 	case "sqs+https":
 		addr := map[string]string{
-			"url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
+			"queue_url": fmt.Sprintf("https://%s%s", u.Host, u.Path),
 		}
 
 		data, err := json.Marshal(addr)
