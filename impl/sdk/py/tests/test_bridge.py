@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import threading
@@ -243,6 +244,16 @@ def test_run_on_schedule(resonate: Resonate) -> None:
         promise_tags={"resonate:invoke": "default"},
     )
     e.wait()
+
+
+def test_await_keyword(resonate: Resonate) -> None:
+    async def run() -> None:
+        v = await resonate.begin_run(uuid.uuid4().hex, add_one, 2)
+        assert v == 3
+        v = await resonate.begin_rpc(uuid.uuid4().hex, add_one, 2)
+        assert v == 3
+
+    asyncio.run(run())
 
 
 def test_local_invocations_with_registered_functions(resonate: Resonate) -> None:
