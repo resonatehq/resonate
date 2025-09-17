@@ -319,7 +319,7 @@ const (
 		completed_on
 	FROM tasks t1
 	WHERE
-		state = 1 AND expires_at <= ? -- State = 1 -> Init
+		state = 1 AND expires_at <= $1 -- State = 1 -> Init
 	AND NOT EXISTS (
 		SELECT 1
 		FROM tasks t2
@@ -327,7 +327,7 @@ const (
 		AND t2.state in (2, 4) -- 2 -> Enqueue, 4 -> Claimed
 	)
 	ORDER BY root_promise_id, sort_id ASC
-	LIMIT $1`
+	LIMIT $2`
 
 	TASK_INSERT_STATEMENT = `
 	INSERT INTO tasks
