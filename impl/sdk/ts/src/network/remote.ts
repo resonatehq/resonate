@@ -173,7 +173,7 @@ export class JsonEncoder implements Encoder {
 
     return {
       headers: {},
-      data: btoa(jsonVal),
+      data: util.base64Encode(jsonVal),
     };
   }
 
@@ -182,7 +182,7 @@ export class JsonEncoder implements Encoder {
       return undefined;
     }
 
-    const data = atob(apiValue.data);
+    const data = util.base64Decode(apiValue.data);
 
     return JSON.parse(data, (_, value) => {
       if (value === this.inf) {
@@ -265,12 +265,12 @@ export class HttpNetwork implements Network {
 
     this.headers = { "Content-Type": "application/json", ...headers };
     if (auth) {
-      this.headers.Authorization = `Basic ${btoa(`${auth.username}:${auth.password}`)}`;
+      this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
     }
 
     this.msgHeaders = {};
     if (messageSourceAuth) {
-      this.msgHeaders.Authorization = `Basic ${btoa(`${messageSourceAuth.username}:${messageSourceAuth.password}`)}`;
+      this.msgHeaders.Authorization = `Basic ${util.base64Encode(`${messageSourceAuth.username}:${messageSourceAuth.password}`)}`;
     }
 
     this.eventSource = this.connect();

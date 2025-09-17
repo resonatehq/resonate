@@ -1,4 +1,4 @@
-import { isGeneratorFunction } from "../src/util";
+import { base64Decode, base64Encode, isGeneratorFunction } from "../src/util";
 
 describe("isGeneratorFunction", () => {
   // Basic generator functions
@@ -107,5 +107,34 @@ describe("isGeneratorFunction", () => {
 
     expect(isGeneratorFunction(dynamicFunction)).toBe(false);
     expect(isGeneratorFunction(dynamicGenerator)).toBe(true);
+  });
+});
+
+describe("base64 encoder", () => {
+  const cases = [
+    "【NEW LAUNCH】BUNDLING Scarlett Fragrance Brightening Body Serum 170ml & Scarlett Whitening Extrait De Parfum 30ml ( Velvet Rouge / Purple Kiss )  | Melembapkan mencerahkan meratakan warna kulit, Kulit cerah wangi mewah",
+    "",
+
+    // Emojis
+    "Summer vibes 🌞🏖️🍹",
+    "Best Seller 🚀🔥 #1",
+    "Happy Birthday 🎉🎂🎁",
+
+    // Non-ASCII (accents, umlauts, tildes)
+    "Crème brûlée délicieuse",
+    "¡Oferta increíble! Sólo hoy",
+    "Übermäßig schön & großartig",
+
+    // Asian characters
+    "日本の化粧品 - 高品質スキンケア",
+    "韩国产品 - 保湿美白精华液",
+    "منتج جديد للعناية بالبشرة 🌙✨",
+
+    // Mixed: emojis + multilingual
+    "Glow Up ✨ | Belleza natural 🌸 | 피부 미백 🌿",
+  ];
+
+  test.each(cases.map((str) => [str]))("encodes and decodes correctly: %s", (string) => {
+    expect(base64Decode(base64Encode(string))).toEqual(string);
   });
 });
