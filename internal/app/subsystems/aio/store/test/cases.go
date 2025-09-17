@@ -3961,6 +3961,153 @@ var TestCases = []*testCase{
 			},
 		},
 	},
+	{
+		name: "Transaction with valid task",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "1",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						ProcessId: util.ToPointer("process"),
+						State:     task.Claimed,
+						Ttl:       5,
+						CreatedOn: 1,
+					},
+				},
+			},
+			{
+				Fence: &task.FencingToken{
+					TaskId:      "1",
+					TaskCounter: 0,
+				},
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "2",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						State:     task.Init,
+						CreatedOn: 1,
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterTasksResult{
+						RowsAffected: 1,
+					},
+				},
+			},
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterTasksResult{
+						RowsAffected: 1,
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "Transaction with non crated task",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "1",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						ProcessId: util.ToPointer("process"),
+						State:     task.Claimed,
+						Ttl:       5,
+						CreatedOn: 1,
+					},
+				},
+			},
+			{
+				Fence: &task.FencingToken{
+					TaskId:      "2",
+					TaskCounter: 0,
+				},
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "3",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						State:     task.Init,
+						CreatedOn: 1,
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterTasksResult{
+						RowsAffected: 1,
+					},
+				},
+			},
+			{
+				Valid: false,
+			},
+		},
+	},
+	{
+		name: "Transaction with non claimed task",
+		transactions: []*t_aio.Transaction{
+			{
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "1",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						State:     task.Init,
+						CreatedOn: 1,
+					},
+				},
+			},
+			{
+				Fence: &task.FencingToken{
+					TaskId:      "1",
+					TaskCounter: 0,
+				},
+				Commands: []t_aio.Command{
+					&t_aio.CreateTaskCommand{
+						Id:        "3",
+						Recv:      []byte("foo"),
+						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
+						Timeout:   1,
+						State:     task.Init,
+						CreatedOn: 1,
+					},
+				},
+			},
+		},
+		expected: []*t_aio.StoreCompletion{
+			{
+				Valid: true,
+				Results: []t_aio.Result{
+					&t_aio.AlterTasksResult{
+						RowsAffected: 1,
+					},
+				},
+			},
+			{
+				Valid: false,
+			},
+		},
+	},
 	// OTHER
 	{
 		name:  "PanicsWhenNoCommands",
