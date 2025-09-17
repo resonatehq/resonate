@@ -27,8 +27,8 @@ type Config struct {
 	Cors           Cors              `flag:"cors" desc:"http cors settings"`
 	Timeout        time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 	Auth           map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
-	TimeToRetry    time.Duration     `flag:"ttr" desc:"time to retry before resending" default:"15s"`
-	TimeToClaim    time.Duration     `flag:"ttc" desc:"time to claim before resending" default:"1m"`
+	TimeToRetry    time.Duration     `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim    time.Duration     `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Cors struct {
