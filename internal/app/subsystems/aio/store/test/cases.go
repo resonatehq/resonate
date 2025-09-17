@@ -60,7 +60,7 @@ func (c *testCase) Run(t *testing.T, store store.Store) {
 
 		}
 
-		assert.Equal(t, c.expected, completions)
+		assert.Equal(t, c.expected, completions, "Test Case: %s", c.name)
 	})
 }
 
@@ -4015,7 +4015,7 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "Transaction with non crated task",
+		name: "Transaction with non created task",
 		transactions: []*t_aio.Transaction{
 			{
 				Commands: []t_aio.Command{

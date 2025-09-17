@@ -287,7 +287,7 @@ const (
 	FROM
 		tasks
 	WHERE
-		id = $1 AND counter  = $2 AND state = 4 -- state == Claimed`
+		id = $1 AND counter = $2 AND state = 4 -- state == Claimed`
 
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
@@ -1638,7 +1638,7 @@ func (w *PostgresStoreWorker) validFencingToken(tx *sql.Tx, transaction *t_aio.T
 	if transaction.Fence == nil {
 		return true, nil
 	}
-	var rowCount int
+	var rowCount int64
 	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.Fence.TaskId, transaction.Fence.TaskCounter).Scan(&rowCount)
 
 	if err != nil {
