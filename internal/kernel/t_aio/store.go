@@ -344,7 +344,11 @@ type StoreCompletion struct {
 }
 
 func (c *StoreCompletion) String() string {
-	return fmt.Sprintf("Store(results=%s)", c.Results)
+	if c.Valid {
+		return fmt.Sprintf("Store(results=%s)", c.Results)
+	} else {
+		return fmt.Sprintf("Store(valid=false)")
+	}
 }
 
 type Result interface {
