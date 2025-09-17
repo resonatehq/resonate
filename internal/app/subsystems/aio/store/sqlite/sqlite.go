@@ -1622,7 +1622,7 @@ func (w *SqliteStoreWorker) validFencingToken(tx *sql.Tx, transaction *t_aio.Tra
 		return true, nil
 	}
 	var rowCount int
-	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.Fence.TaskId, transaction.Fence.TaskId).Scan(&rowCount)
+	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.Fence.TaskId, transaction.Fence.TaskCounter).Scan(&rowCount)
 
 	if err != nil {
 		return false, store.StoreErr(err)

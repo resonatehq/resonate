@@ -3981,7 +3981,7 @@ var TestCases = []*testCase{
 			{
 				Fence: &task.FencingToken{
 					TaskId:      "1",
-					TaskCounter: 0,
+					TaskCounter: 1,
 				},
 				Commands: []t_aio.Command{
 					&t_aio.CreateTaskCommand{
@@ -4034,7 +4034,7 @@ var TestCases = []*testCase{
 			{
 				Fence: &task.FencingToken{
 					TaskId:      "2",
-					TaskCounter: 0,
+					TaskCounter: 1,
 				},
 				Commands: []t_aio.Command{
 					&t_aio.CreateTaskCommand{
@@ -4080,7 +4080,7 @@ var TestCases = []*testCase{
 			{
 				Fence: &task.FencingToken{
 					TaskId:      "1",
-					TaskCounter: 0,
+					TaskCounter: 1,
 				},
 				Commands: []t_aio.Command{
 					&t_aio.CreateTaskCommand{

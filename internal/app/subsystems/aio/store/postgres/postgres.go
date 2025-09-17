@@ -1639,10 +1639,8 @@ func (w *PostgresStoreWorker) validFencingToken(tx *sql.Tx, transaction *t_aio.T
 		return true, nil
 	}
 
-	fmt.Printf("got %v", *transaction.Fence)
 	var rowCount int64
 	err := tx.QueryRow(TASK_VALIDATE_STATEMENT, transaction.Fence.TaskId, transaction.Fence.TaskCounter).Scan(&rowCount)
-	fmt.Printf("row count %v", rowCount)
 
 	if err != nil {
 		return false, store.StoreErr(err)
