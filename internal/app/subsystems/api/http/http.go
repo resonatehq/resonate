@@ -35,10 +35,9 @@ type Cors struct {
 }
 
 type Http struct {
-	config *Config
-	listen net.Listener
-	server *http.Server
-	// cancel   context.CancelFunc
+	config   *Config
+	listen   net.Listener
+	server   *http.Server
 	shutdown chan struct{}
 }
 
