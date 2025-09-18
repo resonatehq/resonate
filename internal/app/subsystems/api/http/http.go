@@ -38,6 +38,7 @@ type Http struct {
 	config *Config
 	listen net.Listener
 	server *http.Server
+	cancel context.CancelFunc
 }
 
 func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) {
@@ -113,6 +114,9 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	authorized.POST("/tasks/heartbeat", server.heartbeatTasks)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
+	// special context for the reverse proxy
+	ctx, cancel := context.WithCancel(context.Background())
+
 	// Poller proxy
 	if pollAddr != "" {
 		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
@@ -123,8 +127,10 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
 		authorized.GET("/poll/*rest", func(c *gin.Context) {
-			c.Request.URL.Path = c.Param("rest")
-			proxy.ServeHTTP(c.Writer, c.Request)
+			r := c.Request.WithContext(ctx)
+			r.URL.Path = c.Param("rest")
+
+			proxy.ServeHTTP(c.Writer, r)
 		})
 	}
 
@@ -132,6 +138,7 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		config: config,
 		listen: listen,
 		server: &http.Server{Handler: handler},
+		cancel: cancel,
 	}, nil
 }
 
@@ -158,6 +165,11 @@ func (h *Http) Start(errors chan<- error) {
 func (h *Http) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), h.config.Timeout)
 	defer cancel()
+
+	// call cancel to immediately close all long polling connections
+	// all other connections remain open until complete or the timeout
+	// occurs
+	h.cancel()
 
 	return h.server.Shutdown(ctx)
 }
