@@ -11,7 +11,7 @@ import (
 )
 
 type Store interface {
-	Execute([]*t_aio.Transaction) ([][]t_aio.Result, error)
+	Execute([]*t_aio.Transaction) ([]*t_aio.StoreCompletion, error)
 }
 
 func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) []*bus.CQE[t_aio.Submission, t_aio.Completion] {
@@ -39,11 +39,9 @@ func Process(store Store, sqes []*bus.SQE[t_aio.Submission, t_aio.Completion]) [
 			cqe.Error = err
 		} else {
 			cqe.Completion = &t_aio.Completion{
-				Kind: t_aio.Store,
-				Tags: sqe.Submission.Tags, // propagate the tags
-				Store: &t_aio.StoreCompletion{
-					Results: results[i],
-				},
+				Kind:  t_aio.Store,
+				Tags:  sqe.Submission.Tags, // propagate the tags
+				Store: results[i],
 			}
 		}
 

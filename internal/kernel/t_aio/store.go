@@ -20,6 +20,7 @@ func (s *StoreSubmission) String() string {
 }
 
 type Transaction struct {
+	Fence    *task.FencingToken
 	Commands []Command
 }
 
@@ -338,11 +339,12 @@ func (*HeartbeatLocksCommand) isCommand()       {}
 func (*TimeoutLocksCommand) isCommand()         {}
 
 type StoreCompletion struct {
+	Valid   bool
 	Results []Result
 }
 
 func (c *StoreCompletion) String() string {
-	return fmt.Sprintf("Store(results=%s)", c.Results)
+    return fmt.Sprintf("Store(valid=%t, results=%s)", c.Valid, c.Results)
 }
 
 type Result interface {
