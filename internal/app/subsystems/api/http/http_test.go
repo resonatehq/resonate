@@ -29,7 +29,7 @@ func setup(auth map[string]string) (*httpTest, error) {
 		Auth:          auth,
 		Timeout:       1 * time.Second,
 		TaskFrequency: 1 * time.Minute, // used as default
-	})
+	}, "")
 
 	if err != nil {
 		return nil, err

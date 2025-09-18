@@ -43,36 +43,6 @@ type DisabledPlugin[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (c *PluginConfig) Instantiate(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, error) {
-	plugins := []aio.Plugin{}
-	if c.Http.Enabled {
-		plugin, err := http.New(a, metrics, &c.Http.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-	if c.Poll.Enabled {
-		plugin, err := poll.New(a, metrics, &c.Poll.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-	if c.SQS.Enabled {
-		plugin, err := sqs.New(a, metrics, &c.SQS.Config)
-		if err != nil {
-			return nil, err
-		}
-
-		plugins = append(plugins, plugin)
-	}
-
-	return plugins, nil
-}
-
 type TargetConfig struct {
 	Name string
 	Type string
@@ -88,13 +58,8 @@ type Sender struct {
 	worker  *SenderWorker
 }
 
-func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Sender, error) {
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config, plugins []aio.Plugin) (*Sender, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
-
-	plugins, err := config.Plugins.Instantiate(a, metrics)
-	if err != nil {
-		return nil, err
-	}
 
 	targets := map[string]*receiver.Recv{}
 	for _, target := range config.Targets {

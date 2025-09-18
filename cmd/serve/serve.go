@@ -41,8 +41,14 @@ func RunServe(config *config.Config) error {
 	api := api.New(config.API.Size, metrics)
 	aio := aio.New(config.AIO.Size, metrics)
 
+	// plugins
+	aioPlugins, pollAddr, err := config.AIOPlugins(aio, metrics)
+	if err != nil {
+		return err
+	}
+
 	// api subsystems
-	apiSubsystems, err := config.APISubsystems(api)
+	apiSubsystems, err := config.APISubsystems(api, pollAddr)
 	if err != nil {
 		return err
 	}
@@ -51,7 +57,7 @@ func RunServe(config *config.Config) error {
 	}
 
 	// aio subsystems
-	aioSubsystems, err := config.AIOSubsystems(aio, metrics)
+	aioSubsystems, err := config.AIOSubsystems(aio, metrics, aioPlugins)
 	if err != nil {
 		return err
 	}

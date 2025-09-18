@@ -13,6 +13,9 @@ import (
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
+	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/poll"
+	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/sender"
@@ -126,10 +129,10 @@ type DisabledSubsystem[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (c *Config) APISubsystems(a api.API) ([]api.Subsystem, error) {
+func (c *Config) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config)
+		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -148,7 +151,7 @@ func (c *Config) APISubsystems(a api.API) ([]api.Subsystem, error) {
 	return subsystems, nil
 }
 
-func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsystem, error) {
+func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics, plugins []aio.Plugin) ([]aio.Subsystem, error) {
 	subsystems := []aio.Subsystem{}
 	if c.AIO.Subsystems.Echo.Enabled {
 		subsystem, err := echo.New(a, metrics, &c.AIO.Subsystems.Echo.Config)
@@ -167,7 +170,7 @@ func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsy
 		subsystems = append(subsystems, subsystem)
 	}
 	if c.AIO.Subsystems.Sender.Enabled {
-		subsystem, err := sender.New(a, metrics, &c.AIO.Subsystems.Sender.Config)
+		subsystem, err := sender.New(a, metrics, &c.AIO.Subsystems.Sender.Config, plugins)
 		if err != nil {
 			return nil, err
 		}
@@ -182,6 +185,39 @@ func (c *Config) AIOSubsystems(a aio.AIO, metrics *metrics.Metrics) ([]aio.Subsy
 
 	subsystems = append(subsystems, subsystem)
 	return subsystems, nil
+}
+
+func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, string, error) {
+	plugins := []aio.Plugin{}
+	var pollAddr string
+
+	if c.AIO.Subsystems.Sender.Config.Plugins.Poll.Enabled {
+		plugin, err := poll.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Poll.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		pollAddr = plugin.Addr() // grab the address to pass to the API
+		plugins = append(plugins, plugin)
+	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.Http.Enabled {
+		plugin, err := httpPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Http.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.SQS.Enabled {
+		plugin, err := sqs.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.SQS.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+
+	return plugins, pollAddr, nil
 }
 
 func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, error) {
@@ -206,10 +242,10 @@ type AIODSTSubsystems struct {
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
 
-func (c *ConfigDST) APISubsystems(a api.API) ([]api.Subsystem, error) {
+func (c *ConfigDST) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config)
+		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}
