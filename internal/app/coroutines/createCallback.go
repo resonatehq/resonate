@@ -1,6 +1,7 @@
 package coroutines
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/resonatehq/gocoro"
@@ -26,6 +27,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		Tags: r.Metadata,
 		Store: &t_aio.StoreSubmission{
 			Transaction: &t_aio.Transaction{
+				Fence: r.Fence,
 				Commands: []t_aio.Command{
 					&t_aio.ReadPromiseCommand{
 						Id: req.PromiseId,
@@ -38,6 +40,10 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	if err != nil {
 		slog.Error("failed to read promise", "req", r, "err", err)
 		return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+	}
+
+	if !completion.Store.Valid {
+		return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 	}
 
 	util.Assert(completion.Store != nil, "completion must not be nil")
@@ -65,6 +71,7 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 				Tags: r.Metadata,
 				Store: &t_aio.StoreSubmission{
 					Transaction: &t_aio.Transaction{
+						Fence: r.Fence,
 						Commands: []t_aio.Command{
 							&t_aio.CreateCallbackCommand{
 								Id:        req.Id,
@@ -82,6 +89,10 @@ func CreateCallback(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			if err != nil {
 				slog.Error("failed to create callback", "req", r, "err", err)
 				return nil, t_api.NewError(t_api.StatusAIOStoreError, err)
+			}
+
+			if !completion.Store.Valid {
+				return nil, t_api.NewError(t_api.StatusTaskPreconditionFailed, errors.New("the specified task is not valid"))
 			}
 
 			util.Assert(completion.Store != nil, "completion must not be nil")

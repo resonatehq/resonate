@@ -8,6 +8,11 @@ import (
 	"github.com/resonatehq/resonate/pkg/message"
 )
 
+type FencingToken struct {
+	TaskId      string
+	TaskCounter int64
+}
+
 type Task struct {
 	Id            string          `json:"id"`
 	Counter       int             `json:"counter"`

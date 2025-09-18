@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/task"
 
 	"github.com/gin-gonic/gin"
 )
@@ -107,6 +108,8 @@ type createPromiseHeader struct {
 	RequestId      string           `header:"request-id"`
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
+	TaskId         string           `header:"task-id"`
+	TaskCounter    int64            `header:"task-counter"`
 }
 
 type createPromiseBody struct {
@@ -133,7 +136,16 @@ func (s *server) createPromise(c *gin.Context) {
 		return
 	}
 
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
+			TaskId:      header.TaskId,
+			TaskCounter: header.TaskCounter,
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CreatePromiseRequest{
 			Id:             body.Id,
 			IdempotencyKey: header.IdempotencyKey,
@@ -214,6 +226,8 @@ type completePromiseHeader struct {
 	RequestId      string           `header:"request-id"`
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
+	TaskId         string           `header:"task-id"`
+	TaskCounter    int64            `header:"task-counter"`
 }
 
 type completePromiseBody struct {
@@ -242,7 +256,16 @@ func (s *server) completePromise(c *gin.Context) {
 		return
 	}
 
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
+			TaskId:      header.TaskId,
+			TaskCounter: header.TaskCounter,
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CompletePromiseRequest{
 			Id:             extractId(c.Param("id")),
 			IdempotencyKey: header.IdempotencyKey,
@@ -262,7 +285,9 @@ func (s *server) completePromise(c *gin.Context) {
 // Callback
 
 type createCallbackHeader struct {
-	RequestId string `header:"request-id"`
+	RequestId   string `header:"request-id"`
+	TaskId      string `header:"task-id"`
+	TaskCounter int64  `header:"task-counter"`
 }
 
 type createCallbackBody struct {
@@ -294,7 +319,16 @@ func (s *server) createCallback(c *gin.Context) {
 		body.PromiseId = extractId(c.Param("id"))
 	}
 
+	var fence *task.FencingToken
+	if header.TaskId != "" {
+		fence = &task.FencingToken{
+			TaskId:      header.TaskId,
+			TaskCounter: header.TaskCounter,
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Fence: fence,
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
