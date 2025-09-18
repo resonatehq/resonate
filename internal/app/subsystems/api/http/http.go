@@ -2,8 +2,11 @@ package http
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,7 +40,7 @@ type Http struct {
 	server *http.Server
 }
 
-func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
+func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) {
 	gin.SetMode(gin.ReleaseMode)
 
 	handler := gin.New()
@@ -109,6 +112,21 @@ func New(a i_api.API, config *Config) (i_api.Subsystem, error) {
 	authorized.GET("/tasks/drop/:id/:counter", server.dropTask)
 	authorized.POST("/tasks/heartbeat", server.heartbeatTasks)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
+
+	// Poller proxy
+	if pollAddr != "" {
+		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
+		if err != nil {
+			return nil, err
+		}
+
+		proxy := httputil.NewSingleHostReverseProxy(target)
+
+		authorized.GET("/poll/*rest", func(c *gin.Context) {
+			c.Request.URL.Path = c.Param("rest")
+			proxy.ServeHTTP(c.Writer, c.Request)
+		})
+	}
 
 	return &Http{
 		config: config,
