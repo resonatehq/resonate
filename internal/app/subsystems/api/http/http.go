@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
+	"github.com/resonatehq/resonate/internal"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
@@ -78,6 +79,12 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	if len(config.Auth) > 0 {
 		authorized.Use(gin.BasicAuth(config.Auth))
 	}
+
+	// Resonate header middleware
+	authorized.Use(func(c *gin.Context) {
+		c.Header("Resonate-Version", internal.Version())
+		c.Next()
+	})
 
 	// Promises API
 	authorized.POST("/promises", server.createPromise)

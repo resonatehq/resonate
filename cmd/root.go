@@ -12,6 +12,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
 	"github.com/resonatehq/resonate/cmd/tasks"
+	"github.com/resonatehq/resonate/internal"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -23,7 +24,7 @@ var (
 var rootCmd = &cobra.Command{
 	Use:     "resonate",
 	Short:   "Resonate: distributed async await",
-	Version: "0.7.14", // This needs to be bumped when new versions are released.
+	Version: internal.Version(),
 }
 
 func init() {
