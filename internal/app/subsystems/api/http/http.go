@@ -38,7 +38,8 @@ type Http struct {
 	config *Config
 	listen net.Listener
 	server *http.Server
-	cancel context.CancelFunc
+	// cancel   context.CancelFunc
+	shutdown chan struct{}
 }
 
 func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) {
@@ -46,6 +47,9 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 
 	handler := gin.New()
 	server := &server{api: api.New(a, "http"), config: config}
+
+	// create a shutdown channel
+	shutdown := make(chan struct{})
 
 	// Create a listener on specified address
 	listen, err := net.Listen("tcp", config.Addr)
@@ -114,9 +118,6 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 	authorized.POST("/tasks/heartbeat", server.heartbeatTasks)
 	authorized.GET("/tasks/heartbeat/:id/:counter", server.heartbeatTasks)
 
-	// special context for the reverse proxy
-	ctx, cancel := context.WithCancel(context.Background())
-
 	// Poller proxy
 	if pollAddr != "" {
 		target, err := url.Parse(fmt.Sprintf("http://%s", pollAddr))
@@ -127,18 +128,25 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
 		authorized.GET("/poll/*rest", func(c *gin.Context) {
+			ctx, cancel := context.WithCancel(context.Background())
+
 			r := c.Request.WithContext(ctx)
 			r.URL.Path = c.Param("rest")
+
+			go func() {
+				<-shutdown
+				cancel()
+			}()
 
 			proxy.ServeHTTP(c.Writer, r)
 		})
 	}
 
 	return &Http{
-		config: config,
-		listen: listen,
-		server: &http.Server{Handler: handler},
-		cancel: cancel,
+		config:   config,
+		listen:   listen,
+		server:   &http.Server{Handler: handler},
+		shutdown: shutdown,
 	}, nil
 }
 
@@ -166,10 +174,10 @@ func (h *Http) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), h.config.Timeout)
 	defer cancel()
 
-	// call cancel to immediately close all long polling connections
-	// all other connections remain open until complete or the timeout
-	// occurs
-	h.cancel()
+	// close the shutdown channel to immediately close all long polling
+	// connections all other connections remain open until complete or
+	// the timeout occurs
+	close(h.shutdown)
 
 	return h.server.Shutdown(ctx)
 }
