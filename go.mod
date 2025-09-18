@@ -4,7 +4,6 @@ go 1.23.0
 
 require (
 	github.com/anishathalye/porcupine v1.0.3
-	github.com/aws/aws-sdk-go v1.55.8
 	github.com/aws/aws-sdk-go-v2/config v1.31.6
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.3
 	github.com/gin-contrib/cors v1.7.6
@@ -24,7 +23,7 @@ require (
 	github.com/stretchr/testify v1.11.1
 	go.uber.org/mock v0.6.0
 	google.golang.org/grpc v1.75.1
-	google.golang.org/protobuf v1.36.8
+	google.golang.org/protobuf v1.36.9
 )
 
 require (
