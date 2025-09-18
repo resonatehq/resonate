@@ -30,6 +30,7 @@ const (
 	StatusPromiseRecvNotFound    StatusCode = 40404
 	StatusPromiseAlreadyExists   StatusCode = 40900
 	StatusScheduleAlreadyExists  StatusCode = 40901
+	StatusTaskPreconditionFailed StatusCode = 41200
 
 	// Platform level status (50000-59909)
 	StatusInternalServerError    StatusCode = 50000
@@ -68,6 +69,8 @@ func (s StatusCode) String() string {
 		return "The task counter is invalid"
 	case StatusTaskInvalidState:
 		return "The task state is invalid"
+	case StatusTaskPreconditionFailed:
+		return "The task precondition failed"
 	case StatusPromiseNotFound:
 		return "The specified promise was not found"
 	case StatusScheduleNotFound:

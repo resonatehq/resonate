@@ -51,7 +51,7 @@ func TimeoutPromises(config *system.Config, metadata map[string]string) gocoro.C
 				continue
 			}
 
-			awaiting[i] = gocoro.Spawn(c, completePromise(metadata, &t_aio.UpdatePromiseCommand{
+			awaiting[i] = gocoro.Spawn(c, completePromise(metadata, nil, &t_aio.UpdatePromiseCommand{
 				Id:             p.Id,
 				State:          promise.GetTimedoutState(p),
 				Value:          promise.Value{},

@@ -9,6 +9,7 @@ import (
 	"github.com/resonatehq/resonate/pkg/idempotency"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
+	"github.com/resonatehq/resonate/pkg/task"
 )
 
 type RequestPayload interface {
@@ -20,6 +21,7 @@ type RequestPayload interface {
 
 type Request struct {
 	Metadata map[string]string
+	Fence    *task.FencingToken
 	Payload  RequestPayload
 }
 

@@ -55,7 +55,7 @@ func ReadPromise(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], 
 				CompletedOn:    p.Timeout,
 			}
 
-			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, cmd))
+			ok, err := gocoro.SpawnAndAwait(c, completePromise(r.Metadata, nil, cmd))
 			if err != nil {
 				return nil, err
 			}
