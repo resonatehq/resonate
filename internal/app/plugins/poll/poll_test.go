@@ -12,6 +12,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -272,15 +273,9 @@ func TestPollPlugin(t *testing.T) {
 			for _, mesg := range tc.messages {
 				ch := make(chan any)
 
-				mesg.mesg.Done = func(ok bool, err error) {
+				mesg.mesg.Done = func(completion *t_aio.SenderCompletion) {
 					defer close(ch)
-
-					assert.Equal(t, mesg.ok, ok)
-					if ok {
-						assert.Nil(t, err)
-					} else {
-						assert.NotNil(t, err)
-					}
+					assert.Equal(t, mesg.ok, completion.Success)
 				}
 				assert.True(t, poll.Enqueue(mesg.mesg))
 				<-ch

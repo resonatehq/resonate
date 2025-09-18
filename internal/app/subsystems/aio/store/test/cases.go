@@ -2504,6 +2504,7 @@ var TestCases = []*testCase{
 						Recv:      []byte("foo"),
 						Mesg:      &message.Mesg{Type: message.Invoke, Root: "foo", Leaf: "foo"},
 						Timeout:   1,
+						ExpiresAt: 1,
 						State:     task.Init,
 						CreatedOn: 1,
 					},
@@ -2512,11 +2513,13 @@ var TestCases = []*testCase{
 						Recv:      []byte("bar"),
 						Mesg:      &message.Mesg{Type: message.Invoke, Root: "bar", Leaf: "bar"},
 						Timeout:   2,
+						ExpiresAt: 2,
 						State:     task.Init,
 						CreatedOn: 2,
 					},
 					&t_aio.ReadTasksCommand{
 						States: []task.State{task.Init},
+						Time:   10,
 						Limit:  10,
 					},
 				},
@@ -2543,6 +2546,7 @@ var TestCases = []*testCase{
 								Recv:          []byte("bar"),
 								Mesg:          []byte(`{"type":"invoke","root":"bar","leaf":"bar"}`),
 								Timeout:       2,
+								ExpiresAt:     2,
 								CreatedOn:     util.ToPointer[int64](2),
 							},
 							{
@@ -2553,6 +2557,7 @@ var TestCases = []*testCase{
 								Recv:          []byte("foo"),
 								Mesg:          []byte(`{"type":"invoke","root":"foo","leaf":"foo"}`),
 								Timeout:       1,
+								ExpiresAt:     1,
 								CreatedOn:     util.ToPointer[int64](1),
 							},
 						},
@@ -2655,7 +2660,7 @@ var TestCases = []*testCase{
 		},
 	},
 	{
-		name: "ReadEnquableTasks",
+		name: "ReadEnqueueableTasks",
 		transactions: []*t_aio.Transaction{
 			{
 				Commands: []t_aio.Command{

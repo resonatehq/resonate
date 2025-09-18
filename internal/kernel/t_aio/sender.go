@@ -20,9 +20,11 @@ func (s *SenderSubmission) String() string {
 }
 
 type SenderCompletion struct {
-	Success bool
+	Success     bool
+	TimeToRetry int64
+	TimeToClaim int64
 }
 
 func (c *SenderCompletion) String() string {
-	return fmt.Sprintf("Sender(success=%t)", c.Success)
+	return fmt.Sprintf("Sender(success=%t, ttr=%d, ttc=%d)", c.Success, c.TimeToRetry, c.TimeToClaim)
 }
