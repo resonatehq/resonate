@@ -21,7 +21,6 @@ func (s *SenderSubmission) String() string {
 
 type SenderCompletion struct {
 	Success     bool
-	Error       error
 	TimeToRetry int64
 	TimeToClaim int64
 }

@@ -153,9 +153,6 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 			if err != nil && decodedT.Mesg.Type != message.Notify {
 				slog.Warn("failed to send task", "err", err)
 			}
-			if err == nil && completion.Sender.Error != nil && decodedT.Mesg.Type != message.Notify {
-				slog.Warn("failed to send task", "err", completion.Sender.Error)
-			}
 
 			if decodedT.Mesg.Type == message.Notify {
 				commands = append(commands, &t_aio.UpdateTaskCommand{

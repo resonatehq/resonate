@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -110,9 +111,12 @@ func (w *HttpWorker) Start() {
 
 		counter.Inc()
 		success, err := w.Process(msg.Addr, msg.Body)
+		if err != nil {
+			slog.Warn("failed to send task", "err", err)
+		}
+
 		msg.Done(&t_aio.SenderCompletion{
 			Success:     success,
-			Error:       err,
 			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
 			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
 		})

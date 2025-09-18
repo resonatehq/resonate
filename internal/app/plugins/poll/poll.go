@@ -49,6 +49,15 @@ type Addr struct {
 	Id    string `json:"id,omitempty"`
 }
 
+func (a *Addr) String() string {
+	id := ""
+	if a.Id != "" {
+		id = "/" + a.Id
+	}
+
+	return fmt.Sprintf("poll://%s@%s%s", a.Cast, a.Group, id)
+}
+
 type connection struct {
 	group string
 	id    string
@@ -312,9 +321,10 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 	// unmarshal message
 	var addr *Addr
 	if err := json.Unmarshal(mesg.Addr, &addr); err != nil {
+		slog.Warn("failed to parse address", "err", err)
+
 		mesg.Done(&t_aio.SenderCompletion{
 			Success:     false,
-			Error:       err,
 			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
 			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
 		})
@@ -324,9 +334,10 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 	// check if we have a connection
 	conn, ok := w.connections.get(addr)
 	if !ok {
+		slog.Warn("connection not found", "address", addr)
+
 		mesg.Done(&t_aio.SenderCompletion{
 			Success:     false,
-			Error:       fmt.Errorf("no %s connection found for group '%s' and id '%s'", addr.Cast, addr.Group, addr.Id),
 			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
 			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
 		})
@@ -342,9 +353,10 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
 		})
 	default:
+		slog.Warn("connection group full", "address", addr)
+
 		mesg.Done(&t_aio.SenderCompletion{
 			Success:     false,
-			Error:       fmt.Errorf("connection full for group '%s'", addr.Group),
 			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
 			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
 		})
