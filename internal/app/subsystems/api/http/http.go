@@ -134,15 +134,19 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 		proxy := httputil.NewSingleHostReverseProxy(target)
 
 		authorized.GET("/poll/*rest", func(c *gin.Context) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(c.Request.Context())
+			defer cancel()
+
+			go func() {
+				select {
+				case <-shutdown:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
 
 			r := c.Request.WithContext(ctx)
 			r.URL.Path = c.Param("rest")
-
-			go func() {
-				<-shutdown
-				cancel()
-			}()
 
 			proxy.ServeHTTP(c.Writer, r)
 		})
