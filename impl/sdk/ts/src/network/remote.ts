@@ -210,9 +210,7 @@ export class JsonEncoder implements Encoder {
 }
 
 export interface HttpNetworkConfig {
-  host: string;
-  storePort: string;
-  messageSourcePort: string;
+  url: string;
   pid: string;
   group: string;
   auth?: { username: string; password: string };
@@ -231,7 +229,6 @@ export class HttpNetwork implements Network {
   private EXCPECTED_RESONATE_VERSION = "0.7.15";
 
   private url: string;
-  private msgUrl: string;
   private group: string;
   private pid: string;
   private timeout: number;
@@ -246,9 +243,7 @@ export class HttpNetwork implements Network {
   } = { invoke: [], resume: [], notify: [] };
 
   constructor({
-    host,
-    storePort,
-    messageSourcePort,
+    url,
     pid,
     group,
     auth,
@@ -257,8 +252,7 @@ export class HttpNetwork implements Network {
     headers = {},
     encoder = new JsonEncoder(),
   }: HttpNetworkConfig) {
-    this.url = `${host}:${storePort}`;
-    this.msgUrl = `${host}:${messageSourcePort}`;
+    this.url = url;
 
     this.group = group;
     this.pid = pid;
@@ -279,7 +273,7 @@ export class HttpNetwork implements Network {
   }
 
   private connect() {
-    const url = new URL(`/${encodeURIComponent(this.group)}/${encodeURIComponent(this.pid)}`, this.msgUrl);
+    const url = new URL(`/poll/${encodeURIComponent(this.group)}/${encodeURIComponent(this.pid)}`, `${this.url}`);
     this.eventSource = new EventSource(url, {
       fetch: (url, init) =>
         fetch(url, {
@@ -313,7 +307,7 @@ export class HttpNetwork implements Network {
       // and recreate
       this.eventSource.close();
 
-      console.log(`Networking. Cannot connect to [${this.msgUrl}]. Retrying in 5s.`);
+      console.log(`Networking. Cannot connect to [${this.url}/poll]. Retrying in 5s.`);
       setTimeout(() => this.connect(), 5000);
     });
 

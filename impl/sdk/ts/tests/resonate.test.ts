@@ -417,12 +417,12 @@ describe("Resonate usage tests", () => {
 
     // mock fetch
     global.fetch = jest.fn((url, options) => {
-      if (url === "http://localhost:9998/promises") {
+      if (url === "http://localhost:9999/promises") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic Zm9vOmJhcg==");
         p1.resolve(null);
       }
 
-      if (url instanceof URL && url.origin === "http://localhost:9999") {
+      if (url instanceof URL && url.href === "http://localhost:9999/poll/default/0") {
         expect((options?.headers as Record<string, string>).Authorization).toBe("Basic YmF6OnF1eA==");
         p2.resolve(null);
       }
@@ -432,9 +432,7 @@ describe("Resonate usage tests", () => {
     });
 
     const network = new HttpNetwork({
-      host: "http://localhost",
-      storePort: "9998",
-      messageSourcePort: "9999",
+      url: "http://localhost:9999",
       pid: "0",
       group: "default",
       auth: { username: "foo", password: "bar" },

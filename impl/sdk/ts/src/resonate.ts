@@ -104,18 +104,14 @@ export class Resonate {
    * Create a remote Resonate instance
    */
   static remote({
-    host = "http://localhost",
-    storePort = "8001",
-    messageSourcePort = "8002",
+    url = "http://localhost:8001",
     group = "default",
     pid = crypto.randomUUID().replace(/-/g, ""),
     ttl = 1 * util.MIN,
     auth = undefined,
     messageSourceAuth = undefined,
   }: {
-    host?: string;
-    storePort?: string;
-    messageSourcePort?: string;
+    url?: string;
     group?: string;
     pid?: string;
     ttl?: number;
@@ -123,9 +119,7 @@ export class Resonate {
     messageSourceAuth?: { username: string; password: string };
   } = {}): Resonate {
     const network = new HttpNetwork({
-      host,
-      storePort,
-      messageSourcePort,
+      url,
       pid,
       group,
       auth,
