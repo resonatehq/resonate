@@ -20,6 +20,7 @@ jobs:
     uses: ./.github/workflows/release_publish_dockerhub_image.yaml
     with:
       tag: ${{ github.ref_name }}
+    secrets: inherit
 
   publish-github-image:
     needs: [check-version]
