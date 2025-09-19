@@ -97,3 +97,12 @@ export function base64Decode(str: string): string {
   const jsonStr = new TextDecoder().decode(bytes);
   return jsonStr;
 }
+
+export function semverLessThan(a: string, b: string): boolean {
+  const [aMajor, aMinor, aPatch] = a.split(".").map((x) => Number.parseInt(x, 10));
+  const [bMajor, bMinor, bPatch] = b.split(".").map((x) => Number.parseInt(x, 10));
+
+  if (aMajor !== bMajor) return aMajor < bMajor;
+  if (aMinor !== bMinor) return aMinor < bMinor;
+  return aPatch < bPatch;
+}

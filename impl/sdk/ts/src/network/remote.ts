@@ -228,6 +228,8 @@ export type RetryPolicy = {
 };
 
 export class HttpNetwork implements Network {
+  private EXCPECTED_RESONATE_VERSION = "0.7.15";
+
   private url: string;
   private msgUrl: string;
   private group: string;
@@ -676,6 +678,13 @@ export class HttpNetwork implements Network {
 
       try {
         const res = await fetch(url, { ...init, signal: controller.signal });
+        const ver = res.headers.get("Resonate-Version") ?? "0.0.0";
+
+        if (util.semverLessThan(ver, this.EXCPECTED_RESONATE_VERSION)) {
+          console.warn(
+            `Networking. Expected Resonate server version >=${this.EXCPECTED_RESONATE_VERSION}, got ${ver}. Will continue.`,
+          );
+        }
 
         if (!res.ok) {
           const err = (await res.json().catch(() => ({}))) as { message?: string };
