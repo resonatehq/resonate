@@ -1,6 +1,6 @@
 {
   "name": "@resonatehq/sdk",
-  "version": "0.7.3",
+  "version": "0.8.0",
   "description": "TypeScript SDK for Resonate",
   "author": "Resonate Developers",
   "license": "Apache-2.0",
