@@ -306,6 +306,11 @@ export class HttpNetwork implements Network {
     });
 
     this.eventSource.addEventListener("error", () => {
+      // some browsers/runtimes may handle automatic reconnect
+      // differently, so to ensure consistency close the eventsource
+      // and recreate
+      this.eventSource.close();
+
       console.log(`Networking. Cannot connect to [${this.msgUrl}]. Retrying in 5s.`);
       setTimeout(() => this.connect(), 5000);
     });
