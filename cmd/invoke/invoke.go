@@ -19,7 +19,7 @@ resonate invoke promise-id --func add --arg 1 --arg 2 --arg "a string"
 resonate invoke promise-id --func process --arg data1 --arg 5 --timeout 1h --target "poll://any@default"
 
 # Invoke with JSON arguments
-resonate invoke promise-id --func process --jsonArgs '[{"key": "value"}, {"num": 42}]'`
+resonate invoke promise-id --func process --json-args '[{"key": "value"}, {"num": 42}]'`
 
 type Param struct {
 	Func string `json:"func"`
@@ -118,7 +118,7 @@ func NewCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&funcName, "func", "", "function to invoke")
 	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be use multiple times to set multiple arguments")
-	cmd.Flags().StringVar(&jsonArgs, "jsonArgs", "", "function arguments as json array")
+	cmd.Flags().StringVar(&jsonArgs, "json-args", "", "function arguments as json array")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "promise timeout")
 	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8001", "resonate server url")
