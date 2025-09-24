@@ -117,7 +117,7 @@ func NewCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&funcName, "func", "", "function to invoke")
-	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be use multiple times to set multiple arguments")
+	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be provided multiple times")
 	cmd.Flags().StringVar(&jsonArgs, "json-args", "", "function arguments as json array")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "promise timeout")
 	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
