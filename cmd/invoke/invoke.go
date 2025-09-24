@@ -7,21 +7,23 @@ import (
 	"time"
 
 	"github.com/resonatehq/resonate/cmd/promises"
-	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/client"
 	"github.com/spf13/cobra"
 )
 
 var invokeExample = `
 # Invoke a function with arguments
-resonate invoke promise-id --func add --args 1 2
+resonate invoke promise-id --func add --arg 1 --arg 2 --arg "a string"
 
 # Invoke with timeout and target
-resonate invoke promise-id --func process --args data1 data2 --timeout 1h --target "poll://any@default"`
+resonate invoke promise-id --func process --arg data1 --arg 5 --timeout 1h --target "poll://any@default"
+
+# Invoke with JSON arguments
+resonate invoke promise-id --func process --jsonArgs '[{"key": "value"}, {"num": 42}]'`
 
 type Param struct {
-	Func string   `json:"func"`
-	Args []string `json:"args"`
+	Func string `json:"func"`
+	Args []any  `json:"args"`
 }
 
 func NewCmd() *cobra.Command {
@@ -29,6 +31,7 @@ func NewCmd() *cobra.Command {
 		c        = client.New()
 		funcName string
 		args     []string
+		jsonArgs string
 		timeout  time.Duration
 		target   string
 		server   string
@@ -58,12 +61,34 @@ func NewCmd() *cobra.Command {
 
 			promiseId := cmdArgs[0]
 
+			var invokeArgs []any
+
+			if jsonArgs != "" {
+				err := json.Unmarshal([]byte(jsonArgs), &invokeArgs)
+				if err != nil {
+					return fmt.Errorf("failed to parse jsonArgs: %v", err)
+				}
+			} else {
+				invokeArgs = make([]any, len(args))
+				for i, arg := range args {
+					var jsonObj any
+					err := json.Unmarshal([]byte(arg), &jsonObj)
+					if err != nil {
+						// If unmarshal fails, treat as string
+						invokeArgs[i] = arg
+					} else {
+						invokeArgs[i] = jsonObj
+					}
+				}
+			}
+
 			invokeData := Param{
 				Func: funcName,
-				Args: args,
+				Args: invokeArgs,
 			}
 
 			jsonData, err := json.Marshal(invokeData)
+
 			if err != nil {
 				return err
 			}
@@ -73,20 +98,27 @@ func NewCmd() *cobra.Command {
 			createArgs := []string{promiseId}
 
 			err = createCmd.Flags().Set("timeout", timeout.String())
-			util.Assert(err != nil, fmt.Sprintf("%v", err))
+			if err != nil {
+				return fmt.Errorf("failed to set timeout: %v", err)
+			}
 
 			err = createCmd.Flags().Set("data", string(jsonData))
-			util.Assert(err != nil, fmt.Sprintf("%v", err))
+			if err != nil {
+				return fmt.Errorf("failed to set data: %v", err)
+			}
 
 			err = createCmd.Flags().Set("tag", fmt.Sprintf("resonate:invoke=%s", target))
-			util.Assert(err != nil, fmt.Sprintf("%v", err))
+			if err != nil {
+				return fmt.Errorf("failed to set tag: %v", err)
+			}
 
 			return createCmd.RunE(createCmd, createArgs)
 		},
 	}
 
-	cmd.Flags().StringVar(&funcName, "func", "", "function name to invoke")
-	cmd.Flags().StringSliceVar(&args, "args", []string{}, "function arguments")
+	cmd.Flags().StringVar(&funcName, "func", "", "function to invoke")
+	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be use multiple times to set multiple arguments")
+	cmd.Flags().StringVar(&jsonArgs, "jsonArgs", "", "function arguments as json array")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "promise timeout")
 	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8001", "resonate server url")
