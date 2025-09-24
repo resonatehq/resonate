@@ -7,6 +7,23 @@ import { Constant, Never } from "../src/retries";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
+  test("done check", async () => {
+    const resonate = Resonate.local();
+
+    const f = resonate.register("f", function foo(ctx: Context): string {
+      return "hello world";
+    });
+
+    const h = await f.beginRun("f");
+
+    expect(await h.done()).toBe(false);
+    await h.result();
+    expect(await h.done()).toBe(true);
+
+    const h1 = await f.beginRun("f");
+    expect(await h1.done()).toBe(true);
+  });
+
   test("function retries", async () => {
     const resonate = Resonate.local();
 
