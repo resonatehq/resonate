@@ -174,8 +174,10 @@ type Options = {
 
 const options = program.opts<Options>();
 
-// ------------------------------------------------------------------------------------------
 export function run(options: Options) {
+  // effectively disable queueMicrotask
+  process.env.QUEUE_MICROTASK_EVERY_N = Number.MAX_SAFE_INTEGER.toString();
+
   const rnd = new Random(options.seed);
 
   const sim = new Simulator(rnd, {

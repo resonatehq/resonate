@@ -40,11 +40,18 @@ export class Coroutine<T> {
   private ctx: InnerContext;
   private decorator: Decorator<T>;
   private handler: Handler;
+  private readonly depth: number;
+  private readonly queueMicrotaskEveryN: number = 1;
 
-  constructor(ctx: InnerContext, decorator: Decorator<T>, handler: Handler) {
+  constructor(ctx: InnerContext, decorator: Decorator<T>, handler: Handler, depth = 1) {
     this.ctx = ctx;
     this.decorator = decorator;
     this.handler = handler;
+    this.depth = depth;
+
+    if (typeof process !== "undefined" && process.env.QUEUE_MICROTASK_EVERY_N) {
+      this.queueMicrotaskEveryN = Number.parseInt(process.env.QUEUE_MICROTASK_EVERY_N);
+    }
   }
 
   public static exec(
@@ -146,8 +153,14 @@ export class Coroutine<T> {
                 return;
               }
 
-              const coroutine = new Coroutine(ctx, new Decorator(action.func(ctx, ...action.args)), this.handler);
-              coroutine.exec((err, status) => {
+              const coroutine = new Coroutine(
+                ctx,
+                new Decorator(action.func(ctx, ...action.args)),
+                this.handler,
+                this.depth + 1,
+              );
+
+              const cb: Callback<More | Done> = (err, status) => {
                 if (err) return callback(err);
                 util.assertDefined(status);
 
@@ -185,7 +198,28 @@ export class Coroutine<T> {
                     },
                   );
                 }
-              });
+              };
+
+              // Every nth level we kick off the next coroutine in a
+              // microtask, escaping the current call stack. This is
+              // necessary to avoid exceeding the maximum call stack
+              // when the user program has adequate recursion.
+              //
+              // The microtask queue is exhausted before the
+              // javascript engine moves on to macrotasks and a
+              // coroutine may spawn recursive coroutines, opening up
+              // the possibility of blocking the event loop
+              // indefinitely. However, this is analagous to writing
+              // a program with unbounded recursion, something that
+              // is always possible.
+              //
+              // Experimenting with the queueMicrotaskEveryN value
+              // shows that a value of 1 (our default) is optimal.
+              if (this.depth % this.queueMicrotaskEveryN === 0) {
+                queueMicrotask(() => coroutine.exec(cb));
+              } else {
+                coroutine.exec(cb);
+              }
             } else {
               // durable promise is completed
               input = {
