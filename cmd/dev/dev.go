@@ -9,18 +9,23 @@ func NewCmd(serveCmd *cobra.Command) *cobra.Command {
 		Use:   "dev",
 		Short: "Start Resonate server in development mode",
 		Long:  "Start Resonate server with development-friendly defaults (in-memory SQLite store).\n\nThis command is an alias for: resonate serve --aio-store-sqlite-path ':memory:' --aio-store-postgres-query 'sslmode=disable'\n",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if !cmd.Flags().Changed("aio-store-sqlite-path") {
-				cmd.Flags().Set("aio-store-sqlite-path", ":memory:")
-			}
-			if !cmd.Flags().Changed("aio-store-postgres-query") {
-				cmd.Flags().Set("aio-store-postgres-query", "sslmode=disable")
-			}
-
-			return serveCmd.RunE(cmd, args)
-		},
+		RunE:  serveCmd.RunE,
 	}
+
 	cmd.Flags().SortFlags = false
 	cmd.Flags().AddFlagSet(serveCmd.Flags())
+
+	f := cmd.Flags().Lookup("aio-store-sqlite-path")
+	if f != nil {
+		f.DefValue = ":memory:"
+		_ = cmd.Flags().Set("aio-store-sqlite-path", ":memory:")
+	}
+
+	f = cmd.Flags().Lookup("aio-store-postgres-query")
+	if f != nil {
+		f.DefValue = "sslmode=disable"
+		_ = cmd.Flags().Set("aio-store-postgres-query", "sslmode=disable")
+	}
+
 	return cmd
 }
