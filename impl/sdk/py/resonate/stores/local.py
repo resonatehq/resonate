@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -87,6 +86,7 @@ class LocalStore:
 
     def connect(self, source: LocalMessageSource) -> None:
         self._conn.add(source)
+        assert len(self._conn) == 1, "local store only supports one message source"
 
     def disconnect(self, source: LocalMessageSource) -> None:
         if source in self._conn:
@@ -130,32 +130,15 @@ class LocalStore:
 
                 while True:
                     try:
-                        targets = []
-
                         # grab the next message from the step generator
-                        addr, mesg = step.send(next)
+                        _, mesg = step.send(next)
 
-                        # check all connections for preferred and alternate
-                        # targets
+                        # the local store disregards the address
+                        assert len(self._conn) == 1, "local store only supports one message source"
                         for message_source in self._conn:
-                            preferred, alternate = message_source.match(addr)
-                            assert not (preferred and alternate)
+                            message_source.enqueue(mesg)
 
-                            if preferred:
-                                targets = [message_source]
-                                break
-                            if alternate:
-                                targets.append(message_source)
-
-                        # send to a random target, when we find a preferred
-                        # match there will be a single target, finally let the
-                        # step generator know if we were able to send to the
-                        # target
-                        if targets:
-                            random.choice(targets).enqueue(mesg)
-                            next = True
-                        else:
-                            next = False
+                        next = True
                     except StopIteration:
                         break
 

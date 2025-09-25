@@ -142,10 +142,10 @@ def info1(ctx: Context, idempotency_key: str, tags: dict[str, str], version: int
 def info2(ctx: Context, *args: Any, **kwargs: Any) -> Generator[Yieldable, Any, None]:
     info1(ctx, *args, **kwargs)
     yield ctx.lfc(info1, f"{ctx.id}.1", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "local"}, 1)
-    yield ctx.rfc(info1, f"{ctx.id}.2", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "default"}, 1)
+    yield ctx.rfc(info1, f"{ctx.id}.2", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://any@default"}, 1)
     yield (yield ctx.lfi(info1, f"{ctx.id}.3", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "local"}, 1))
-    yield (yield ctx.rfi(info1, f"{ctx.id}.4", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "default"}, 1))
-    yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "default"}, 1))
+    yield (yield ctx.rfi(info1, f"{ctx.id}.4", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://any@default"}, 1))
+    yield (yield ctx.detached(info1, f"{ctx.id}.5", {"resonate:root": ctx.id, "resonate:parent": ctx.id, "resonate:scope": "global", "resonate:invoke": "poll://any@default"}, 1))
 
 
 def parent_bound(ctx: Context, child_timeout_rel: float, mode: Literal["rfc", "lfc"]) -> Generator[Yieldable, Any, None]:
@@ -218,7 +218,7 @@ def resonate(store: Store, message_source: MessageSource) -> Generator[Resonate,
     resonate.register(wkflw)
     resonate.register(failure_wkflw)
 
-    # start resonate (this startes the bridge)
+    # start resonate (this starts the bridge)
     resonate.start()
 
     yield resonate
@@ -443,7 +443,7 @@ def test_info(
         id,
         "info",
         idempotency_key or id,
-        {**(tags or {}), "resonate:root": id, "resonate:parent": id, "resonate:scope": "global", "resonate:invoke": target or "default"},
+        {**(tags or {}), "resonate:root": id, "resonate:parent": id, "resonate:scope": "global", "resonate:invoke": f"poll://any@{target or "default"}"},
         version,
     )
 

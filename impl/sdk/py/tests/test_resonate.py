@@ -265,7 +265,7 @@ def test_begin_run(
         assert (
             promise.tags
             == {**default_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
-            == {"resonate:invoke": default_opts.target, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {"resonate:invoke": f"poll://any@{default_opts.target}", "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
         )
 
     for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
@@ -284,7 +284,7 @@ def test_begin_run(
         assert (
             promise.tags
             == {**updated_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
-            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": f"poll://any@{updated_opts.target}", "resonate:scope": "global"}
         )
 
     f.begin_run("f7", *args, **kwargs)
@@ -298,7 +298,7 @@ def test_begin_run(
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
+        == {"resonate:invoke": f"poll://any@{default_opts.target}", "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
     f.options(**opts).begin_run("f8", *args, **kwargs)
@@ -316,7 +316,7 @@ def test_begin_run(
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": f"poll://any@{updated_opts.target}", "resonate:scope": "global"}
     )
 
 
@@ -398,7 +398,7 @@ def test_begin_rpc(
         assert (
             promise.tags
             == {**default_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
-            == {"resonate:invoke": default_opts.target, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
+            == {"resonate:invoke": f"poll://any@{default_opts.target}", "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
         )
 
     for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
@@ -417,7 +417,7 @@ def test_begin_rpc(
         assert (
             promise.tags
             == {**updated_conv.tags, "resonate:parent": id, "resonate:root": id, "resonate:scope": "global"}
-            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+            == {**updated_opts.tags, "resonate:parent": id, "resonate:root": id, "resonate:invoke": f"poll://any@{updated_opts.target}", "resonate:scope": "global"}
         )
 
     f.begin_rpc("f7", *args, **kwargs)
@@ -431,7 +431,7 @@ def test_begin_rpc(
     assert (
         promise.tags
         == {**default_conv.tags, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
-        == {"resonate:invoke": default_opts.target, "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
+        == {"resonate:invoke": f"poll://any@{default_opts.target}", "resonate:parent": "f7", "resonate:root": "f7", "resonate:scope": "global"}
     )
 
     f.options(**opts).begin_rpc("f8", *args, **kwargs)
@@ -449,7 +449,7 @@ def test_begin_rpc(
     assert (
         promise.tags
         == {**updated_conv.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:scope": "global"}
-        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": updated_opts.target, "resonate:scope": "global"}
+        == {**updated_opts.tags, "resonate:parent": "f8", "resonate:root": "f8", "resonate:invoke": f"poll://any@{updated_opts.target}", "resonate:scope": "global"}
     )
 
 
@@ -680,7 +680,15 @@ def test_context_rfx_validations(registry: Registry, func: Callable, match: str)
 @pytest.mark.parametrize("encoder", [JsonEncoder(), JsonPickleEncoder(), NoopEncoder(), None])
 @pytest.mark.parametrize("non_retryable_exceptions", [(NameError,), (ValueError,), (NameError, ValueError), None])
 @pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
-@pytest.mark.parametrize("target", ["foo", "bar", "baz", None])
+@pytest.mark.parametrize("target", [
+    ("foo", "poll://any@foo"),
+    ("bar", "poll://any@bar"),
+    ("baz", "poll://any@baz"),
+    ("poll://default", "poll://default"),
+    ("poll://any@default", "poll://any@default"),
+    ("http://resonatehq.io", "http://resonatehq.io"),
+    (None, None),
+])
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
 @pytest.mark.parametrize("timeout", [1, 2, 3, None])
 @pytest.mark.parametrize("version", [1, 2, 3])
@@ -689,7 +697,7 @@ def test_options(
     encoder: Encoder[Any, str | None] | None,
     non_retryable_exceptions: tuple[type[Exception], ...] | None,
     retry_policy: RetryPolicy | None,
-    target: str | None,
+    target: tuple[str | None, str | None],
     tags: dict[str, str] | None,
     timeout: float | None,
     version: int,
@@ -754,12 +762,12 @@ def test_options(
             assert cmd.conv.idempotency_key == cmd.id
             assert cmd.conv.data == {"func": "func", "args": (1, 2), "kwargs": {}, "version": v}
             assert cmd.conv.timeout == 31536000
-            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "global", "resonate:invoke": "default"}
+            assert cmd.conv.tags == {"resonate:parent": "f", "resonate:root": "f", "resonate:scope": "global", "resonate:invoke": "poll://any@default"}
 
             cmd = cmd.options(
                 encoder=encoder,
                 tags=tags,
-                target=target,
+                target=target[0],
                 timeout=timeout,
                 version=version,
             )
@@ -769,9 +777,9 @@ def test_options(
 
             if encoder:
                 assert cmd.opts.encoder is encoder
-            if target:
+            if target[0]:
                 assert cmd.conv.tags
-                assert cmd.conv.tags["resonate:invoke"] == target
+                assert cmd.conv.tags["resonate:invoke"] == target[1]
             if tags:
                 assert cmd.conv.tags
                 assert all(k in cmd.conv.tags and cmd.conv.tags[k] == v for k, v in tags.items())

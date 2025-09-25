@@ -197,7 +197,7 @@ class Component:
 
     def match(self, addr: str) -> tuple[bool, bool]:
         parsed = urllib.parse.urlparse(addr)
-        assert parsed.scheme == "sim"
+        assert parsed.scheme in ("sim", "poll")
 
         uni = urllib.parse.urlparse(self.uni)
         assert uni.scheme == "sim"

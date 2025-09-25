@@ -95,3 +95,12 @@ def truncate(s: str, n: int) -> str:
     if len(s) > n:
         return s[:n] + "..."
     return s
+
+
+def is_url(string: str) -> bool:
+    try:
+        result = urllib.parse.urlparse(string)
+        # A valid URL usually has at least a scheme and netloc
+        return all([result.scheme, result.netloc])
+    except ValueError:
+        return False

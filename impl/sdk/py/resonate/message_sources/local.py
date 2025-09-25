@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import queue
-import urllib
-import urllib.parse
 from typing import TYPE_CHECKING
 
 from resonate.models.message import Mesg
@@ -54,13 +52,3 @@ class LocalMessageSource:
 
     def next(self) -> Mesg | None:
         return self._messages.get()
-
-    def match(self, addr: str) -> tuple[bool, bool]:
-        parsed = urllib.parse.urlparse(addr)
-
-        if parsed.username in ("uni", "any", None) and parsed.scheme == self._scheme and parsed.hostname == self._group and parsed.path == f"/{self._id}":
-            return True, False
-        if parsed.username in ("any", None) and parsed.scheme == self._scheme and parsed.hostname == self._group:
-            return False, True
-
-        return False, False

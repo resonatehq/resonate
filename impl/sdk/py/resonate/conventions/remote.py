@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from resonate import utils
 from resonate.options import Options
 
 if TYPE_CHECKING:
@@ -33,7 +34,13 @@ class Remote:
 
     @property
     def tags(self) -> dict[str, str]:
-        return {**self.opts.tags, "resonate:root": self.r_id, "resonate:parent": self.p_id, "resonate:scope": "global", "resonate:invoke": self.opts.target}
+        return {
+            **self.opts.tags,
+            "resonate:root": self.r_id,
+            "resonate:parent": self.p_id,
+            "resonate:scope": "global",
+            "resonate:invoke": self.match(self.opts.target),
+        }
 
     def options(
         self,
@@ -48,3 +55,7 @@ class Remote:
         self.opts = self.opts.merge(id=id, idempotency_key=idempotency_key, target=target, tags=tags, timeout=timeout, version=version)
 
         return self
+
+    def match(self, target: str) -> str:
+        # can be refactored to be configurable
+        return target if utils.is_url(target) else f"poll://any@{target}"
