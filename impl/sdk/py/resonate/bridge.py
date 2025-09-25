@@ -235,7 +235,7 @@ class Bridge:
                         case [Network(_, cid, CreateSubscriptionReq(id, promise_id, timeout, recv))]:
                             # Current implementation returns a single CreateSubscriptionReq in the list
                             # if we get more than one element they are all CreateCallbackReq
-                            durable_promise, callback = self._store.promises.subscribe(
+                            durable_promise, _ = self._store.promises.subscribe(
                                 id=id,
                                 promise_id=promise_id,
                                 timeout=timeout,
