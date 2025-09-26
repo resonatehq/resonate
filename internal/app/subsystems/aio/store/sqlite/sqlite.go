@@ -279,18 +279,18 @@ const (
 	TASK_SELECT_ALL_STATEMENT = `
 	SELECT
 		id,
-	    process_id,
+		process_id,
 		state,
-	    root_promise_id,
-	    recv,
-	    mesg,
-	    timeout,
-	    counter,
-	    attempt,
-	    ttl,
-	    expires_at,
-	    created_on,
-	    completed_on
+		root_promise_id,
+		recv,
+		mesg,
+		timeout,
+		counter,
+		attempt,
+		ttl,
+		expires_at,
+		created_on,
+		completed_on
 	FROM tasks
 	WHERE
 		state & ? != 0 AND ((expires_at != 0 AND expires_at <= ?) OR timeout <= ?)
@@ -300,18 +300,19 @@ const (
 	TASK_SELECT_ENQUEUEABLE_STATEMENT = `
 	SELECT
 		id,
-	    process_id,
+		process_id,
 		state,
-	    root_promise_id,
-	    recv,
-	    mesg,
-	    timeout,
-	    counter,
-	    attempt,
-	    ttl,
-	    expires_at,
-	    created_on,
-	    completed_on
+		root_promise_id,
+		recv,
+		mesg,
+		timeout,
+		counter,
+		attempt,
+		ttl,
+		expires_at,
+		created_on,
+		completed_on,
+		min(sort_id)
 	FROM tasks t1
 	WHERE
 		state = 1 AND expires_at <= ? -- State = 1 -> Init
@@ -1477,6 +1478,7 @@ func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqu
 
 	rowsReturned := int64(0)
 	var records []*task.TaskRecord
+	var ignored string
 
 	for rows.Next() {
 		record := &task.TaskRecord{}
@@ -1494,6 +1496,7 @@ func (w *SqliteStoreWorker) readEnqueueableTasks(tx *sql.Tx, cmd *t_aio.ReadEnqu
 			&record.ExpiresAt,
 			&record.CreatedOn,
 			&record.CompletedOn,
+			&ignored,
 		); err != nil {
 			return nil, store.StoreErr(err)
 		}
