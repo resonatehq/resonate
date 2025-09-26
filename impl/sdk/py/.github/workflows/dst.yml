@@ -2,6 +2,7 @@ name: dst
 
 permissions:
   contents: read
+  issues: write
 
 on:
   workflow_dispatch:
@@ -55,6 +56,37 @@ jobs:
       - name: Run dst (seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }})
         run: uv run pytest -s --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} tests/test_dst.py 2> logs.txt
 
+      - name: Create issue if dst failed
+        if: ${{ failure() && matrix.run == 1 }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `DST: ${{ needs.values.outputs.seed }}`,
+              labels: ['dst'],
+              body: `# DST Failed
+              DST run failed for seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }}, os=${{ matrix.os }}, version=${{ matrix.python-version }}.
+
+              **Seed**
+              ~~~
+              ${{ needs.values.outputs.seed }}
+              ~~~
+
+              **Commit**
+              ~~~
+              ${ process.env.GITHUB_SHA }
+              ~~~
+
+              **Command**
+              ~~~
+              uv run pytest -s --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} tests/test_dst.py
+              ~~~
+
+              [more details](${ process.env.GITHUB_SERVER_URL }/${ process.env.GITHUB_REPOSITORY }/actions/runs/${ process.env.GITHUB_RUN_ID })`,
+            })
+
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
@@ -77,10 +109,43 @@ jobs:
         with:
           name: ${{ matrix.os }}-${{ matrix.python-version }}-logs-1
           path: logs-1.txt
+
       - name: Download logs from run 2
         uses: actions/download-artifact@v4
         with:
           name: ${{ matrix.os }}-${{ matrix.python-version }}-logs-2
           path: logs-2.txt
+
       - name: Diff
         run: diff logs-1.txt logs-2.txt
+
+      - name: Create issue if diff
+        if: ${{ failure() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `DST: ${{ needs.values.outputs.seed }}`,
+              labels: ['dst'],
+              body: `# DST Failed
+              Two DST runs produced different results for seed=${{ needs.values.outputs.seed }}, steps=${{ needs.values.outputs.steps }}, os=${{ matrix.os }}, version=${{ matrix.python-version }}.
+
+              **Seed**
+              ~~~
+              ${{ needs.values.outputs.seed }}
+              ~~~
+
+              **Commit**
+              ~~~
+              ${ process.env.GITHUB_SHA }
+              ~~~
+
+              **Command**
+              ~~~
+              uv run pytest -s --seed ${{ needs.values.outputs.seed }} --steps ${{ needs.values.outputs.steps }} tests/test_dst.py
+              ~~~
+
+              [more details](${ process.env.GITHUB_SERVER_URL }/${ process.env.GITHUB_REPOSITORY }/actions/runs/${ process.env.GITHUB_RUN_ID })`,
+            })
