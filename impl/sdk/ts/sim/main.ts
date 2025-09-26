@@ -192,7 +192,7 @@ export function run(options: Options) {
   const registry = new Registry();
 
   for (const [name, func] of Object.entries(availableFuncs)) {
-    registry.set(name, func);
+    registry.add(func, name);
   }
 
   // server
@@ -238,7 +238,7 @@ export function run(options: Options) {
               timeout,
               iKey: id,
               tags: { "resonate:invoke": "local://any@default" },
-              param: { func: funcName, args: [rnd.randint(0, 20)] },
+              param: { func: funcName, args: [rnd.randint(0, 20)], version: 1 },
             },
             { requ: true, correlationId: i },
           );
@@ -256,7 +256,7 @@ export function run(options: Options) {
               timeout,
               iKey: id,
               tags: { "resonate:invoke": "local://any@default" },
-              param: { func: funcName, args: [] },
+              param: { func: funcName, args: [], version: 1 },
             },
             { requ: true, correlationId: i },
           );

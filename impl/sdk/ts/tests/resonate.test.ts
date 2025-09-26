@@ -7,6 +7,39 @@ import { Constant, Never } from "../src/retries";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
+  test("try versions", async () => {
+    const resonate = Resonate.local();
+
+    const f1 = resonate.register(
+      "f",
+      function foo(ctx: Context): number {
+        return 1;
+      },
+      { version: 1 },
+    );
+    const f2 = resonate.register(
+      "f",
+      function bar(ctx: Context): number {
+        return 2;
+      },
+      { version: 2 },
+    );
+
+    expect(await resonate.run(crypto.randomUUID().replace(/-/g, ""), "f", resonate.options({ version: 1 }))).toBe(1);
+    expect(await resonate.run(crypto.randomUUID().replace(/-/g, ""), "f", resonate.options({ version: 2 }))).toBe(2);
+    expect(await resonate.run(crypto.randomUUID().replace(/-/g, ""), "f")).toBe(2);
+    expect(await resonate.rpc(crypto.randomUUID().replace(/-/g, ""), "f", resonate.options({ version: 1 }))).toBe(1);
+    expect(await resonate.rpc(crypto.randomUUID().replace(/-/g, ""), "f", resonate.options({ version: 2 }))).toBe(2);
+    expect(await resonate.rpc(crypto.randomUUID().replace(/-/g, ""), "f")).toBe(2);
+    expect(await f1.run(crypto.randomUUID().replace(/-/g, ""))).toBe(1);
+    await expect(f1.run(crypto.randomUUID().replace(/-/g, ""), resonate.options({ version: 2 }))).rejects.toThrow(
+      "function foo version 2 not found in registry",
+    );
+    expect(await f2.run(crypto.randomUUID().replace(/-/g, ""))).toBe(2);
+    await expect(f2.run(crypto.randomUUID().replace(/-/g, ""), resonate.options({ version: 1 }))).rejects.toThrow(
+      "function bar version 1 not found in registry",
+    );
+  });
   test("done check", async () => {
     const resonate = Resonate.local();
 

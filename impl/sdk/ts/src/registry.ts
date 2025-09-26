@@ -3,30 +3,81 @@ import type { Func } from "./types";
 type Item = {
   name: string;
   func: Func;
+  version: number;
 };
 
 export class Registry {
-  public forward_registry: Map<string, Item> = new Map();
-  public reverse_registry: Map<Func, Item> = new Map();
+  private forward: Map<string, Record<number, Item>> = new Map();
+  private reverse: Map<Func, Item> = new Map();
 
-  get(nameOrFunc: string | Func): Item | undefined {
-    return typeof nameOrFunc === "string"
-      ? this.forward_registry.get(nameOrFunc)
-      : this.reverse_registry.get(nameOrFunc);
+  add(func: Func, name?: string, version = 1): void {
+    if (!(version > 0)) {
+      throw new Error("provided version must be greater than zero");
+    }
+
+    if (name === undefined && func.name === "") {
+      throw new Error("name required when registering an anonymous function");
+    }
+    const funcName = name ?? func.name;
+
+    const existingByName = this.forward.get(funcName);
+    if ((existingByName && existingByName[version] !== undefined) || this.reverse.has(func)) {
+      throw new Error(`function ${funcName} already registered`);
+    }
+
+    const item: Item = { name: funcName, func, version };
+
+    if (!existingByName) {
+      this.forward.set(funcName, {});
+    }
+    this.forward.get(funcName)![version] = item;
+
+    this.reverse.set(func, item);
   }
 
-  has(nameOrFunc: string | Func): boolean {
-    return typeof nameOrFunc === "string"
-      ? this.forward_registry.has(nameOrFunc)
-      : this.reverse_registry.has(nameOrFunc);
+  get(func: string | Func, version = 0): Item {
+    if (typeof func === "string") {
+      const versions = this.forward.get(func);
+      if (!versions) {
+        throw new Error(`function ${func} not found in registry`);
+      }
+
+      // pick latest if version = 0
+      const chosenVersion = version === 0 ? Math.max(...Object.keys(versions).map(Number)) : version;
+
+      if (!(chosenVersion in versions)) {
+        throw new Error(`function ${func} version ${version} not found in registry`);
+      }
+
+      return versions[chosenVersion];
+    }
+    const entry = this.reverse.get(func);
+    if (!entry) {
+      const fnName = func.name || "unknown";
+      throw new Error(`function ${fnName} not found in registry`);
+    }
+
+    if (version !== 0 && entry.version !== version) {
+      const fnName = func.name || "unknown";
+      throw new Error(`function ${fnName} version ${version} not found in registry`);
+    }
+
+    return entry;
   }
 
-  set(name: string, func: Func): void {
-    this.forward_registry.set(name, { name, func });
-    this.reverse_registry.set(func, { name, func });
-  }
-
-  keys(): IterableIterator<string> {
-    return this.forward_registry.keys();
+  latest(func: string | Func, defaultVersion = 1): number {
+    if (typeof func === "string") {
+      const versions = this.forward.get(func);
+      if (!versions) {
+        return defaultVersion;
+      }
+      const versionNumbers = Object.keys(versions).map(Number);
+      return versionNumbers.length > 0 ? Math.max(...versionNumbers) : defaultVersion;
+    }
+    const entry = this.reverse.get(func);
+    if (!entry) {
+      return defaultVersion;
+    }
+    return entry.version;
   }
 }

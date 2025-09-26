@@ -125,14 +125,14 @@ export class Computation {
       return doneAndDropTaskIfErr(true);
     }
 
-    const registered = this.registry.get(rootPromise.param.func);
-    if (!registered) {
-      // TODO: log something useful
+    let func: Func;
+    const args = rootPromise.param.args;
+
+    try {
+      func = this.registry.get(rootPromise.param.func, rootPromise.param.version ?? 0).func;
+    } catch {
       return doneAndDropTaskIfErr(true);
     }
-
-    const func = registered.func;
-    const args = rootPromise.param.args;
 
     // start heartbeat
     this.heartbeat.start();

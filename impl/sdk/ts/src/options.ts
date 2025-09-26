@@ -8,6 +8,7 @@ export class Options {
   public readonly tags: Record<string, string>;
   public readonly target: string;
   public readonly timeout: number;
+  public readonly version: number;
   public readonly retryPolicy: RetryPolicy | undefined;
 
   [RESONATE_OPTIONS] = true;
@@ -17,18 +18,21 @@ export class Options {
     tags = {},
     target = "default",
     timeout = 24 * util.HOUR,
+    version = 0,
     retryPolicy = undefined,
   }: {
     id?: string;
     tags?: Record<string, string>;
     target?: string;
     timeout?: number;
+    version?: number;
     retryPolicy?: RetryPolicy;
   }) {
     this.id = id;
     this.tags = tags;
     this.target = this.match(target);
     this.timeout = timeout;
+    this.version = version;
     this.retryPolicy = retryPolicy;
   }
 

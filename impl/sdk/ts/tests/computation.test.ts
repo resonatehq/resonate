@@ -133,7 +133,7 @@ describe("Computation Event Queue Concurrency", () => {
       return { a: va, b: vb, c: vc, d: vd };
     }
 
-    registry.set("testCoro", testCoroutine);
+    registry.add(testCoroutine, "testCoro");
     const { promise, task } = await createPromiseAndTask(network, "root-promise-1", "testCoro", []);
 
     const testTask: ClaimedTask = {

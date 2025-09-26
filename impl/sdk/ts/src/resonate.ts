@@ -134,25 +134,45 @@ export class Resonate {
   /**
    * Register a function and returns a registered function
    */
-  public register<F extends Func>(name: string, func: F): ResonateFunc<F>;
-  public register<F extends Func>(func: F): ResonateFunc<F>;
-  public register<F extends Func>(nameOrFunc: string | F, maybeFunc?: F): ResonateFunc<F> {
-    const name = typeof nameOrFunc === "string" ? nameOrFunc : nameOrFunc.name;
-    const func = typeof nameOrFunc === "string" ? maybeFunc! : nameOrFunc;
+  public register<F extends Func>(
+    name: string,
+    func: F,
+    options?: {
+      version?: number;
+    },
+  ): ResonateFunc<F>;
+  public register<F extends Func>(
+    func: F,
+    options?: {
+      version?: number;
+    },
+  ): ResonateFunc<F>;
+  public register<F extends Func>(
+    nameOrFunc: string | F,
+    funcOrOptions?:
+      | F
+      | {
+          version?: number;
+        },
+    maybeOptions: {
+      version?: number;
+    } = {},
+  ): ResonateFunc<F> {
+    const { version = 1 } = (typeof funcOrOptions === "object" ? funcOrOptions : maybeOptions) ?? {};
+    const func = typeof nameOrFunc === "function" ? nameOrFunc : (funcOrOptions as F);
+    const name = typeof nameOrFunc === "string" ? nameOrFunc : (func.name ?? "anonymous");
 
-    if (this.registry.has(name)) {
-      throw new Error(`'${name}' already registered`);
-    }
-
-    this.registry.set(name, func);
+    this.registry.add(func, name, version);
 
     return {
-      run: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.run(id, func, ...args),
-      rpc: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> => this.rpc(id, func, ...args),
+      run: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> =>
+        this.run(id, func, ...util.splitArgsAndOpts(args, this.options({ version: version }))),
+      rpc: (id: string, ...args: ParamsWithOptions<F>): Promise<Return<F>> =>
+        this.rpc(id, func, ...util.splitArgsAndOpts(args, this.options({ version: version }))),
       beginRun: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
-        this.beginRun(id, func, ...args),
+        this.beginRun(id, func, ...util.splitArgsAndOpts(args, this.options({ version: version }))),
       beginRpc: (id: string, ...args: ParamsWithOptions<F>): Promise<ResonateHandle<Return<F>>> =>
-        this.beginRpc(id, func, ...args),
+        this.beginRpc(id, func, ...util.splitArgsAndOpts(args, this.options({ version: version }))),
       options: this.options,
     };
   }
@@ -178,19 +198,15 @@ export class Resonate {
   public async beginRun<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
   public async beginRun(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
   public async beginRun(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
-    const registered = this.registry.get(funcOrName);
-    if (!registered) {
-      throw new Error(`${funcOrName} does not exist`);
-    }
-
     const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
 
     const { promise, task } = await this.createPromiseAndTask({
       kind: "createPromiseAndTask",
       promise: {
         id: id,
         timeout: Date.now() + opts.timeout,
-        param: { func: registered.name, args },
+        param: { func: registered.name, args, version: opts.version },
         tags: {
           ...opts.tags,
           "resonate:invoke": this.anycast,
@@ -233,24 +249,20 @@ export class Resonate {
   public async beginRpc<T>(id: string, func: string, ...args: any[]): Promise<ResonateHandle<T>>;
   public async beginRpc(id: string, funcOrName: Func | string, ...args: any[]): Promise<ResonateHandle<any>>;
   public async beginRpc(id: string, funcOrName: Func | string, ...argsWithOpts: any[]): Promise<ResonateHandle<any>> {
+    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
+
     let name: string;
     if (typeof funcOrName === "string") {
       name = funcOrName;
     } else {
-      const registered = this.registry.get(funcOrName);
-      if (!registered) {
-        throw new Error(`${funcOrName} is not registered`);
-      }
-      name = registered.name;
+      name = this.registry.get(funcOrName, opts.version).name;
     }
-
-    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
     const promise = await this.createPromise({
       kind: "createPromise",
       id: id,
       timeout: Date.now() + opts.timeout,
-      param: { func: name, args },
+      param: { func: name, args, version: opts.version },
       tags: { ...opts.tags, "resonate:invoke": opts.target, "resonate:scope": "global" },
       iKey: id,
       strict: false,
@@ -272,22 +284,18 @@ export class Resonate {
     func: Func | string,
     ...argsWithOpts: any[]
   ): Promise<ResonateSchedule> {
+    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
+
     let funcName: string;
     if (typeof func === "string") {
       funcName = func;
     } else {
-      const registered = this.registry.get(func);
-      if (!registered) {
-        throw new Error(`${func} is not registered`);
-      }
-      funcName = registered.name;
+      funcName = this.registry.get(func, opts.version).name;
     }
-
-    const [args, opts] = util.splitArgsAndOpts(argsWithOpts, this.options());
 
     await this.schedules.create(name, cron, "{{.id}}.{{.timestamp}}", opts.timeout, {
       ikey: name,
-      promiseParam: { func: funcName, args },
+      promiseParam: { func: funcName, args, version: opts.version },
       promiseTags: { ...opts.tags, "resonate:invoke": opts.target },
     });
 

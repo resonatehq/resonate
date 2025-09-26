@@ -33,7 +33,7 @@ const options: {
 const rnd = new Random(options.seed);
 const clock = new StepClock();
 const registry = new Registry();
-registry.set("fibonacci", fibonacci);
+registry.add(fibonacci);
 
 const sim = new Simulator(rnd, {
   randomDelay: options.randomDelay,
@@ -87,7 +87,7 @@ sim.delay(0, () => {
       timeout: 10000000000,
       iKey: id,
       tags: { "resonate:invoke": "local://any@default" },
-      param: { func: "fibonacci", args: [n] },
+      param: { func: "fibonacci", args: [n], version: 1 },
     },
     { requ: true, correlationId: 1 },
   );
