@@ -47,7 +47,7 @@ interface Task {
   timeout: number;
   processId?: string;
   ttl?: number;
-  expiry?: number;
+  expiry: number;
   createdOn: number;
   completedOn?: number;
 }
@@ -109,45 +109,28 @@ export class Server {
   next(time: number): number | undefined {
     let timeout: number | undefined = undefined;
 
-    // Check pending promises
+    // Check promises
     for (const promise of this.promises.values()) {
-      if (timeout === 0) {
-        return timeout;
-      }
-
       if (promise.state === "pending") {
-        timeout = timeout === undefined ? promise.timeout : Math.min(promise.timeout, timeout);
-      }
-    }
-
-    // Check tasks
-    for (const task of this.tasks.values()) {
-      if (timeout === 0) {
-        return timeout;
-      }
-
-      if (task.state === "init") {
-        timeout = timeout === undefined ? 0 : Math.min(0, timeout);
-      } else if (["claimed", "enqueued"].includes(task.state)) {
-        util.assertDefined(task.expiry);
-        timeout = timeout === undefined ? task.expiry : Math.min(task.expiry, timeout);
+        timeout = Math.min(promise.timeout, timeout ?? promise.timeout);
       }
     }
 
     // Check schedules
     for (const schedule of this.schedules.values()) {
-      if (timeout === 0) {
-        return timeout;
-      }
-
       util.assertDefined(schedule.nextRunTime);
-      timeout = timeout === undefined ? schedule.nextRunTime : Math.min(schedule.nextRunTime, timeout);
+      timeout = Math.min(schedule.nextRunTime, timeout ?? schedule.nextRunTime);
+    }
+
+    // Check tasks
+    for (const task of this.tasks.values()) {
+      if (["init", "claimed", "enqueued"].includes(task.state)) {
+        timeout = Math.min(task.expiry, timeout ?? task.expiry);
+      }
     }
 
     // Convert to delay relative to `time`, clamped to signed 32-bit range
-    timeout = timeout !== undefined ? Math.min(Math.max(0, timeout - time), 2147483647) : timeout;
-
-    return timeout;
+    return timeout !== undefined ? Math.min(Math.max(0, timeout - time), 2147483647) : timeout;
   }
 
   step(time: number): { msg: Message; recv: string }[] {
@@ -203,7 +186,7 @@ export class Server {
 
     const msgs: { msg: Message; recv: string }[] = [];
     for (const task of this.tasks.values()) {
-      if (task.state !== "init" || inFlightRootPromiseIds.has(task.rootPromiseId)) {
+      if (task.state !== "init" || task.expiry > time || inFlightRootPromiseIds.has(task.rootPromiseId)) {
         continue;
       }
 
@@ -1058,6 +1041,7 @@ export class Server {
         recv,
         rootPromiseId,
         leafPromiseId,
+        expiry: 0,
         createdOn: time,
       };
 
@@ -1069,7 +1053,7 @@ export class Server {
       record = {
         ...record,
         state: to,
-        expiry: time + 5000, // 5 secs
+        expiry: time + 5000, // wait 5s before transitioning back to init if unclaimed
       };
       this.tasks.set(id, record);
       return { task: record, applied: true };
@@ -1132,7 +1116,7 @@ export class Server {
         state: to,
         processId: undefined,
         ttl: undefined,
-        expiry: undefined,
+        expiry: time + 5000, // wait 5s before sending again
       };
       this.tasks.set(id, record);
       return { task: record, applied: true };
@@ -1147,7 +1131,7 @@ export class Server {
         state: to,
         processId: undefined,
         ttl: undefined,
-        expiry: undefined,
+        expiry: 0,
       };
 
       this.tasks.set(id, record);
