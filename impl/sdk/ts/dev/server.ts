@@ -1176,6 +1176,7 @@ export class Server {
       record = {
         ...record,
         state: to,
+        completedOn: time,
       };
 
       this.tasks.set(id, record);
