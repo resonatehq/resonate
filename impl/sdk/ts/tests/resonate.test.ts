@@ -1,6 +1,7 @@
 import { setTimeout } from "node:timers/promises";
 import { LocalNetwork } from "../dev/network";
 import type { Context } from "../src/context";
+import { JsonEncoder } from "../src/encoder";
 import { HttpNetwork } from "../src/network/remote";
 import { Resonate } from "../src/resonate";
 import { Constant, Never } from "../src/retries";
@@ -287,6 +288,7 @@ describe("Resonate usage tests", () => {
   });
 
   test("Basic human in the loop", async () => {
+    const encoder = new JsonEncoder();
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
 
@@ -299,13 +301,14 @@ describe("Resonate usage tests", () => {
     const p = await f.beginRun("f");
     await setTimeout(100); // Ensure myId promise is created
 
-    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, value: "myValue" });
+    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, data: encoder.encode("myValue").data });
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
   });
 
   test("Correctly sets timeout", async () => {
+    const encoder = new JsonEncoder();
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 50_000 }, network);
 
@@ -324,7 +327,7 @@ describe("Resonate usage tests", () => {
     expect(durable.timeout).toBeGreaterThanOrEqual(time + 5 * util.HOUR);
     expect(durable.timeout).toBeLessThan(time + 5 * util.HOUR + 1000);
 
-    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, value: "myValue" });
+    await resonate.promises.resolve("myId", { ikey: "myId", strict: false, data: encoder.encode("myValue").data });
     const v = await p.result();
     expect(v).toBe("myValue");
     resonate.stop();
@@ -396,6 +399,7 @@ describe("Resonate usage tests", () => {
   });
 
   test("Basic get", async () => {
+    const encoder = new JsonEncoder();
     const network = new LocalNetwork();
     const resonate = new Resonate({ group: "default", pid: "0", ttl: 60_000 }, network);
 
@@ -404,7 +408,7 @@ describe("Resonate usage tests", () => {
 
     // get returns the promise value
     await resonate.promises.create("foo", Number.MAX_SAFE_INTEGER);
-    await resonate.promises.resolve("foo", { ikey: "foo", strict: false, value: "foo" });
+    await resonate.promises.resolve("foo", { ikey: "foo", strict: false, data: encoder.encode("foo").data });
 
     const handle = await resonate.get("foo");
     expect(await handle.result()).toBe("foo");

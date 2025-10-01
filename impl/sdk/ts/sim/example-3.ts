@@ -5,6 +5,7 @@ import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
 
 import { StepClock } from "../src/clock";
+import { JsonEncoder } from "../src/encoder";
 import { Registry } from "../src/registry";
 import * as util from "../src/util";
 
@@ -32,6 +33,7 @@ const options: {
 
 const rnd = new Random(options.seed);
 const clock = new StepClock();
+const encoder = new JsonEncoder();
 const registry = new Registry();
 registry.add(fibonacci);
 
@@ -45,6 +47,7 @@ const server = new ServerProcess(clock, "server");
 const worker1 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-1",
@@ -53,6 +56,7 @@ const worker1 = new WorkerProcess(
 const worker2 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-2",
@@ -61,6 +65,7 @@ const worker2 = new WorkerProcess(
 const worker3 = new WorkerProcess(
   rnd,
   clock,
+  encoder,
   registry,
   { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
   "worker-3",
@@ -87,7 +92,7 @@ sim.delay(0, () => {
       timeout: 10000000000,
       iKey: id,
       tags: { "resonate:invoke": "local://any@default" },
-      param: { func: "fibonacci", args: [n], version: 1 },
+      param: encoder.encode({ func: "fibonacci", args: [n], version: 1 }),
     },
     { requ: true, correlationId: 1 },
   );

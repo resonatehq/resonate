@@ -1,5 +1,5 @@
 import type { Context, InnerContext } from "./context";
-import { Decorator, type Literal, type Value } from "./decorator";
+import { Decorator, type Value } from "./decorator";
 import type { Handler } from "./handler";
 import type { DurablePromiseRecord } from "./network/network";
 import { type Callback, type Result, type Yieldable, ko, ok } from "./types";
@@ -84,7 +84,6 @@ export class Coroutine<T> {
         coroutine.exec((err, status) => {
           if (err) return callback(err);
           util.assertDefined(status);
-
           switch (status.type) {
             case "more":
               callback(false, { type: "suspended", todo: status.todo });
@@ -96,7 +95,9 @@ export class Coroutine<T> {
                   kind: "completePromise",
                   id: id,
                   state: status.result.success ? "resolved" : "rejected",
-                  value: status.result.success ? status.result.value : status.result.error,
+                  value: {
+                    data: status.result.success ? status.result.value : status.result.error,
+                  },
                   iKey: id,
                   strict: false,
                 },
@@ -180,19 +181,25 @@ export class Coroutine<T> {
                       kind: "completePromise",
                       id: action.id,
                       state: status.result.success ? "resolved" : "rejected",
-                      value: status.result.success ? status.result.value : status.result.error,
+                      value: {
+                        data: status.result.success ? status.result.value : status.result.error,
+                      },
                       iKey: action.id,
                       strict: false,
                     },
                     (err, res) => {
                       if (err) return callback(err);
                       util.assertDefined(res);
+                      util.assert(res.state !== "pending", "promise must be completed");
 
                       input = {
                         type: "internal.promise",
                         state: "completed",
                         id: action.id,
-                        value: extractResult(res),
+                        value: {
+                          type: "internal.literal",
+                          value: res.state === "resolved" ? ok(res.value?.data) : ko(res.value?.data),
+                        },
                       };
                       next();
                     },
@@ -226,7 +233,10 @@ export class Coroutine<T> {
                 type: "internal.promise",
                 state: "completed",
                 id: action.id,
-                value: extractResult(res),
+                value: {
+                  type: "internal.literal",
+                  value: res.state === "resolved" ? ok(res.value?.data) : ko(res.value?.data),
+                },
               };
               next();
             }
@@ -254,7 +264,10 @@ export class Coroutine<T> {
                 type: "internal.promise",
                 state: "completed",
                 id: action.id,
-                value: extractResult(res),
+                value: {
+                  type: "internal.literal",
+                  value: res.state === "resolved" ? ok(res.value?.data) : ko(res.value?.data),
+                },
               };
             }
             next();
@@ -298,14 +311,4 @@ export class Coroutine<T> {
 
     next();
   }
-}
-
-function extractResult<T>(durablePromise: DurablePromiseRecord): Literal<T> {
-  util.assert(durablePromise.state !== "pending", "Can not get result from a pending promise");
-  const value: Result<T> = durablePromise.state === "resolved" ? ok(durablePromise.value) : ko(durablePromise.value);
-
-  return {
-    type: "internal.literal",
-    value,
-  };
 }

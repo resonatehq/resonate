@@ -27,12 +27,14 @@ export class Promises {
     {
       ikey = undefined,
       strict = false,
-      param = undefined,
+      headers = undefined,
+      data = undefined,
       tags = undefined,
     }: {
       ikey?: string;
       strict?: boolean;
-      param?: any;
+      headers?: Record<string, string>;
+      data?: string;
       tags?: Record<string, string>;
     } = {},
   ): Promise<DurablePromiseRecord> {
@@ -42,7 +44,7 @@ export class Promises {
           kind: "createPromise",
           id: id,
           timeout: timeout,
-          param: param,
+          param: { headers, data },
           tags: tags,
           iKey: ikey,
           strict: strict,
@@ -68,12 +70,14 @@ export class Promises {
     {
       ikey = undefined,
       strict = false,
-      param = undefined,
+      headers = undefined,
+      data = undefined,
       tags = undefined,
     }: {
       ikey?: string;
       strict?: boolean;
-      param?: any;
+      headers?: Record<string, string>;
+      data?: string;
       tags?: Record<string, string>;
     } = {},
   ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
@@ -84,7 +88,7 @@ export class Promises {
           promise: {
             id: id,
             timeout: timeout,
-            param: param,
+            param: { headers, data },
             tags: tags,
           },
           task: {
@@ -112,11 +116,13 @@ export class Promises {
     {
       ikey = undefined,
       strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
       ikey?: string;
       strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -125,7 +131,7 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "resolved",
-          value: value,
+          value: { headers, data },
           iKey: ikey,
           strict: strict,
         },
@@ -146,11 +152,13 @@ export class Promises {
     {
       ikey = undefined,
       strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
       ikey?: string;
       strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -159,7 +167,7 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "rejected",
-          value: value,
+          value: { headers, data },
           iKey: ikey,
           strict: strict,
         },
@@ -181,11 +189,13 @@ export class Promises {
     {
       ikey = undefined,
       strict = false,
-      value = undefined,
+      headers = undefined,
+      data = undefined,
     }: {
       ikey?: string;
       strict?: boolean;
-      value?: any;
+      headers?: Record<string, string>;
+      data?: string;
     } = {},
   ): Promise<DurablePromiseRecord> {
     return new Promise((resolve, reject) => {
@@ -194,7 +204,7 @@ export class Promises {
           kind: "completePromise",
           id: id,
           state: "rejected_canceled",
-          value: value,
+          value: { headers, data },
           iKey: ikey,
           strict: strict,
         },

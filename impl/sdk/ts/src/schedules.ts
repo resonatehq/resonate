@@ -37,13 +37,15 @@ export class Schedules {
       ikey = undefined,
       description = undefined,
       tags = undefined,
-      promiseParam = undefined,
+      promiseHeaders = undefined,
+      promiseData = undefined,
       promiseTags = undefined,
     }: {
       ikey?: string;
       description?: string;
       tags?: Record<string, string>;
-      promiseParam?: any;
+      promiseHeaders?: Record<string, string>;
+      promiseData?: string;
       promiseTags?: Record<string, string>;
     } = {},
   ): Promise<ScheduleRecord> {
@@ -57,7 +59,7 @@ export class Schedules {
           tags: tags,
           promiseId: promiseId,
           promiseTimeout: promiseTimeout,
-          promiseParam: promiseParam,
+          promiseParam: { headers: promiseHeaders, data: promiseData },
           promiseTags: promiseTags,
           iKey: ikey,
         },

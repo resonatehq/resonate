@@ -38,22 +38,16 @@ import type {
 
 import { EventSource } from "eventsource";
 
-import type { Callback } from "../types";
+import type { Callback, Value } from "../types";
 import * as util from "../util";
-
-// API Value format from OpenAPI spec
-interface ApiValue {
-  headers?: Record<string, string>;
-  data?: string;
-}
 
 // API Response Types
 interface PromiseDto {
   id: string;
   state: string;
   timeout: number;
-  param?: ApiValue;
-  value?: ApiValue;
+  param?: Value<string>;
+  value?: Value<string>;
   tags?: Record<string, string>;
   idempotencyKeyForCreate?: string;
   idempotencyKeyForComplete?: string;
@@ -85,7 +79,7 @@ interface ScheduleDto {
   tags?: Record<string, string>;
   promiseId: string;
   promiseTimeout: number;
-  promiseParam?: ApiValue;
+  promiseParam?: Value<string>;
   promiseTags?: Record<string, string>;
   idempotencyKey?: string;
   lastRunTime?: number;
@@ -123,92 +117,6 @@ interface HeartbeatResponseDto {
   tasksAffected: number;
 }
 
-export interface Encoder {
-  encode(value: any): ApiValue;
-  decode(apiValue: ApiValue | undefined): any;
-}
-
-export class JsonEncoder implements Encoder {
-  inf = "__INF__";
-  negInf = "__NEG_INF__";
-  encode(value: any): ApiValue {
-    // note about undefined:
-    // undefined is not json serializable, so immediately return undefined
-    if (value === undefined) {
-      return {
-        data: undefined,
-      };
-    }
-
-    const jsonVal = JSON.stringify(value, (_, value) => {
-      if (value === Number.POSITIVE_INFINITY) {
-        return this.inf;
-      }
-
-      if (value === Number.NEGATIVE_INFINITY) {
-        return this.negInf;
-      }
-
-      if (value instanceof AggregateError) {
-        return {
-          __type: "aggregate_error",
-          message: value.message,
-          stack: value.stack,
-          name: value.name,
-          errors: value.errors,
-        };
-      }
-
-      if (value instanceof Error) {
-        return {
-          __type: "error",
-          message: value.message,
-          stack: value.stack,
-          name: value.name,
-        };
-      }
-
-      return value;
-    });
-
-    return {
-      headers: {},
-      data: util.base64Encode(jsonVal),
-    };
-  }
-
-  decode(apiValue: ApiValue | undefined): any {
-    if (!apiValue?.data) {
-      return undefined;
-    }
-
-    const data = util.base64Decode(apiValue.data);
-
-    return JSON.parse(data, (_, value) => {
-      if (value === this.inf) {
-        return Number.POSITIVE_INFINITY;
-      }
-
-      if (value === this.negInf) {
-        return Number.NEGATIVE_INFINITY;
-      }
-
-      if (value?.__type === "aggregate_error") {
-        return Object.assign(new AggregateError(value.errors, value.message), value);
-      }
-
-      if (value?.__type === "error") {
-        const error = new Error(value.message || "Unknown error");
-        if (value.name) error.name = value.name;
-        if (value.stack) error.stack = value.stack;
-        return error;
-      }
-
-      return value;
-    });
-  }
-}
-
 export interface HttpNetworkConfig {
   url: string;
   pid: string;
@@ -217,7 +125,6 @@ export interface HttpNetworkConfig {
   messageSourceAuth?: { username: string; password: string };
   timeout?: number;
   headers?: Record<string, string>;
-  encoder?: Encoder;
 }
 
 export type RetryPolicy = {
@@ -234,7 +141,6 @@ export class HttpNetwork implements Network {
   private timeout: number;
   private headers: Record<string, string>;
   private msgHeaders: Record<string, string>;
-  private encoder: Encoder;
   private eventSource: EventSource;
   private subscriptions: {
     invoke: Array<(msg: Message) => void>;
@@ -242,22 +148,12 @@ export class HttpNetwork implements Network {
     notify: Array<(msg: Message) => void>;
   } = { invoke: [], resume: [], notify: [] };
 
-  constructor({
-    url,
-    pid,
-    group,
-    auth,
-    messageSourceAuth,
-    timeout = 30 * util.SEC,
-    headers = {},
-    encoder = new JsonEncoder(),
-  }: HttpNetworkConfig) {
+  constructor({ url, pid, group, auth, messageSourceAuth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
     this.url = url;
 
     this.group = group;
     this.pid = pid;
     this.timeout = timeout;
-    this.encoder = encoder;
 
     this.headers = { "Content-Type": "application/json", ...headers };
     if (auth) {
@@ -389,7 +285,7 @@ export class HttpNetwork implements Network {
         body: JSON.stringify({
           id: req.id,
           timeout: req.timeout,
-          param: this.encoder.encode(req.param),
+          param: req.param,
           tags: req.tags,
         }),
       },
@@ -417,7 +313,7 @@ export class HttpNetwork implements Network {
           promise: {
             id: req.promise.id,
             timeout: req.promise.timeout,
-            param: this.encoder.encode(req.promise.param),
+            param: req.promise.param,
             tags: req.promise.tags,
           },
           task: {
@@ -456,7 +352,7 @@ export class HttpNetwork implements Network {
         headers,
         body: JSON.stringify({
           state: req.state.toUpperCase(),
-          value: this.encoder.encode(req.value),
+          value: req.value,
         }),
       },
       retryPolicy,
@@ -531,7 +427,7 @@ export class HttpNetwork implements Network {
           tags: req.tags,
           promiseId: req.promiseId,
           promiseTimeout: req.promiseTimeout,
-          promiseParam: this.encoder.encode(req.promiseParam),
+          promiseParam: req.promiseParam,
           promiseTags: req.promiseTags,
         }),
       },
@@ -702,35 +598,35 @@ export class HttpNetwork implements Network {
     throw new Error("Fetch error");
   }
 
-  private mapPromiseDtoToRecord(apiPromise: PromiseDto): DurablePromiseRecord {
+  private mapPromiseDtoToRecord(promise: PromiseDto): DurablePromiseRecord {
     return {
-      id: apiPromise.id,
-      state: this.mapApiStateToInternal(apiPromise.state),
-      timeout: apiPromise.timeout,
-      param: this.encoder.decode(apiPromise.param),
-      value: this.encoder.decode(apiPromise.value),
-      tags: apiPromise.tags || {},
-      iKeyForCreate: apiPromise.idempotencyKeyForCreate,
-      iKeyForComplete: apiPromise.idempotencyKeyForComplete,
-      createdOn: apiPromise.createdOn,
-      completedOn: apiPromise.completedOn,
+      id: promise.id,
+      state: this.mapApiStateToInternal(promise.state),
+      timeout: promise.timeout,
+      param: promise.param,
+      value: promise.value,
+      tags: promise.tags || {},
+      iKeyForCreate: promise.idempotencyKeyForCreate,
+      iKeyForComplete: promise.idempotencyKeyForComplete,
+      createdOn: promise.createdOn,
+      completedOn: promise.completedOn,
     };
   }
 
-  private mapScheduleDtoToRecord(apiSchedule: ScheduleDto): ScheduleRecord {
+  private mapScheduleDtoToRecord(schedule: ScheduleDto): ScheduleRecord {
     return {
-      id: apiSchedule.id,
-      description: apiSchedule.description,
-      cron: apiSchedule.cron,
-      tags: apiSchedule.tags || {},
-      promiseId: apiSchedule.promiseId,
-      promiseTimeout: apiSchedule.promiseTimeout,
-      promiseParam: apiSchedule.promiseParam,
-      promiseTags: apiSchedule.promiseTags || {},
-      iKey: apiSchedule.idempotencyKey,
-      lastRunTime: apiSchedule.lastRunTime,
-      nextRunTime: apiSchedule.nextRunTime,
-      createdOn: apiSchedule.createdOn,
+      id: schedule.id,
+      description: schedule.description,
+      cron: schedule.cron,
+      tags: schedule.tags || {},
+      promiseId: schedule.promiseId,
+      promiseTimeout: schedule.promiseTimeout,
+      promiseParam: schedule.promiseParam,
+      promiseTags: schedule.promiseTags || {},
+      iKey: schedule.idempotencyKey,
+      lastRunTime: schedule.lastRunTime,
+      nextRunTime: schedule.nextRunTime,
+      createdOn: schedule.createdOn,
     };
   }
 

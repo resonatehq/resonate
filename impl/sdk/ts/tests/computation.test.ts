@@ -1,32 +1,36 @@
-import type { ClaimedTask } from "resonate-inner";
 import { LocalNetwork } from "../dev/network";
 import { WallClock } from "../src/clock";
 import { Computation, type Status } from "../src/computation";
 import type { Context } from "../src/context";
+import { JsonEncoder } from "../src/encoder";
 import { Handler } from "../src/handler";
 import { NoopHeartbeat } from "../src/heartbeat";
-import type { DurablePromiseRecord, Network, TaskRecord } from "../src/network/network";
+import type { DurablePromiseRecord, TaskRecord } from "../src/network/network";
 import type { Processor } from "../src/processor/processor";
 import { Registry } from "../src/registry";
+import type { ClaimedTask } from "../src/resonate-inner";
 import type { Result } from "../src/types";
 import * as util from "../src/util";
 
 async function createPromiseAndTask(
-  network: Network,
+  handler: Handler,
   id: string,
   funcName: string,
   args: any[],
 ): Promise<{ promise: DurablePromiseRecord; task: TaskRecord }> {
-  return new Promise((resolve, _reject) => {
-    network.send(
+  return new Promise((resolve) => {
+    handler.createPromiseAndTask(
       {
         kind: "createPromiseAndTask",
         promise: {
           id: id,
           timeout: 24 * util.HOUR + Date.now(),
           param: {
-            func: funcName,
-            args,
+            data: {
+              func: funcName,
+              args: args,
+              version: 1,
+            },
           },
           tags: { "resonate:invoke": "poll://any@default/default" },
         },
@@ -37,7 +41,8 @@ async function createPromiseAndTask(
         iKey: id,
         strict: false,
       },
-      (_err, res) => {
+      (_, res) => {
+        util.assertDefined(res);
         resolve({ promise: res!.promise, task: res!.task! });
       },
     );
@@ -93,6 +98,7 @@ class MockProcessor implements Processor {
 describe("Computation Event Queue Concurrency", () => {
   let mockProcessor: MockProcessor;
   let network: LocalNetwork;
+  let handler: Handler;
   let registry: Registry;
   let computation: Computation;
 
@@ -102,6 +108,7 @@ describe("Computation Event Queue Concurrency", () => {
     jest.clearAllMocks();
     mockProcessor = new MockProcessor();
     network = new LocalNetwork();
+    handler = new Handler(network, new JsonEncoder());
     registry = new Registry();
 
     computation = new Computation(
@@ -112,7 +119,7 @@ describe("Computation Event Queue Concurrency", () => {
       3600,
       new WallClock(),
       network,
-      new Handler(network),
+      new Handler(network, new JsonEncoder()),
       registry,
       new NoopHeartbeat(),
       new Map(),
@@ -134,7 +141,7 @@ describe("Computation Event Queue Concurrency", () => {
     }
 
     registry.add(testCoroutine, "testCoro");
-    const { promise, task } = await createPromiseAndTask(network, "root-promise-1", "testCoro", []);
+    const { promise, task } = await createPromiseAndTask(handler, "root-promise-1", "testCoro", []);
 
     const testTask: ClaimedTask = {
       kind: "claimed",
@@ -173,10 +180,12 @@ describe("Computation Event Queue Concurrency", () => {
       kind: "completed",
       promise: {
         value: {
-          a: "completed-root-promise-1.0",
-          b: "completed-root-promise-1.1",
-          c: "completed-root-promise-1.2",
-          d: "completed-root-promise-1.3",
+          data: {
+            a: "completed-root-promise-1.0",
+            b: "completed-root-promise-1.1",
+            c: "completed-root-promise-1.2",
+            d: "completed-root-promise-1.3",
+          },
         },
       },
     });

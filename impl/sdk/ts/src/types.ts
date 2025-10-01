@@ -44,3 +44,10 @@ export type Callback<T> = {
   (err: false, res: T): void;
   (err: true, res?: undefined): void;
 };
+
+// Value
+
+export interface Value<T> {
+  headers?: Record<string, string>;
+  data?: T;
+}

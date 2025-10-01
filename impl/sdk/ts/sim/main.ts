@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { StepClock } from "../src/clock";
 import type { Context } from "../src/context";
+import { JsonEncoder } from "../src/encoder";
 import type { Request } from "../src/network/network";
 import { Registry } from "../src/registry";
 import { ServerProcess } from "./src/server";
@@ -73,7 +74,6 @@ function* baz(ctx: Context): Generator<any, any, any> {
 }
 
 const availableFuncs = { fibLfi: fibLfi, fibRfi: fibRfi, fibLfc: fibLfc, fibRfc: fibRfc, foo: foo, bar: bar, baz: baz };
-// ------------------------------------------------------------------------------------------
 
 // CLI
 const program = new Command();
@@ -189,6 +189,7 @@ export function run(options: Options) {
   });
 
   const clock = new StepClock();
+  const encoder = new JsonEncoder();
   const registry = new Registry();
 
   for (const [name, func] of Object.entries(availableFuncs)) {
@@ -204,6 +205,7 @@ export function run(options: Options) {
       new WorkerProcess(
         rnd,
         clock,
+        encoder,
         registry,
         { charFlipProb: options.charFlipProb ?? rnd.random(0.05) },
         `worker-${i}`,
@@ -238,7 +240,7 @@ export function run(options: Options) {
               timeout,
               iKey: id,
               tags: { "resonate:invoke": "local://any@default" },
-              param: { func: funcName, args: [rnd.randint(0, 20)], version: 1 },
+              param: encoder.encode({ func: funcName, args: [rnd.randint(0, 20)], version: 1 }),
             },
             { requ: true, correlationId: i },
           );
@@ -256,7 +258,7 @@ export function run(options: Options) {
               timeout,
               iKey: id,
               tags: { "resonate:invoke": "local://any@default" },
-              param: { func: funcName, args: [], version: 1 },
+              param: encoder.encode({ func: funcName, args: [], version: 1 }),
             },
             { requ: true, correlationId: i },
           );

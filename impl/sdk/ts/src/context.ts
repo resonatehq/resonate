@@ -6,12 +6,14 @@ import type { Func, ParamsWithOptions, Result, Return } from "./types";
 import * as util from "./util";
 
 export class LFI<T> implements Iterable<LFI<T>> {
+  public id: string;
   public func: Func;
   public args: any[];
   public retryPolicy: RetryPolicy;
-  public createReq: CreatePromiseReq;
+  public createReq: CreatePromiseReq<any>;
 
-  constructor(func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
+  constructor(id: string, func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq<any>) {
+    this.id = id;
     this.func = func;
     this.args = args;
     this.retryPolicy = retryPolicy;
@@ -26,12 +28,14 @@ export class LFI<T> implements Iterable<LFI<T>> {
 }
 
 export class LFC<T> implements Iterable<LFC<T>> {
+  public id: string;
   public func: Func;
   public args: any[];
   public retryPolicy: RetryPolicy;
   public createReq: CreatePromiseReq;
 
-  constructor(func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
+  constructor(id: string, func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
+    this.id = id;
     this.func = func;
     this.args = args;
     this.retryPolicy = retryPolicy;
@@ -46,10 +50,12 @@ export class LFC<T> implements Iterable<LFC<T>> {
 }
 
 export class RFI<T> implements Iterable<RFI<T>> {
+  public id: string;
   public createReq: CreatePromiseReq;
   public mode: "attached" | "detached";
 
-  constructor(createReq: CreatePromiseReq, mode: "attached" | "detached" = "attached") {
+  constructor(id: string, createReq: CreatePromiseReq, mode: "attached" | "detached" = "attached") {
+    this.id = id;
     this.createReq = createReq;
     this.mode = mode;
   }
@@ -62,10 +68,12 @@ export class RFI<T> implements Iterable<RFI<T>> {
 }
 
 export class RFC<T> implements Iterable<RFC<T>> {
+  public id: string;
   public createReq: CreatePromiseReq;
   public mode = "attached" as const;
 
-  constructor(createReq: CreatePromiseReq) {
+  constructor(id: string, createReq: CreatePromiseReq) {
+    this.id = id;
     this.createReq = createReq;
   }
 
@@ -194,7 +202,6 @@ export class InnerContext implements Context {
   beginRun = this.lfi.bind(this);
   beginRpc = this.rfi.bind(this);
 
-  // TODO(avillega): set the parent timeout to be used to calculate the actual timeout for the createReq
   private constructor(
     id: string,
     rId: string,
@@ -225,6 +232,7 @@ export class InnerContext implements Context {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
 
     return new LFI(
+      opts.id,
       func,
       argu,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
@@ -236,6 +244,7 @@ export class InnerContext implements Context {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
 
     return new LFC(
+      opts.id,
       func,
       argu,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
@@ -249,8 +258,15 @@ export class InnerContext implements Context {
     if (typeof func === "function") {
       throw new Error("not implemented");
     }
+
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new RFI(this.remoteCreateReq(func, argu, opts));
+    const data = {
+      func: func,
+      args: argu,
+      version: opts.version,
+    };
+
+    return new RFI(opts.id, this.remoteCreateReq(data, opts));
   }
 
   rfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
@@ -259,8 +275,15 @@ export class InnerContext implements Context {
     if (typeof func === "function") {
       throw new Error("not implemented");
     }
+
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new RFC(this.remoteCreateReq(func, argu, opts));
+    const data = {
+      func: func,
+      args: argu,
+      version: opts.version,
+    };
+
+    return new RFC(opts.id, this.remoteCreateReq(data, opts));
   }
 
   promise<T>({
@@ -269,11 +292,13 @@ export class InnerContext implements Context {
     data,
     tags,
   }: { id?: string; timeout?: number; data?: any; tags?: Record<string, string> } = {}): RFI<T> {
-    return new RFI(this.latentCreateOpts(id, timeout, data, tags));
+    id = id ?? this.seqid();
+    return new RFI(id, this.latentCreateOpts(id, timeout, data, tags));
   }
 
   sleep(ms: number): RFC<void> {
-    return new RFC(this.sleepCreateOpts(this.options({ timeout: ms })));
+    const opts = this.options({ timeout: ms });
+    return new RFC(opts.id, this.sleepCreateOpts(opts));
   }
 
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
@@ -282,8 +307,15 @@ export class InnerContext implements Context {
     if (typeof func === "function") {
       throw new Error("not implemented");
     }
+
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    return new RFI(this.remoteCreateReq(func, argu, opts, Number.MAX_SAFE_INTEGER), "detached");
+    const data = {
+      func: func,
+      args: argu,
+      version: opts.version,
+    };
+
+    return new RFI(opts.id, this.remoteCreateReq(data, opts, Number.MAX_SAFE_INTEGER), "detached");
   }
 
   getDependency<T = any>(name: string): T | undefined {
@@ -324,7 +356,7 @@ export class InnerContext implements Context {
     };
   }
 
-  remoteCreateReq(func: string, args: any[], opts: Options, maxTimeout = this.timeout): CreatePromiseReq {
+  remoteCreateReq(data: any, opts: Options, maxTimeout = this.timeout): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
@@ -339,18 +371,15 @@ export class InnerContext implements Context {
     return {
       kind: "createPromise",
       id: opts.id,
-      timeout: timeout,
+      timeout,
       tags,
-      param: {
-        func,
-        args,
-      },
+      param: { data },
       iKey: opts.id,
       strict: false,
     };
   }
 
-  latentCreateOpts(id?: string, timeout?: number, data?: any, tags?: Record<string, string>): CreatePromiseReq {
+  latentCreateOpts(id: string, timeout?: number, data?: any, tags?: Record<string, string>): CreatePromiseReq {
     const cTags = {
       "resonate:scope": "global",
       "resonate:root": this.rId,
@@ -358,18 +387,16 @@ export class InnerContext implements Context {
       ...tags,
     };
 
-    const cId = id ?? this.seqid();
-
     // timeout cannot be greater than parent timeout
     const cTimeout = Math.min(this.clock.now() + (timeout ?? 24 * util.HOUR), this.timeout);
 
     return {
       kind: "createPromise",
-      id: cId,
+      id: id,
       timeout: cTimeout,
-      param: data,
+      param: { data },
       tags: cTags,
-      iKey: cId,
+      iKey: id,
       strict: false,
     };
   }

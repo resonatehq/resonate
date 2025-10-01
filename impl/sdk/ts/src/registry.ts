@@ -1,14 +1,14 @@
 import type { Func } from "./types";
 
-type Item = {
+export type RegistryItem = {
   name: string;
   func: Func;
   version: number;
 };
 
 export class Registry {
-  private forward: Map<string, Record<number, Item>> = new Map();
-  private reverse: Map<Func, Item> = new Map();
+  private forward: Map<string, Record<number, RegistryItem>> = new Map();
+  private reverse: Map<Func, RegistryItem> = new Map();
 
   add(func: Func, name?: string, version = 1): void {
     if (!(version > 0)) {
@@ -25,7 +25,7 @@ export class Registry {
       throw new Error(`function ${funcName} already registered`);
     }
 
-    const item: Item = { name: funcName, func, version };
+    const item: RegistryItem = { name: funcName, func, version };
 
     if (!existingByName) {
       this.forward.set(funcName, {});
@@ -35,7 +35,7 @@ export class Registry {
     this.reverse.set(func, item);
   }
 
-  get(func: string | Func, version = 0): Item {
+  get(func: string | Func, version = 0): RegistryItem {
     if (typeof func === "string") {
       const versions = this.forward.get(func);
       if (!versions) {
