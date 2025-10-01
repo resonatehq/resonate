@@ -234,6 +234,7 @@ export class Computation {
           done,
         ),
       ctx.retryPolicy,
+      ctx.timeout,
     );
   }
 

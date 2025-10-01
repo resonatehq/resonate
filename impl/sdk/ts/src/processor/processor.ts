@@ -4,7 +4,14 @@ import type { Result } from "../types";
 type F = () => Promise<unknown>;
 
 export interface Processor {
-  process(id: string, name: string, func: F, cb: (result: Result<unknown>) => void, retryPolicy: RetryPolicy): void;
+  process(
+    id: string,
+    name: string,
+    func: F,
+    cb: (result: Result<unknown>) => void,
+    retryPolicy: RetryPolicy,
+    timeout: number,
+  ): void;
 }
 
 export class AsyncProcessor implements Processor {
@@ -14,8 +21,9 @@ export class AsyncProcessor implements Processor {
     func: () => Promise<T>,
     cb: (result: Result<T>) => void,
     retryPolicy: RetryPolicy,
+    timeout: number,
   ): void {
-    void this.run(id, name, func, cb, retryPolicy);
+    void this.run(id, name, func, cb, retryPolicy, timeout);
   }
 
   private async run<T>(
@@ -24,6 +32,7 @@ export class AsyncProcessor implements Processor {
     func: () => Promise<T>,
     cb: (result: Result<T>) => void,
     retryPolicy: RetryPolicy,
+    timeout: number,
   ) {
     let attempt = 1;
 
@@ -38,6 +47,14 @@ export class AsyncProcessor implements Processor {
           cb({ success: false, error });
           return;
         }
+
+        const now = Date.now();
+
+        if (now + retryIn >= timeout) {
+          cb({ success: false, error });
+          return;
+        }
+
         console.log(
           `RuntimeError. Function ${name} failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`,
         );
