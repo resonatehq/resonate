@@ -129,8 +129,7 @@ export class Computation {
       typeof rootPromise.param.data.func !== "string" ||
       !("args" in rootPromise.param.data) ||
       !Array.isArray(rootPromise.param.data.args) ||
-      !("version" in rootPromise.param.data) ||
-      typeof rootPromise.param.data.version !== "number"
+      ("version" in rootPromise.param.data && typeof rootPromise.param.data.version !== "number")
     ) {
       // TODO: log something useful
       return doneAndDropTaskIfErr(true);
@@ -139,7 +138,7 @@ export class Computation {
     let registered: RegistryItem;
     const args = rootPromise.param.data.args;
     try {
-      registered = this.registry.get(rootPromise.param.data.func, rootPromise.param.data.version);
+      registered = this.registry.get(rootPromise.param.data.func, rootPromise.param.data.version ?? 1);
     } catch {
       // TODO: log something useful
       return doneAndDropTaskIfErr(true);
