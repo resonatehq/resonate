@@ -64,6 +64,10 @@ func NewCmd() *cobra.Command {
 				return errors.New("must specify a function name with --func")
 			}
 
+			if version <= 0 {
+				return errors.New("version must be greater than 0")
+			}
+
 			promiseId := cmdArgs[0]
 
 			var invokeArgs []any
