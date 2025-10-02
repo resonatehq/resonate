@@ -20,15 +20,16 @@ import (
 )
 
 type Config struct {
-	Size           int               `flag:"size" desc:"submission buffered channel size" default:"100"`
-	BufferSize     int               `flag:"buffer-size" desc:"connection buffer size" default:"100"`
-	MaxConnections int               `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
-	Addr           string            `flag:"addr" desc:"http server address" default:":8002"`
-	Cors           Cors              `flag:"cors" desc:"http cors settings"`
-	Timeout        time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
-	Auth           map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
-	TimeToRetry    time.Duration     `flag:"ttr" desc:"time to wait before resending" default:"15s"`
-	TimeToClaim    time.Duration     `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
+	Size            int               `flag:"size" desc:"submission buffered channel size" default:"100"`
+	BufferSize      int               `flag:"buffer-size" desc:"connection buffer size" default:"100"`
+	MaxConnections  int               `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
+	Addr            string            `flag:"addr" desc:"http server address" default:":8002"`
+	Cors            Cors              `flag:"cors" desc:"http cors settings"`
+	Timeout         time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	DisconnectAfter time.Duration     `flag:"disconnect-after" desc:"time to wait before closing a connections, defaults to never" default:"0"`
+	Auth            map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
+	TimeToRetry     time.Duration     `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim     time.Duration     `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Cors struct {
@@ -463,6 +464,13 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	f.Flush()
 
+	// some environments have a max connection time, this option lets
+	// connections be closed gracefully, the sdk must reconnect
+	var disconnect <-chan time.Time
+	if h.config.DisconnectAfter > 0 {
+		disconnect = time.After(h.config.DisconnectAfter)
+	}
+
 	for {
 		select {
 		case data, ok := <-conn.ch:
@@ -470,12 +478,15 @@ func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			if _, err := w.Write([]byte("data: " + string(data) + "\n\n")); err != nil { // nosemgrep: no-direct-write-to-responsewriter
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil { // nosemgrep: no-fprintf-to-responsewriter
 				h.Disconnect(conn)
 				return
 			}
 
 			f.Flush()
+		case <-disconnect:
+			h.Disconnect(conn)
+			return
 		case <-r.Context().Done():
 			h.Disconnect(conn)
 			return
