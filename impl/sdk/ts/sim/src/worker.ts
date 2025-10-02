@@ -2,7 +2,14 @@ import type { StepClock } from "../../src/clock";
 import type { Encoder } from "../../src/encoder";
 import { Handler } from "../../src/handler";
 import { NoopHeartbeat } from "../../src/heartbeat";
-import type { Network, Message as NetworkMessage, Request, Response, ResponseFor } from "../../src/network/network";
+import type {
+  MessageSource,
+  Network,
+  Message as NetworkMessage,
+  Request,
+  Response,
+  ResponseFor,
+} from "../../src/network/network";
 import type { Registry } from "../../src/registry";
 import { ResonateInner } from "../../src/resonate-inner";
 import type { Callback } from "../../src/types";
@@ -13,6 +20,28 @@ interface DeliveryOptions {
   charFlipProb?: number;
 }
 
+class SimulatedMessageSource implements MessageSource {
+  private subscriptions: {
+    invoke: Array<(msg: NetworkMessage) => void>;
+    resume: Array<(msg: NetworkMessage) => void>;
+    notify: Array<(msg: NetworkMessage) => void>;
+  } = { invoke: [], resume: [], notify: [] };
+
+  constructor(private maybeCorruptData: (data: NetworkMessage) => any) {}
+
+  recv(msg: NetworkMessage): void {
+    for (const callback of this.subscriptions[msg.type]) {
+      callback(this.maybeCorruptData(msg));
+    }
+  }
+
+  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: NetworkMessage) => void): void {
+    this.subscriptions[type].push(callback);
+  }
+
+  stop(): void {}
+}
+
 class SimulatedNetwork implements Network {
   private correlationId = 1;
   private currentTime = 0;
@@ -21,11 +50,7 @@ class SimulatedNetwork implements Network {
   private deliveryOptions: Required<DeliveryOptions>;
   private buffer: Message<Request>[] = [];
   private callbacks: Record<number, { callback: Callback<Response>; timeout: number }> = {};
-  private subscriptions: {
-    invoke: Array<(msg: NetworkMessage) => void>;
-    resume: Array<(msg: NetworkMessage) => void>;
-    notify: Array<(msg: NetworkMessage) => void>;
-  } = { invoke: [], resume: [], notify: [] };
+  private messageSource: SimulatedMessageSource;
 
   constructor(
     prng: Random,
@@ -35,6 +60,11 @@ class SimulatedNetwork implements Network {
   ) {
     this.prng = prng;
     this.deliveryOptions = { charFlipProb };
+    this.messageSource = new SimulatedMessageSource((data) => this.maybeCorruptData(data));
+  }
+
+  getMessageSource(): MessageSource {
+    return this.messageSource;
   }
 
   send<T extends Request>(req: T, cb: (err: boolean, res?: ResponseFor<T>) => void): void {
@@ -50,16 +80,6 @@ class SimulatedNetwork implements Network {
 
     this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 5000 };
     this.buffer.push(message);
-  }
-
-  recv(msg: NetworkMessage): void {
-    for (const callback of this.subscriptions[msg.type]) {
-      callback(this.maybeCorruptData(msg));
-    }
-  }
-
-  subscribe(type: "invoke" | "resume" | "notify", callback: (msg: NetworkMessage) => void): void {
-    this.subscriptions[type].push(callback);
   }
 
   stop(): void {}
@@ -97,7 +117,7 @@ class SimulatedNetwork implements Network {
       }
     } else {
       util.assert(message.source.kind === this.target.kind && message.source.iaddr === this.target.iaddr);
-      this.recv((message as Message<NetworkMessage>).data);
+      this.messageSource.recv((message as Message<NetworkMessage>).data);
     }
   }
 
@@ -154,6 +174,7 @@ export class WorkerProcess extends Process {
       clock: this.clock,
       network: this.network,
       handler: new Handler(this.network, encoder),
+      messageSource: this.network.getMessageSource(),
       registry: registry,
       heartbeat: new NoopHeartbeat(),
       dependencies: new Map(),

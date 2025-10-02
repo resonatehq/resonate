@@ -24,6 +24,7 @@ import type {
   HeartbeatTasksReq,
   HeartbeatTasksRes,
   Message,
+  MessageSource,
   Network,
   ReadPromiseReq,
   ReadPromiseRes,
@@ -34,7 +35,7 @@ import type {
   ResponseFor,
   ScheduleRecord,
   TaskRecord,
-} from "./network"; // Assuming types are in a separate file
+} from "./network";
 
 import { EventSource } from "eventsource";
 
@@ -119,12 +120,16 @@ interface HeartbeatResponseDto {
 
 export interface HttpNetworkConfig {
   url: string;
+  auth?: { username: string; password: string };
+  timeout?: number;
+  headers?: Record<string, string>;
+}
+
+export interface HttpMessageSourceConfig {
+  url: string;
   pid: string;
   group: string;
   auth?: { username: string; password: string };
-  messageSourceAuth?: { username: string; password: string };
-  timeout?: number;
-  headers?: Record<string, string>;
 }
 
 export type RetryPolicy = {
@@ -136,78 +141,17 @@ export class HttpNetwork implements Network {
   private EXCPECTED_RESONATE_VERSION = "0.7.15";
 
   private url: string;
-  private group: string;
-  private pid: string;
   private timeout: number;
   private headers: Record<string, string>;
-  private msgHeaders: Record<string, string>;
-  private eventSource: EventSource;
-  private subscriptions: {
-    invoke: Array<(msg: Message) => void>;
-    resume: Array<(msg: Message) => void>;
-    notify: Array<(msg: Message) => void>;
-  } = { invoke: [], resume: [], notify: [] };
 
-  constructor({ url, pid, group, auth, messageSourceAuth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
+  constructor({ url, auth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
     this.url = url;
-
-    this.group = group;
-    this.pid = pid;
     this.timeout = timeout;
 
     this.headers = { "Content-Type": "application/json", ...headers };
     if (auth) {
       this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
     }
-
-    this.msgHeaders = {};
-    if (messageSourceAuth) {
-      this.msgHeaders.Authorization = `Basic ${util.base64Encode(`${messageSourceAuth.username}:${messageSourceAuth.password}`)}`;
-    }
-
-    this.eventSource = this.connect();
-  }
-
-  private connect() {
-    const url = new URL(`/poll/${encodeURIComponent(this.group)}/${encodeURIComponent(this.pid)}`, `${this.url}`);
-    this.eventSource = new EventSource(url, {
-      fetch: (url, init) =>
-        fetch(url, {
-          ...init,
-          headers: {
-            ...init.headers,
-            ...this.msgHeaders,
-          },
-        }),
-    });
-
-    this.eventSource.addEventListener("message", (event) => {
-      let msg: Message;
-      const data = JSON.parse(event.data);
-
-      if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
-        msg = { type: data.type, task: data.task };
-      } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
-        msg = { type: data.type, promise: this.mapPromiseDtoToRecord(data.promise) };
-      } else {
-        console.warn("Received invalid message:", data);
-        return;
-      }
-
-      this.recv(msg);
-    });
-
-    this.eventSource.addEventListener("error", () => {
-      // some browsers/runtimes may handle automatic reconnect
-      // differently, so to ensure consistency close the eventsource
-      // and recreate
-      this.eventSource.close();
-
-      console.log(`Networking. Cannot connect to [${this.url}/poll]. Retrying in 5s.`);
-      setTimeout(() => this.connect(), 5000);
-    });
-
-    return this.eventSource;
   }
 
   send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever = false): void {
@@ -225,18 +169,8 @@ export class HttpNetwork implements Network {
     );
   }
 
-  recv(msg: Message): void {
-    for (const callback of this.subscriptions[msg.type]) {
-      callback(msg);
-    }
-  }
-
   public stop(): void {
-    this.eventSource.close();
-  }
-
-  public subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void {
-    this.subscriptions[type].push(callback);
+    // No-op for HttpNetwork, MessageSource handles connection cleanup
   }
 
   private async handleRequest(req: Request, retryPolicy: RetryPolicy = {}): Promise<Response> {
@@ -292,7 +226,7 @@ export class HttpNetwork implements Network {
       retryPolicy,
     );
 
-    const promise = this.mapPromiseDtoToRecord((await res.json()) as PromiseDto);
+    const promise = mapPromiseDtoToRecord((await res.json()) as PromiseDto);
     return { kind: "createPromise", promise };
   }
 
@@ -328,7 +262,7 @@ export class HttpNetwork implements Network {
     const data = (await res.json()) as CreatePromiseAndTaskResponseDto;
     return {
       kind: "createPromiseAndTask",
-      promise: this.mapPromiseDtoToRecord(data.promise),
+      promise: mapPromiseDtoToRecord(data.promise),
       task: data.task ? this.mapTaskDtoToRecord(data.task) : undefined,
     };
   }
@@ -336,7 +270,7 @@ export class HttpNetwork implements Network {
   private async readPromise(req: ReadPromiseReq, retryPolicy: RetryPolicy = {}): Promise<ReadPromiseRes> {
     const res = await this.fetch(`/promises/${encodeURIComponent(req.id)}`, { method: "GET" }, retryPolicy);
 
-    const promise = this.mapPromiseDtoToRecord((await res.json()) as PromiseDto);
+    const promise = mapPromiseDtoToRecord((await res.json()) as PromiseDto);
     return { kind: "readPromise", promise };
   }
 
@@ -358,7 +292,7 @@ export class HttpNetwork implements Network {
       retryPolicy,
     );
 
-    const promise = this.mapPromiseDtoToRecord((await res.json()) as PromiseDto);
+    const promise = mapPromiseDtoToRecord((await res.json()) as PromiseDto);
     return { kind: "completePromise", promise };
   }
 
@@ -380,7 +314,7 @@ export class HttpNetwork implements Network {
     return {
       kind: "createCallback",
       callback: data.callback ? this.mapCallbackDtoToRecord(data.callback) : undefined,
-      promise: this.mapPromiseDtoToRecord(data.promise),
+      promise: mapPromiseDtoToRecord(data.promise),
     };
   }
 
@@ -407,7 +341,7 @@ export class HttpNetwork implements Network {
     return {
       kind: "createSubscription",
       callback: data.callback ? this.mapCallbackDtoToRecord(data.callback) : undefined,
-      promise: this.mapPromiseDtoToRecord(data.promise),
+      promise: mapPromiseDtoToRecord(data.promise),
     };
   }
 
@@ -484,13 +418,13 @@ export class HttpNetwork implements Network {
           root: message.promises.root
             ? {
                 id: message.promises.root.id,
-                data: this.mapPromiseDtoToRecord(message.promises.root.data),
+                data: mapPromiseDtoToRecord(message.promises.root.data),
               }
             : undefined,
           leaf: message.promises.leaf
             ? {
                 id: message.promises.leaf.id,
-                data: this.mapPromiseDtoToRecord(message.promises.leaf.data),
+                data: mapPromiseDtoToRecord(message.promises.leaf.data),
               }
             : undefined,
         },
@@ -598,21 +532,6 @@ export class HttpNetwork implements Network {
     throw new Error("Fetch error");
   }
 
-  private mapPromiseDtoToRecord(promise: PromiseDto): DurablePromiseRecord {
-    return {
-      id: promise.id,
-      state: this.mapApiStateToInternal(promise.state),
-      timeout: promise.timeout,
-      param: promise.param,
-      value: promise.value,
-      tags: promise.tags || {},
-      iKeyForCreate: promise.idempotencyKeyForCreate,
-      iKeyForComplete: promise.idempotencyKeyForComplete,
-      createdOn: promise.createdOn,
-      completedOn: promise.completedOn,
-    };
-  }
-
   private mapScheduleDtoToRecord(schedule: ScheduleDto): ScheduleRecord {
     return {
       id: schedule.id,
@@ -650,23 +569,119 @@ export class HttpNetwork implements Network {
       completedOn: apiTask.completedOn,
     };
   }
+}
 
-  private mapApiStateToInternal(
-    apiState: string,
-  ): "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout" {
-    switch (apiState) {
-      case "PENDING":
-        return "pending";
-      case "RESOLVED":
-        return "resolved";
-      case "REJECTED":
-        return "rejected";
-      case "REJECTED_CANCELED":
-        return "rejected_canceled";
-      case "REJECTED_TIMEDOUT":
-        return "rejected_timedout";
-      default:
-        throw new Error(`Unknown API state: ${apiState}`);
+export class HttpMessageSource implements MessageSource {
+  private url: string;
+  private group: string;
+  private pid: string;
+  private headers: Record<string, string>;
+  private eventSource: EventSource;
+  private subscriptions: {
+    invoke: Array<(msg: Message) => void>;
+    resume: Array<(msg: Message) => void>;
+    notify: Array<(msg: Message) => void>;
+  } = { invoke: [], resume: [], notify: [] };
+
+  constructor({ url, pid, group, auth }: HttpMessageSourceConfig) {
+    this.url = url;
+    this.group = group;
+    this.pid = pid;
+    this.headers = {};
+    if (auth) {
+      this.headers.Authorization = `Basic ${util.base64Encode(`${auth.username}:${auth.password}`)}`;
+    }
+
+    this.eventSource = this.connect();
+  }
+
+  private connect() {
+    const url = new URL(`/poll/${encodeURIComponent(this.group)}/${encodeURIComponent(this.pid)}`, `${this.url}`);
+    this.eventSource = new EventSource(url, {
+      fetch: (url, init) =>
+        fetch(url, {
+          ...init,
+          headers: {
+            ...init.headers,
+            ...this.headers,
+          },
+        }),
+    });
+
+    this.eventSource.addEventListener("message", (event) => {
+      let msg: Message;
+      const data = JSON.parse(event.data);
+
+      if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
+        msg = { type: data.type, task: data.task };
+      } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
+        msg = { type: data.type, promise: mapPromiseDtoToRecord(data.promise) };
+      } else {
+        console.warn("Received invalid message:", data);
+        return;
+      }
+
+      this.recv(msg);
+    });
+
+    this.eventSource.addEventListener("error", () => {
+      // some browsers/runtimes may handle automatic reconnect
+      // differently, so to ensure consistency close the eventsource
+      // and recreate
+      this.eventSource.close();
+
+      console.log(`Networking. Cannot connect to [${this.url}/poll]. Retrying in 5s.`);
+      setTimeout(() => this.connect(), 5000);
+    });
+
+    return this.eventSource;
+  }
+
+  recv(msg: Message): void {
+    for (const callback of this.subscriptions[msg.type]) {
+      callback(msg);
     }
   }
+
+  public stop(): void {
+    this.eventSource.close();
+  }
+
+  public subscribe(type: "invoke" | "resume" | "notify", callback: (msg: Message) => void): void {
+    this.subscriptions[type].push(callback);
+  }
+}
+
+function mapApiStateToInternal(
+  state: string,
+): "pending" | "resolved" | "rejected" | "rejected_canceled" | "rejected_timedout" {
+  switch (state) {
+    case "PENDING":
+      return "pending";
+    case "RESOLVED":
+      return "resolved";
+    case "REJECTED":
+      return "rejected";
+    case "REJECTED_CANCELED":
+      return "rejected_canceled";
+    case "REJECTED_TIMEDOUT":
+      return "rejected_timedout";
+    default:
+      throw new Error(`Unknown API state: ${state}`);
+  }
+}
+
+function mapPromiseDtoToRecord(promise: PromiseDto): DurablePromiseRecord {
+  return {
+    id: promise.id,
+    state: mapApiStateToInternal(promise.state),
+    timeout: promise.timeout,
+    param: promise.param,
+    value: promise.value,
+    tags: promise.tags || {},
+    iKeyForCreate: promise.idempotencyKeyForCreate,
+    iKeyForComplete: promise.idempotencyKeyForComplete,
+    createdOn: promise.createdOn,
+    completedOn: promise.completedOn,
+  };
 }

@@ -2,7 +2,7 @@ import type { Clock } from "./clock";
 import { Computation, type Status } from "./computation";
 import type { Handler } from "./handler";
 import type { Heartbeat } from "./heartbeat";
-import type { DurablePromiseRecord, Message, Network, TaskRecord } from "./network/network";
+import type { DurablePromiseRecord, Message, MessageSource, Network, TaskRecord } from "./network/network";
 import type { Registry } from "./registry";
 import type { Callback } from "./types";
 import * as util from "./util";
@@ -49,6 +49,7 @@ export class ResonateInner {
     registry,
     heartbeat,
     dependencies,
+    messageSource = undefined,
   }: {
     unicast: string;
     anycast: string;
@@ -60,6 +61,7 @@ export class ResonateInner {
     registry: Registry;
     heartbeat: Heartbeat;
     dependencies: Map<string, any>;
+    messageSource?: MessageSource;
   }) {
     this.unicast = unicast;
     this.anycast = anycast;
@@ -73,8 +75,8 @@ export class ResonateInner {
     this.dependencies = dependencies;
 
     // subscribe to invoke and resume
-    this.network.subscribe("invoke", this.onMessage.bind(this));
-    this.network.subscribe("resume", this.onMessage.bind(this));
+    messageSource?.subscribe("invoke", this.onMessage.bind(this));
+    messageSource?.subscribe("resume", this.onMessage.bind(this));
   }
 
   public process(task: Task, done: Callback<Status>) {
