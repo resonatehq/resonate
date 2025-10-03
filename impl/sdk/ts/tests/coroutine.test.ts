@@ -60,7 +60,7 @@ describe("Coroutine", () => {
     return new Promise<any>((resolve) => {
       Coroutine.exec(
         uuid,
-        InnerContext.root(uuid, 0, new Never(), new WallClock(), new Map()),
+        InnerContext.root(uuid, "poll://any@default", 0, new Never(), new WallClock(), new Map()),
         func,
         args,
         handler,

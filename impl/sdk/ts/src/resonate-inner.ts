@@ -27,7 +27,8 @@ export type UnclaimedTask = {
 
 export class ResonateInner {
   private unicast: string;
-  private anycast: string;
+  private anycastPreference: string;
+  private anycastNoPreference: string;
   private pid: string;
   private ttl: number;
   private clock: Clock;
@@ -40,7 +41,8 @@ export class ResonateInner {
 
   constructor({
     unicast,
-    anycast,
+    anycastPreference,
+    anycastNoPreference,
     pid,
     ttl,
     clock,
@@ -52,7 +54,8 @@ export class ResonateInner {
     messageSource = undefined,
   }: {
     unicast: string;
-    anycast: string;
+    anycastPreference: string;
+    anycastNoPreference: string;
     pid: string;
     ttl: number;
     clock: Clock;
@@ -64,7 +67,8 @@ export class ResonateInner {
     messageSource?: MessageSource;
   }) {
     this.unicast = unicast;
-    this.anycast = anycast;
+    this.anycastPreference = anycastPreference;
+    this.anycastNoPreference = anycastNoPreference;
     this.pid = pid;
     this.ttl = ttl;
     this.clock = clock;
@@ -85,7 +89,8 @@ export class ResonateInner {
       computation = new Computation(
         task.task.rootPromiseId,
         this.unicast,
-        this.anycast,
+        this.anycastPreference,
+        this.anycastNoPreference,
         this.pid,
         this.ttl,
         this.clock,

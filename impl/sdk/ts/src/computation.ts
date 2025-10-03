@@ -30,7 +30,8 @@ export class Computation {
   private ttl: number;
   private clock: Clock;
   private unicast: string;
-  private anycast: string;
+  private anycastPreference: string;
+  private anycastNoPreference: string;
   private network: Network;
   private handler: Handler;
   private registry: Registry;
@@ -44,7 +45,8 @@ export class Computation {
   constructor(
     id: string,
     unicast: string,
-    anycast: string,
+    anycastPreference: string,
+    anycastNoPreference: string,
     pid: string,
     ttl: number,
     clock: Clock,
@@ -57,7 +59,8 @@ export class Computation {
   ) {
     this.id = id;
     this.unicast = unicast;
-    this.anycast = anycast;
+    this.anycastPreference = anycastPreference;
+    this.anycastNoPreference = anycastNoPreference;
     this.pid = pid;
     this.ttl = ttl;
     this.clock = clock;
@@ -160,6 +163,7 @@ export class Computation {
 
       const ctx = InnerContext.root(
         this.id,
+        this.anycastNoPreference,
         rootPromise.timeout,
         util.isGeneratorFunction(registered.func) ? new Never() : new Exponential(),
         this.clock,
@@ -277,7 +281,7 @@ export class Computation {
             promiseId: id,
             rootPromiseId: this.id,
             timeout: timeout,
-            recv: this.anycast,
+            recv: this.anycastPreference,
           },
           done,
         ),

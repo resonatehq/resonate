@@ -113,8 +113,9 @@ describe("Computation Event Queue Concurrency", () => {
 
     computation = new Computation(
       "root-promise-1",
-      "poll://any@test-group/test-pid",
       "poll://uni@test-group/test-pid",
+      "poll://any@test-group/test-pid",
+      "poll://any@test-group",
       "test-pid",
       3600,
       new WallClock(),

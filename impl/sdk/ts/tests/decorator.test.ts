@@ -27,7 +27,9 @@ describe("Decorator", () => {
       yield* ctx.beginRun((_ctx: Context) => 42);
     }
 
-    const d = new Decorator(foo(InnerContext.root("foo", 0, new Never(), new WallClock(), new Map())));
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
     const r = d.next({ type: "internal.nothing" });
 
     expect(r).toMatchObject({
@@ -60,7 +62,9 @@ describe("Decorator", () => {
       return v1 + v2;
     }
 
-    const d = new Decorator(foo(InnerContext.root("foo", 0, new Never(), new WallClock(), new Map())));
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
     let r = d.next({ type: "internal.nothing" });
     expect(r).toMatchObject({
       type: "internal.async.l",
@@ -120,7 +124,9 @@ describe("Decorator", () => {
       return 30;
     }
 
-    const d = new Decorator(foo(InnerContext.root("foo", 0, new Never(), new WallClock(), new Map())));
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: ok(10) }); // yield a future, get a literal back
@@ -151,7 +157,9 @@ describe("Decorator", () => {
       return 30; // D
     }
 
-    const d = new Decorator(foo(InnerContext.root("foo", 0, new Never(), new WallClock(), new Map())));
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: ok(10) }); // A -> yield a future, get a literal back
@@ -189,7 +197,9 @@ describe("Decorator", () => {
       return 42; // D
     }
 
-    const d = new Decorator(foo(InnerContext.root("foo", 0, new Never(), new WallClock(), new Map())));
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
 
     d.next({ type: "internal.nothing" }); // First yield
     d.next({ type: "internal.literal", value: ok(10) }); // A -> yield a future, get a literal back

@@ -43,7 +43,8 @@ export interface ResonateSchedule {
 
 export class Resonate {
   private unicast: string;
-  private anycast: string;
+  private anycastPreference: string;
+  private anycastNoPreference: string;
   private pid: string;
   private ttl: number;
 
@@ -74,7 +75,8 @@ export class Resonate {
     auth?: { username: string; password: string };
   } = {}) {
     this.unicast = `poll://uni@${group}/${pid}`;
-    this.anycast = `poll://any@${group}/${pid}`;
+    this.anycastPreference = `poll://any@${group}/${pid}`;
+    this.anycastNoPreference = `poll://any@${group}`;
     this.pid = pid;
     this.ttl = ttl;
     this.encoder = new JsonEncoder();
@@ -96,7 +98,8 @@ export class Resonate {
 
     this.inner = new ResonateInner({
       unicast: this.unicast,
-      anycast: this.anycast,
+      anycastPreference: this.anycastPreference,
+      anycastNoPreference: this.anycastNoPreference,
       pid: this.pid,
       ttl: this.ttl,
       clock: new WallClock(),
@@ -230,7 +233,7 @@ export class Resonate {
         },
         tags: {
           ...opts.tags,
-          "resonate:invoke": this.anycast,
+          "resonate:invoke": this.anycastPreference,
           "resonate:scope": "global",
         },
       },
@@ -348,7 +351,8 @@ export class Resonate {
   }
 
   public options(opts: Partial<Options> = {}): Options {
-    return new Options(opts);
+    const target = opts.target ?? this.anycastNoPreference;
+    return new Options({ target, ...opts });
   }
 
   /** Store a named dependency for use with `Context`.

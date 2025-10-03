@@ -168,7 +168,8 @@ export class WorkerProcess extends Process {
     this.registry = registry;
     this.resonate = new ResonateInner({
       unicast: `sim://uni@${gaddr}/${iaddr}`,
-      anycast: `sim://any@${gaddr}/${iaddr}`,
+      anycastPreference: `sim://any@${gaddr}/${iaddr}`,
+      anycastNoPreference: `sim://any@${gaddr}`,
       pid: iaddr,
       ttl: 5000,
       clock: this.clock,
