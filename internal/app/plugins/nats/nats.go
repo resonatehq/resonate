@@ -25,7 +25,6 @@ type Config struct {
 
 type Client interface {
 	Publish(subject string, data []byte) error
-	PublishRequest(subject, reply string, data []byte) error
 	Close()
 }
 

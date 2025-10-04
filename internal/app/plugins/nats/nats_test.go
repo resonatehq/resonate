@@ -48,25 +48,6 @@ func (m *MockNATSClient) Publish(subject string, data []byte) error {
 	return nil
 }
 
-func (m *MockNATSClient) PublishRequest(subject, reply string, data []byte) error {
-	if !m.ok {
-		return errors.New("mock error: failed to publish request")
-	}
-
-	if m.ch != nil {
-		select {
-		case m.ch <- &PublishParams{
-			Subject: subject,
-			Data:    data,
-		}:
-		default:
-			// Channel is full or no one is reading, ignore
-		}
-	}
-
-	return nil
-}
-
 func (m *MockNATSClient) Close() {}
 
 func TestNATSPlugin(t *testing.T) {
