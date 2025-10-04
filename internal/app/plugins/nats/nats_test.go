@@ -14,8 +14,9 @@ import (
 )
 
 type MockNATSClient struct {
-	ch chan<- *PublishParams
-	ok bool
+	ch     chan<- *PublishParams
+	ok     bool
+	closed bool
 	// Add a field to control publish behavior
 	PublishFunc func(subject string, data []byte) error
 }
@@ -34,6 +35,10 @@ func (m *MockNATSClient) Publish(subject string, data []byte) error {
 		return errors.New("mock error: failed to publish message")
 	}
 
+	if m.closed {
+		return errors.New("mock client is closed")
+	}
+
 	if m.ch != nil {
 		select {
 		case m.ch <- &PublishParams{
@@ -48,15 +53,14 @@ func (m *MockNATSClient) Publish(subject string, data []byte) error {
 	return nil
 }
 
-func (m *MockNATSClient) Close() {}
+func (m *MockNATSClient) Close() {
+	m.closed = true
+}
 
 func TestNATSPlugin(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
 	ch := make(chan *PublishParams, 1)
-
-	success_client := &MockNATSClient{ch: ch, ok: true}
-	failure_client := &MockNATSClient{ch: ch, ok: false}
 
 	for _, tc := range []struct {
 		name    string
@@ -68,7 +72,7 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "Success",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
 				Subject: "test.subject",
@@ -78,7 +82,7 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "SuccessWithDifferentSubject",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "my.custom.subject"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
 				Subject: "my.custom.subject",
@@ -88,7 +92,7 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "SuccessWithDifferentURL",
 			addr:    []byte(`{"url": "nats://example.com:4222", "subject": "test.subject"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
 				Subject: "test.subject",
@@ -98,7 +102,7 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "SuccessWithComplexSubject",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "orders.created.v1"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
 				Subject: "orders.created.v1",
@@ -108,7 +112,7 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "SuccessWithSecureURL",
 			addr:    []byte(`{"url": "nats://secure.example.com:4222", "subject": "secure.topic"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
 				Subject: "secure.topic",
@@ -118,49 +122,49 @@ func TestNATSPlugin(t *testing.T) {
 		{
 			name:    "FailureDueToJson",
 			addr:    []byte(""),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToClient",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`),
-			client:  failure_client,
+			client:  &MockNATSClient{ch: ch, ok: false},
 			success: false,
 		},
 		{
 			name:    "FailureDueToMissingURL",
 			addr:    []byte(`{"subject": "test.subject"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToMissingSubject",
 			addr:    []byte(`{"url": "nats://localhost:4222"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToEmptyURL",
 			addr:    []byte(`{"url": "", "subject": "test.subject"}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToEmptySubject",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": ""}`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToMalformedJSON",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToInvalidJSON",
 			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject", "extra": }`),
-			client:  success_client,
+			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 	} {
@@ -197,6 +201,10 @@ func TestNATSPlugin(t *testing.T) {
 				case <-time.After(100 * time.Millisecond):
 					// No params expected for failure cases
 				}
+			}
+
+			if tc.client != nil {
+				tc.client.Close()
 			}
 
 			err = nats.Stop()
@@ -243,6 +251,8 @@ func TestNATSErrorHandling(t *testing.T) {
 			t.Fatal("Test timed out")
 		}
 
+		error_client.Close()
+
 		err = nats.Stop()
 		assert.Nil(t, err)
 	})
@@ -279,6 +289,8 @@ func TestNATSErrorHandling(t *testing.T) {
 		case <-time.After(1 * time.Second):
 			t.Fatal("Test timed out")
 		}
+
+		success_client.Close()
 
 		err = nats.Stop()
 		assert.Nil(t, err)
@@ -328,6 +340,8 @@ func TestNATSErrorHandling(t *testing.T) {
 			assert.Equal(t, []byte("test message"), params.Data)
 		}
 
+		success_client.Close()
+
 		err = nats.Stop()
 		assert.Nil(t, err)
 	})
@@ -358,6 +372,8 @@ func TestNATSErrorHandling(t *testing.T) {
 			Done: func(completion *t_aio.SenderCompletion) {},
 		})
 		assert.False(t, ok)
+
+		success_client.Close()
 
 		err = nats.Stop()
 		assert.Nil(t, err)
