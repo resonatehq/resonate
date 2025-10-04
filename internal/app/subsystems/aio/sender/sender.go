@@ -9,6 +9,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/nats"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -28,9 +29,10 @@ type Config struct {
 }
 
 type PluginConfig struct {
-	Http EnabledPlugin[http.Config] `flag:"http"`
-	Poll EnabledPlugin[poll.Config] `flag:"poll"`
-	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
+	Http EnabledPlugin[http.Config]  `flag:"http"`
+	Poll EnabledPlugin[poll.Config]  `flag:"poll"`
+	SQS  DisabledPlugin[sqs.Config]  `flag:"sqs"`
+	NATS DisabledPlugin[nats.Config] `flag:"nats"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -332,6 +334,24 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
+
+	case "nats":
+		subject := strings.TrimPrefix(u.Path, "/")
+		if subject == "" {
+			return nil, false
+		}
+
+		addr := map[string]string{
+			"url":     u.String(),
+			"subject": subject,
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "nats", Data: data}, true
 
 	default:
 		return nil, false

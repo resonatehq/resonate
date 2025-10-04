@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/nats"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
@@ -210,6 +211,14 @@ func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, 
 	}
 	if c.AIO.Subsystems.Sender.Config.Plugins.SQS.Enabled {
 		plugin, err := sqs.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.SQS.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.NATS.Enabled {
+		plugin, err := nats.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.NATS.Config)
 		if err != nil {
 			return nil, "", err
 		}
