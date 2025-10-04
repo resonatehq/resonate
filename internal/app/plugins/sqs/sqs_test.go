@@ -31,13 +31,11 @@ func (m *MockSQSClient) SendMessage(
 		return nil, errors.New("mock error: failed to send message")
 	}
 
-	// construct options
 	opts := &sqs.Options{}
 	for _, o := range opt {
 		o(opts)
 	}
 
-	// send the params to the backchannel
 	m.ch <- &SendMessageParams{
 		Url:    *params.QueueUrl,
 		Region: opts.Region,
@@ -54,8 +52,8 @@ func TestSQSPlugin(t *testing.T) {
 	ch := make(chan *SendMessageParams, 1)
 	defer close(ch)
 
-	successClient := &MockSQSClient{ch, true}
-	failureClient := &MockSQSClient{ch, false}
+	success_client := &MockSQSClient{ch, true}
+	failure_client := &MockSQSClient{ch, false}
 
 	for _, tc := range []struct {
 		name    string
@@ -67,7 +65,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "Success",
 			addr:    []byte(`{"url": "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue"}`),
-			client:  successClient,
+			client:  success_client,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue",
@@ -77,7 +75,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "SuccessNoRegion",
 			addr:    []byte(`{"url": "https://notvalid.com"}`),
-			client:  successClient,
+			client:  success_client,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://notvalid.com",
@@ -87,7 +85,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "SuccessRegionTaskPrecedenceOverUrl",
 			addr:    []byte(`{"url": "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue", "region": "us-east-2"}`),
-			client:  successClient,
+			client:  success_client,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue",
@@ -97,18 +95,18 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "FailureDueToJson",
 			addr:    []byte(""),
-			client:  successClient,
+			client:  success_client,
 			success: false,
 		},
 		{
 			name:    "FailureDueToCleint",
 			addr:    []byte(`{}`),
-			client:  failureClient,
+			client:  failure_client,
 			success: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sqs, err := newWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
+			sqs, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
 			assert.Nil(t, err)
 
 			err = sqs.Start(nil)
