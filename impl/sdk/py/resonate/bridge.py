@@ -113,7 +113,6 @@ class Bridge:
             pid=self._pid,
             ttl=self._ttl * 1000,
         )
-
         if promise.completed:
             assert not task
             match promise.result(encoder):
@@ -124,9 +123,7 @@ class Bridge:
         elif task is not None:
             self._promise_id_to_task[promise.id] = task
             self.start_heartbeat()
-            self._cq.put_nowait((Invoke(conv.id, conv, promise.abs_timeout, func, args, kwargs, opts, promise), future))
-        else:
-            self._cq.put_nowait((Listen(promise.id), future))
+            self._cq.put_nowait(Invoke(conv.id, conv, promise.abs_timeout, func, args, kwargs, opts, promise))
 
         return promise
 
@@ -149,8 +146,6 @@ class Bridge:
                     future.set_result(v)
                 case Ko(e):
                     future.set_exception(e)
-        else:
-            self._cq.put_nowait((Listen(promise.id), future))
 
         return promise
 
@@ -163,8 +158,6 @@ class Bridge:
                     future.set_result(v)
                 case Ko(e):
                     future.set_exception(e)
-        else:
-            self._cq.put_nowait((Listen(id), future))
 
         return promise
 
@@ -204,8 +197,13 @@ class Bridge:
 
     @exit_on_exception
     def _process_cq(self) -> None:
+        shutdown_error: ResonateShutdownError | None = None
         while item := self._cq.get():
             cmd, future = item if isinstance(item, tuple) else (item, None)
+            if shutdown_error is not None and future is not None:
+                future.set_exception(shutdown_error)
+                continue
+
             match self._scheduler.step(cmd, future):
                 case More(reqs):
                     for req in reqs:
@@ -215,13 +213,12 @@ class Bridge:
                                     cmd = self._handle_network_request(id, cid, n_req)
                                     self._cq.put_nowait(cmd)
                                 except Exception as e:
-                                    err = ResonateShutdownError(mesg="An unexpected store error has occurred, shutting down")
-                                    err.__cause__ = e  # bind original error
+                                    shutdown_error = ResonateShutdownError(mesg="An unexpected store error has occurred, shutting down")
+                                    shutdown_error.__cause__ = e  # bind original error
 
                                     # bypass the cq and shutdown right away
-                                    self._scheduler.shutdown(err)
+                                    self._scheduler.shutdown(shutdown_error)
                                     self._stop_no_join()
-                                    return
 
                             case Function(id, cid, func):
                                 self._processor.enqueue(func, lambda r, id=id, cid=cid: self._cq.put_nowait(Return(id, cid, r)))
@@ -438,3 +435,6 @@ class Bridge:
 
             case _:
                 raise NotImplementedError
+
+    def subscribe(self, id: str, future: Future) -> None:
+        self._cq.put_nowait((Listen(id), future))

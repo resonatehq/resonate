@@ -16,7 +16,7 @@ from resonate.coroutine import LFC, LFI, RFC, RFI
 from resonate.dependencies import Dependencies
 from resonate.encoders import JsonEncoder, JsonPickleEncoder, NoopEncoder
 from resonate.loggers import ContextLogger
-from resonate.models.commands import Command, Invoke, Listen
+from resonate.models.commands import Command, Invoke
 from resonate.options import Options
 from resonate.registry import Registry
 from resonate.resonate import Function
@@ -71,9 +71,11 @@ def registry() -> Registry:
 
 def cmd(resonate: Resonate) -> Command:
     item = resonate._bridge._cq.get_nowait()  # noqa: SLF001
-    assert isinstance(item, tuple)
-
-    cmd, _ = item
+    assert item is not None
+    if isinstance(item, tuple):
+        cmd, _ = item
+    else:
+        cmd = item
     return cmd
 
 
@@ -388,7 +390,6 @@ def test_begin_rpc(
 
     for id, fn in [("f1", func), ("f2", name), ("f3", f)]:
         resonate.begin_rpc(id, fn, *args, **kwargs)
-        assert cmd(resonate) == Listen(id=id)
 
         promise = resonate.promises.get(id=id)
         assert promise.id == id
@@ -403,7 +404,6 @@ def test_begin_rpc(
 
     for id, fn in [("f4", func), ("f5", name), ("f6", f)]:
         resonate.options(**opts).begin_rpc(id, fn, *args, **kwargs)
-        assert cmd(resonate) == Listen(id=id)
 
         promise = resonate.promises.get(id=id)
         assert promise.id == id
@@ -421,7 +421,6 @@ def test_begin_rpc(
         )
 
     f.begin_rpc("f7", *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f7")
 
     promise = resonate.promises.get(id="f7")
     assert promise.id == "f7"
@@ -435,7 +434,6 @@ def test_begin_rpc(
     )
 
     f.options(**opts).begin_rpc("f8", *args, **kwargs)
-    assert cmd(resonate) == Listen(id="f8")
 
     promise = resonate.promises.get(id="f8")
     assert promise.id == "f8"
@@ -486,7 +484,6 @@ def test_begin_run_and_begin_rpc_validations(registry: Registry, func: Callable 
 def test_get(resonate: Resonate, id: str) -> None:
     resonate.promises.create(id=id, timeout=sys.maxsize)
     resonate.get(id)
-    assert cmd(resonate) == Listen(id=id)
 
 
 def test_resonate_type_annotations() -> None:
@@ -680,15 +677,18 @@ def test_context_rfx_validations(registry: Registry, func: Callable, match: str)
 @pytest.mark.parametrize("encoder", [JsonEncoder(), JsonPickleEncoder(), NoopEncoder(), None])
 @pytest.mark.parametrize("non_retryable_exceptions", [(NameError,), (ValueError,), (NameError, ValueError), None])
 @pytest.mark.parametrize("retry_policy", [Constant(), Exponential(), Linear(), Never(), None])
-@pytest.mark.parametrize("target", [
-    ("foo", "poll://any@foo"),
-    ("bar", "poll://any@bar"),
-    ("baz", "poll://any@baz"),
-    ("poll://default", "poll://default"),
-    ("poll://any@default", "poll://any@default"),
-    ("http://resonatehq.io", "http://resonatehq.io"),
-    (None, None),
-])
+@pytest.mark.parametrize(
+    "target",
+    [
+        ("foo", "poll://any@foo"),
+        ("bar", "poll://any@bar"),
+        ("baz", "poll://any@baz"),
+        ("poll://default", "poll://default"),
+        ("poll://any@default", "poll://any@default"),
+        ("http://resonatehq.io", "http://resonatehq.io"),
+        (None, None),
+    ],
+)
 @pytest.mark.parametrize("tags", [{"a": "1"}, {"b": "2"}, {"c": "3"}, None])
 @pytest.mark.parametrize("timeout", [1, 2, 3, None])
 @pytest.mark.parametrize("version", [1, 2, 3])

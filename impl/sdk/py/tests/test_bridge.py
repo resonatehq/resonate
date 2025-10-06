@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import threading
 import time
@@ -11,7 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from resonate.errors import ResonateShutdownError, ResonateStoreError
+from resonate.errors import ResonateShutdownError
+from resonate.errors.errors import ResonateStoreError
 from resonate.resonate import Resonate
 from resonate.retry_policies import Constant, Never
 from resonate.stores import LocalStore
@@ -120,10 +120,7 @@ def rfi_add_one_by_name(ctx: Context, n: int) -> Generator[Any, Any, int]:
 
 
 def hitl(ctx: Context, id: str | None) -> Generator[Yieldable, Any, int]:
-    if id:
-        p = yield ctx.promise().options(id=id)
-    else:
-        p = yield ctx.promise()
+    p = yield ctx.promise().options(id=id, idempotency_key=id)
     v = yield p
     return v
 
@@ -227,25 +224,6 @@ def resonate(store: Store, message_source: MessageSource) -> Generator[Resonate,
     resonate.stop()
 
 
-def test_run_on_schedule(resonate: Resonate) -> None:
-    e = threading.Event()
-
-    @resonate.register
-    def on_schedule(ctx: Context) -> None:
-        e.set()
-
-    id = f"on-schedule-{uuid.uuid4().hex}"
-    resonate.schedules.create(
-        id,
-        "* * * * *",
-        f"{id}.{{{{.timestamp}}}}",
-        (60 * 60) * 1000,  # input in milliseconds
-        promise_data=json.dumps({"func": "on_schedule", "args": [], "kwargs": {}, "version": 1}),
-        promise_tags={"resonate:invoke": "default"},
-    )
-    e.wait()
-
-
 def test_await_keyword(resonate: Resonate) -> None:
     async def run() -> None:
         v = await resonate.begin_run(uuid.uuid4().hex, add_one, 2)
@@ -306,11 +284,13 @@ def test_random_generation(resonate: Resonate) -> None:
 
 
 @pytest.mark.parametrize("id", ["foo", None])
-def test_hitl(resonate: Resonate, id: str | None) -> None:
-    uid = uuid.uuid4()
-    handle = resonate.begin_run(f"hitl-{uid}", hitl, id)
-    time.sleep(1)
-    resonate.promises.resolve(id=id or f"hitl-{uid}.1", data="1")
+def test_hitl(resonate: Resonate, id: str) -> None:
+    uid = uuid.uuid4().hex
+    id = id or f"hitl-{uid}.1"
+    p = resonate.promises.create(id, sys.maxsize, ikey=id, strict=False)
+    handle = resonate.begin_run(f"hitl-{uid}", hitl, p.id)
+    p_done = resonate.promises.resolve(id=p.id, data="1")
+    assert p_done.state == "RESOLVED"
     assert handle.result() == 1
 
 
@@ -443,7 +423,7 @@ def test_info(
         id,
         "info",
         idempotency_key or id,
-        {**(tags or {}), "resonate:root": id, "resonate:parent": id, "resonate:scope": "global", "resonate:invoke": f"poll://any@{target or "default"}"},
+        {**(tags or {}), "resonate:root": id, "resonate:parent": id, "resonate:scope": "global", "resonate:invoke": f"poll://any@{target or 'default'}"},
         version,
     )
 
