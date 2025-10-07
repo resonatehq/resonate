@@ -151,6 +151,8 @@ export interface Context {
 
   // sleep
   sleep(ms: number): RFC<void>;
+  sleep(opts: { for?: number; until?: Date }): RFC<void>;
+  sleep(msOrOpts: number | { for?: number; until?: Date }): RFC<void>;
 
   // promise
   promise<T>({
@@ -315,9 +317,21 @@ export class InnerContext implements Context {
     return new RFI(id, this.latentCreateOpts(id, timeout, data, tags));
   }
 
-  sleep(ms: number): RFC<void> {
-    const opts = this.options({ timeout: ms });
-    return new RFC(opts.id, this.sleepCreateOpts(opts));
+  sleep(msOrOpts: number | { for?: number; until?: Date }): RFC<void> {
+    let until: number;
+
+    if (typeof msOrOpts === "number") {
+      until = this.clock.now() + msOrOpts;
+    } else if (msOrOpts.for != null) {
+      until = this.clock.now() + msOrOpts.for;
+    } else if (msOrOpts.until != null) {
+      until = msOrOpts.until.getTime();
+    } else {
+      until = 0;
+    }
+
+    const id = this.seqid();
+    return new RFC(id, this.sleepCreateOpts(id, until));
   }
 
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
@@ -421,25 +435,24 @@ export class InnerContext implements Context {
     };
   }
 
-  sleepCreateOpts(opts: Options): CreatePromiseReq {
+  sleepCreateOpts(id: string, time: number): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
       "resonate:root": this.rId,
       "resonate:parent": this.pId,
       "resonate:timeout": "true",
-      ...opts.tags,
     };
 
     // timeout cannot be greater than parent timeout
-    const timeout = Math.min(this.clock.now() + opts.timeout, this.timeout);
+    const timeout = Math.min(time, this.timeout);
 
     return {
       kind: "createPromise",
-      id: opts.id,
+      id: id,
       timeout: timeout,
       param: {},
       tags,
-      iKey: opts.id,
+      iKey: id,
       strict: false,
     };
   }
