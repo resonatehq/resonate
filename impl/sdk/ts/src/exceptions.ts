@@ -29,7 +29,7 @@ export class ResonateError extends Error {
     this.code = code;
     this.type = type;
     this.next = next;
-    this.href = `https://rn8.io/e/${code}`;
+    this.href = `https://rn8.io/e/11${code}`; // 11 is the typescript sdk code
     this.retriable = retriable;
     this.serverError = serverError;
   }
@@ -41,24 +41,24 @@ export class ResonateError extends Error {
 
 export default {
   REGISTRY_VERSION_INVALID: (v: number) => {
-    return new ResonateError("01", "Registry", `Function version must be greater than zero (${v} provided)`);
+    return new ResonateError("00", "Registry", `Function version must be greater than zero (${v} provided)`);
   },
   REGISTRY_NAME_REQUIRED: () => {
-    return new ResonateError("02", "Registry", "Function name is required");
+    return new ResonateError("01", "Registry", "Function name is required");
   },
   REGISTRY_FUNCTION_ALREADY_REGISTERED: (f: string, v: number, u?: string) => {
     const under = u ? ` under '${u}'` : "";
-    return new ResonateError("03", "Registry", `Function '${f}' (version ${v}) is already registered${under}`);
+    return new ResonateError("02", "Registry", `Function '${f}' (version ${v}) is already registered${under}`);
   },
   REGISTRY_FUNCTION_NOT_REGISTERED: (f: string, v: number) => {
     const version = v > 0 ? ` (version ${v})` : "";
-    return new ResonateError("04", "Registry", `Function '${f}'${version} is not registered`, { next: "Will drop" });
+    return new ResonateError("03", "Registry", `Function '${f}'${version} is not registered`, { next: "Will drop" });
   },
   DEPENDENCY_ALREADY_REGISTERED: (d: string) => {
-    return new ResonateError("05", "Dependencies", `Dependency '${d}' is already registered`);
+    return new ResonateError("04", "Dependencies", `Dependency '${d}' is already registered`);
   },
   DEPENDENCY_NOT_REGISTERED: (d: string) => {
-    return new ResonateError("06", "Dependencies", `Dependency '${d}' is not registered`, { next: "Will drop" });
+    return new ResonateError("05", "Dependencies", `Dependency '${d}' is not registered`, { next: "Will drop" });
   },
   ENCODING_ARGS_UNENCODEABLE: (f: string, c: any) => {
     return new ResonateError("06", "Encoding", `Argument(s) for function '${f}' cannot be encoded`, {
@@ -85,6 +85,6 @@ export default {
     });
   },
   SERVER_ERROR: (m: any, r?: boolean, e?: ResonateServerError) => {
-    return new ResonateError("10", "Server", m, { retriable: r, serverError: e });
+    return new ResonateError("99", "Server", m, { retriable: r, serverError: e });
   },
 };
