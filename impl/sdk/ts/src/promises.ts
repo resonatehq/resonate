@@ -178,7 +178,6 @@ export class Promises {
       );
     });
   }
-
   cancel(
     id: string,
     {
@@ -214,7 +213,33 @@ export class Promises {
       );
     });
   }
+  async *search(
+    id: string,
+    { state = undefined, limit = undefined }: { state?: "pending" | "resolved" | "rejected"; limit?: number } = {},
+  ): AsyncGenerator<DurablePromiseRecord[], void> {
+    let cursor: string | undefined = undefined;
 
+    do {
+      const res = await new Promise<{ promises: DurablePromiseRecord[]; cursor?: string }>((resolve, reject) => {
+        this.network.send(
+          {
+            kind: "searchPromises",
+            id,
+            state,
+            limit,
+            cursor,
+          },
+          (err, res) => {
+            if (err) return reject(err);
+            resolve(res!);
+          },
+        );
+      });
+
+      cursor = res.cursor;
+      yield res.promises;
+    } while (cursor !== null && cursor !== undefined);
+  }
   callback(
     promiseId: string,
     rootPromiseId: string,

@@ -63,7 +63,8 @@ export type Request =
   | ClaimTaskReq
   | CompleteTaskReq
   | DropTaskReq
-  | HeartbeatTasksReq;
+  | HeartbeatTasksReq
+  | SearchPromisesReq;
 
 export type CreatePromiseReq<T = string> = {
   kind: "createPromise";
@@ -169,6 +170,14 @@ export type HeartbeatTasksReq = {
   processId: string;
 };
 
+export type SearchPromisesReq = {
+  kind: "searchPromises";
+  id: string;
+  state?: "pending" | "resolved" | "rejected";
+  limit?: number;
+  cursor?: string;
+};
+
 // Response
 
 export type Response =
@@ -184,7 +193,8 @@ export type Response =
   | ClaimTaskRes
   | CompleteTaskRes
   | DropTaskRes
-  | HeartbeatTasksRes;
+  | HeartbeatTasksRes
+  | SearchPromisesRes;
 
 export type CreatePromiseRes = {
   kind: "createPromise";
@@ -262,6 +272,12 @@ export type DropTaskRes = {
 export type HeartbeatTasksRes = {
   kind: "heartbeatTasks";
   tasksAffected: number;
+};
+
+export type SearchPromisesRes = {
+  kind: "searchPromises";
+  promises: DurablePromiseRecord[];
+  cursor?: string;
 };
 
 // Message

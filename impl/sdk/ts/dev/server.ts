@@ -351,6 +351,10 @@ export class Server {
         return { kind: "dropTask" };
       }
 
+      case "searchPromises": {
+        return { kind: "searchPromises", promises: this.searchPromises({ ...requ }) };
+      }
+
       default:
         throw exceptions.SERVER_ERROR(`Unsupported request kind ${(requ as any).kind}`);
     }
@@ -652,6 +656,10 @@ export class Server {
     const { applied } = this.transitionTask({ id, to: "init", counter, time });
     util.assert(applied);
     return;
+  }
+
+  private searchPromises({ id }: { id: string }): DurablePromiseRecord[] {
+    return Array.from(this.promises.values());
   }
 
   private heartbeatTasks({ processId, time }: { processId: string; time: number }): number {

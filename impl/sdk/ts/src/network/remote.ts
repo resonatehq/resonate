@@ -34,6 +34,8 @@ import type {
   Response,
   ResponseFor,
   ScheduleRecord,
+  SearchPromisesReq,
+  SearchPromisesRes,
   TaskRecord,
 } from "./network";
 
@@ -117,6 +119,10 @@ interface ClaimTaskResponseDto {
 
 interface HeartbeatResponseDto {
   tasksAffected: number;
+}
+interface SearchPromisesResponseDto {
+  promises: PromiseDto[];
+  cursor: string;
 }
 
 export interface HttpNetworkConfig {
@@ -205,6 +211,8 @@ export class HttpNetwork implements Network {
         return this.dropTask(req, retryPolicy);
       case "heartbeatTasks":
         return this.heartbeatTasks(req, retryPolicy);
+      case "searchPromises":
+        return this.searchPromises(req, retryPolicy);
       default:
         throw new Error(`Unsupported request kind: ${(req as any).kind}`);
     }
@@ -488,6 +496,19 @@ export class HttpNetwork implements Network {
       kind: "heartbeatTasks",
       tasksAffected: data.tasksAffected,
     };
+  }
+
+  private async searchPromises(req: SearchPromisesReq, retryPolicy: RetryPolicy = {}): Promise<SearchPromisesRes> {
+    const params = new URLSearchParams({ id: req.id });
+    if (req.state) params.append("state", req.state);
+    if (req.limit) params.append("limit", String(req.limit));
+    if (req.cursor) params.append("cursor", req.cursor);
+
+    const res = await this.fetch(`/promises?${params.toString()}`, { method: "GET" }, retryPolicy);
+
+    const data: any = (await res.json()) as SearchPromisesResponseDto;
+
+    return { kind: "searchPromises", promises: data.promises, cursor: data.cursor };
   }
 
   private async fetch(
