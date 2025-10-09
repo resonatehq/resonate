@@ -342,7 +342,6 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		addr := map[string]string{
-			"url":     u.String(),
 			"subject": subject,
 		}
 

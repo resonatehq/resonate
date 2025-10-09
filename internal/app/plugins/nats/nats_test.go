@@ -71,7 +71,7 @@ func TestNATSPlugin(t *testing.T) {
 	}{
 		{
 			name:    "Success",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`),
+			addr:    []byte(`{"subject": "test.subject"}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
@@ -81,7 +81,7 @@ func TestNATSPlugin(t *testing.T) {
 		},
 		{
 			name:    "SuccessWithDifferentSubject",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "my.custom.subject"}`),
+			addr:    []byte(`{"subject": "my.custom.subject"}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
@@ -90,18 +90,8 @@ func TestNATSPlugin(t *testing.T) {
 			},
 		},
 		{
-			name:    "SuccessWithDifferentURL",
-			addr:    []byte(`{"url": "nats://example.com:4222", "subject": "test.subject"}`),
-			client:  &MockNATSClient{ch: ch, ok: true},
-			success: true,
-			params: &PublishParams{
-				Subject: "test.subject",
-				Data:    []byte("test message"),
-			},
-		},
-		{
 			name:    "SuccessWithComplexSubject",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "orders.created.v1"}`),
+			addr:    []byte(`{"subject": "orders.created.v1"}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
@@ -110,8 +100,8 @@ func TestNATSPlugin(t *testing.T) {
 			},
 		},
 		{
-			name:    "SuccessWithSecureURL",
-			addr:    []byte(`{"url": "nats://secure.example.com:4222", "subject": "secure.topic"}`),
+			name:    "SuccessWithSecureSubject",
+			addr:    []byte(`{"subject": "secure.topic"}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: true,
 			params: &PublishParams{
@@ -127,49 +117,37 @@ func TestNATSPlugin(t *testing.T) {
 		},
 		{
 			name:    "FailureDueToClient",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`),
+			addr:    []byte(`{"subject": "test.subject"}`),
 			client:  &MockNATSClient{ch: ch, ok: false},
 			success: false,
 		},
 		{
-			name:    "FailureDueToMissingURL",
-			addr:    []byte(`{"subject": "test.subject"}`),
-			client:  &MockNATSClient{ch: ch, ok: true},
-			success: false,
-		},
-		{
 			name:    "FailureDueToMissingSubject",
-			addr:    []byte(`{"url": "nats://localhost:4222"}`),
-			client:  &MockNATSClient{ch: ch, ok: true},
-			success: false,
-		},
-		{
-			name:    "FailureDueToEmptyURL",
-			addr:    []byte(`{"url": "", "subject": "test.subject"}`),
+			addr:    []byte(`{}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToEmptySubject",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": ""}`),
+			addr:    []byte(`{"subject": ""}`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToMalformedJSON",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"`),
+			addr:    []byte(`{"subject": "test.subject"`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 		{
 			name:    "FailureDueToInvalidJSON",
-			addr:    []byte(`{"url": "nats://localhost:4222", "subject": "test.subject", "extra": }`),
+			addr:    []byte(`{"subject": "test.subject", "extra": }`),
 			client:  &MockNATSClient{ch: ch, ok: true},
 			success: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
+			nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, tc.client)
 			assert.Nil(t, err)
 
 			err = nats.Start(nil)
@@ -224,13 +202,13 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		error_client := &MockNATSClient{ch: ch, ok: false}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, error_client)
+		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, error_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
 		assert.Nil(t, err)
 
-		addr := []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`)
+		addr := []byte(`{"subject": "test.subject"}`)
 
 		done := make(chan bool, 1)
 		ok := nats.Enqueue(&aio.Message{
@@ -263,13 +241,13 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, success_client)
+		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
 		assert.Nil(t, err)
 
-		addr := []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"`)
+		addr := []byte(`{"subject": "test.subject"`)
 
 		done := make(chan bool, 1)
 		ok := nats.Enqueue(&aio.Message{
@@ -302,7 +280,7 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 10, Workers: 2}, success_client)
+		nats, err := NewWithClient(nil, metrics, &Config{Size: 10, Workers: 2, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
@@ -312,7 +290,7 @@ func TestNATSErrorHandling(t *testing.T) {
 		done := make(chan bool, num_messages)
 
 		for i := 0; i < num_messages; i++ {
-			addr := []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`)
+			addr := []byte(`{"subject": "test.subject"}`)
 			ok := nats.Enqueue(&aio.Message{
 				Addr: addr,
 				Body: []byte("test message"),
@@ -352,13 +330,13 @@ func TestNATSErrorHandling(t *testing.T) {
 
 		success_client := &MockNATSClient{ch: ch, ok: true}
 
-		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, success_client)
+		nats, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second}, success_client)
 		assert.Nil(t, err)
 
 		err = nats.Start(nil)
 		assert.Nil(t, err)
 
-		addr := []byte(`{"url": "nats://localhost:4222", "subject": "test.subject"}`)
+		addr := []byte(`{"subject": "test.subject"}`)
 		ok := nats.Enqueue(&aio.Message{
 			Addr: addr,
 			Body: []byte("test message 1"),
