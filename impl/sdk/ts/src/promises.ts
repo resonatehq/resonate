@@ -11,8 +11,7 @@ export class Promises {
     return new Promise((resolve, reject) => {
       this.network.send({ kind: "readPromise", id }, (err, res) => {
         if (err) {
-          // TODO: reject with more information
-          reject(Error("not implemented"));
+          reject(err);
           return;
         }
 
@@ -51,8 +50,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -100,8 +98,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -137,8 +134,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -173,8 +169,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -210,8 +205,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -241,8 +235,7 @@ export class Promises {
         },
         (err, res) => {
           if (err) {
-            // TODO: reject with more information
-            reject(Error("not implemented"));
+            reject(err);
             return;
           }
 
@@ -264,8 +257,7 @@ export class Promises {
     return new Promise((resolve, reject) => {
       this.network.send({ kind: "createSubscription", id, promiseId, timeout, recv }, (err, res) => {
         if (err) {
-          // TODO: reject with more information
-          reject(Error("not implemented"));
+          reject(err);
           return;
         }
 

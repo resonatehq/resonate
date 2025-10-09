@@ -32,11 +32,11 @@ describe("Resonate usage tests", () => {
     expect(await resonate.rpc(crypto.randomUUID().replace(/-/g, ""), "f")).toBe(2);
     expect(await f1.run(crypto.randomUUID().replace(/-/g, ""))).toBe(1);
     await expect(f1.run(crypto.randomUUID().replace(/-/g, ""), resonate.options({ version: 2 }))).rejects.toThrow(
-      "function foo version 2 not found in registry",
+      "Function 'foo' (version 2) is not registered",
     );
     expect(await f2.run(crypto.randomUUID().replace(/-/g, ""))).toBe(2);
     await expect(f2.run(crypto.randomUUID().replace(/-/g, ""), resonate.options({ version: 1 }))).rejects.toThrow(
-      "function bar version 1 not found in registry",
+      "Function 'bar' (version 1) is not registered",
     );
   });
   test("done check", async () => {

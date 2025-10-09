@@ -168,7 +168,7 @@ export interface Context {
   detached(func: Func | string, ...args: any[]): RFI<any>;
 
   // getDependency
-  getDependency(key: string): any | undefined;
+  getDependency<T = any>(key: string): T | undefined;
 
   // options
   options(opts: Partial<Options>): Options;

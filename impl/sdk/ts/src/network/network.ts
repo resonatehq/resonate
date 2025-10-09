@@ -1,6 +1,7 @@
 // Records
 
-import type { Callback, Value } from "../types";
+import type { ResonateError } from "../exceptions";
+import type { Value } from "../types";
 
 export interface DurablePromiseRecord<T = string> {
   id: string;
@@ -274,7 +275,11 @@ export type Message =
 export type ResponseFor<T extends Request> = Extract<Response, { kind: T["kind"] }>;
 
 export interface Network {
-  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever?: boolean): void;
+  send<T extends Request>(
+    req: T,
+    callback: (err?: ResonateError, res?: ResponseFor<T>) => void,
+    retryForever?: boolean,
+  ): void;
   stop(): void;
 }
 

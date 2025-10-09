@@ -48,16 +48,12 @@ export class AsyncProcessor implements Processor {
           return;
         }
 
-        const now = Date.now();
-
-        if (now + retryIn >= timeout) {
+        if (Date.now() + retryIn >= timeout) {
           cb({ success: false, error });
           return;
         }
 
-        console.log(
-          `RuntimeError. Function ${name} failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`,
-        );
+        console.warn(`Runtime. Function '${name}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`);
 
         await new Promise((resolve) => setTimeout(resolve, retryIn));
         attempt++;

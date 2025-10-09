@@ -39,7 +39,8 @@ import type {
 
 import { EventSource } from "eventsource";
 
-import type { Callback, Value } from "../types";
+import exceptions, { ResonateError, type ResonateServerError } from "../exceptions";
+import type { Value } from "../types";
 import * as util from "../util";
 
 // API Response Types
@@ -154,17 +155,20 @@ export class HttpNetwork implements Network {
     }
   }
 
-  send<T extends Request>(req: T, callback: Callback<ResponseFor<T>>, retryForever = false): void {
+  send<T extends Request>(
+    req: T,
+    callback: (err?: ResonateError, res?: ResponseFor<T>) => void,
+    retryForever = false,
+  ): void {
     const retryPolicy = retryForever ? { retries: Number.MAX_SAFE_INTEGER, delay: 1000 } : { retries: 0 };
 
     this.handleRequest(req, retryPolicy).then(
       (res) => {
         util.assert(res.kind === req.kind, "res kind must match req kind");
-        callback(false, res as ResponseFor<T>);
+        callback(undefined, res as ResponseFor<T>);
       },
       (err) => {
-        console.error(`Request failed: ${err}`);
-        callback(true);
+        callback(err as ResonateError);
       },
     );
   }
@@ -506,21 +510,28 @@ export class HttpNetwork implements Network {
 
         if (util.semverLessThan(ver, this.EXCPECTED_RESONATE_VERSION)) {
           console.warn(
-            `Networking. Expected Resonate server version >=${this.EXCPECTED_RESONATE_VERSION}, got ${ver}. Will continue.`,
+            `Networking. Resonate server ${this.EXCPECTED_RESONATE_VERSION} or newer required (provided ${ver}). Will continue.`,
           );
         }
 
         if (!res.ok) {
-          const err = (await res.json().catch(() => ({}))) as { message?: string };
-          throw new Error(err.message || `HTTP ${res.status}: ${res.statusText}`);
+          const err = (await res
+            .json()
+            .then((r: any) => r.error)
+            .catch(() => undefined)) as ResonateServerError | undefined;
+          throw exceptions.SERVER_ERROR(err ? err.message : res.statusText, res.status >= 500 && res.status < 600, err);
         }
 
         return res;
       } catch (err) {
-        if (attempt >= retries) {
+        if (err instanceof ResonateError && !err.retriable) {
           throw err;
         }
-        console.log(`Networking. Cannot connect to [${this.url}]. Retrying in ${delay / 1000}s.`);
+        if (attempt >= retries) {
+          throw exceptions.SERVER_ERROR(String(err));
+        }
+
+        console.warn(`Networking. Cannot connect to [${this.url}]. Retrying in ${delay / 1000}s.`);
 
         // sleep before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));
@@ -610,14 +621,19 @@ export class HttpMessageSource implements MessageSource {
 
     this.eventSource.addEventListener("message", (event) => {
       let msg: Message;
-      const data = JSON.parse(event.data);
 
-      if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
-        msg = { type: data.type, task: data.task };
-      } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
-        msg = { type: data.type, promise: mapPromiseDtoToRecord(data.promise) };
-      } else {
-        console.warn("Received invalid message:", data);
+      try {
+        const data = JSON.parse(event.data);
+
+        if ((data?.type === "invoke" || data?.type === "resume") && util.isTaskRecord(data?.task)) {
+          msg = { type: data.type, task: data.task };
+        } else if (data?.type === "notify" && util.isDurablePromiseRecord(data?.promise)) {
+          msg = { type: data.type, promise: mapPromiseDtoToRecord(data.promise) };
+        } else {
+          throw new Error("invalid message");
+        }
+      } catch (e) {
+        console.warn("Networking. Received invalid message. Will continue.");
         return;
       }
 
@@ -630,7 +646,7 @@ export class HttpMessageSource implements MessageSource {
       // and recreate
       this.eventSource.close();
 
-      console.log(`Networking. Cannot connect to [${this.url}/poll]. Retrying in 5s.`);
+      console.warn(`Networking. Cannot connect to [${this.url}/poll]. Retrying in 5s.`);
       setTimeout(() => this.connect(), 5000);
     });
 

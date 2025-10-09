@@ -2,15 +2,16 @@ import { WallClock } from "../src/clock";
 import { type Context, InnerContext } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { JsonEncoder } from "../src/encoder";
+import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
 import { Never } from "../src/retries";
-import { type Callback, type Result, ok } from "../src/types";
+import { type Result, ok } from "../src/types";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
 
-  send<T extends Request>(request: T, callback: Callback<ResponseFor<T>>): void {
+  send<T extends Request>(request: T, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
     switch (request.kind) {
       case "createPromise": {
         const p: DurablePromiseRecord = {
@@ -23,7 +24,7 @@ class DummyNetwork implements Network {
           iKeyForCreate: request.iKey,
         };
         this.promises.set(p.id, p);
-        callback(false, {
+        callback(undefined, {
           kind: "createPromise",
           promise: p,
         } as ResponseFor<T>);
@@ -35,7 +36,7 @@ class DummyNetwork implements Network {
         p.state = "resolved";
         p.value = request.value!;
         this.promises.set(p.id, p);
-        callback(false, {
+        callback(undefined, {
           kind: "completePromise",
           promise: p,
         } as ResponseFor<T>);
@@ -86,7 +87,7 @@ describe("Coroutine", () => {
           strict: false,
         },
         (err, res) => {
-          expect(err).toBe(false);
+          expect(err).toBeUndefined();
           resolve(res);
         },
       );

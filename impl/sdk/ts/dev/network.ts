@@ -1,8 +1,7 @@
-import { Server } from "./server";
-
-import type { Callback } from "types";
+import type { ResonateError } from "../src/exceptions";
 import type { Message, MessageSource, Network, Request, ResponseFor } from "../src/network/network";
 import * as util from "../src/util";
+import { Server } from "./server";
 
 export class LocalMessageSource implements MessageSource {
   private server: Server;
@@ -69,16 +68,16 @@ export class LocalNetwork implements Network {
     // No-op for LocalNetwork, MessageSource handles polling cleanup
   }
 
-  send<T extends Request>(req: Request, callback: Callback<ResponseFor<T>>): void {
+  send<T extends Request>(req: Request, callback: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
     setTimeout(() => {
       try {
         const res = this.server.process(req, Date.now());
         util.assert(res.kind === req.kind, "res kind must match req kind");
 
-        callback(false, res as ResponseFor<T>);
+        callback(undefined, res as ResponseFor<T>);
         this.messageSource.enqueueNext();
       } catch (err) {
-        callback(true);
+        callback(err as ResonateError);
       }
     });
   }

@@ -1,5 +1,6 @@
 import type { StepClock } from "../../src/clock";
 import type { Encoder } from "../../src/encoder";
+import { ResonateError } from "../../src/exceptions";
 import { Handler } from "../../src/handler";
 import { NoopHeartbeat } from "../../src/heartbeat";
 import type {
@@ -67,7 +68,7 @@ class SimulatedNetwork implements Network {
     return this.messageSource;
   }
 
-  send<T extends Request>(req: T, cb: (err: boolean, res?: ResponseFor<T>) => void): void {
+  send<T extends Request>(req: T, cb: (err?: ResonateError, res?: ResponseFor<T>) => void): void {
     const message = new Message<Request>(this.source, this.target, req, {
       requ: true,
       correlationId: this.correlationId++,
@@ -75,7 +76,7 @@ class SimulatedNetwork implements Network {
 
     const callback = (err: boolean, res?: Response) => {
       util.assert(err || (res !== undefined && res.kind === req.kind), "res kind must match req kind");
-      cb(err, res as ResponseFor<T>);
+      cb(new ResonateError("0", "Simulator", "Simulator error"), res as ResponseFor<T>);
     };
 
     this.callbacks[message.head!.correlationId] = { callback, timeout: this.currentTime + 5000 };

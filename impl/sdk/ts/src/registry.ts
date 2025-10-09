@@ -1,3 +1,4 @@
+import exceptions from "./exceptions";
 import type { Func } from "./types";
 
 export type RegistryItem = {
@@ -8,76 +9,43 @@ export type RegistryItem = {
 
 export class Registry {
   private forward: Map<string, Record<number, RegistryItem>> = new Map();
-  private reverse: Map<Func, RegistryItem> = new Map();
+  private reverse: Map<Func, Record<number, RegistryItem>> = new Map();
 
-  add(func: Func, name?: string, version = 1): void {
+  add(func: Func, name = "", version = 1): void {
+    // version must be greater than zero
     if (!(version > 0)) {
-      throw new Error("provided version must be greater than zero");
+      throw exceptions.REGISTRY_VERSION_INVALID(version);
     }
 
-    if (name === undefined && func.name === "") {
-      throw new Error("name required when registering an anonymous function");
-    }
-    const funcName = name ?? func.name;
-
-    const existingByName = this.forward.get(funcName);
-    if ((existingByName && existingByName[version] !== undefined) || this.reverse.has(func)) {
-      throw new Error(`function ${funcName} already registered`);
+    // function must have a name
+    if (name === "" && func.name === "") {
+      throw exceptions.REGISTRY_NAME_REQUIRED();
     }
 
-    const item: RegistryItem = { name: funcName, func, version };
+    const funcName = name || func.name;
 
-    if (!existingByName) {
-      this.forward.set(funcName, {});
+    // function must not already be registered
+    if (this.get(funcName, version)) {
+      throw exceptions.REGISTRY_FUNCTION_ALREADY_REGISTERED(funcName, version);
     }
-    this.forward.get(funcName)![version] = item;
+    if (this.get(func, version)) {
+      throw exceptions.REGISTRY_FUNCTION_ALREADY_REGISTERED(func.name, version, this.get(func, version)?.name);
+    }
 
-    this.reverse.set(func, item);
+    const forward = this.forward.get(funcName) ?? {};
+    const reverse = this.reverse.get(func) ?? {};
+    forward[version] = reverse[version] = { name: funcName, func, version };
+
+    this.forward.set(funcName, forward);
+    this.reverse.set(func, reverse);
   }
 
-  get(func: string | Func, version = 0): RegistryItem {
-    if (typeof func === "string") {
-      const versions = this.forward.get(func);
-      if (!versions) {
-        throw new Error(`function ${func} not found in registry`);
-      }
-
-      // pick latest if version = 0
-      const chosenVersion = version === 0 ? Math.max(...Object.keys(versions).map(Number)) : version;
-
-      if (!(chosenVersion in versions)) {
-        throw new Error(`function ${func} version ${version} not found in registry`);
-      }
-
-      return versions[chosenVersion];
-    }
-    const entry = this.reverse.get(func);
-    if (!entry) {
-      const fnName = func.name || "unknown";
-      throw new Error(`function ${fnName} not found in registry`);
-    }
-
-    if (version !== 0 && entry.version !== version) {
-      const fnName = func.name || "unknown";
-      throw new Error(`function ${fnName} version ${version} not found in registry`);
-    }
-
-    return entry;
+  get(func: string | Func, version = 0): RegistryItem | undefined {
+    const registry = typeof func === "string" ? this.forward.get(func) : this.reverse.get(func);
+    return registry?.[version > 0 ? version : this.latest(registry)];
   }
 
-  latest(func: string | Func, defaultVersion = 1): number {
-    if (typeof func === "string") {
-      const versions = this.forward.get(func);
-      if (!versions) {
-        return defaultVersion;
-      }
-      const versionNumbers = Object.keys(versions).map(Number);
-      return versionNumbers.length > 0 ? Math.max(...versionNumbers) : defaultVersion;
-    }
-    const entry = this.reverse.get(func);
-    if (!entry) {
-      return defaultVersion;
-    }
-    return entry.version;
+  private latest(registry: Record<number, RegistryItem>): number {
+    return Math.max(...(Object.keys(registry ?? {}).map(Number) || [1]));
   }
 }
