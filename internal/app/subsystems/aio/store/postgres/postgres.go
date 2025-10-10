@@ -12,6 +12,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -462,6 +463,11 @@ func (s *PostgresStore) Kind() t_aio.Kind {
 
 func (s *PostgresStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
+		return err
+	}
+
+	// Check for pending migrations
+	if err := migrations.CheckPostgresMigrations(s.db); err != nil {
 		return err
 	}
 
