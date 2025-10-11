@@ -8,6 +8,7 @@ import (
 
 	"cloud.google.com/go/pubsub/v2"
 
+	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
@@ -31,7 +32,7 @@ type Addr struct {
 	Topic string `json:"topic"`
 }
 
-func New(metrics *metrics.Metrics, config *Config) (*PubSub, error) {
+func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 	if config.ProjectID == "" {
 		return nil, fmt.Errorf("GCP project ID is required")
 	}
@@ -51,6 +52,7 @@ func New(metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 		"pubsub",
 		&config.BaseConfig,
 		metrics,
+		a,
 		proc,
 		func() error {
 			if client != nil {

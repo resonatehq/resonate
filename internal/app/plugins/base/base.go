@@ -28,6 +28,7 @@ type Worker struct {
 	sq        <-chan *aio.Message
 	processor Processor
 	config    *BaseConfig
+	aio       aio.AIO
 	metrics   *metrics.Metrics
 	name      string
 }
@@ -39,7 +40,7 @@ type Plugin struct {
 	cleanup func() error
 }
 
-func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, cleanup func() error) *Plugin {
+func NewPlugin(a aio.AIO, name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, cleanup func() error) *Plugin {
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*Worker, config.Workers)
 
@@ -49,6 +50,7 @@ func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, proces
 			sq:        sq,
 			processor: processor,
 			config:    config,
+			aio:       a,
 			metrics:   metrics,
 			name:      name,
 		}

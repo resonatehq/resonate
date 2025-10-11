@@ -80,7 +80,7 @@ func TestPubSubBasics(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
 	t.Run("ConfigValidation", func(t *testing.T) {
-		_, err := New(metrics, &Config{
+		_, err := New(nil, metrics, &Config{
 			BaseConfig: base.BaseConfig{Size: 10, Workers: 2, Timeout: 1 * time.Second},
 			ProjectID:  "",
 		})
