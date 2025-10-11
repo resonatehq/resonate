@@ -107,9 +107,40 @@ func TestUrlParse(t *testing.T) {
 			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"url":"https://sqs.us-west-2.amazonaws.com/123456789012/my-queue_123-456"}`)},
 			ok:   true,
 		},
+		// pubsub scheme
+		{
+			name: "valid pubsub url",
+			url:  "pubsub://my-project/my-topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with nested topic name",
+			url:  "pubsub://my-project/orders-processing-v1",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"orders-processing-v1"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid pubsub url with complex topic path",
+			url:  "pubsub://my-project/projects/my-project/topics/my-topic",
+			recv: &receiver.Recv{Type: "pubsub", Data: []byte(`{"topic":"projects/my-project/topics/my-topic"}`)},
+			ok:   true,
+		},
+		{
+			name: "pubsub url with empty topic",
+			url:  "pubsub://my-project/",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "pubsub url with missing topic",
+			url:  "pubsub://my-project",
+			recv: nil,
+			ok:   false,
+		},
 		// unsupported scheme
 		{
-			name: "scheme must be http, https, poll, or sqs+https",
+			name: "scheme must be http, https, poll, sqs+https, nats, or pubsub",
 			url:  "nope://example.com",
 			recv: nil,
 			ok:   false,

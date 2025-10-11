@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
+	"github.com/resonatehq/resonate/internal/app/plugins/pubsub"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -28,9 +29,10 @@ type Config struct {
 }
 
 type PluginConfig struct {
-	Http EnabledPlugin[http.Config] `flag:"http"`
-	Poll EnabledPlugin[poll.Config] `flag:"poll"`
-	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
+	Http   EnabledPlugin[http.Config]    `flag:"http"`
+	Poll   EnabledPlugin[poll.Config]    `flag:"poll"`
+	SQS    DisabledPlugin[sqs.Config]    `flag:"sqs"`
+	PubSub DisabledPlugin[pubsub.Config] `flag:"pubsub"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -332,6 +334,23 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
+
+	case "pubsub":
+		topic := strings.TrimPrefix(u.Path, "/")
+		if topic == "" {
+			return nil, false
+		}
+
+		addr := map[string]string{
+			"topic": topic,
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "pubsub", Data: data}, true
 
 	default:
 		return nil, false
