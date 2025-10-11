@@ -166,8 +166,10 @@ func TestWorkerProcessing(t *testing.T) {
 		}
 
 		plugin := NewPlugin("test", config, metrics, proc, nil)
-		plugin.Start(nil)
-		defer plugin.Stop()
+		assert.Nil(t, plugin.Start(nil))
+		defer func() {
+			assert.Nil(t, plugin.Stop())
+		}()
 
 		done := make(chan bool, 1)
 		msg := &aio.Message{
@@ -201,8 +203,10 @@ func TestWorkerProcessing(t *testing.T) {
 		}
 
 		plugin := NewPlugin("test", config, metrics, proc, nil)
-		plugin.Start(nil)
-		defer plugin.Stop()
+		assert.Nil(t, plugin.Start(nil))
+		defer func() {
+			assert.Nil(t, plugin.Stop())
+		}()
 
 		done := make(chan bool, 1)
 		msg := &aio.Message{
