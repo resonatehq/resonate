@@ -49,10 +49,10 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 	}
 
 	plugin := base.NewPlugin(
+		a,
 		"pubsub",
 		&config.BaseConfig,
 		metrics,
-		a,
 		proc,
 		func() error {
 			if client != nil {
