@@ -24,33 +24,33 @@ type Processor interface {
 }
 
 type Worker struct {
-	id         int
-	sq         <-chan *aio.Message
-	processor  Processor
-	config     *BaseConfig
-	metrics    *metrics.Metrics
-	pluginName string
+	id        int
+	sq        <-chan *aio.Message
+	processor Processor
+	config    *BaseConfig
+	metrics   *metrics.Metrics
+	name      string
 }
 
 type Plugin struct {
 	name    string
 	sq      chan *aio.Message
 	workers []*Worker
-	onStop  func() error
+	cleanup func() error
 }
 
-func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, onStop func() error) *Plugin {
+func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, processor Processor, cleanup func() error) *Plugin {
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*Worker, config.Workers)
 
 	for i := 0; i < config.Workers; i++ {
 		workers[i] = &Worker{
-			id:         i,
-			sq:         sq,
-			processor:  processor,
-			config:     config,
-			metrics:    metrics,
-			pluginName: name,
+			id:        i,
+			sq:        sq,
+			processor: processor,
+			config:    config,
+			metrics:   metrics,
+			name:      name,
 		}
 	}
 
@@ -58,7 +58,7 @@ func NewPlugin(name string, config *BaseConfig, metrics *metrics.Metrics, proces
 		name:    name,
 		sq:      sq,
 		workers: workers,
-		onStop:  onStop,
+		cleanup: cleanup,
 	}
 }
 
@@ -81,8 +81,8 @@ func (p *Plugin) Stop() error {
 	if p.sq != nil {
 		close(p.sq)
 	}
-	if p.onStop != nil {
-		return p.onStop()
+	if p.cleanup != nil {
+		return p.cleanup()
 	}
 	return nil
 }
@@ -101,7 +101,7 @@ func (p *Plugin) Enqueue(msg *aio.Message) bool {
 }
 
 func (w *Worker) String() string {
-	return fmt.Sprintf("%s:%s", t_aio.Sender.String(), w.pluginName)
+	return fmt.Sprintf("%s:%s", t_aio.Sender.String(), w.name)
 }
 
 func (w *Worker) Start() {
@@ -118,7 +118,7 @@ func (w *Worker) Start() {
 		counter.Inc()
 		success, err := w.processor.Process(msg.Body, msg.Addr)
 		if err != nil {
-			slog.Warn("failed to process message", "plugin", w.pluginName, "err", err)
+			slog.Warn("failed to process message", "plugin", w.name, "err", err)
 		}
 
 		msg.Done(&t_aio.SenderCompletion{

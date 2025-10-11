@@ -14,14 +14,14 @@ import (
 )
 
 type MockProcessor struct {
-	processFunc func(body, addr []byte) (bool, error)
-	callCount   int
+	process func(body, addr []byte) (bool, error)
+	count   int
 }
 
 func (m *MockProcessor) Process(body, addr []byte) (bool, error) {
-	m.callCount++
-	if m.processFunc != nil {
-		return m.processFunc(body, addr)
+	m.count++
+	if m.process != nil {
+		return m.process(body, addr)
 	}
 	return true, nil
 }
@@ -84,13 +84,13 @@ func TestPluginEnqueue(t *testing.T) {
 	})
 
 	t.Run("QueueFull", func(t *testing.T) {
-		smallPlugin := NewPlugin("test", &BaseConfig{Size: 1, Workers: 1}, metrics, proc, nil)
+		new := NewPlugin("test", &BaseConfig{Size: 1, Workers: 1}, metrics, proc, nil)
 
 		msg1 := &aio.Message{Addr: []byte("1"), Body: []byte("1"), Done: func(c *t_aio.SenderCompletion) {}}
 		msg2 := &aio.Message{Addr: []byte("2"), Body: []byte("2"), Done: func(c *t_aio.SenderCompletion) {}}
 
-		assert.True(t, smallPlugin.Enqueue(msg1))
-		assert.False(t, smallPlugin.Enqueue(msg2))
+		assert.True(t, new.Enqueue(msg1))
+		assert.False(t, new.Enqueue(msg2))
 	})
 }
 
@@ -117,9 +117,9 @@ func TestPluginStopWithCleanup(t *testing.T) {
 	config := &BaseConfig{Size: 1, Workers: 1}
 	proc := &MockProcessor{}
 
-	cleanupCalled := false
+	is_cleanup := false
 	cleanup := func() error {
-		cleanupCalled = true
+		is_cleanup = true
 		return nil
 	}
 
@@ -127,7 +127,7 @@ func TestPluginStopWithCleanup(t *testing.T) {
 	err := plugin.Stop()
 
 	assert.Nil(t, err)
-	assert.True(t, cleanupCalled)
+	assert.True(t, is_cleanup)
 }
 
 func TestPluginStopWithCleanupError(t *testing.T) {
@@ -135,15 +135,15 @@ func TestPluginStopWithCleanupError(t *testing.T) {
 	config := &BaseConfig{Size: 1, Workers: 1}
 	proc := &MockProcessor{}
 
-	expectedErr := errors.New("cleanup failed")
+	expected_err := errors.New("cleanup failed")
 	cleanup := func() error {
-		return expectedErr
+		return expected_err
 	}
 
 	plugin := NewPlugin("test", config, metrics, proc, cleanup)
 	err := plugin.Stop()
 
-	assert.Equal(t, expectedErr, err)
+	assert.Equal(t, expected_err, err)
 }
 
 func TestWorkerProcessing(t *testing.T) {
@@ -158,7 +158,7 @@ func TestWorkerProcessing(t *testing.T) {
 
 	t.Run("SuccessfulProcessing", func(t *testing.T) {
 		proc := &MockProcessor{
-			processFunc: func(body, addr []byte) (bool, error) {
+			process: func(body, addr []byte) (bool, error) {
 				assert.Equal(t, []byte("test body"), body)
 				assert.Equal(t, []byte("test addr"), addr)
 				return true, nil
@@ -190,12 +190,12 @@ func TestWorkerProcessing(t *testing.T) {
 			t.Fatal("Timeout waiting for processing")
 		}
 
-		assert.Equal(t, 1, proc.callCount)
+		assert.Equal(t, 1, proc.count)
 	})
 
 	t.Run("FailedProcessing", func(t *testing.T) {
 		proc := &MockProcessor{
-			processFunc: func(body, addr []byte) (bool, error) {
+			process: func(body, addr []byte) (bool, error) {
 				return false, errors.New("processing failed")
 			},
 		}

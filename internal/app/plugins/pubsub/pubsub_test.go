@@ -14,48 +14,48 @@ import (
 
 func TestPubSubPlugin(t *testing.T) {
 	tests := []struct {
-		name          string
-		addr          []byte
-		expectSuccess bool
-		expectedTopic string
+		name           string
+		addr           []byte
+		expect_success bool
+		expected_topic string
 	}{
 		{
-			name:          "Success",
-			addr:          []byte(`{"topic": "test-topic"}`),
-			expectSuccess: false,
-			expectedTopic: "test-topic",
+			name:           "Success",
+			addr:           []byte(`{"topic": "test-topic"}`),
+			expect_success: false,
+			expected_topic: "test-topic",
 		},
 		{
-			name:          "SuccessWithDifferentTopic",
-			addr:          []byte(`{"topic": "orders-topic"}`),
-			expectSuccess: false,
-			expectedTopic: "orders-topic",
+			name:           "SuccessWithDifferentTopic",
+			addr:           []byte(`{"topic": "orders-topic"}`),
+			expect_success: false,
+			expected_topic: "orders-topic",
 		},
 		{
-			name:          "SuccessWithComplexTopic",
-			addr:          []byte(`{"topic": "projects/my-project/topics/my-topic"}`),
-			expectSuccess: false,
-			expectedTopic: "projects/my-project/topics/my-topic",
+			name:           "SuccessWithComplexTopic",
+			addr:           []byte(`{"topic": "projects/my-project/topics/my-topic"}`),
+			expect_success: false,
+			expected_topic: "projects/my-project/topics/my-topic",
 		},
 		{
-			name:          "FailureDueToJson",
-			addr:          []byte(""),
-			expectSuccess: false,
+			name:           "FailureDueToJson",
+			addr:           []byte(""),
+			expect_success: false,
 		},
 		{
-			name:          "FailureDueToMissingTopic",
-			addr:          []byte(`{}`),
-			expectSuccess: false,
+			name:           "FailureDueToMissingTopic",
+			addr:           []byte(`{}`),
+			expect_success: false,
 		},
 		{
-			name:          "FailureDueToEmptyTopic",
-			addr:          []byte(`{"topic": ""}`),
-			expectSuccess: false,
+			name:           "FailureDueToEmptyTopic",
+			addr:           []byte(`{"topic": ""}`),
+			expect_success: false,
 		},
 		{
-			name:          "FailureDueToMalformedJSON",
-			addr:          []byte(`{"topic": "test-topic"`),
-			expectSuccess: false,
+			name:           "FailureDueToMalformedJSON",
+			addr:           []byte(`{"topic": "test-topic"`),
+			expect_success: false,
 		},
 	}
 
@@ -64,9 +64,9 @@ func TestPubSubPlugin(t *testing.T) {
 			var addr Addr
 			err := json.Unmarshal(tt.addr, &addr)
 
-			if tt.expectedTopic != "" {
+			if tt.expected_topic != "" {
 				assert.Nil(t, err, "JSON should parse correctly")
-				assert.Equal(t, tt.expectedTopic, addr.Topic)
+				assert.Equal(t, tt.expected_topic, addr.Topic)
 			} else {
 				if err == nil {
 					assert.Empty(t, addr.Topic, "Topic should be empty for invalid cases")
@@ -135,43 +135,43 @@ func TestCompletionValues(t *testing.T) {
 
 func TestAddrParsing(t *testing.T) {
 	tests := []struct {
-		name      string
-		json      string
-		wantTopic string
-		wantErr   bool
+		name       string
+		json       string
+		want_topic string
+		want_err   bool
 	}{
 		{
-			name:      "SimpleTopic",
-			json:      `{"topic":"my-topic"}`,
-			wantTopic: "my-topic",
-			wantErr:   false,
+			name:       "SimpleTopic",
+			json:       `{"topic":"my-topic"}`,
+			want_topic: "my-topic",
+			want_err:   false,
 		},
 		{
-			name:      "TopicWithHyphens",
-			json:      `{"topic":"my-topic-name"}`,
-			wantTopic: "my-topic-name",
-			wantErr:   false,
+			name:       "TopicWithHyphens",
+			json:       `{"topic":"my-topic-name"}`,
+			want_topic: "my-topic-name",
+			want_err:   false,
 		},
 		{
-			name:      "FullTopicPath",
-			json:      `{"topic":"projects/my-project/topics/my-topic"}`,
-			wantTopic: "projects/my-project/topics/my-topic",
-			wantErr:   false,
+			name:       "FullTopicPath",
+			json:       `{"topic":"projects/my-project/topics/my-topic"}`,
+			want_topic: "projects/my-project/topics/my-topic",
+			want_err:   false,
 		},
 		{
-			name:    "EmptyTopic",
-			json:    `{"topic":""}`,
-			wantErr: false,
+			name:     "EmptyTopic",
+			json:     `{"topic":""}`,
+			want_err: false,
 		},
 		{
-			name:    "MissingTopic",
-			json:    `{}`,
-			wantErr: false,
+			name:     "MissingTopic",
+			json:     `{}`,
+			want_err: false,
 		},
 		{
-			name:    "InvalidJSON",
-			json:    `{invalid}`,
-			wantErr: true,
+			name:     "InvalidJSON",
+			json:     `{invalid}`,
+			want_err: true,
 		},
 	}
 
@@ -180,12 +180,12 @@ func TestAddrParsing(t *testing.T) {
 			var addr Addr
 			err := json.Unmarshal([]byte(tt.json), &addr)
 
-			if tt.wantErr {
+			if tt.want_err {
 				assert.Error(t, err)
 			} else {
 				assert.Nil(t, err)
-				if tt.wantTopic != "" {
-					assert.Equal(t, tt.wantTopic, addr.Topic)
+				if tt.want_topic != "" {
+					assert.Equal(t, tt.want_topic, addr.Topic)
 				}
 			}
 		})
