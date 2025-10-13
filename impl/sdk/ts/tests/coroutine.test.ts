@@ -6,7 +6,7 @@ import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
 import { Never } from "../src/retries";
-import { type Result, ok } from "../src/types";
+import { ok, type Result } from "../src/types";
 
 class DummyNetwork implements Network {
   private promises = new Map<string, DurablePromiseRecord>();
@@ -150,8 +150,8 @@ describe("Coroutine", () => {
       const p1 = yield* ctx.beginRun(bar);
       const p2 = yield* ctx.beginRpc("bar");
       const v1 = yield* p1;
-      const vx = yield* p1;
-      const v2 = yield* p2;
+      yield* p1;
+      yield* p2;
       return v1;
     }
 

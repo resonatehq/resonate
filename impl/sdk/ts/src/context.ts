@@ -160,7 +160,12 @@ export interface Context {
     timeout,
     data,
     tags,
-  }?: { id?: string; timeout?: number; data?: any; tags?: Record<string, string> }): RFI<T>;
+  }?: {
+    id?: string;
+    timeout?: number;
+    data?: any;
+    tags?: Record<string, string>;
+  }): RFI<T>;
 
   // detached
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
@@ -312,7 +317,12 @@ export class InnerContext implements Context {
     timeout,
     data,
     tags,
-  }: { id?: string; timeout?: number; data?: any; tags?: Record<string, string> } = {}): RFI<T> {
+  }: {
+    id?: string;
+    timeout?: number;
+    data?: any;
+    tags?: Record<string, string>;
+  } = {}): RFI<T> {
     id = id ?? this.seqid();
     return new RFI(id, this.latentCreateOpts(id, timeout, data, tags));
   }

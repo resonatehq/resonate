@@ -2,7 +2,7 @@ import type { Context, InnerContext } from "./context";
 import { Decorator, type Value } from "./decorator";
 import type { Handler } from "./handler";
 import type { DurablePromiseRecord } from "./network/network";
-import { type Callback, type Result, type Yieldable, ko, ok } from "./types";
+import { type Callback, ko, ok, type Result, type Yieldable } from "./types";
 import * as util from "./util";
 
 export type Suspended = {
@@ -50,7 +50,7 @@ export class Coroutine<T> {
     this.depth = depth;
 
     if (typeof process !== "undefined" && process.env.QUEUE_MICROTASK_EVERY_N) {
-      this.queueMicrotaskEveryN = Number.parseInt(process.env.QUEUE_MICROTASK_EVERY_N);
+      this.queueMicrotaskEveryN = Number.parseInt(process.env.QUEUE_MICROTASK_EVERY_N, 10);
     }
   }
 

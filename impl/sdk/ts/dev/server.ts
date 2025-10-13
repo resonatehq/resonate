@@ -100,7 +100,7 @@ export class Server {
   }
 
   next(time: number): number | undefined {
-    let timeout: number | undefined = undefined;
+    let timeout: number | undefined;
 
     // Check promises
     for (const promise of this.promises.values()) {
@@ -519,7 +519,13 @@ export class Server {
     timeout,
     recv,
     time,
-  }: { id: string; promiseId: string; timeout: number; recv: string; time: number }): {
+  }: {
+    id: string;
+    promiseId: string;
+    timeout: number;
+    recv: string;
+    time: number;
+  }): {
     promise: DurablePromiseRecord;
     callback?: CallbackRecord;
   } {
@@ -564,7 +570,13 @@ export class Server {
     timeout,
     recv,
     time,
-  }: { promiseId: string; rootPromiseId: string; timeout: number; recv: string; time: number }): {
+  }: {
+    promiseId: string;
+    rootPromiseId: string;
+    timeout: number;
+    recv: string;
+    time: number;
+  }): {
     promise: DurablePromiseRecord;
     callback?: CallbackRecord;
   } {
@@ -601,7 +613,13 @@ export class Server {
     processId,
     ttl,
     time,
-  }: { id: string; counter: number; processId: string; ttl: number; time: number }): ClaimTaskRes["message"] {
+  }: {
+    id: string;
+    counter: number;
+    processId: string;
+    ttl: number;
+    time: number;
+  }): ClaimTaskRes["message"] {
     const { task, applied } = this.transitionTask({
       id,
       to: "claimed",

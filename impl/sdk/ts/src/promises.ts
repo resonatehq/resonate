@@ -217,7 +217,7 @@ export class Promises {
     id: string,
     { state = undefined, limit = undefined }: { state?: "pending" | "resolved" | "rejected"; limit?: number } = {},
   ): AsyncGenerator<DurablePromiseRecord[], void> {
-    let cursor: string | undefined = undefined;
+    let cursor: string | undefined;
 
     do {
       const res = await new Promise<{ promises: DurablePromiseRecord[]; cursor?: string }>((resolve, reject) => {

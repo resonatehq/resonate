@@ -1,3 +1,7 @@
+import { EventSource } from "eventsource";
+import exceptions, { ResonateError, type ResonateServerError } from "../exceptions";
+import type { Value } from "../types";
+import * as util from "../util";
 import type {
   CallbackRecord,
   ClaimTaskReq,
@@ -38,12 +42,6 @@ import type {
   SearchPromisesRes,
   TaskRecord,
 } from "./network";
-
-import { EventSource } from "eventsource";
-
-import exceptions, { ResonateError, type ResonateServerError } from "../exceptions";
-import type { Value } from "../types";
-import * as util from "../util";
 
 // API Response Types
 interface PromiseDto {

@@ -1,3 +1,5 @@
+import type { Encoder } from "./encoder";
+import exceptions, { type ResonateError } from "./exceptions";
 import type {
   CallbackRecord,
   ClaimTaskReq,
@@ -11,12 +13,8 @@ import type {
   ReadPromiseReq,
   TaskRecord,
 } from "./network/network";
-import * as util from "./util";
-
-import exceptions, { type ResonateError } from "./exceptions";
-
-import type { Encoder } from "./encoder";
 import type { Value } from "./types";
+import * as util from "./util";
 
 export class Cache {
   private promises: Map<string, DurablePromiseRecord<any>> = new Map();

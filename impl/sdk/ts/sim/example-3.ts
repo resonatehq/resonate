@@ -1,13 +1,12 @@
+import { StepClock } from "../src/clock";
 import type * as context from "../src/context";
+import { JsonEncoder } from "../src/encoder";
 import type { Request } from "../src/network/network";
+import { Registry } from "../src/registry";
+import * as util from "../src/util";
 import { ServerProcess } from "./src/server";
 import { Message, Random, Simulator, unicast } from "./src/simulator";
 import { WorkerProcess } from "./src/worker";
-
-import { StepClock } from "../src/clock";
-import { JsonEncoder } from "../src/encoder";
-import { Registry } from "../src/registry";
-import * as util from "../src/util";
 
 // Function definition
 function* fibonacci(ctx: context.Context, n: number): Generator<any, number, any> {

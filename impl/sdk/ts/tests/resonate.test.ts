@@ -652,17 +652,11 @@ describe("Resonate environment variable initialization", () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    // biome-ignore lint/performance/noDelete: Fully delete the env variables between tests
     delete process.env.RESONATE_HOST;
-    // biome-ignore lint/performance/noDelete:
     delete process.env.RESONATE_PORT;
-    // biome-ignore lint/performance/noDelete:
     delete process.env.RESONATE_URL;
-    // biome-ignore lint/performance/noDelete:
     delete process.env.RESONATE_SCHEME;
-    // biome-ignore lint/performance/noDelete:
     delete process.env.RESONATE_USERNAME;
-    // biome-ignore lint/performance/noDelete:
     delete process.env.RESONATE_PASSWORD;
   });
 

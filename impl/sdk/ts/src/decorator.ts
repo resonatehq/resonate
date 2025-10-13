@@ -1,7 +1,7 @@
 import { Future, LFC, LFI, RFC, RFI } from "./context";
 import type { CreatePromiseReq } from "./network/network";
 import type { RetryPolicy } from "./retries";
-import { type Func, type Result, type Yieldable, ko, ok } from "./types";
+import { type Func, ko, ok, type Result, type Yieldable } from "./types";
 import * as util from "./util";
 
 // Expr

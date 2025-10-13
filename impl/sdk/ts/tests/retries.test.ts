@@ -1,7 +1,4 @@
-import { Constant } from "../src/retries";
-import { Exponential } from "../src/retries";
-import { Linear } from "../src/retries";
-import { Never } from "../src/retries";
+import { Constant, Exponential, Linear, Never } from "../src/retries";
 
 describe("RetryPolicy delay progression", () => {
   const cases: [Never | Constant | Linear | Exponential, (number | null)[] | null][] = [

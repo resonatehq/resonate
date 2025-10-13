@@ -2,7 +2,7 @@ import { WallClock } from "../src/clock";
 import { type Context, Future, InnerContext, type LFI } from "../src/context";
 import { Decorator } from "../src/decorator";
 import { Never } from "../src/retries";
-import { type Yieldable, ok } from "../src/types";
+import { ok, type Yieldable } from "../src/types";
 
 describe("Decorator", () => {
   it("returns internal.return when generator is done", () => {
