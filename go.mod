@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/anishathalye/porcupine v1.0.3
 	github.com/aws/aws-sdk-go-v2/config v1.31.12
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.7
+	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.8
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.28.0
