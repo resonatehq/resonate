@@ -147,7 +147,25 @@ export class Resonate {
   }
 
   /**
-   * Create a local Resonate instance
+   * Initializes a Resonate client instance for local development.
+   *
+   * Creates and returns a Resonate client configured for **local-only execution**
+   * with zero external dependencies. All state is stored in local memory — no
+   * network or external persistence is required. This mode is ideal for rapid
+   * testing, debugging, and experimentation before connecting to a Resonate server.
+   *
+   * The client runs with a `"default"` worker group, a `"default"` process ID,
+   * and an effectively infinite TTL (`Number.MAX_SAFE_INTEGER`) for tasks.
+   *
+   * @returns A {@link Resonate} client instance configured for local development.
+   *
+   * @example
+   * ```ts
+   * const resonate = Resonate.local();
+   * resonate.register(foo);
+   * const result = await resonate.run("foo.1", foo, { data: "test" });
+   * console.log(result);
+   * ```
    */
   static local(): Resonate {
     return new Resonate({
@@ -158,7 +176,39 @@ export class Resonate {
   }
 
   /**
-   * Create a remote Resonate instance
+   * Initializes a Resonate client instance with remote configuration.
+   *
+   * Creates and returns a Resonate client that connects to a **Resonate Server**
+   * and optional remote message sources. This configuration enables distributed,
+   * durable workers to cooperate and execute functions via **durable RPCs**.
+   *
+   * By default, the client connects to a Resonate Server running locally
+   * (`http://localhost:8001`) and joins the `"default"` worker group.
+   *
+   * The client is identified by a unique process ID (`pid`) and maintains
+   * claimed task leases for the duration specified by `ttl`.
+   *
+   * @param options - Configuration options for the remote client.
+   * @param options.url - The base URL of the remote Resonate Server. Defaults to `"http://localhost:8001"`.
+   * @param options.group - The worker group name. Defaults to `"default"`.
+   * @param options.pid - Optional process identifier for the client. Defaults to a randomly generated UUID.
+   * @param options.ttl - Time-to-live (in seconds) for claimed tasks. Defaults to `1 * util.MIN`.
+   * @param options.auth - Optional authentication credentials for connecting to the remote server.
+   *
+   * @returns A {@link Resonate} client instance configured for remote operation.
+   *
+   * @example
+   * ```ts
+   * const resonate = Resonate.remote({
+   *   url: "https://resonate.example.com",
+   *   group: "analytics",
+   *   ttl: 30,
+   *   auth: { username: "user", password: "secret" },
+   * });
+   *
+   * const result = await resonate.run("task-42", "processData", { input: "dataset.csv" });
+   * console.log(result);
+   * ```
    */
   static remote({
     url = "http://localhost:8001",
@@ -178,7 +228,34 @@ export class Resonate {
   }
 
   /**
-   * Register a function and returns a registered function
+   * Registers a function with Resonate for execution and version control.
+   *
+   * This method makes a function available for distributed or top-level execution
+   * under a specific name and version.
+   *
+   * Providing explicit `name` or `version` options allows precise control over
+   * function identification and versioning, enabling repeatable, distributed
+   * invocation and backward-compatible deployments.
+   *
+   * @param nameOrFunc - Either the function name (string) or the function itself.
+   *   When passing a name, provide the function and optional options as additional parameters.
+   * @param funcOrOptions - The function to register, or an optional configuration object
+   *   with versioning information when the first argument is a name.
+   * @param maybeOptions - Optional configuration object when both name and function are provided.
+   *   Supports a `version` field to specify the registered function version.
+   *
+   * @returns A {@link ResonateFunc} wrapper for the registered function.
+   *   When used as a decorator, returns a decorator that registers the target function
+   *   upon definition.
+   *
+   * @example
+   * ```ts
+   * function greet(ctx: Context, name: string): string {
+   *   return `Hello, ${name}!`;
+   * }
+   *
+   * resonate.register("greet_user", greet, { version: 2 });
+   * ```
    */
   public register<F extends Func>(
     name: string,
@@ -224,7 +301,31 @@ export class Resonate {
   }
 
   /**
-   * Invoke a function and return a value
+   * Runs a registered function with Resonate and waits for the result.
+   *
+   * This method executes the specified function under a **durable promise**
+   * identified by the provided `id`. If a promise with the same `id` already exists,
+   * Resonate subscribes to its result or returns it immediately if it has already completed.
+   *
+   * Duplicate executions for the same `id` are automatically prevented, ensuring
+   * idempotent and consistent behavior across distributed runs.
+   *
+   * This is a **blocking operation** — execution will not continue until the
+   * function result is available.
+   *
+   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
+   *   idempotent execution.
+   * @param funcOrName - Either the registered function reference or its string name
+   *   to execute.
+   * @param args - Positional arguments passed to the function.
+   *
+   * @returns A promise resolving to the final result returned from the function execution.
+   *
+   * @example
+   * ```ts
+   * const result = await client.run("job-123", "processData", { input: "records.csv" });
+   * console.log("Result:", result);
+   * ```
    */
   public async run<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
   public async run<T>(id: string, name: string, ...args: any[]): Promise<T>;
@@ -234,7 +335,35 @@ export class Resonate {
   }
 
   /**
-   * Invoke a function and return a promise
+   * Runs a registered function asynchronously with Resonate.
+   *
+   * This method schedules the specified function for execution under a **durable promise**
+   * identified by the provided `id`. If a promise with the same `id` already exists,
+   * Resonate subscribes to its result or returns it immediately if it has already completed.
+   *
+   * Unlike {@link run}, this method is **non-blocking** and immediately returns a
+   * {@link ResonateHandle} that can be awaited or queried later to retrieve the final result
+   * once execution completes.
+   *
+   * Duplicate executions for the same `id` are automatically prevented, ensuring idempotent
+   * and consistent behavior across distributed runs.
+   *
+   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
+   *   idempotent execution.
+   * @param funcOrName - Either the registered function reference or its string name
+   *   to execute.
+   * @param argsWithOpts - Positional arguments and optional configuration parameters
+   *   passed to the function.
+   *
+   * @returns A {@link ResonateHandle} representing the asynchronous execution.
+   *   The handle can be awaited or inspected for status and results.
+   *
+   * @example
+   * ```ts
+   * const handle = await client.beginRun("run-001", "generateReport", { period: "Q3" });
+   * const result = await handle.getResult();
+   * console.log(result);
+   * ```
    */
   public async beginRun<F extends Func>(
     id: string,
@@ -291,7 +420,33 @@ export class Resonate {
   }
 
   /**
-   * Invoke a remote function and return a value
+   * Executes a registered function remotely with Resonate and waits for the result.
+   *
+   * This method runs the specified function on a remote worker or process under a
+   * **durable promise** identified by the provided `id`. If a promise with the same
+   * `id` already exists, Resonate subscribes to its result or returns it immediately
+   * if it has already completed.
+   *
+   * Unlike {@link beginRpc}, this method is **blocking** — it waits for the remote
+   * function to complete and returns the final result before continuing execution.
+   *
+   * Duplicate executions for the same `id` are automatically prevented, ensuring
+   * idempotent and consistent behavior across distributed runs.
+   *
+   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
+   *   idempotent remote execution.
+   * @param funcOrName - Either the registered function reference or its string name
+   *   to execute remotely.
+   * @param args - Positional arguments passed to the remote function.
+   *
+   * @returns A promise resolving to the final result returned from the remote
+   *   function execution.
+   *
+   * @example
+   * ```ts
+   * const result = await client.rpc("job-42", "analyzeData", { file: "input.csv" });
+   * console.log("Remote result:", result);
+   * ```
    */
   public async rpc<F extends Func>(id: string, func: F, ...args: ParamsWithOptions<F>): Promise<Return<F>>;
   public async rpc<T>(id: string, name: string, ...args: any[]): Promise<T>;
@@ -301,7 +456,35 @@ export class Resonate {
   }
 
   /**
-   * Invoke a remote function and return a promise
+   * Initiates a remote procedure call (RPC) with Resonate and returns a handle to the execution.
+   *
+   * This method schedules a registered function for **remote execution** under a durable promise
+   * identified by the provided `id`. The function runs on a remote worker or process as part of
+   * Resonate’s distributed execution environment.
+   *
+   * Unlike {@link rpc}, this method is **non-blocking** and immediately returns a
+   * {@link ResonateHandle} that can be awaited or queried later to retrieve the final result once
+   * remote execution completes.
+   *
+   * If a durable promise with the same `id` already exists, Resonate subscribes to its result or
+   * returns it immediately if it has already completed. Duplicate executions for the same `id`
+   * are automatically prevented, ensuring idempotent and consistent behavior.
+   *
+   * @param id - The unique identifier of the durable promise. Reusing an ID ensures
+   *   idempotent remote execution.
+   * @param funcOrName - Either the registered function reference or its string name to execute remotely.
+   * @param argsWithOpts - Positional arguments and optional configuration parameters
+   *   passed to the remote function.
+   *
+   * @returns A {@link ResonateHandle} representing the asynchronous remote execution.
+   *   The handle can be awaited or inspected for completion and results.
+   *
+   * @example
+   * ```ts
+   * const handle = await client.beginRpc("task-123", "processData", { input: "hello" });
+   * const result = await handle.getResult();
+   * console.log(result);
+   * ```
    */
   public async beginRpc<F extends Func>(
     id: string,
@@ -379,7 +562,22 @@ export class Resonate {
   }
 
   /**
-   * Get a promise and return a value
+   * Retrieves or subscribes to an existing execution by its unique ID.
+   *
+   * This method attaches to an existing **durable promise** identified by `id`.
+   * If the associated execution is still in progress, it returns a {@link ResonateHandle}
+   * that can be awaited or observed until completion. If the execution has already
+   * finished, the handle is immediately resolved with the stored result.
+   *
+   * Notes:
+   * - A durable promise with the given `id` must already exist.
+   * - This operation is **non-blocking**; awaiting the returned handle will block
+   *   only if the execution is still running.
+   *
+   * @param id - Unique identifier of the target execution or durable promise.
+   *
+   * @returns A {@link ResonateHandle} representing the existing execution.
+   *   The handle can be awaited or queried to retrieve the final result.
    */
   public async get<T = any>(id: string): Promise<ResonateHandle<T>> {
     const promise = await this.readPromise({
