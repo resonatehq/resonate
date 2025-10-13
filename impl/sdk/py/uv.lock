@@ -330,7 +330,7 @@ wheels = [
 
 [[package]]
 name = "pydoctor"
-version = "25.4.0"
+version = "25.10.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -343,9 +343,9 @@ dependencies = [
     { name = "twisted" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/51/b9d82166b905bf4c3b682a93065dbbf590c2a7dfa1ce851f7d75d8437acd/pydoctor-25.4.0.tar.gz", hash = "sha256:c460413a31d83103481fe61479cf6da896694c9b6258243154abd01e4eee14bf", size = 969073, upload-time = "2025-05-22T20:13:55.132Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ce/26/4b49eab9203a0f6939711f6a62a06c04d6e11fbf01e7b2cd9f9dece97686/pydoctor-25.10.1.tar.gz", hash = "sha256:489ec8b96f1e477df8f1892e2c7990836f32481a633ed13abb5e24a3488c83fb", size = 981473, upload-time = "2025-09-29T22:06:49.712Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0a/98/189c27fdf86cd67cf32ce88dad165919bcd62f4cc2d79a5b2a240785a87e/pydoctor-25.4.0-py3-none-any.whl", hash = "sha256:9fb5bff6fb28e4071080f2580812133e374289dba49798f3eaeb7f8d68a043cb", size = 1601262, upload-time = "2025-05-22T20:13:53.157Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/ae/1ae23968390bfd71678c1cd752e66a9823e2fe45ba34a6740f76e84011ab/pydoctor-25.10.1-py3-none-any.whl", hash = "sha256:2aa85f8d64e11c065d71a2317b82724a58361173d945290509367681665bdc7c", size = 1637603, upload-time = "2025-09-29T22:06:47.349Z" },
 ]
 
 [[package]]
