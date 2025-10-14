@@ -116,6 +116,7 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 							CompletedOn:   t.CompletedOn,
 						},
 						Promise:       promise,
+						BaseHref:      config.Url,
 						ClaimHref:     fmt.Sprintf("%s/tasks/claim/%s/%d", config.Url, t.Id, t.Counter),
 						CompleteHref:  fmt.Sprintf("%s/tasks/complete/%s/%d", config.Url, t.Id, t.Counter),
 						HeartbeatHref: fmt.Sprintf("%s/tasks/heartbeat/%s/%d", config.Url, t.Id, t.Counter),

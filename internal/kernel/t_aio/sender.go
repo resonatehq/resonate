@@ -10,6 +10,7 @@ import (
 type SenderSubmission struct {
 	Task          *task.Task
 	Promise       *promise.Promise
+	BaseHref      string
 	ClaimHref     string
 	CompleteHref  string
 	HeartbeatHref string
