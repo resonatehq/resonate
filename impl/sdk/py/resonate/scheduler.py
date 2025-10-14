@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from inspect import isgeneratorfunction
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, override
 
 from resonate import utils
 from resonate.conventions import Base
@@ -64,8 +64,8 @@ class Scheduler:
         self.pid = pid or uuid.uuid4().hex
 
         # unicast / anycast
-        self.unicast = unicast or f"poll://uni@default/{pid}"
-        self.anycast = anycast or f"poll://any@default/{pid}"
+        self.unicast: str = unicast or f"poll://uni@default/{pid}"
+        self.anycast: str = anycast or f"poll://any@default/{pid}"
 
         # computations
         self.computations: dict[str, Computation] = {}
@@ -107,6 +107,7 @@ class Info:
     def __init__(self, func: Lfnc | Coro) -> None:
         self._func = func
 
+    @override
     def __repr__(self) -> str:
         return f"Info(attempt={self.attempt}, ikey={self.idempotency_key} tags={self.tags}, timeout={self.timeout})"
 
