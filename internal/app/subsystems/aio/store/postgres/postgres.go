@@ -392,7 +392,7 @@ type Config struct {
 	Username  string            `flag:"username" desc:"postgres username"`
 	Password  string            `flag:"password" desc:"postgres password"`
 	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
-	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
 	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
 	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
 }
