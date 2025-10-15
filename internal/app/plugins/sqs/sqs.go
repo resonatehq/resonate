@@ -23,10 +23,6 @@ type Config struct {
 	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
 	Timeout     time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
-
-	// By default do not attempt to resend if the task is not claimed in
-	// a certain amount of time. Once a message is sent to SQS, it is
-	// durable and will not be acknowledged until the task is claimed.
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"0"`
 }
 
