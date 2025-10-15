@@ -2,12 +2,16 @@ package migrations
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 )
+
+// ErrPendingMigrations is returned when there are unapplied migrations
+var ErrPendingMigrations = errors.New("pending migrations exist")
 
 // Migration represents a single database migration
 type Migration struct {
@@ -53,20 +57,9 @@ func ParseMigrationFilename(filename string) (version int, name string, err erro
 	return version, matches[2], nil
 }
 
-// LoadMigrations loads all migrations from embedded files for the specified store type
-func LoadMigrations(storeType string) ([]Migration, error) {
-	var files []string
-	var err error
-
-	switch storeType {
-	case "sqlite":
-		files, err = GetSQLiteMigrationFiles()
-	case "postgres":
-		files, err = GetPostgresMigrationFiles()
-	default:
-		return nil, fmt.Errorf("unsupported store type: %s", storeType)
-	}
-
+// LoadMigrations loads all migrations from embedded files using the provided store
+func LoadMigrations(store MigrationStore) ([]Migration, error) {
+	files, err := store.GetMigrationFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -79,14 +72,7 @@ func LoadMigrations(storeType string) ([]Migration, error) {
 			return nil, err
 		}
 
-		var content string
-		switch storeType {
-		case "sqlite":
-			content, err = GetSQLiteMigrationContent(file)
-		case "postgres":
-			content, err = GetPostgresMigrationContent(file)
-		}
-
+		content, err := store.GetMigrationContent(file)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read migration %s: %w", file, err)
 		}
@@ -107,8 +93,8 @@ func LoadMigrations(storeType string) ([]Migration, error) {
 }
 
 // GetPendingMigrations returns migrations that need to be applied
-func GetPendingMigrations(currentVersion int, storeType string) ([]Migration, error) {
-	allMigrations, err := LoadMigrations(storeType)
+func GetPendingMigrations(currentVersion int, store MigrationStore) ([]Migration, error) {
+	allMigrations, err := LoadMigrations(store)
 	if err != nil {
 		return nil, err
 	}
@@ -137,7 +123,7 @@ func ValidateMigrationSequence(migrations []Migration, startVersion int) error {
 }
 
 // ApplyMigrations executes migrations in a transaction
-func ApplyMigrations(db *sql.DB, migrations []Migration, storeType string) error {
+func ApplyMigrations(db *sql.DB, migrations []Migration, store MigrationStore) error {
 	if len(migrations) == 0 {
 		return nil
 	}
@@ -163,14 +149,8 @@ func ApplyMigrations(db *sql.DB, migrations []Migration, storeType string) error
 			}
 		}
 
-		// Update migrations table
-		var updateSQL string
-		if storeType == "sqlite" {
-			updateSQL = "INSERT INTO migrations (id) VALUES (?) ON CONFLICT(id) DO NOTHING"
-		} else {
-			updateSQL = "INSERT INTO migrations (id) VALUES ($1) ON CONFLICT(id) DO NOTHING"
-		}
-
+		// Update migrations table using store-specific SQL
+		updateSQL := store.GetInsertMigrationSQL()
 		_, err = tx.Exec(updateSQL, migration.Version)
 		if err != nil {
 			fmt.Println("✗")

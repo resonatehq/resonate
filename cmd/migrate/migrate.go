@@ -61,12 +61,17 @@ func newStatusCmd() *cobra.Command {
 			}
 			defer db.Close()
 
+			store, err := getMigrationStore()
+			if err != nil {
+				return err
+			}
+
 			currentVersion, err := migrations.GetCurrentVersion(db)
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
 
-			allMigrations, err := migrations.LoadMigrations(storeType)
+			allMigrations, err := migrations.LoadMigrations(store)
 			if err != nil {
 				return fmt.Errorf("failed to load migrations: %w", err)
 			}
@@ -78,7 +83,7 @@ func newStatusCmd() *cobra.Command {
 				latestVersion = currentVersion
 			}
 
-			pending, err := migrations.GetPendingMigrations(currentVersion, storeType)
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
 			if err != nil {
 				return fmt.Errorf("failed to get pending migrations: %w", err)
 			}
@@ -110,12 +115,17 @@ func newDryRunCmd() *cobra.Command {
 			}
 			defer db.Close()
 
+			store, err := getMigrationStore()
+			if err != nil {
+				return err
+			}
+
 			currentVersion, err := migrations.GetCurrentVersion(db)
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
 
-			pending, err := migrations.GetPendingMigrations(currentVersion, storeType)
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
 			if err != nil {
 				return fmt.Errorf("failed to get pending migrations: %w", err)
 			}
@@ -146,12 +156,17 @@ func newUpCmd() *cobra.Command {
 			}
 			defer db.Close()
 
+			store, err := getMigrationStore()
+			if err != nil {
+				return err
+			}
+
 			currentVersion, err := migrations.GetCurrentVersion(db)
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
 
-			pending, err := migrations.GetPendingMigrations(currentVersion, storeType)
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
 			if err != nil {
 				return fmt.Errorf("failed to get pending migrations: %w", err)
 			}
@@ -168,7 +183,7 @@ func newUpCmd() *cobra.Command {
 
 			fmt.Printf("Applying %d migration(s)...\n\n", len(pending))
 
-			if err := migrations.ApplyMigrations(db, pending, storeType); err != nil {
+			if err := migrations.ApplyMigrations(db, pending, store); err != nil {
 				return err
 			}
 
@@ -178,6 +193,18 @@ func newUpCmd() *cobra.Command {
 
 			return nil
 		},
+	}
+}
+
+// getMigrationStore returns the appropriate migration store based on the store type
+func getMigrationStore() (migrations.MigrationStore, error) {
+	switch storeType {
+	case "sqlite":
+		return migrations.NewSqliteMigrationStore(), nil
+	case "postgres":
+		return migrations.NewPostgresMigrationStore(), nil
+	default:
+		return nil, fmt.Errorf("unsupported store type: %s", storeType)
 	}
 }
 
