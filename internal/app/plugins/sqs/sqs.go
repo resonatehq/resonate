@@ -162,7 +162,7 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 	}, func(o *sqs.Options) {
 		if addr.Region != nil {
 			o.Region = *addr.Region
-		} else if region, ok := parse_sqs_region(addr.Url); ok {
+		} else if region, ok := parseSQSRegion(addr.Url); ok {
 			o.Region = region
 		}
 	})
@@ -173,16 +173,16 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 	return true, nil
 }
 
-func parse_sqs_region(sqs_url string) (string, bool) {
+func parseSQSRegion(sqs_url string) (string, bool) {
 	u, err := url.Parse(sqs_url)
 	if err != nil {
 		return "", false
 	}
 
-	host_parts := strings.Split(u.Host, ".")
-	if host_parts[0] != "sqs" || len(host_parts) < 2 {
+	hostParts := strings.Split(u.Host, ".")
+	if hostParts[0] != "sqs" || len(hostParts) < 2 {
 		return "", false
 	}
 
-	return host_parts[1], true
+	return hostParts[1], true
 }

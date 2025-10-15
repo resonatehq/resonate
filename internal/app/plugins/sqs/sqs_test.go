@@ -52,8 +52,8 @@ func TestSQSPlugin(t *testing.T) {
 	ch := make(chan *SendMessageParams, 1)
 	defer close(ch)
 
-	success_client := &MockSQSClient{ch, true}
-	failure_client := &MockSQSClient{ch, false}
+	successClient := &MockSQSClient{ch, true}
+	failureClient := &MockSQSClient{ch, false}
 
 	for _, tc := range []struct {
 		name    string
@@ -65,7 +65,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "Success",
 			addr:    []byte(`{"url": "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue"}`),
-			client:  success_client,
+			client:  successClient,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue",
@@ -75,7 +75,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "SuccessNoRegion",
 			addr:    []byte(`{"url": "https://notvalid.com"}`),
-			client:  success_client,
+			client:  successClient,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://notvalid.com",
@@ -85,7 +85,7 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "SuccessRegionTaskPrecedenceOverUrl",
 			addr:    []byte(`{"url": "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue", "region": "us-east-2"}`),
-			client:  success_client,
+			client:  successClient,
 			success: true,
 			params: &SendMessageParams{
 				Url:    "https://sqs.us-west-2.amazonaws.com/123456789012/test-queue",
@@ -95,13 +95,13 @@ func TestSQSPlugin(t *testing.T) {
 		{
 			name:    "FailureDueToJson",
 			addr:    []byte(""),
-			client:  success_client,
+			client:  successClient,
 			success: false,
 		},
 		{
 			name:    "FailureDueToCleint",
 			addr:    []byte(`{}`),
-			client:  failure_client,
+			client:  failureClient,
 			success: false,
 		},
 	} {
