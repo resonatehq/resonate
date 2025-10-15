@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 )
 
-//go:embed migrations/sqlite migrations/postgres
+//go:embed all:migrations
 var MigrationsFS embed.FS
 
 // GetSQLiteMigrationFiles returns list of SQLite migration files
