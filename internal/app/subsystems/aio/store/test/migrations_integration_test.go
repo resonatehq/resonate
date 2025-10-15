@@ -16,15 +16,14 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Database without migrations table should return error
-	t.Run("database without migrations table returns error", func(t *testing.T) {
-		_, err := migrations.GetCurrentVersion(db)
-		if err == nil {
-			t.Fatal("GetCurrentVersion() should return error when migrations table doesn't exist")
+	// Test 1: Database without migrations table should return version 0
+	t.Run("database without migrations table returns version 0", func(t *testing.T) {
+		version, err := migrations.GetCurrentVersion(db)
+		if err != nil {
+			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
-		// Verify it's a "no such table" error
-		if !contains(err.Error(), "no such table") && !contains(err.Error(), "does not exist") {
-			t.Errorf("Expected 'no such table' error, got: %v", err)
+		if version != 0 {
+			t.Errorf("GetCurrentVersion() = %d, want 0 when migrations table doesn't exist", version)
 		}
 	})
 
@@ -374,12 +373,12 @@ func TestGetPendingMigrations(t *testing.T) {
 		{
 			name:           "pending migrations from version 0",
 			currentVersion: 0,
-			wantCount:      -1, // We don't know how many migrations exist in the embed
+			wantCount:      1, // Should have 001_initial_schema
 		},
 		{
 			name:           "pending migrations from version 1",
 			currentVersion: 1,
-			wantCount:      -1, // We don't know how many migrations exist in the embed
+			wantCount:      0, // All migrations applied
 		},
 		{
 			name:           "no pending from very high version",

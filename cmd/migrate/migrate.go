@@ -34,11 +34,13 @@ func NewCmd() *cobra.Command {
 	migrateCmd.PersistentFlags().String("aio-store-postgres-username", "", "postgres username")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-password", "", "postgres password")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-database", "resonate", "postgres database")
+	migrateCmd.PersistentFlags().String("aio-store-postgres-sslmode", "disable", "postgres SSL mode (disable, require, verify-ca, verify-full)")
 	viper.BindPFlag("aio.store.postgres.host", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-host"))
 	viper.BindPFlag("aio.store.postgres.port", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-port"))
 	viper.BindPFlag("aio.store.postgres.username", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-username"))
 	viper.BindPFlag("aio.store.postgres.password", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-password"))
 	viper.BindPFlag("aio.store.postgres.database", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-database"))
+	viper.BindPFlag("aio.store.postgres.sslmode", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-sslmode"))
 
 	// Add subcommands
 	migrateCmd.AddCommand(newStatusCmd())
@@ -211,6 +213,7 @@ func openPostgresDB() (*sql.DB, error) {
 	user := viper.GetString("aio.store.postgres.username")
 	password := viper.GetString("aio.store.postgres.password")
 	dbname := viper.GetString("aio.store.postgres.database")
+	sslmode := viper.GetString("aio.store.postgres.sslmode")
 
 	if host == "" {
 		host = "localhost"
@@ -221,9 +224,12 @@ func openPostgresDB() (*sql.DB, error) {
 	if dbname == "" {
 		dbname = "resonate"
 	}
+	if sslmode == "" {
+		sslmode = "disable"
+	}
 
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
-		host, port, user, password, dbname)
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+		host, port, user, password, dbname, sslmode)
 
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {

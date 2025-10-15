@@ -21,10 +21,16 @@ func GetCurrentVersion(db *sql.DB) (int, error) {
 	var version int
 	err := db.QueryRow("SELECT id FROM migrations ORDER BY id DESC LIMIT 1").Scan(&version)
 	if err == sql.ErrNoRows {
-		// No migrations table or no rows, return 0
+		// Empty migrations table, return 0
 		return 0, nil
 	}
 	if err != nil {
+		// Check if error is because migrations table doesn't exist
+		errStr := err.Error()
+		if regexp.MustCompile(`(?i)no such table|does not exist|table.*not found`).MatchString(errStr) {
+			// Migrations table doesn't exist yet, return 0 (no migrations applied)
+			return 0, nil
+		}
 		return 0, fmt.Errorf("failed to get current migration version: %w", err)
 	}
 	return version, nil
