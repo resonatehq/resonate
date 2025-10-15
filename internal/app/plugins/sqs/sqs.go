@@ -55,12 +55,12 @@ type Addr struct {
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
-	aws_config, err := awsconfig.LoadDefaultConfig(context.Background())
+	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	client := sqs.NewFromConfig(aws_config)
+	client := sqs.NewFromConfig(awsConfig)
 	return NewWithClient(a, metrics, config, client)
 }
 
@@ -173,8 +173,8 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 	return true, nil
 }
 
-func parseSQSRegion(sqs_url string) (string, bool) {
-	u, err := url.Parse(sqs_url)
+func parseSQSRegion(sqsUrl string) (string, bool) {
+	u, err := url.Parse(sqsUrl)
 	if err != nil {
 		return "", false
 	}
