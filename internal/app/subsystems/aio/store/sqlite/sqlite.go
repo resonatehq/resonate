@@ -375,7 +375,7 @@ const (
 type Config struct {
 	Size      int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:"`
+	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:" dev:":memory:"`
 	TxTimeout time.Duration `flag:"tx-timeout" desc:"sqlite transaction timeout" default:"10s"`
 	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" dst:"true"`
 }

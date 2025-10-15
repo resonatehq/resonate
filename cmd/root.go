@@ -36,16 +36,14 @@ func init() {
 	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
 
 	// Add Subcommands
+	rootCmd.AddCommand(dev.NewCmd())
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
+	rootCmd.AddCommand(serve.NewCmd())
 	rootCmd.AddCommand(tasks.NewCmd())
-
-	serveCmd := serve.NewCmd()
-	rootCmd.AddCommand(serveCmd)
-	rootCmd.AddCommand(dev.NewCmd(serveCmd))
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)
