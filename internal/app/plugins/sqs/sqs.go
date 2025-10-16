@@ -23,30 +23,26 @@ type Config struct {
 	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
 	Timeout     time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
-
-	// By default do not attempt to resend if the task is not claimed in
-	// a certain amount of time. Once a message is sent to SQS, it is
-	// durable and will not be acknowledged until the task is claimed.
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"0"`
 }
 
-type SQSClient interface {
+type Client interface {
 	SendMessage(ctx context.Context, params *sqs.SendMessageInput, opt ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
 }
 
-type SQSWorker struct {
+type Worker struct {
 	i       int
 	sq      <-chan *aio.Message
 	timeout time.Duration
 	aio     aio.AIO
 	metrics *metrics.Metrics
 	config  *Config
-	client  SQSClient
+	client  Client
 }
 
 type SQS struct {
 	sq      chan *aio.Message
-	workers []*SQSWorker
+	workers []*Worker
 }
 
 type Addr struct {
@@ -55,21 +51,21 @@ type Addr struct {
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
-	aws_config, err := awsconfig.LoadDefaultConfig(context.Background())
+	awsConfig, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	client := sqs.NewFromConfig(aws_config)
-	return newWithClient(a, metrics, config, client)
+	client := sqs.NewFromConfig(awsConfig)
+	return NewWithClient(a, metrics, config, client)
 }
 
-func newWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client SQSClient) (*SQS, error) {
+func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
 	sq := make(chan *aio.Message, config.Size)
-	workers := make([]*SQSWorker, config.Workers)
+	workers := make([]*Worker, config.Workers)
 
 	for i := 0; i < config.Workers; i++ {
-		workers[i] = &SQSWorker{
+		workers[i] = &Worker{
 			i:       i,
 			sq:      sq,
 			timeout: config.Timeout,
@@ -116,11 +112,11 @@ func (s *SQS) Enqueue(msg *aio.Message) bool {
 	}
 }
 
-func (w *SQSWorker) String() string {
+func (w *Worker) String() string {
 	return fmt.Sprintf("%s:sqs", t_aio.Sender.String())
 }
 
-func (w *SQSWorker) Start() {
+func (w *Worker) Start() {
 	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
 	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
 	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
@@ -146,7 +142,7 @@ func (w *SQSWorker) Start() {
 	}
 }
 
-func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
+func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
@@ -155,10 +151,10 @@ func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
 	defer cancel()
 
-	messageBody := string(body)
+	msg := string(body)
 	_, err := w.client.SendMessage(ctx, &sqs.SendMessageInput{
 		QueueUrl:    &addr.Url,
-		MessageBody: &messageBody,
+		MessageBody: &msg,
 	}, func(o *sqs.Options) {
 		if addr.Region != nil {
 			o.Region = *addr.Region
@@ -173,13 +169,13 @@ func (w *SQSWorker) Process(data []byte, body []byte) (bool, error) {
 	return true, nil
 }
 
-func parseSQSRegion(sqsURL string) (string, bool) {
-	u, err := url.Parse(sqsURL)
+func parseSQSRegion(sqsUrl string) (string, bool) {
+	u, err := url.Parse(sqsUrl)
 	if err != nil {
 		return "", false
 	}
 
-	hostParts := strings.Split(u.Host, ".") // generally: [sqs, <region>, ...]
+	hostParts := strings.Split(u.Host, ".")
 	if hostParts[0] != "sqs" || len(hostParts) < 2 {
 		return "", false
 	}
