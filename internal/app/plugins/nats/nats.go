@@ -56,7 +56,6 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*NATS, error) {
 	sq := make(chan *aio.Message, config.Size)
 	workers := make([]*Worker, config.Workers)
 
-	// Create a separate NATS connection for each worker
 	for i := 0; i < config.Workers; i++ {
 		opts := []natsgo.Option{
 			natsgo.Timeout(config.Timeout),
@@ -67,7 +66,6 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*NATS, error) {
 
 		nc, err := natsgo.Connect(config.URL, opts...)
 		if err != nil {
-			// Close any previously created connections
 			for j := 0; j < i; j++ {
 				if workers[j].client != nil {
 					workers[j].client.Close()
@@ -135,7 +133,6 @@ func (p *NATS) Stop() error {
 	if p.sq != nil {
 		close(p.sq)
 	}
-	// Close all worker NATS connections
 	for _, worker := range p.workers {
 		if worker.client != nil {
 			worker.client.Close()

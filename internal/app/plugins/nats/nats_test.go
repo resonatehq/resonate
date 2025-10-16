@@ -14,10 +14,9 @@ import (
 )
 
 type MockNATSClient struct {
-	ch     chan<- *PublishParams
-	ok     bool
-	closed bool
-	// Add a field to control publish behavior
+	ch          chan<- *PublishParams
+	ok          bool
+	closed      bool
 	PublishFunc func(subject string, data []byte) error
 }
 
