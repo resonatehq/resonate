@@ -128,7 +128,9 @@ func (k *Kafka) Start(chan<- error) error {
 func (k *Kafka) Stop() error {
 	close(k.sq)
 	if len(k.workers) > 0 && k.workers[0].producer != nil {
-		k.workers[0].producer.Close()
+		if err := k.workers[0].producer.Close(); err != nil {
+			return fmt.Errorf("failed to close kafka producer: %w", err)
+		}
 	}
 	return nil
 }
