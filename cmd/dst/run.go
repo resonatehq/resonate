@@ -6,8 +6,10 @@ import (
 	"math/rand" // nosemgrep
 	netHttp "net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/cmd/config"
@@ -21,10 +23,12 @@ import (
 	"github.com/resonatehq/resonate/pkg/log"
 	"github.com/resonatehq/resonate/test/dst"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
 func RunDSTCmd() *cobra.Command {
 	var (
+		v      = viper.New()
 		config = &config.ConfigDST{}
 
 		seed              int64
@@ -47,11 +51,37 @@ func RunDSTCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run deterministic simulation test",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if file, _ := cmd.Flags().GetString("config"); file != "" {
+				v.SetConfigFile(file)
+			} else {
+				v.SetConfigName("resonate-dst")
+				v.AddConfigPath(".")
+				v.AddConfigPath("$HOME")
+			}
+
+			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			v.AutomaticEnv()
+
+			if err := v.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return err
+				}
+			}
+
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r := rand.New(rand.NewSource(seed))
 
-			// config
-			if err := config.Parse(r); err != nil {
+			hooks := mapstructure.ComposeDecodeHookFunc(
+				util.StringToRange(r),
+				util.MapToBytes(),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+			)
+
+			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
 				return err
 			}
 
@@ -205,6 +235,9 @@ func RunDSTCmd() *cobra.Command {
 		},
 	}
 
+	// bind config file flag
+	cmd.Flags().StringP("config", "c", "", "config file (default resonate-dst.yaml)")
+
 	// dst related values
 	cmd.Flags().Int64Var(&seed, "seed", 0, "dst seed")
 	cmd.Flags().Int64Var(&ticks, "ticks", 1000, "number of ticks")
@@ -222,7 +255,7 @@ func RunDSTCmd() *cobra.Command {
 	cmd.Flags().Var(backchannelSize, "backchannel-size", "backchannel size")
 
 	// bind config
-	_ = config.BindDST(cmd)
+	_ = config.Bind(cmd, v)
 	cmd.SilenceUsage = true
 
 	cmd.Flags().SortFlags = false
