@@ -9,6 +9,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/http"
+	"github.com/resonatehq/resonate/internal/app/plugins/kafka"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
@@ -28,9 +29,10 @@ type Config struct {
 }
 
 type PluginConfig struct {
-	Http EnabledPlugin[http.Config] `flag:"http"`
-	Poll EnabledPlugin[poll.Config] `flag:"poll"`
-	SQS  DisabledPlugin[sqs.Config] `flag:"sqs"`
+	Http  EnabledPlugin[http.Config]   `flag:"http"`
+	Kafka DisabledPlugin[kafka.Config] `flag:"kafka"`
+	Poll  EnabledPlugin[poll.Config]   `flag:"poll"`
+	SQS   DisabledPlugin[sqs.Config]   `flag:"sqs"`
 }
 
 type EnabledPlugin[T any] struct {
@@ -333,6 +335,24 @@ func schemeToRecv(v string) (*receiver.Recv, bool) {
 		}
 
 		return &receiver.Recv{Type: "sqs", Data: data}, true
+
+	case "kafka":
+		topic := u.Host
+		if topic == "" {
+			return nil, false
+		}
+
+		addr := map[string]string{"topic": topic}
+		if key := u.Query().Get("key"); key != "" {
+			addr["key"] = key
+		}
+
+		data, err := json.Marshal(addr)
+		if err != nil {
+			return nil, false
+		}
+
+		return &receiver.Recv{Type: "kafka", Data: data}, true
 
 	default:
 		return nil, false
