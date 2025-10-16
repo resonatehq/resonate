@@ -192,6 +192,68 @@ func TestNATSPlugin(t *testing.T) {
 	close(ch)
 }
 
+func TestNew(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+
+	_, err := New(nil, metrics, &Config{URL: ""})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "NATS URL is required")
+}
+
+func TestNATSString(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+	assert.Contains(t, nats.String(), "sender:nats")
+}
+
+func TestNATSType(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+	assert.Equal(t, "nats", nats.Type())
+}
+
+func TestNATSEnqueue(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
+
+	assert.False(t, nats.Enqueue(nil))
+
+	nats.sq = nil
+	assert.False(t, nats.Enqueue(&aio.Message{}))
+}
+
+func TestWorkerProcessTimeout(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
+	slowClient := &MockNATSClient{
+		PublishFunc: func(subject string, data []byte) error {
+			time.Sleep(200 * time.Millisecond)
+			return nil
+		},
+	}
+
+	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 100 * time.Millisecond}, slowClient)
+	nats.Start(nil)
+
+	done := make(chan bool, 1)
+	nats.Enqueue(&aio.Message{
+		Addr: []byte(`{"subject": "test.subject"}`),
+		Body: []byte("test message"),
+		Done: func(completion *t_aio.SenderCompletion) {
+			assert.False(t, completion.Success)
+			done <- true
+		},
+	})
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("Test timed out")
+	}
+
+	slowClient.Close()
+	nats.Stop()
+}
+
 func TestNATSErrorHandling(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
