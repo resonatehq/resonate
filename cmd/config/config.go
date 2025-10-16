@@ -50,11 +50,15 @@ type config[T t_api, U t_aio] struct {
 }
 
 func (c *Config) Bind(cmd *cobra.Command) error {
-	return bind(cmd, c, false, "", "")
+	return bind(cmd, c, "default", "", "")
+}
+
+func (c *Config) BindDev(cmd *cobra.Command) error {
+	return bind(cmd, c, "dev", "", "dev")
 }
 
 func (c *ConfigDST) BindDST(cmd *cobra.Command) error {
-	return bind(cmd, c, true, "", "dst")
+	return bind(cmd, c, "dst", "", "dst")
 }
 
 func (c *Config) Parse() error {
@@ -65,6 +69,21 @@ func (c *Config) Parse() error {
 	)
 
 	if err := viper.Unmarshal(&c, viper.DecodeHook(hooks)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Config) ParseDev() error {
+	hooks := mapstructure.ComposeDecodeHookFunc(
+		util.MapToBytes(),
+		mapstructure.StringToTimeDurationHookFunc(),
+		mapstructure.StringToSliceHookFunc(","),
+	)
+
+	config := struct{ Dev *Config }{Dev: c}
+	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
 		return err
 	}
 
@@ -313,7 +332,7 @@ func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST
 
 // Helper functions
 
-func bind(cmd *cobra.Command, cfg any, dst bool, fPrefix string, kPrefix string) error {
+func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
@@ -323,8 +342,8 @@ func bind(cmd *cobra.Command, cfg any, dst bool, fPrefix string, kPrefix string)
 		desc := field.Tag.Get("desc")
 
 		var value string
-		if dst && field.Tag.Get("dst") != "" {
-			value = field.Tag.Get("dst")
+		if v := field.Tag.Get(tag); v != "" {
+			value = v
 		} else {
 			value = field.Tag.Get("default")
 		}
@@ -438,7 +457,7 @@ func bind(cmd *cobra.Command, cfg any, dst bool, fPrefix string, kPrefix string)
 			cmd.Flags().StringToString(n, v, desc)
 			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Struct:
-			if err := bind(cmd, v.Field(i).Addr().Interface(), dst, n, k); err != nil {
+			if err := bind(cmd, v.Field(i).Addr().Interface(), tag, n, k); err != nil {
 				return err
 			}
 		default:

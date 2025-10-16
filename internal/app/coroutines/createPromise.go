@@ -3,6 +3,7 @@ package coroutines
 import (
 	"errors"
 	"log/slog"
+	"strconv"
 
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -178,6 +179,14 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 					// just set the recv
 					taskCmd.Recv = completion.Router.Recv
 				} else {
+					var expiresAt int64
+					if delay, ok := promiseCmd.Tags["resonate:delay"]; ok {
+						expiresAt, err = strconv.ParseInt(delay, 10, 64)
+						if err != nil {
+							slog.Warn("could not parse delay", "promise", promiseCmd.Id, "delay", delay)
+						}
+					}
+
 					// add the task command
 					taskCmd = &t_aio.CreateTaskCommand{
 						Id:        util.InvokeId(promiseCmd.Id),
@@ -185,6 +194,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 						Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 						Timeout:   promiseCmd.Timeout,
 						State:     task.Init,
+						ExpiresAt: expiresAt,
 						CreatedOn: promiseCmd.CreatedOn,
 					}
 				}

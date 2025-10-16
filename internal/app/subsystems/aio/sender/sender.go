@@ -238,6 +238,7 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 			"type": mesgType,
 			"task": sqe.Submission.Sender.Task,
 			"href": map[string]string{
+				"base":      sqe.Submission.Sender.BaseHref,
 				"claim":     sqe.Submission.Sender.ClaimHref,
 				"complete":  sqe.Submission.Sender.CompleteHref,
 				"heartbeat": sqe.Submission.Sender.HeartbeatHref,
