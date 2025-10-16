@@ -61,12 +61,12 @@ func newStatusCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(db)
 			if err != nil {
 				return err
 			}
 
-			currentVersion, err := migrations.GetCurrentVersion(db)
+			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
@@ -115,12 +115,12 @@ func newDryRunCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(db)
 			if err != nil {
 				return err
 			}
 
-			currentVersion, err := migrations.GetCurrentVersion(db)
+			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
@@ -156,12 +156,12 @@ func newUpCmd() *cobra.Command {
 			}
 			defer db.Close()
 
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(db)
 			if err != nil {
 				return err
 			}
 
-			currentVersion, err := migrations.GetCurrentVersion(db)
+			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
 				return fmt.Errorf("failed to get current version: %w", err)
 			}
@@ -183,7 +183,7 @@ func newUpCmd() *cobra.Command {
 
 			fmt.Printf("Applying %d migration(s)...\n\n", len(pending))
 
-			if err := migrations.ApplyMigrations(db, pending, store); err != nil {
+			if err := migrations.ApplyMigrations(pending, store); err != nil {
 				return err
 			}
 
@@ -197,12 +197,12 @@ func newUpCmd() *cobra.Command {
 }
 
 // getMigrationStore returns the appropriate migration store based on the store type
-func getMigrationStore() (migrations.MigrationStore, error) {
+func getMigrationStore(db *sql.DB) (migrations.MigrationStore, error) {
 	switch storeType {
 	case "sqlite":
-		return migrations.NewSqliteMigrationStore(), nil
+		return migrations.NewSqliteMigrationStore(db), nil
 	case "postgres":
-		return migrations.NewPostgresMigrationStore(), nil
+		return migrations.NewPostgresMigrationStore(db), nil
 	default:
 		return nil, fmt.Errorf("unsupported store type: %s", storeType)
 	}

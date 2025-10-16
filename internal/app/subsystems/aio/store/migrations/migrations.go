@@ -1,7 +1,6 @@
 package migrations
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -10,7 +9,6 @@ import (
 	"strconv"
 )
 
-// ErrPendingMigrations is returned when there are unapplied migrations
 var ErrPendingMigrations = errors.New("pending migrations exist")
 
 // Migration represents a single database migration
@@ -20,28 +18,6 @@ type Migration struct {
 	SQL     string
 }
 
-// GetCurrentVersion reads the current migration version from the database
-func GetCurrentVersion(db *sql.DB) (int, error) {
-	var version int
-	err := db.QueryRow("SELECT id FROM migrations ORDER BY id DESC LIMIT 1").Scan(&version)
-	if err == sql.ErrNoRows {
-		// Empty migrations table, return 0
-		return 0, nil
-	}
-	if err != nil {
-		// Check if error is because migrations table doesn't exist
-		errStr := err.Error()
-		if regexp.MustCompile(`(?i)no such table|does not exist|table.*not found`).MatchString(errStr) {
-			// Migrations table doesn't exist yet, return 0 (no migrations applied)
-			return 0, nil
-		}
-		return 0, fmt.Errorf("failed to get current migration version: %w", err)
-	}
-	return version, nil
-}
-
-// ParseMigrationFilename extracts version and name from a migration filename
-// Expected format: 002_description.sql
 func ParseMigrationFilename(filename string) (version int, name string, err error) {
 	re := regexp.MustCompile(`^(\d{3})_(.+)\.sql$`)
 	matches := re.FindStringSubmatch(filename)
@@ -57,7 +33,6 @@ func ParseMigrationFilename(filename string) (version int, name string, err erro
 	return version, matches[2], nil
 }
 
-// LoadMigrations loads all migrations from embedded files using the provided store
 func LoadMigrations(store MigrationStore) ([]Migration, error) {
 	files, err := store.GetMigrationFiles()
 	if err != nil {
@@ -123,10 +98,13 @@ func ValidateMigrationSequence(migrations []Migration, startVersion int) error {
 }
 
 // ApplyMigrations executes migrations in a transaction
-func ApplyMigrations(db *sql.DB, migrations []Migration, store MigrationStore) error {
+func ApplyMigrations(migrations []Migration, store MigrationStore) error {
 	if len(migrations) == 0 {
 		return nil
 	}
+
+	// Get DB from store
+	db := store.GetDB()
 
 	// Start transaction
 	tx, err := db.Begin()

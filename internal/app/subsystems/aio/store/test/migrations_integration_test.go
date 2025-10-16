@@ -4,8 +4,8 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 )
 
 func TestSQLiteMigrationLifecycle(t *testing.T) {
@@ -18,7 +18,8 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 
 	// Test 1: Database without migrations table should return version 0
 	t.Run("database without migrations table returns version 0", func(t *testing.T) {
-		version, err := migrations.GetCurrentVersion(db)
+		store := migrations.NewSqliteMigrationStore(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -38,7 +39,8 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 			t.Fatalf("Failed to insert initial version: %v", err)
 		}
 
-		version, err := migrations.GetCurrentVersion(db)
+		store := migrations.NewSqliteMigrationStore(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -54,7 +56,8 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 			t.Fatalf("Failed to insert migration version: %v", err)
 		}
 
-		version, err := migrations.GetCurrentVersion(db)
+		store := migrations.NewSqliteMigrationStore(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -70,7 +73,8 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 			t.Fatalf("Failed to insert migration versions: %v", err)
 		}
 
-		version, err := migrations.GetCurrentVersion(db)
+		store := migrations.NewSqliteMigrationStore(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -86,7 +90,8 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 			t.Fatalf("Failed to insert migration versions: %v", err)
 		}
 
-		version, err := migrations.GetCurrentVersion(db)
+		store := migrations.NewSqliteMigrationStore(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -130,13 +135,15 @@ func TestApplyMigrations(t *testing.T) {
 			},
 		}
 
-		err = migrations.ApplyMigrations(db, testMigrations, "sqlite")
+		store := migrations.NewSqliteMigrationStore(db)
+
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed: %v", err)
 		}
 
 		// Verify version was updated to 3
-		version, err := migrations.GetCurrentVersion(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -186,13 +193,14 @@ func TestApplyMigrations(t *testing.T) {
 			},
 		}
 
-		err = migrations.ApplyMigrations(db, testMigrations, "sqlite")
+		store := migrations.NewSqliteMigrationStore(db)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed: %v", err)
 		}
 
 		// Verify version was updated to 3
-		version, err := migrations.GetCurrentVersion(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -248,13 +256,14 @@ func TestApplyMigrations(t *testing.T) {
 			},
 		}
 
-		err = migrations.ApplyMigrations(db, testMigrations, "sqlite")
+		store := migrations.NewSqliteMigrationStore(db)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err == nil {
 			t.Fatal("ApplyMigrations() should have failed but succeeded")
 		}
 
 		// Verify rollback - version should still be 1
-		version, err := migrations.GetCurrentVersion(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -290,14 +299,16 @@ func TestApplyMigrations(t *testing.T) {
 			t.Fatalf("Failed to insert initial version: %v", err)
 		}
 
+		store := migrations.NewSqliteMigrationStore(db)
+
 		// Apply empty migrations - should be no-op
-		err = migrations.ApplyMigrations(db, []migrations.Migration{}, "sqlite")
+		err = migrations.ApplyMigrations([]migrations.Migration{}, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed with empty list: %v", err)
 		}
 
 		// Version should still be 1
-		version, err := migrations.GetCurrentVersion(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -332,7 +343,8 @@ func TestApplyMigrations(t *testing.T) {
 			},
 		}
 
-		err = migrations.ApplyMigrations(db, testMigrations, "sqlite")
+		store := migrations.NewSqliteMigrationStore(db)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed on first run: %v", err)
 		}
@@ -344,7 +356,7 @@ func TestApplyMigrations(t *testing.T) {
 		}
 
 		// Should still be at version 2
-		version, err := migrations.GetCurrentVersion(db)
+		version, err := store.GetCurrentVersion()
 		if err != nil {
 			t.Fatalf("GetCurrentVersion() failed: %v", err)
 		}
@@ -389,7 +401,15 @@ func TestGetPendingMigrations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pending, err := migrations.GetPendingMigrations(tt.currentVersion, "sqlite")
+			// Create in-memory SQLite database for testing
+			db, err := sql.Open("sqlite3", ":memory:")
+			if err != nil {
+				t.Fatalf("Failed to open in-memory SQLite: %v", err)
+			}
+			defer db.Close()
+
+			store := migrations.NewSqliteMigrationStore(db)
+			pending, err := migrations.GetPendingMigrations(tt.currentVersion, store)
 			if err != nil {
 				t.Fatalf("GetPendingMigrations() failed: %v", err)
 			}

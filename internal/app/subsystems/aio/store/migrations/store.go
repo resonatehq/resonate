@@ -14,8 +14,15 @@ type MigrationStore interface {
 	// The statement should use the appropriate parameter placeholder for the database type
 	GetInsertMigrationSQL() string
 
+	// GetCurrentVersion returns the current migration version from the database
+	// Uses database-specific SQL to handle dialect differences
+	GetCurrentVersion() (int, error)
+
+	// GetDB returns the database connection held by this store
+	GetDB() *sql.DB
+
 	// CheckMigrations checks for pending migrations and returns an error if any exist
-	CheckMigrations(db *sql.DB) error
+	CheckMigrations() error
 
 	// String returns the name of the store type for logging/debugging
 	String() string
