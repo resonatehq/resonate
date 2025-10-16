@@ -232,7 +232,7 @@ func TestWorkerProcessTimeout(t *testing.T) {
 	}
 
 	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 100 * time.Millisecond}, slowClient)
-	nats.Start(nil)
+	_ = nats.Start(nil)
 
 	done := make(chan bool, 1)
 	nats.Enqueue(&aio.Message{
@@ -251,7 +251,7 @@ func TestWorkerProcessTimeout(t *testing.T) {
 	}
 
 	slowClient.Close()
-	nats.Stop()
+	_ = nats.Stop()
 }
 
 func TestNATSErrorHandling(t *testing.T) {
