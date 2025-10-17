@@ -34,8 +34,12 @@ export class ResonateError extends Error {
     this.serverError = serverError;
   }
 
-  log() {
+  log(verbose: boolean) {
     console.error(`${this.type}. ${this.message}. ${this.next}. (See ${this.href} for more information)`);
+
+    if (verbose) {
+      console.error(this);
+    }
   }
 }
 

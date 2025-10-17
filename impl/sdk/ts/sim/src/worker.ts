@@ -180,6 +180,7 @@ export class WorkerProcess extends Process {
       registry: registry,
       heartbeat: new NoopHeartbeat(),
       dependencies: new Map(),
+      verbose: false,
     });
   }
 

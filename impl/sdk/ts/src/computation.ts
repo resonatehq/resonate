@@ -37,6 +37,7 @@ export class Computation {
   private handler: Handler;
   private registry: Registry;
   private dependencies: Map<string, any>;
+  private verbose: boolean;
   private heartbeat: Heartbeat;
   private processor: Processor;
 
@@ -56,6 +57,7 @@ export class Computation {
     registry: Registry,
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
+    verbose: boolean,
     processor?: Processor,
   ) {
     this.id = id;
@@ -70,6 +72,7 @@ export class Computation {
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
+    this.verbose = verbose;
     this.processor = processor ?? new AsyncProcessor();
   }
 
@@ -100,11 +103,10 @@ export class Computation {
           },
           (err, promise) => {
             if (err) {
-              err.log();
+              err.log(this.verbose);
               return doneProcessing(true);
             }
             util.assertDefined(promise);
-
             this.processClaimed({ kind: "claimed", task: task.task, rootPromise: promise }, doneProcessing);
           },
         );
@@ -138,20 +140,20 @@ export class Computation {
       !Array.isArray(rootPromise.param.data.args) ||
       ("version" in rootPromise.param.data && typeof rootPromise.param.data.version !== "number")
     ) {
-      // TODO: log something useful
       return doneAndDropTaskIfErr(true);
     }
 
-    const registered = this.registry.get(rootPromise.param.data.func, rootPromise.param.data.version ?? 1);
-    const args = rootPromise.param.data.args;
+    const { func: funcName, version = 1, args } = rootPromise.param.data;
+    const registered = this.registry.get(funcName, version);
 
     // function must be registered
     if (!registered) {
-      exceptions
-        .REGISTRY_FUNCTION_NOT_REGISTERED(rootPromise.param.data.func, rootPromise.param.data.version ?? 1)
-        .log();
+      exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcName, version).log(this.verbose);
       return doneAndDropTaskIfErr(true);
     }
+
+    if (version !== 0) util.assert(version === registered.version, "versions must match");
+    util.assert(funcName === registered.name, "names must match");
 
     // start heartbeat
     this.heartbeat.start();
@@ -196,8 +198,10 @@ export class Computation {
     args: any[],
     done: Callback<Status>,
   ) {
-    Coroutine.exec(this.id, ctx, func, args, this.handler, (err, status) => {
-      if (err) return done(err);
+    Coroutine.exec(this.id, this.verbose, ctx, func, args, this.handler, (err, status) => {
+      if (err) {
+        return done(err);
+      }
       util.assertDefined(status);
 
       switch (status.type) {
@@ -213,6 +217,7 @@ export class Computation {
           } else if (status.todo.remote.length > 0) {
             this.processRemoteTodo(nursery, status.todo.remote, ctx.timeout, done);
           }
+
           break;
       }
     });
@@ -243,7 +248,7 @@ export class Computation {
           },
           (err, res) => {
             if (err) {
-              err.log();
+              err.log(this.verbose);
               return done(true);
             }
             util.assertDefined(res);
@@ -299,7 +304,7 @@ export class Computation {
           },
           (err, res) => {
             if (err) {
-              err.log();
+              err.log(this.verbose);
               return done(true);
             }
             util.assertDefined(res);

@@ -37,6 +37,7 @@ export class ResonateInner {
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
+  private verbose: boolean;
   private computations: Map<string, Computation> = new Map();
 
   constructor({
@@ -51,6 +52,7 @@ export class ResonateInner {
     registry,
     heartbeat,
     dependencies,
+    verbose,
     messageSource = undefined,
   }: {
     unicast: string;
@@ -64,6 +66,7 @@ export class ResonateInner {
     registry: Registry;
     heartbeat: Heartbeat;
     dependencies: Map<string, any>;
+    verbose: boolean;
     messageSource?: MessageSource;
   }) {
     this.unicast = unicast;
@@ -77,6 +80,7 @@ export class ResonateInner {
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
+    this.verbose = verbose;
 
     // subscribe to invoke and resume
     messageSource?.subscribe("invoke", this.onMessage.bind(this));
@@ -99,6 +103,7 @@ export class ResonateInner {
         this.registry,
         this.heartbeat,
         this.dependencies,
+        this.verbose,
       );
       this.computations.set(task.task.rootPromiseId, computation);
     }

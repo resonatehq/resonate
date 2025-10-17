@@ -124,6 +124,7 @@ interface SearchPromisesResponseDto {
 }
 
 export interface HttpNetworkConfig {
+  verbose: boolean;
   url: string;
   auth?: { username: string; password: string };
   timeout?: number;
@@ -145,11 +146,13 @@ export type RetryPolicy = {
 export class HttpNetwork implements Network {
   private EXCPECTED_RESONATE_VERSION = "0.7.15";
 
+  private verbose: boolean;
   private url: string;
   private timeout: number;
   private headers: Record<string, string>;
 
-  constructor({ url, auth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
+  constructor({ verbose, url, auth, timeout = 30 * util.SEC, headers = {} }: HttpNetworkConfig) {
+    this.verbose = verbose;
     this.url = url;
     this.timeout = timeout;
 
@@ -551,6 +554,9 @@ export class HttpNetwork implements Network {
         }
 
         console.warn(`Networking. Cannot connect to [${this.url}]. Retrying in ${delay / 1000}s.`);
+        if (this.verbose) {
+          console.warn(err);
+        }
 
         // sleep before retrying
         await new Promise((resolve) => setTimeout(resolve, delay));

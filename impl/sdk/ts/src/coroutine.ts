@@ -38,13 +38,15 @@ type Done = {
 
 export class Coroutine<T> {
   private ctx: InnerContext;
+  private verbose: boolean;
   private decorator: Decorator<T>;
   private handler: Handler;
   private readonly depth: number;
   private readonly queueMicrotaskEveryN: number = 1;
 
-  constructor(ctx: InnerContext, decorator: Decorator<T>, handler: Handler, depth = 1) {
+  constructor(ctx: InnerContext, verbose: boolean, decorator: Decorator<T>, handler: Handler, depth = 1) {
     this.ctx = ctx;
+    this.verbose = verbose;
     this.decorator = decorator;
     this.handler = handler;
     this.depth = depth;
@@ -56,6 +58,7 @@ export class Coroutine<T> {
 
   public static exec(
     id: string,
+    verbose: boolean,
     ctx: InnerContext,
     func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
     args: any[],
@@ -80,7 +83,7 @@ export class Coroutine<T> {
           return callback(false, { type: "completed", promise: res });
         }
 
-        const coroutine = new Coroutine(ctx, new Decorator(func(ctx, ...args)), handler);
+        const coroutine = new Coroutine(ctx, verbose, new Decorator(func(ctx, ...args)), handler);
         coroutine.exec((err, status) => {
           if (err) return callback(err);
           util.assertDefined(status);
@@ -103,7 +106,7 @@ export class Coroutine<T> {
                 },
                 (err, promise) => {
                   if (err) {
-                    err.log();
+                    err.log(verbose);
                     return callback(true);
                   }
                   util.assertDefined(promise);
@@ -139,7 +142,7 @@ export class Coroutine<T> {
             action.createReq,
             (err, res) => {
               if (err) {
-                err.log();
+                err.log(this.verbose);
                 return callback(true);
               }
               util.assertDefined(res);
@@ -166,6 +169,7 @@ export class Coroutine<T> {
 
                 const coroutine = new Coroutine(
                   ctx,
+                  this.verbose,
                   new Decorator(action.func(ctx, ...action.args)),
                   this.handler,
                   this.depth + 1,
@@ -199,7 +203,7 @@ export class Coroutine<T> {
                       },
                       (err, res) => {
                         if (err) {
-                          err.log();
+                          err.log(this.verbose);
                           return callback(true);
                         }
                         util.assertDefined(res);
@@ -264,7 +268,7 @@ export class Coroutine<T> {
         if (action.type === "internal.async.r") {
           this.handler.createPromise(action.createReq, (err, res) => {
             if (err) {
-              err.log();
+              err.log(this.verbose);
               return callback(true);
             }
             util.assertDefined(res);

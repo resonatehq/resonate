@@ -124,6 +124,7 @@ describe("Computation Event Queue Concurrency", () => {
       registry,
       new NoopHeartbeat(),
       new Map(),
+      false,
       mockProcessor,
     );
   });
