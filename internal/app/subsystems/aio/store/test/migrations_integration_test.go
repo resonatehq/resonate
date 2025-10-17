@@ -16,15 +16,12 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 	}
 	defer db.Close()
 
-	// Test 1: Database without migrations table should return version 0
-	t.Run("database without migrations table returns version 0", func(t *testing.T) {
+	// Test 1: Database without migrations table should return an error
+	t.Run("database without migrations table returns error", func(t *testing.T) {
 		store := migrations.NewSqliteMigrationStore(db)
-		version, err := store.GetCurrentVersion()
-		if err != nil {
-			t.Fatalf("GetCurrentVersion() failed: %v", err)
-		}
-		if version != 0 {
-			t.Errorf("GetCurrentVersion() = %d, want 0 when migrations table doesn't exist", version)
+		_, err := store.GetCurrentVersion()
+		if err == nil {
+			t.Fatal("GetCurrentVersion() should have failed when migrations table doesn't exist")
 		}
 	})
 

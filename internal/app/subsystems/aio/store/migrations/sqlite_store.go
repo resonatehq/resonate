@@ -73,3 +73,7 @@ func (s *SqliteMigrationStore) CheckMigrations() error {
 func (s *SqliteMigrationStore) String() string {
 	return "sqlite"
 }
+
+func (s *SqliteMigrationStore) Close() error {
+	return s.db.Close()
+}

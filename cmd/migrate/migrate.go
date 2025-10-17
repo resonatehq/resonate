@@ -12,8 +12,6 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
-var storeType string
-
 func NewCmd() *cobra.Command {
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
@@ -21,20 +19,21 @@ func NewCmd() *cobra.Command {
 		Long:  "Manage database migrations for Resonate",
 	}
 
-	// Add --store flag
-	migrateCmd.PersistentFlags().StringVar(&storeType, "store", "sqlite", "store type (sqlite or postgres)")
-
 	// Add SQLite flags
+	migrateCmd.PersistentFlags().Bool("aio-store-sqlite-enable", true, "enable sqlite store")
 	migrateCmd.PersistentFlags().String("aio-store-sqlite-path", "resonate.db", "sqlite database path")
+	viper.BindPFlag("aio.store.sqlite.enable", migrateCmd.PersistentFlags().Lookup("aio-store-sqlite-enable"))
 	viper.BindPFlag("aio.store.sqlite.path", migrateCmd.PersistentFlags().Lookup("aio-store-sqlite-path"))
 
 	// Add PostgreSQL flags
+	migrateCmd.PersistentFlags().Bool("aio-store-postgres-enable", false, "enable postgres store")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-host", "localhost", "postgres host")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-port", "5432", "postgres port")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-username", "", "postgres username")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-password", "", "postgres password")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-database", "resonate", "postgres database")
 	migrateCmd.PersistentFlags().String("aio-store-postgres-sslmode", "disable", "postgres SSL mode (disable, require, verify-ca, verify-full)")
+	viper.BindPFlag("aio.store.postgres.enable", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-enable"))
 	viper.BindPFlag("aio.store.postgres.host", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-host"))
 	viper.BindPFlag("aio.store.postgres.port", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-port"))
 	viper.BindPFlag("aio.store.postgres.username", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-username"))
@@ -55,16 +54,11 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show current migration status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
+			store, err := getMigrationStore()
 			if err != nil {
 				return err
 			}
-			defer db.Close()
-
-			store, err := getMigrationStore(db)
-			if err != nil {
-				return err
-			}
+			defer store.Close()
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
@@ -88,7 +82,7 @@ func newStatusCmd() *cobra.Command {
 				return fmt.Errorf("failed to get pending migrations: %w", err)
 			}
 
-			fmt.Printf("Store type: %s\n", storeType)
+			fmt.Printf("Store type: %s\n", store.String())
 			fmt.Printf("Current migration version: %d\n", currentVersion)
 			fmt.Printf("Latest migration version: %d\n", latestVersion)
 			fmt.Printf("Pending migrations: %d\n", len(pending))
@@ -109,16 +103,11 @@ func newDryRunCmd() *cobra.Command {
 		Use:   "dry-run",
 		Short: "Show which migrations would be applied",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
+			store, err := getMigrationStore()
 			if err != nil {
 				return err
 			}
-			defer db.Close()
-
-			store, err := getMigrationStore(db)
-			if err != nil {
-				return err
-			}
+			defer store.Close()
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
@@ -150,16 +139,11 @@ func newUpCmd() *cobra.Command {
 		Use:   "up",
 		Short: "Apply all pending migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			db, err := openDB()
+			store, err := getMigrationStore()
 			if err != nil {
 				return err
 			}
-			defer db.Close()
-
-			store, err := getMigrationStore(db)
-			if err != nil {
-				return err
-			}
+			defer store.Close()
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
@@ -196,28 +180,36 @@ func newUpCmd() *cobra.Command {
 	}
 }
 
-// getMigrationStore returns the appropriate migration store based on the store type
-func getMigrationStore(db *sql.DB) (migrations.MigrationStore, error) {
-	switch storeType {
-	case "sqlite":
-		return migrations.NewSqliteMigrationStore(db), nil
-	case "postgres":
-		return migrations.NewPostgresMigrationStore(db), nil
-	default:
-		return nil, fmt.Errorf("unsupported store type: %s", storeType)
-	}
-}
+// getMigrationStore infers the store type, opens the database connection,
+// and returns the appropriate migration store. The store owns the database
+// connection and the caller is responsible for calling Close() on the store.
+func getMigrationStore() (migrations.MigrationStore, error) {
+	// Infer store type from enable flags
+	sqliteEnabled := viper.GetBool("aio.store.sqlite.enable")
+	postgresEnabled := viper.GetBool("aio.store.postgres.enable")
 
-// openDB opens a database connection based on the store type and config
-func openDB() (*sql.DB, error) {
-	switch storeType {
-	case "sqlite":
-		return openSQLiteDB()
-	case "postgres":
-		return openPostgresDB()
-	default:
-		return nil, fmt.Errorf("unsupported store type: %s", storeType)
+	if postgresEnabled && sqliteEnabled {
+		return nil, fmt.Errorf("both postgres and sqlite stores are enabled; enable only one")
 	}
+
+	if !postgresEnabled && !sqliteEnabled {
+		return nil, fmt.Errorf("no store enabled; enable either sqlite or postgres")
+	}
+
+	// Open database connection and create store
+	if postgresEnabled {
+		db, err := openPostgresDB()
+		if err != nil {
+			return nil, err
+		}
+		return migrations.NewPostgresMigrationStore(db), nil
+	}
+
+	db, err := openSQLiteDB()
+	if err != nil {
+		return nil, err
+	}
+	return migrations.NewSqliteMigrationStore(db), nil
 }
 
 func openSQLiteDB() (*sql.DB, error) {

@@ -26,4 +26,7 @@ type MigrationStore interface {
 
 	// String returns the name of the store type for logging/debugging
 	String() string
+
+	// Close closes the database connection owned by this store
+	Close() error
 }

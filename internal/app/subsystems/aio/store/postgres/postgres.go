@@ -29,7 +29,11 @@ import (
 const (
 	// Schema is now managed by migrations (see internal/migrationfiles/migrations/postgres/)
 	// This is kept empty for backwards compatibility
-	CREATE_TABLE_STATEMENT = ``
+	CREATE_TABLE_STATEMENT = `
+	CREATE TABLE IF NOT EXISTS migrations (
+		id INTEGER,
+		PRIMARY KEY(id)
+	);`
 
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE promises;
@@ -377,10 +381,41 @@ func (s *PostgresStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
 	}
+	ms := migrations.NewPostgresMigrationStore(s.db)
 
-	// Check for pending migrations
-	if err := migrations.CheckPostgresMigrations(s.db); err != nil {
+	version, err := ms.GetCurrentVersion()
+	if err != nil {
 		return err
+	}
+
+	// Get pending migrations
+	pending, err := migrations.GetPendingMigrations(version, ms)
+	if err != nil {
+		return err
+	}
+
+	// If version == 0, the db is fresh and we can apply all migrations automatically
+	if version == 0 {
+		if len(pending) > 0 {
+			// Validate migration sequence
+			if err := migrations.ValidateMigrationSequence(pending, version); err != nil {
+				return err
+			}
+
+			// Apply all migrations
+			if err := migrations.ApplyMigrations(pending, ms); err != nil {
+				return err
+			}
+		}
+	} else {
+		// For existing databases, check for pending migrations and error if any exist
+		if len(pending) > 0 {
+			return &migrations.MigrationError{
+				Version: pending[0].Version,
+				Name:    pending[0].Name,
+				Err:     migrations.ErrPendingMigrations,
+			}
+		}
 	}
 
 	for _, worker := range s.workers {
