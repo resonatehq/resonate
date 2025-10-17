@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mitchellh/mapstructure"
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
@@ -48,61 +47,12 @@ type config[T t_api, U t_aio] struct {
 	LogLevel    string        `flag:"log-level" desc:"can be one of: debug, info, warn, error" default:"info"`
 }
 
-func (c *Config) Bind(cmd *cobra.Command) error {
-	return bind(cmd, c, "default", "", "")
+func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, tag string) error {
+	return bind(cmd, c, vip, tag, "", "")
 }
 
-func (c *Config) BindDev(cmd *cobra.Command) error {
-	return bind(cmd, c, "dev", "", "dev")
-}
-
-func (c *ConfigDST) BindDST(cmd *cobra.Command) error {
-	return bind(cmd, c, "dst", "", "dst")
-}
-
-func (c *Config) Parse() error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	if err := viper.Unmarshal(&c, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *Config) ParseDev() error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	config := struct{ Dev *Config }{Dev: c}
-	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (c *ConfigDST) Parse(r *rand.Rand) error {
-	hooks := mapstructure.ComposeDecodeHookFunc(
-		util.StringToRange(r),
-		util.MapToBytes(),
-		mapstructure.StringToTimeDurationHookFunc(),
-		mapstructure.StringToSliceHookFunc(","),
-	)
-
-	config := struct{ DST *ConfigDST }{DST: c}
-	if err := viper.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
-		return err
-	}
-
-	return nil
+func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
+	return bind(cmd, c, vip, "dst", "", "")
 }
 
 type API struct {
@@ -323,7 +273,7 @@ func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST
 
 // Helper functions
 
-func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix string) error {
+func bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
@@ -358,10 +308,10 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 		switch field.Type.Kind() {
 		case reflect.String:
 			cmd.Flags().String(n, value, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Bool:
 			cmd.Flags().Bool(n, value == "true", desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Int:
 			if strings.Contains(value, ":") {
 				flag := util.NewRangeIntFlag(0, 0)
@@ -370,11 +320,11 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 				}
 
 				cmd.Flags().Var(flag, n, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 			} else {
 				v, _ := strconv.Atoi(value)
 				cmd.Flags().Int(n, v, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 			}
 		case reflect.Int64:
 			if field.Type == reflect.TypeOf(time.Duration(0)) {
@@ -385,11 +335,11 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 					}
 
 					cmd.Flags().Var(flag, n, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 				} else {
 					v, _ := time.ParseDuration(value)
 					cmd.Flags().Duration(n, v, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 				}
 			} else {
 				if strings.Contains(value, ":") {
@@ -399,11 +349,11 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 					}
 
 					cmd.Flags().Var(flag, n, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 				} else {
 					v, _ := strconv.ParseInt(value, 10, 64)
 					cmd.Flags().Int64(n, v, desc)
-					_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 				}
 			}
 		case reflect.Float64:
@@ -414,11 +364,11 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 				}
 
 				cmd.Flags().Var(flag, n, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 			} else {
 				v, _ := strconv.ParseFloat(value, 64)
 				cmd.Flags().Float64(n, v, desc)
-				_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 			}
 		case reflect.Slice:
 			// TODO: support additional slice types via flags
@@ -433,7 +383,7 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 				v = []string{value}
 			}
 			cmd.Flags().StringArray(n, v, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
@@ -446,9 +396,9 @@ func bind(cmd *cobra.Command, cfg any, tag string, fPrefix string, kPrefix strin
 				return err
 			}
 			cmd.Flags().StringToString(n, v, desc)
-			_ = viper.BindPFlag(k, cmd.Flags().Lookup(n))
+			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Struct:
-			if err := bind(cmd, v.Field(i).Addr().Interface(), tag, n, k); err != nil {
+			if err := bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
 				return err
 			}
 		default:

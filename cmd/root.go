@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"log/slog"
 	"os"
-	"strings"
 
 	"github.com/resonatehq/resonate/cmd/dev"
 	"github.com/resonatehq/resonate/cmd/dst"
@@ -15,11 +13,6 @@ import (
 	"github.com/resonatehq/resonate/cmd/tasks"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
-)
-
-var (
-	cfgFile string
 )
 
 var rootCmd = &cobra.Command{
@@ -29,12 +22,6 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
-	// Flags
-	rootCmd.PersistentFlags().StringVarP(&cfgFile, "config", "", "", "config file (default \"resonate.yml\")")
-	rootCmd.PersistentFlags().StringP("log-level", "", "info", "can be one of: debug, info, warn, error")
-
 	// Add Subcommands
 	rootCmd.AddCommand(dev.NewCmd())
 	rootCmd.AddCommand(dst.NewCmd())
@@ -48,26 +35,6 @@ func init() {
 	// Set default output
 	rootCmd.SetOut(os.Stdout)
 	rootCmd.SetErr(os.Stderr)
-}
-
-func initConfig() {
-	if cfgFile != "" {
-		viper.SetConfigFile(cfgFile)
-	} else {
-		viper.SetConfigName("resonate")
-		viper.AddConfigPath(".")
-		viper.AddConfigPath("$HOME")
-	}
-
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
-	viper.AutomaticEnv()
-
-	if err := viper.ReadInConfig(); err != nil {
-		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			slog.Error("error reading config file", "error", err)
-			os.Exit(1)
-		}
-	}
 }
 
 func Execute() {
