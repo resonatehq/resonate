@@ -3,7 +3,6 @@ package migrations
 import (
 	"database/sql"
 	"fmt"
-	"regexp"
 
 	"github.com/resonatehq/resonate/internal/migrationfiles"
 )
@@ -33,17 +32,13 @@ func (s *SqliteMigrationStore) GetInsertMigrationSQL() string {
 func (s *SqliteMigrationStore) GetCurrentVersion() (int, error) {
 	var version int
 	err := s.db.QueryRow("SELECT id FROM migrations ORDER BY id DESC LIMIT 1").Scan(&version)
+
+	// We create the migrations table on store start, we can assume that ErrNoRows means that no migrations have been applied
+	// and the db is fresh
 	if err == sql.ErrNoRows {
-		// Empty migrations table, return 0
 		return 0, nil
 	}
 	if err != nil {
-		// Check if error is because migrations table doesn't exist
-		errStr := err.Error()
-		if regexp.MustCompile(`(?i)no such table|does not exist|table.*not found`).MatchString(errStr) {
-			// Migrations table doesn't exist yet, return 0 (no migrations applied)
-			return 0, nil
-		}
 		return 0, fmt.Errorf("failed to get current migration version: %w", err)
 	}
 	return version, nil

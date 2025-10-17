@@ -94,9 +94,9 @@ func newStatusCmd() *cobra.Command {
 			fmt.Printf("Pending migrations: %d\n", len(pending))
 
 			if len(pending) > 0 {
-				fmt.Println("\nStatus: ⚠️  MIGRATIONS PENDING")
+				fmt.Println("\nStatus: MIGRATIONS PENDING")
 			} else {
-				fmt.Println("\nStatus: ✓ UP TO DATE")
+				fmt.Println("\nStatus: UP TO DATE")
 			}
 
 			return nil
