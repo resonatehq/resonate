@@ -258,6 +258,7 @@ export class Computation {
         ),
       ctx.retryPolicy,
       ctx.timeout,
+      this.verbose,
     );
   }
 

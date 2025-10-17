@@ -11,6 +11,7 @@ export interface Processor {
     cb: (result: Result<unknown>) => void,
     retryPolicy: RetryPolicy,
     timeout: number,
+    verbose: boolean,
   ): void;
 }
 
@@ -22,8 +23,9 @@ export class AsyncProcessor implements Processor {
     cb: (result: Result<T>) => void,
     retryPolicy: RetryPolicy,
     timeout: number,
+    verbose: boolean,
   ): void {
-    void this.run(id, name, func, cb, retryPolicy, timeout);
+    void this.run(id, name, func, cb, retryPolicy, timeout, verbose);
   }
 
   private async run<T>(
@@ -33,6 +35,7 @@ export class AsyncProcessor implements Processor {
     cb: (result: Result<T>) => void,
     retryPolicy: RetryPolicy,
     timeout: number,
+    verbose: boolean,
   ) {
     let attempt = 1;
 
@@ -54,6 +57,9 @@ export class AsyncProcessor implements Processor {
         }
 
         console.warn(`Runtime. Function '${name}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`);
+        if (verbose) {
+          console.warn(error);
+        }
 
         await new Promise((resolve) => setTimeout(resolve, retryIn));
         attempt++;
