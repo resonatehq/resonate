@@ -272,8 +272,12 @@ export class Computation {
 
       nursery.hold((next) => {
         this.processFunction(id, ctx, func, args, (err) => {
-          if (err) return done(err);
           next();
+
+          if (err) {
+            this.seen.delete(id);
+            done(err);
+          }
         });
       });
     }

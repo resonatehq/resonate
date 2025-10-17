@@ -54,7 +54,7 @@ export class Nursery<E, R> {
   }
 
   done(err?: E, res?: R) {
-    if (!this.running || this.completed) return;
+    if (this.completed) return;
 
     this.e = err;
     this.r = res;
