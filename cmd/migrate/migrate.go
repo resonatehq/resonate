@@ -3,7 +3,12 @@ package migrate
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
+	"strings"
 
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/resonatehq/resonate/cmd/config"
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -12,49 +17,101 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// MigrateConfig holds configuration for the migrate command
+type MigrateConfig struct {
+	Store MigrateStoreConfig `flag:"aio-store"`
+}
+
+// MigrateStoreConfig holds store-specific configuration
+type MigrateStoreConfig struct {
+	Postgres PostgresMigrateConfig `flag:"postgres"`
+	Sqlite   SqliteMigrateConfig   `flag:"sqlite"`
+}
+
+// PostgresMigrateConfig holds postgres-specific configuration
+type PostgresMigrateConfig struct {
+	Enabled  bool   `flag:"enable" desc:"enable postgres store" default:"false"`
+	Host     string `flag:"host" desc:"postgres host" default:"localhost"`
+	Port     string `flag:"port" desc:"postgres port" default:"5432"`
+	Username string `flag:"username" desc:"postgres username"`
+	Password string `flag:"password" desc:"postgres password"`
+	Database string `flag:"database" desc:"postgres database" default:"resonate"`
+	Sslmode  string `flag:"sslmode" desc:"postgres SSL mode (disable, require, verify-ca, verify-full)" default:"disable"`
+}
+
+// SqliteMigrateConfig holds sqlite-specific configuration
+type SqliteMigrateConfig struct {
+	Enabled bool   `flag:"enable" desc:"enable sqlite store" default:"true"`
+	Path    string `flag:"path" desc:"sqlite database path" default:"resonate.db"`
+}
+
+func (c *MigrateConfig) Bind(cmd *cobra.Command, vip *viper.Viper) error {
+	return config.Bind(cmd, c, vip, "default", "", "")
+}
+
 func NewCmd() *cobra.Command {
+	var (
+		v      = viper.New()
+		config = &MigrateConfig{}
+	)
+
 	migrateCmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "Database migration commands",
 		Long:  "Manage database migrations for Resonate",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if file, _ := cmd.Flags().GetString("config"); file != "" {
+				v.SetConfigFile(file)
+			} else {
+				v.SetConfigName("resonate")
+				v.AddConfigPath(".")
+				v.AddConfigPath("$HOME")
+			}
+
+			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			v.AutomaticEnv()
+
+			if err := v.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return err
+				}
+			}
+
+			// Unmarshal config
+			hooks := mapstructure.ComposeDecodeHookFunc(
+				util.MapToBytes(),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+			)
+
+			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+				return err
+			}
+
+			return nil
+		},
 	}
 
-	// Add SQLite flags
-	migrateCmd.PersistentFlags().Bool("aio-store-sqlite-enable", true, "enable sqlite store")
-	migrateCmd.PersistentFlags().String("aio-store-sqlite-path", "resonate.db", "sqlite database path")
-	viper.BindPFlag("aio.store.sqlite.enable", migrateCmd.PersistentFlags().Lookup("aio-store-sqlite-enable"))
-	viper.BindPFlag("aio.store.sqlite.path", migrateCmd.PersistentFlags().Lookup("aio-store-sqlite-path"))
+	// bind config file flag
+	migrateCmd.PersistentFlags().StringP("config", "c", "", "config file (default resonate.yaml)")
 
-	// Add PostgreSQL flags
-	migrateCmd.PersistentFlags().Bool("aio-store-postgres-enable", false, "enable postgres store")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-host", "localhost", "postgres host")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-port", "5432", "postgres port")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-username", "", "postgres username")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-password", "", "postgres password")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-database", "resonate", "postgres database")
-	migrateCmd.PersistentFlags().String("aio-store-postgres-sslmode", "disable", "postgres SSL mode (disable, require, verify-ca, verify-full)")
-	viper.BindPFlag("aio.store.postgres.enable", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-enable"))
-	viper.BindPFlag("aio.store.postgres.host", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-host"))
-	viper.BindPFlag("aio.store.postgres.port", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-port"))
-	viper.BindPFlag("aio.store.postgres.username", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-username"))
-	viper.BindPFlag("aio.store.postgres.password", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-password"))
-	viper.BindPFlag("aio.store.postgres.database", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-database"))
-	viper.BindPFlag("aio.store.postgres.sslmode", migrateCmd.PersistentFlags().Lookup("aio-store-postgres-sslmode"))
+	// bind config
+	_ = config.Bind(migrateCmd, v)
 
 	// Add subcommands
-	migrateCmd.AddCommand(newStatusCmd())
-	migrateCmd.AddCommand(newDryRunCmd())
-	migrateCmd.AddCommand(newUpCmd())
+	migrateCmd.AddCommand(newStatusCmd(config))
+	migrateCmd.AddCommand(newDryRunCmd(config))
+	migrateCmd.AddCommand(newUpCmd(config))
 
 	return migrateCmd
 }
 
-func newStatusCmd() *cobra.Command {
+func newStatusCmd(config *MigrateConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show current migration status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(config)
 			if err != nil {
 				return err
 			}
@@ -98,12 +155,12 @@ func newStatusCmd() *cobra.Command {
 	}
 }
 
-func newDryRunCmd() *cobra.Command {
+func newDryRunCmd(config *MigrateConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "dry-run",
 		Short: "Show which migrations would be applied",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(config)
 			if err != nil {
 				return err
 			}
@@ -134,12 +191,12 @@ func newDryRunCmd() *cobra.Command {
 	}
 }
 
-func newUpCmd() *cobra.Command {
+func newUpCmd(config *MigrateConfig) *cobra.Command {
 	return &cobra.Command{
 		Use:   "up",
 		Short: "Apply all pending migrations",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			store, err := getMigrationStore()
+			store, err := getMigrationStore(config)
 			if err != nil {
 				return err
 			}
@@ -183,10 +240,10 @@ func newUpCmd() *cobra.Command {
 // getMigrationStore infers the store type, opens the database connection,
 // and returns the appropriate migration store. The store owns the database
 // connection and the caller is responsible for calling Close() on the store.
-func getMigrationStore() (migrations.MigrationStore, error) {
+func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error) {
 	// Infer store type from enable flags
-	sqliteEnabled := viper.GetBool("aio.store.sqlite.enable")
-	postgresEnabled := viper.GetBool("aio.store.postgres.enable")
+	sqliteEnabled := config.Store.Sqlite.Enabled
+	postgresEnabled := config.Store.Postgres.Enabled
 
 	if postgresEnabled && sqliteEnabled {
 		return nil, fmt.Errorf("both postgres and sqlite stores are enabled; enable only one")
@@ -198,22 +255,22 @@ func getMigrationStore() (migrations.MigrationStore, error) {
 
 	// Open database connection and create store
 	if postgresEnabled {
-		db, err := openPostgresDB()
+		db, err := openPostgresDB(config)
 		if err != nil {
 			return nil, err
 		}
 		return migrations.NewPostgresMigrationStore(db), nil
 	}
 
-	db, err := openSQLiteDB()
+	db, err := openSQLiteDB(config)
 	if err != nil {
 		return nil, err
 	}
 	return migrations.NewSqliteMigrationStore(db), nil
 }
 
-func openSQLiteDB() (*sql.DB, error) {
-	path := viper.GetString("aio.store.sqlite.path")
+func openSQLiteDB(config *MigrateConfig) (*sql.DB, error) {
+	path := config.Store.Sqlite.Path
 	if path == "" {
 		path = "resonate.db"
 	}
@@ -226,13 +283,15 @@ func openSQLiteDB() (*sql.DB, error) {
 	return db, nil
 }
 
-func openPostgresDB() (*sql.DB, error) {
-	host := viper.GetString("aio.store.postgres.host")
-	port := viper.GetString("aio.store.postgres.port")
-	user := viper.GetString("aio.store.postgres.username")
-	password := viper.GetString("aio.store.postgres.password")
-	dbname := viper.GetString("aio.store.postgres.database")
-	sslmode := viper.GetString("aio.store.postgres.sslmode")
+func openPostgresDB(config *MigrateConfig) (*sql.DB, error) {
+	pgConfig := config.Store.Postgres
+
+	host := pgConfig.Host
+	port := pgConfig.Port
+	user := pgConfig.Username
+	password := pgConfig.Password
+	dbname := pgConfig.Database
+	sslmode := pgConfig.Sslmode
 
 	if host == "" {
 		host = "localhost"
@@ -247,10 +306,19 @@ func openPostgresDB() (*sql.DB, error) {
 		sslmode = "disable"
 	}
 
-	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		host, port, user, password, dbname, sslmode)
+	// Build connection string using url.URL for proper escaping
+	query := url.Values{}
+	query.Set("sslmode", sslmode)
 
-	db, err := sql.Open("postgres", connStr)
+	dbUrl := &url.URL{
+		User:     url.UserPassword(user, password),
+		Host:     fmt.Sprintf("%s:%s", host, port),
+		Path:     dbname,
+		Scheme:   "postgres",
+		RawQuery: query.Encode(),
+	}
+
+	db, err := sql.Open("postgres", dbUrl.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
 	}

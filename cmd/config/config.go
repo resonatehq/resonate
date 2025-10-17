@@ -48,11 +48,11 @@ type config[T t_api, U t_aio] struct {
 }
 
 func (c *Config) Bind(cmd *cobra.Command, vip *viper.Viper, tag string) error {
-	return bind(cmd, c, vip, tag, "", "")
+	return Bind(cmd, c, vip, tag, "", "")
 }
 
 func (c *ConfigDST) Bind(cmd *cobra.Command, vip *viper.Viper) error {
-	return bind(cmd, c, vip, "dst", "", "")
+	return Bind(cmd, c, vip, "dst", "", "")
 }
 
 type API struct {
@@ -273,7 +273,8 @@ func (c *ConfigDST) store(a aio.AIO, metrics *metrics.Metrics) (aio.SubsystemDST
 
 // Helper functions
 
-func bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
+// Bind binds configuration struct fields to cobra flags and viper config
+func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix string, kPrefix string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	t := v.Type()
 
@@ -398,7 +399,7 @@ func bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 			cmd.Flags().StringToString(n, v, desc)
 			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
 		case reflect.Struct:
-			if err := bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
+			if err := Bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
 				return err
 			}
 		default:
