@@ -14,6 +14,7 @@ import (
 	"github.com/resonatehq/resonate/internal/api"
 	httpPlugin "github.com/resonatehq/resonate/internal/app/plugins/http"
 	"github.com/resonatehq/resonate/internal/app/plugins/poll"
+	redpandaPlugin "github.com/resonatehq/resonate/internal/app/plugins/redpanda"
 	"github.com/resonatehq/resonate/internal/app/plugins/sqs"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/echo"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/router"
@@ -171,6 +172,14 @@ func (c *Config) AIOPlugins(a aio.AIO, metrics *metrics.Metrics) ([]aio.Plugin, 
 	}
 	if c.AIO.Subsystems.Sender.Config.Plugins.Http.Enabled {
 		plugin, err := httpPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Http.Config)
+		if err != nil {
+			return nil, "", err
+		}
+
+		plugins = append(plugins, plugin)
+	}
+	if c.AIO.Subsystems.Sender.Config.Plugins.Redpanda.Enabled {
+		plugin, err := redpandaPlugin.New(a, metrics, &c.AIO.Subsystems.Sender.Config.Plugins.Redpanda.Config)
 		if err != nil {
 			return nil, "", err
 		}
