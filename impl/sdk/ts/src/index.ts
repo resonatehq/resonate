@@ -1,3 +1,11 @@
+export { WallClock } from "./clock";
 export { Context } from "./context";
 export * as core from "./core";
+export { JsonEncoder } from "./encoder";
+export { Handler } from "./handler";
+export { AsyncHeartbeat, NoopHeartbeat } from "./heartbeat";
+export { HttpNetwork } from "./network/remote";
+export { Registry } from "./registry";
 export { Resonate, ResonateFunc, ResonateHandle } from "./resonate";
+export { ResonateInner, type Task } from "./resonate-inner";
+export { Func } from "./types";

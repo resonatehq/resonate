@@ -42,6 +42,13 @@ export interface ResonateSchedule {
   delete(): Promise<void>;
 }
 
+type SubscriptionEntry = {
+  promise: Promise<DurablePromiseRecord<any>>;
+  resolve: (r: DurablePromiseRecord<any>) => void;
+  reject: (e: any) => void;
+  timeout: number;
+};
+
 export class Resonate {
   private unicast: string;
   private anycastPreference: string;
@@ -57,7 +64,9 @@ export class Resonate {
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
-  private subscriptions: Map<string, PromiseWithResolvers<DurablePromiseRecord<any>>> = new Map();
+  private subscriptions: Map<string, SubscriptionEntry> = new Map();
+  private subscribeEvery: number;
+  private intervalId: ReturnType<typeof setInterval>;
 
   public readonly promises: Promises;
   public readonly schedules: Schedules;
@@ -81,6 +90,7 @@ export class Resonate {
     this.pid = pid;
     this.ttl = ttl;
     this.encoder = new JsonEncoder();
+    this.subscribeEvery = 60 * 1000; // make this configurable
 
     // Determine the URL based on priority: url arg > RESONATE_URL > RESONATE_HOST+PORT
     let resolvedUrl = url;
@@ -144,6 +154,29 @@ export class Resonate {
 
     // subscribe to notify
     this.messageSource.subscribe("notify", this.onMessage.bind(this));
+
+    // periodically refresh subscriptions
+    this.intervalId = setInterval(async () => {
+      for (const [id, sub] of this.subscriptions.entries()) {
+        try {
+          const createSubscriptionReq: CreateSubscriptionReq = {
+            kind: "createSubscription",
+            id: this.pid,
+            promiseId: id,
+            timeout: sub.timeout + 1 * util.MIN, // add a buffer
+            recv: this.unicast,
+          };
+
+          const res = await this.createSubscription(createSubscriptionReq);
+          if (res.state !== "pending") {
+            sub.resolve(res);
+            this.subscriptions.delete(id);
+          }
+        } catch {
+          // silently skip on error
+        }
+      }
+    }, this.subscribeEvery);
   }
 
   /**
@@ -605,6 +638,7 @@ export class Resonate {
     this.network.stop();
     this.messageSource.stop();
     this.heartbeat.stop();
+    clearInterval(this.intervalId);
   }
 
   private createPromiseAndTask(
@@ -722,7 +756,7 @@ export class Resonate {
       this.subscriptions.get(id) ?? Promise.withResolvers<DurablePromiseRecord<any>>();
 
     if (res.state === "pending") {
-      this.subscriptions.set(id, { promise, resolve, reject });
+      this.subscriptions.set(id, { promise, resolve, reject, timeout: res.timeout });
     } else {
       resolve(res);
       this.subscriptions.delete(id);
