@@ -1,0 +1,327 @@
+package migrate
+
+import (
+	"database/sql"
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/go-viper/mapstructure/v2"
+	"github.com/resonatehq/resonate/cmd/config"
+	"github.com/resonatehq/resonate/cmd/util"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+
+	_ "github.com/lib/pq"
+	_ "github.com/mattn/go-sqlite3"
+)
+
+// MigrateConfig holds configuration for the migrate command
+type MigrateConfig struct {
+	Store MigrateStoreConfig `flag:"aio-store"`
+}
+
+// MigrateStoreConfig holds store-specific configuration
+type MigrateStoreConfig struct {
+	Postgres PostgresMigrateConfig `flag:"postgres"`
+	Sqlite   SqliteMigrateConfig   `flag:"sqlite"`
+}
+
+// PostgresMigrateConfig holds postgres-specific configuration
+type PostgresMigrateConfig struct {
+	Enabled  bool   `flag:"enable" desc:"enable postgres store" default:"false"`
+	Host     string `flag:"host" desc:"postgres host" default:"localhost"`
+	Port     string `flag:"port" desc:"postgres port" default:"5432"`
+	Username string `flag:"username" desc:"postgres username"`
+	Password string `flag:"password" desc:"postgres password"`
+	Database string `flag:"database" desc:"postgres database" default:"resonate"`
+	Sslmode  string `flag:"sslmode" desc:"postgres SSL mode (disable, require, verify-ca, verify-full)" default:"disable"`
+}
+
+// SqliteMigrateConfig holds sqlite-specific configuration
+type SqliteMigrateConfig struct {
+	Enabled bool   `flag:"enable" desc:"enable sqlite store" default:"true"`
+	Path    string `flag:"path" desc:"sqlite database path" default:"resonate.db"`
+}
+
+func (c *MigrateConfig) Bind(cmd *cobra.Command, vip *viper.Viper) error {
+	return config.Bind(cmd, c, vip, "default", "", "")
+}
+
+func NewCmd() *cobra.Command {
+	var (
+		v      = viper.New()
+		config = &MigrateConfig{}
+	)
+
+	migrateCmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "Database migration commands",
+		Long:  "Manage database migrations for Resonate",
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			if file, _ := cmd.Flags().GetString("config"); file != "" {
+				v.SetConfigFile(file)
+			} else {
+				v.SetConfigName("resonate")
+				v.AddConfigPath(".")
+				v.AddConfigPath("$HOME")
+			}
+
+			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			v.AutomaticEnv()
+
+			if err := v.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return err
+				}
+			}
+
+			// Unmarshal config
+			hooks := mapstructure.ComposeDecodeHookFunc(
+				util.MapToBytes(),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+			)
+
+			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+				return err
+			}
+
+			return nil
+		},
+	}
+
+	// bind config file flag
+	migrateCmd.PersistentFlags().StringP("config", "c", "", "config file (default resonate.yaml)")
+
+	// bind config
+	_ = config.Bind(migrateCmd, v)
+
+	// Add subcommands
+	migrateCmd.AddCommand(newStatusCmd(config))
+	migrateCmd.AddCommand(newDryRunCmd(config))
+	migrateCmd.AddCommand(newUpCmd(config))
+
+	return migrateCmd
+}
+
+func newStatusCmd(config *MigrateConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Show current migration status",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := getMigrationStore(config)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			currentVersion, err := store.GetCurrentVersion()
+			if err != nil {
+				return fmt.Errorf("failed to get current version: %w", err)
+			}
+
+			allMigrations, err := migrations.LoadMigrations(store)
+			if err != nil {
+				return fmt.Errorf("failed to load migrations: %w", err)
+			}
+
+			var latestVersion int
+			if len(allMigrations) > 0 {
+				latestVersion = allMigrations[len(allMigrations)-1].Version
+			} else {
+				latestVersion = currentVersion
+			}
+
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
+			if err != nil {
+				return fmt.Errorf("failed to get pending migrations: %w", err)
+			}
+
+			fmt.Printf("Store type: %s\n", store.String())
+			fmt.Printf("Current migration version: %d\n", currentVersion)
+			fmt.Printf("Latest migration version: %d\n", latestVersion)
+			fmt.Printf("Pending migrations: %d\n", len(pending))
+
+			if len(pending) > 0 {
+				fmt.Println("\nStatus: MIGRATIONS PENDING")
+			} else {
+				fmt.Println("\nStatus: UP TO DATE")
+			}
+
+			return nil
+		},
+	}
+}
+
+func newDryRunCmd(config *MigrateConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "dry-run",
+		Short: "Show which migrations would be applied",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := getMigrationStore(config)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			currentVersion, err := store.GetCurrentVersion()
+			if err != nil {
+				return fmt.Errorf("failed to get current version: %w", err)
+			}
+
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
+			if err != nil {
+				return fmt.Errorf("failed to get pending migrations: %w", err)
+			}
+
+			if len(pending) == 0 {
+				fmt.Println("No pending migrations")
+				return nil
+			}
+
+			fmt.Printf("Would apply the following %d migration(s):\n\n", len(pending))
+			for _, m := range pending {
+				fmt.Printf("  %03d_%s.sql\n", m.Version, m.Name)
+			}
+
+			return nil
+		},
+	}
+}
+
+func newUpCmd(config *MigrateConfig) *cobra.Command {
+	return &cobra.Command{
+		Use:   "up",
+		Short: "Apply all pending migrations",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			store, err := getMigrationStore(config)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			currentVersion, err := store.GetCurrentVersion()
+			if err != nil {
+				return fmt.Errorf("failed to get current version: %w", err)
+			}
+
+			pending, err := migrations.GetPendingMigrations(currentVersion, store)
+			if err != nil {
+				return fmt.Errorf("failed to get pending migrations: %w", err)
+			}
+
+			if len(pending) == 0 {
+				fmt.Println("No pending migrations")
+				return nil
+			}
+
+			// Validate migration sequence
+			if err := migrations.ValidateMigrationSequence(pending, currentVersion); err != nil {
+				return err
+			}
+
+			fmt.Printf("Applying %d migration(s)...\n\n", len(pending))
+
+			if err := migrations.ApplyMigrations(pending, store); err != nil {
+				return err
+			}
+
+			latestVersion := pending[len(pending)-1].Version
+			fmt.Printf("\n✓ Successfully applied %d migration(s). Database is now at version %d.\n",
+				len(pending), latestVersion)
+
+			return nil
+		},
+	}
+}
+
+// getMigrationStore infers the store type, opens the database connection,
+// and returns the appropriate migration store. The store owns the database
+// connection and the caller is responsible for calling Close() on the store.
+func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error) {
+	// Infer store type from enable flags
+	sqliteEnabled := config.Store.Sqlite.Enabled
+	postgresEnabled := config.Store.Postgres.Enabled
+
+	if postgresEnabled && sqliteEnabled {
+		return nil, fmt.Errorf("both postgres and sqlite stores are enabled; enable only one")
+	}
+
+	if !postgresEnabled && !sqliteEnabled {
+		return nil, fmt.Errorf("no store enabled; enable either sqlite or postgres")
+	}
+
+	// Open database connection and create store
+	if postgresEnabled {
+		db, err := openPostgresDB(config)
+		if err != nil {
+			return nil, err
+		}
+		return migrations.NewPostgresMigrationStore(db), nil
+	}
+
+	db, err := openSQLiteDB(config)
+	if err != nil {
+		return nil, err
+	}
+	return migrations.NewSqliteMigrationStore(db), nil
+}
+
+func openSQLiteDB(config *MigrateConfig) (*sql.DB, error) {
+	path := config.Store.Sqlite.Path
+	if path == "" {
+		path = "resonate.db"
+	}
+
+	db, err := sql.Open("sqlite3", path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
+	}
+
+	return db, nil
+}
+
+func openPostgresDB(config *MigrateConfig) (*sql.DB, error) {
+	pgConfig := config.Store.Postgres
+
+	host := pgConfig.Host
+	port := pgConfig.Port
+	user := pgConfig.Username
+	password := pgConfig.Password
+	dbname := pgConfig.Database
+	sslmode := pgConfig.Sslmode
+
+	if host == "" {
+		host = "localhost"
+	}
+	if port == "" {
+		port = "5432"
+	}
+	if dbname == "" {
+		dbname = "resonate"
+	}
+	if sslmode == "" {
+		sslmode = "disable"
+	}
+
+	// Build connection string using url.URL for proper escaping
+	query := url.Values{}
+	query.Set("sslmode", sslmode)
+
+	dbUrl := &url.URL{
+		User:     url.UserPassword(user, password),
+		Host:     fmt.Sprintf("%s:%s", host, port),
+		Path:     dbname,
+		Scheme:   "postgres",
+		RawQuery: query.Encode(),
+	}
+
+	db, err := sql.Open("postgres", dbUrl.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
+	}
+
+	return db, nil
+}
