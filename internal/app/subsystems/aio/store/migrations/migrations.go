@@ -98,7 +98,7 @@ func ValidateMigrationSequence(migrations []Migration, startVersion int) error {
 }
 
 // ApplyMigrations executes migrations in a transaction
-func ApplyMigrations(migrations []Migration, store MigrationStore) error {
+func ApplyMigrations(migrations []Migration, store MigrationStore, verbose bool) error {
 	if len(migrations) == 0 {
 		return nil
 	}
@@ -114,12 +114,16 @@ func ApplyMigrations(migrations []Migration, store MigrationStore) error {
 	defer tx.Rollback() // Rollback if not committed
 
 	for _, migration := range migrations {
-		fmt.Printf("Applying migration %03d_%s.sql... ", migration.Version, migration.Name)
+		if verbose {
+			fmt.Printf("Applying migration %03d_%s.sql... ", migration.Version, migration.Name)
+		}
 
 		// Execute migration SQL
 		_, err := tx.Exec(migration.SQL)
 		if err != nil {
-			fmt.Println("✗")
+			if verbose {
+				fmt.Println("✗")
+			}
 			return &MigrationError{
 				Version: migration.Version,
 				Name:    migration.Name,
@@ -131,11 +135,15 @@ func ApplyMigrations(migrations []Migration, store MigrationStore) error {
 		updateSQL := store.GetInsertMigrationSQL()
 		_, err = tx.Exec(updateSQL, migration.Version)
 		if err != nil {
-			fmt.Println("✗")
+			if verbose {
+				fmt.Println("✗")
+			}
 			return fmt.Errorf("failed to update migrations table: %w", err)
 		}
 
-		fmt.Println("✓")
+		if verbose {
+			fmt.Println("✓")
+		}
 	}
 
 	// Commit transaction

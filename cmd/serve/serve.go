@@ -18,6 +18,7 @@ import (
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -134,7 +135,11 @@ func Serve(config *config.Config) error {
 		return err
 	}
 	if err := aio.Start(); err != nil {
-		slog.Error("failed to start aio", "error", err)
+		if migrationErr, ok := err.(*migrations.MigrationError); ok {
+			slog.Error("failed to start aio", "error", fmt.Sprintf("Migration %03d_%s failed: %v", migrationErr.Version, migrationErr.Name, migrationErr.Err))
+		} else {
+			slog.Error("failed to start aio", "error", err)
+		}
 		return err
 	}
 

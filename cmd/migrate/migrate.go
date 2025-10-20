@@ -224,7 +224,7 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 
 			fmt.Printf("Applying %d migration(s)...\n\n", len(pending))
 
-			if err := migrations.ApplyMigrations(pending, store); err != nil {
+			if err := migrations.ApplyMigrations(pending, store, true); err != nil {
 				return err
 			}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -367,18 +368,14 @@ func (s *SqliteStore) Start(chan<- error) error {
 			}
 
 			// Apply all migrations
-			if err := migrations.ApplyMigrations(pending, ms); err != nil {
+			if err := migrations.ApplyMigrations(pending, ms, false); err != nil {
 				return err
 			}
 		}
 	} else {
 		// For existing databases, check for pending migrations and error if any exist
 		if len(pending) > 0 {
-			return &migrations.MigrationError{
-				Version: pending[0].Version,
-				Name:    pending[0].Name,
-				Err:     migrations.ErrPendingMigrations,
-			}
+			return errors.New("Pending migrations, run `resonate migrate` for more information")
 		}
 	}
 
