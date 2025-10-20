@@ -29,7 +29,6 @@ import (
 
 const (
 	// Schema is now managed by migrations (see internal/migrationfiles/migrations/postgres/)
-	// This is kept empty for backwards compatibility
 	CREATE_TABLE_STATEMENT = `
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER,

@@ -145,6 +145,10 @@ func newStatusCmd(config *MigrateConfig) *cobra.Command {
 			fmt.Printf("Pending migrations: %d\n", len(pending))
 
 			if len(pending) > 0 {
+				fmt.Println("\nPending migration files:")
+				for _, m := range pending {
+					fmt.Printf("  %03d_%s.sql\n", m.Version, m.Name)
+				}
 				fmt.Println("\nStatus: MIGRATIONS PENDING")
 			} else {
 				fmt.Println("\nStatus: UP TO DATE")
@@ -183,7 +187,8 @@ func newDryRunCmd(config *MigrateConfig) *cobra.Command {
 
 			fmt.Printf("Would apply the following %d migration(s):\n\n", len(pending))
 			for _, m := range pending {
-				fmt.Printf("  %03d_%s.sql\n", m.Version, m.Name)
+				fmt.Printf("%03d_%s.sql\n", m.Version, m.Name)
+				fmt.Printf("%s\n\n", m.SQL)
 			}
 
 			return nil
