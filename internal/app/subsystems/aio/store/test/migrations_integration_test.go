@@ -299,7 +299,7 @@ func TestApplyMigrations(t *testing.T) {
 		store := migrations.NewSqliteMigrationStore(db)
 
 		// Apply empty migrations - should be no-op
-		err = migrations.ApplyMigrations([]migrations.Migration{}, store)
+		err = migrations.ApplyMigrations([]migrations.Migration{}, store, true)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed with empty list: %v", err)
 		}
