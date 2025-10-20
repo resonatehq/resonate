@@ -18,11 +18,11 @@ func NewPostgresMigrationStore(db *sql.DB) *PostgresMigrationStore {
 }
 
 func (s *PostgresMigrationStore) GetMigrationFiles() ([]string, error) {
-	return migrationfiles.GetPostgresMigrationFiles()
+	return migrationfiles.GetMigrationFiles("migrations/postgres")
 }
 
 func (s *PostgresMigrationStore) GetMigrationContent(path string) (string, error) {
-	return migrationfiles.GetPostgresMigrationContent(path)
+	return migrationfiles.GetMigrationContent(path)
 }
 
 func (s *PostgresMigrationStore) GetInsertMigrationSQL() string {

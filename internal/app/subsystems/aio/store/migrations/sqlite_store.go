@@ -18,11 +18,11 @@ func NewSqliteMigrationStore(db *sql.DB) *SqliteMigrationStore {
 }
 
 func (s *SqliteMigrationStore) GetMigrationFiles() ([]string, error) {
-	return migrationfiles.GetSQLiteMigrationFiles()
+	return migrationfiles.GetMigrationFiles("migrations/sqlite")
 }
 
 func (s *SqliteMigrationStore) GetMigrationContent(path string) (string, error) {
-	return migrationfiles.GetSQLiteMigrationContent(path)
+	return migrationfiles.GetMigrationContent(path)
 }
 
 func (s *SqliteMigrationStore) GetInsertMigrationSQL() string {
