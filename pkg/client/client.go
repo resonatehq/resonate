@@ -13,6 +13,7 @@ type Client interface {
 	V1() v1.ClientWithResponsesInterface
 	Setup(string) error
 	SetBasicAuth(string, string)
+	SetBearerToken(string)
 }
 
 // Client
@@ -21,6 +22,7 @@ type client struct {
 	v1       v1.ClientWithResponsesInterface
 	username string
 	password string
+	token    string
 }
 
 func New() Client {
@@ -30,7 +32,9 @@ func New() Client {
 func (c *client) Setup(server string) error {
 	var opts []v1.ClientOption
 
-	if c.username != "" && c.password != "" {
+	if c.token != "" {
+		opts = append(opts, bearerAuth(c.token))
+	} else if c.username != "" && c.password != "" {
 		opts = append(opts, basicAuth(c.username, c.password))
 	}
 
@@ -48,6 +52,10 @@ func (c *client) V1() v1.ClientWithResponsesInterface {
 func (c *client) SetBasicAuth(username, password string) {
 	c.username = username
 	c.password = password
+}
+
+func (c *client) SetBearerToken(token string) {
+	c.token = token
 }
 
 // Mock Client
@@ -70,6 +78,8 @@ func (c *mockClient) V1() v1.ClientWithResponsesInterface {
 
 func (c *mockClient) SetBasicAuth(string, string) {}
 
+func (c *mockClient) SetBearerToken(string) {}
+
 // Helper functions
 
 func basicAuth(username, password string) v1.ClientOption {
@@ -77,6 +87,16 @@ func basicAuth(username, password string) v1.ClientOption {
 		c.RequestEditors = append(c.RequestEditors, func(ctx context.Context, req *http.Request) error {
 			authHeader := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
 			req.Header.Set("Authorization", authHeader)
+			return nil
+		})
+		return nil
+	}
+}
+
+func bearerAuth(token string) v1.ClientOption {
+	return func(c *v1.Client) error {
+		c.RequestEditors = append(c.RequestEditors, func(ctx context.Context, req *http.Request) error {
+			req.Header.Set("Authorization", "Bearer "+token)
 			return nil
 		})
 		return nil

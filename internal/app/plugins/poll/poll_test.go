@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/app/auth"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
@@ -338,61 +340,136 @@ func TestPollPlugin(t *testing.T) {
 }
 
 func TestPollPluginAuth(t *testing.T) {
-	metrics := metrics.New(prometheus.NewRegistry())
-
-	config := &Config{
-		Size:           10,
-		BufferSize:     10,
-		MaxConnections: 1,
-		Addr:           ":0",
-		Timeout:        1 * time.Second,
-		Auth:           map[string]string{"user": "pass"},
-	}
-
-	poll, err := New(nil, metrics, config)
-	assert.Nil(t, err)
-
-	errors := make(chan error, 10)
-	assert.Nil(t, poll.Start(errors))
-
-	client := &http.Client{Timeout: 1 * time.Second}
-
-	tests := []struct {
-		name     string
-		username string
-		password string
-		code     int
+	scenarios := []struct {
+		name   string
+		config func() *Config
+		cases  []struct {
+			name         string
+			setup        func(t *testing.T, req *http.Request)
+			expectedCode int
+		}
 	}{
-		{"CorrectCredentials", "user", "pass", http.StatusOK},
-		{"IncorrectCredentials", "user", "wrong", http.StatusUnauthorized},
+		{
+			name: "BasicAuth",
+			config: func() *Config {
+				return &Config{
+					Size:           10,
+					BufferSize:     10,
+					MaxConnections: 1,
+					Addr:           ":0",
+					Timeout:        1 * time.Second,
+					Auth: auth.Config{
+						Provider: "basic",
+						Basic:    map[string]string{"user": "pass"},
+					},
+				}
+			},
+			cases: []struct {
+				name         string
+				setup        func(t *testing.T, req *http.Request)
+				expectedCode int
+			}{
+				{
+					name: "CorrectCredentials",
+					setup: func(_ *testing.T, req *http.Request) {
+						req.SetBasicAuth("user", "pass")
+					},
+					expectedCode: http.StatusOK,
+				},
+				{
+					name: "IncorrectCredentials",
+					setup: func(_ *testing.T, req *http.Request) {
+						req.SetBasicAuth("user", "wrong")
+					},
+					expectedCode: http.StatusUnauthorized,
+				},
+			},
+		},
+		{
+			name: "JWTBearer",
+			config: func() *Config {
+				return &Config{
+					Size:           10,
+					BufferSize:     10,
+					MaxConnections: 1,
+					Addr:           ":0",
+					Timeout:        1 * time.Second,
+					Auth: auth.Config{
+						Provider: "jwt",
+						JWT: auth.JWTConfig{
+							Algorithm: "HS256",
+							Issuer:    "resonate",
+							Audience:  []string{"resonate"},
+							Key:       "secret",
+						},
+					},
+				}
+			},
+			cases: []struct {
+				name         string
+				setup        func(t *testing.T, req *http.Request)
+				expectedCode int
+			}{
+				{
+					name: "ValidToken",
+					setup: func(t *testing.T, req *http.Request) {
+						token := issuePollJWT(t, "secret", "resonate", []string{"resonate"}, "user")
+						req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+					},
+					expectedCode: http.StatusOK,
+				},
+				{
+					name: "InvalidToken",
+					setup: func(_ *testing.T, req *http.Request) {
+						req.Header.Set("Authorization", "Bearer invalid")
+					},
+					expectedCode: http.StatusUnauthorized,
+				},
+			},
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/foo/a", poll.Addr()), nil)
-			if err != nil {
+	for _, scenario := range scenarios {
+		t.Run(scenario.name, func(t *testing.T) {
+			metrics := metrics.New(prometheus.NewRegistry())
+			poll, err := New(nil, metrics, scenario.config())
+			assert.Nil(t, err)
+
+			errors := make(chan error, 10)
+			assert.Nil(t, poll.Start(errors))
+
+			client := &http.Client{Timeout: 1 * time.Second}
+
+			for _, tc := range scenario.cases {
+				t.Run(tc.name, func(t *testing.T) {
+					req, err := http.NewRequest("GET", fmt.Sprintf("http://%s/foo/a", poll.Addr()), nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					if tc.setup != nil {
+						tc.setup(t, req)
+					}
+
+					res, err := client.Do(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer util.DeferAndLog(res.Body.Close)
+
+					assert.Equal(t, tc.expectedCode, res.StatusCode)
+				})
+			}
+
+			if err := poll.Stop(); err != nil {
 				t.Fatal(err)
 			}
 
-			req.SetBasicAuth(tc.username, tc.password)
-
-			res, err := client.Do(req)
-			if err != nil {
-				t.Fatal(err)
+			close(errors)
+			for err := range errors {
+				assert.Fail(t, err.Error())
 			}
-			defer util.DeferAndLog(res.Body.Close)
-
-			assert.Equal(t, tc.code, res.StatusCode)
 		})
-	}
-
-	if err := poll.Stop(); err != nil {
-		t.Fatal(err)
-	}
-
-	close(errors)
-	for err := range errors {
-		assert.Fail(t, err.Error())
 	}
 }
 
@@ -403,6 +480,26 @@ func contains[T comparable](arr []T, val T) bool {
 		}
 	}
 	return false
+}
+
+func issuePollJWT(t *testing.T, secret, issuer string, audience []string, subject string) string {
+	t.Helper()
+
+	claims := jwt.RegisteredClaims{
+		Subject:   subject,
+		Issuer:    issuer,
+		Audience:  jwt.ClaimStrings(audience),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	return signed
 }
 
 func unique(conns []*Conn) int {

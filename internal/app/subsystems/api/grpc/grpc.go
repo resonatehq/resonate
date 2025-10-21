@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"strings"
 
 	i_api "github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
@@ -55,7 +56,7 @@ func (g *Grpc) Kind() string {
 }
 
 func (g *Grpc) Addr() string {
-	return g.listen.Addr().String()
+	return listenAddr(g.listen.Addr())
 }
 
 func (g *Grpc) Start(errors chan<- error) {
@@ -134,4 +135,18 @@ func (s *server) log(ctx context.Context, req interface{}, info *grpc.UnaryServe
 
 	slog.Debug("grpc", "method", info.FullMethod, "error", err)
 	return res, err
+}
+
+func listenAddr(addr net.Addr) string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	return net.JoinHostPort(host, port)
 }
