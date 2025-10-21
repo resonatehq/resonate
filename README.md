@@ -13,7 +13,7 @@ The Resonate Server acts as a supervisor and orchestrator for Resonate Workers â
 
 **Why does this component exist?**
 
-Traditional programming languages are not designed with abstractions that address distribution.
+Popular programming languages like Python and TypeScript are not designed with abstractions that address distribution.
 To provide those abstractions at the application level (i.e. to enable API-like abstractions that simplify the implementation of reliable process to process message passing) the system needs a service that acts as both an orchestrator of messages and a supervisor of the processes sending them.
 
 The Resonate Server is a highly efficient single binary that pairs with a Resonate SDK to provide those APIs.
