@@ -3,8 +3,10 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -54,8 +56,12 @@ func (e *Error) Write(w http.ResponseWriter) {
 	if e == nil {
 		return
 	}
-	for key, value := range e.Headers {
-		w.Header().Set(key, value)
+	if len(e.Headers) > 0 {
+		keys := maps.Keys(e.Headers)
+		slices.Sort(keys)
+		for _, key := range keys {
+			w.Header().Set(key, e.Headers[key])
+		}
 	}
 	http.Error(w, e.Error(), e.Status)
 }
@@ -195,12 +201,17 @@ func basicUnauthorized(cause error) *Error {
 
 func newBasicAuthenticator(credentials map[string]string) Authenticator {
 	sanitized := map[string]string{}
-	for user, pass := range credentials {
-		trimmed := strings.TrimSpace(user)
-		if trimmed == "" {
-			continue
+	if len(credentials) > 0 {
+		users := maps.Keys(credentials)
+		slices.Sort(users)
+		for _, user := range users {
+			pass := credentials[user]
+			trimmed := strings.TrimSpace(user)
+			if trimmed == "" {
+				continue
+			}
+			sanitized[trimmed] = pass
 		}
-		sanitized[trimmed] = pass
 	}
 	return &basicAuthenticator{credentials: sanitized}
 }
