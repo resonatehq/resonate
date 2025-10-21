@@ -40,6 +40,8 @@ import type {
   ScheduleRecord,
   SearchPromisesReq,
   SearchPromisesRes,
+  SearchSchedulesReq,
+  SearchSchedulesRes,
   TaskRecord,
 } from "./network";
 
@@ -120,6 +122,10 @@ interface HeartbeatResponseDto {
 }
 interface SearchPromisesResponseDto {
   promises: PromiseDto[];
+  cursor: string;
+}
+interface SearchSchedulesResponseDto {
+  schedules: ScheduleDto[];
   cursor: string;
 }
 
@@ -214,6 +220,8 @@ export class HttpNetwork implements Network {
         return this.heartbeatTasks(req, retryPolicy);
       case "searchPromises":
         return this.searchPromises(req, retryPolicy);
+      case "searchSchedules":
+        return this.searchSchedules(req, retryPolicy);
       default:
         throw new Error(`Unsupported request kind: ${(req as any).kind}`);
     }
@@ -510,6 +518,15 @@ export class HttpNetwork implements Network {
     const data: any = (await res.json()) as SearchPromisesResponseDto;
 
     return { kind: "searchPromises", promises: data.promises, cursor: data.cursor };
+  }
+
+  private async searchSchedules(req: SearchSchedulesReq, retryPolicy: RetryPolicy = {}): Promise<SearchSchedulesRes> {
+    const params = new URLSearchParams({ id: req.id });
+    if (req.limit) params.append("limit", String(req.limit));
+    if (req.cursor) params.append("cursor", req.cursor);
+    const res = await this.fetch(`/schedules?${params.toString()}`, { method: "GET" }, retryPolicy);
+    const data: any = (await res.json()) as SearchSchedulesResponseDto;
+    return { kind: "searchSchedules", schedules: data.schedules, cursor: data.cursor };
   }
 
   private async fetch(

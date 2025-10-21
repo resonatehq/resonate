@@ -65,6 +65,7 @@ export class Schedules {
         },
         (err, res) => {
           if (err) {
+            console.log(err);
             // TODO: reject with more information
             reject(Error("not implemented"));
             return;
@@ -94,5 +95,29 @@ export class Schedules {
         },
       );
     });
+  }
+
+  async *search(id: string, { limit = undefined }: { limit?: number } = {}): AsyncGenerator<ScheduleRecord[], void> {
+    let cursor: string | undefined;
+
+    do {
+      const res = await new Promise<{ schedules: ScheduleRecord[]; cursor?: string }>((resolve, reject) => {
+        this.network.send(
+          {
+            kind: "searchSchedules",
+            id,
+            limit,
+            cursor,
+          },
+          (err, res) => {
+            if (err) return reject(err);
+            resolve(res!);
+          },
+        );
+      });
+
+      cursor = res.cursor;
+      yield res.schedules;
+    } while (cursor !== null && cursor !== undefined);
   }
 }

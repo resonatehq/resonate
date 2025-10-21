@@ -64,7 +64,8 @@ export type Request =
   | CompleteTaskReq
   | DropTaskReq
   | HeartbeatTasksReq
-  | SearchPromisesReq;
+  | SearchPromisesReq
+  | SearchSchedulesReq;
 
 export type CreatePromiseReq<T = string> = {
   kind: "createPromise";
@@ -178,6 +179,13 @@ export type SearchPromisesReq = {
   cursor?: string;
 };
 
+export type SearchSchedulesReq = {
+  kind: "searchSchedules";
+  id: string;
+  limit?: number;
+  cursor?: string;
+};
+
 // Response
 
 export type Response =
@@ -194,7 +202,8 @@ export type Response =
   | CompleteTaskRes
   | DropTaskRes
   | HeartbeatTasksRes
-  | SearchPromisesRes;
+  | SearchPromisesRes
+  | SearchSchedulesRes;
 
 export type CreatePromiseRes = {
   kind: "createPromise";
@@ -277,6 +286,12 @@ export type HeartbeatTasksRes = {
 export type SearchPromisesRes = {
   kind: "searchPromises";
   promises: DurablePromiseRecord[];
+  cursor?: string;
+};
+
+export type SearchSchedulesRes = {
+  kind: "searchSchedules";
+  schedules: ScheduleRecord[];
   cursor?: string;
 };
 

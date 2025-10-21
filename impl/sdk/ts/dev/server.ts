@@ -355,6 +355,10 @@ export class Server {
         return { kind: "searchPromises", promises: this.searchPromises({ ...requ }) };
       }
 
+      case "searchSchedules": {
+        return { kind: "searchSchedules", schedules: this.searchSchedules({ ...requ }) };
+      }
+
       default:
         throw exceptions.SERVER_ERROR(`Unsupported request kind ${(requ as any).kind}`);
     }
@@ -678,6 +682,10 @@ export class Server {
 
   private searchPromises({ id }: { id: string }): DurablePromiseRecord[] {
     return Array.from(this.promises.values());
+  }
+
+  private searchSchedules({ id }: { id: string }): ScheduleRecord[] {
+    return Array.from(this.schedules.values());
   }
 
   private heartbeatTasks({ processId, time }: { processId: string; time: number }): number {

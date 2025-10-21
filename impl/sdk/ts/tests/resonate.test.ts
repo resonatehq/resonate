@@ -202,7 +202,7 @@ describe("Resonate usage tests", () => {
     resonate.stop();
   });
 
-  test("test search api", async () => {
+  test("test promises search api", async () => {
     const resonate = Resonate.local();
 
     // Create test promises
@@ -211,6 +211,26 @@ describe("Resonate usage tests", () => {
 
     const results: any[] = [];
     for await (const page of resonate.promises.search("*", { limit: 1 })) {
+      expect(Array.isArray(page)).toBe(true);
+      results.push(...page);
+    }
+
+    const ids = results.map((r) => r.id);
+    expect(ids).toContain(foo.id);
+    expect(ids).toContain(bar.id);
+
+    resonate.stop();
+  });
+
+  test("test schedules search api", async () => {
+    const resonate = Resonate.local();
+
+    // Create test promises
+    const foo = await resonate.schedules.create("foo", "0 * * * *", "{{.id}}.{{.timestamp}}", Number.MAX_SAFE_INTEGER);
+    const bar = await resonate.schedules.create("bar", "0 * * * *", "{{.id}}.{{.timestamp}}", Number.MAX_SAFE_INTEGER);
+
+    const results: any[] = [];
+    for await (const page of resonate.schedules.search("*", { limit: 1 })) {
       expect(Array.isArray(page)).toBe(true);
       results.push(...page);
     }
