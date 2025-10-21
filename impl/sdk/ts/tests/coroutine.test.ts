@@ -2,6 +2,7 @@ import { WallClock } from "../src/clock";
 import { type Context, InnerContext } from "../src/context";
 import { Coroutine, type Suspended } from "../src/coroutine";
 import { JsonEncoder } from "../src/encoder";
+import { AES256GCMEncryptor } from "../src/encryptor";
 import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
@@ -106,7 +107,7 @@ describe("Coroutine", () => {
       return v;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
     const r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
   });
@@ -126,7 +127,7 @@ describe("Coroutine", () => {
       const v2 = yield* p2;
       return v + v2;
     }
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
 
     // First execution - should suspend
     let r = await exec("foo.1", foo, [], h);
@@ -156,7 +157,7 @@ describe("Coroutine", () => {
       return v1;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
 
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
@@ -179,7 +180,7 @@ describe("Coroutine", () => {
       return 99;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
@@ -210,7 +211,7 @@ describe("Coroutine", () => {
       return 99;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
@@ -235,7 +236,7 @@ describe("Coroutine", () => {
       return v;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
     let r = await exec("foo.1", foo, [], h);
 
     expect(r.type).toBe("suspended");
@@ -266,7 +267,7 @@ describe("Coroutine", () => {
       return v1 + v2;
     }
 
-    const h = new Handler(new DummyNetwork(), new JsonEncoder());
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new AES256GCMEncryptor("foo"));
 
     let r = await exec("foo.1", foo, [], h);
     expect(r.type).toBe("suspended");
