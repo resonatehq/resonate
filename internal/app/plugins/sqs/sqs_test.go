@@ -10,6 +10,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
@@ -106,7 +107,7 @@ func TestSQSPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sqs, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
+			sqs, err := NewWithClient(nil, metrics, &Config{BaseConfig: base.BaseConfig{Size: 1, Workers: 1}}, tc.client)
 			assert.Nil(t, err)
 
 			err = sqs.Start(nil)
