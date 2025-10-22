@@ -34,15 +34,15 @@ jobs:
         id: cache
         with:
           path: resonate
-          key: resonate-${{ github.sha }}  # Cache key tied to the commit SHA
+          key: resonate-${{ github.sha }} # Cache key tied to the commit SHA
 
       - name: Build resonate
-        if: steps.cache.outputs.cache-hit != 'true'  # Only run if cache missed
+        if: steps.cache.outputs.cache-hit != 'true' # Only run if cache missed
         run: |
           go build -o resonate main.go
 
       - name: Save resonate to cache
-        if: steps.cache.outputs.cache-hit != 'true'  # Only save if cache was missed
+        if: steps.cache.outputs.cache-hit != 'true' # Only save if cache was missed
         uses: actions/cache/save@v4
         with:
           path: resonate
@@ -87,9 +87,9 @@ jobs:
         # see: https://github.com/actions/runner/issues/822
         image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
-          POSTGRES_USER: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
-          POSTGRES_DB: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
+          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
