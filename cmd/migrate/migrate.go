@@ -139,19 +139,19 @@ func newStatusCmd(config *MigrateConfig) *cobra.Command {
 				return fmt.Errorf("failed to get pending migrations: %w", err)
 			}
 
-			fmt.Printf("Store type: %s\n", store.String())
-			fmt.Printf("Current migration version: %d\n", currentVersion)
-			fmt.Printf("Latest migration version: %d\n", latestVersion)
-			fmt.Printf("Pending migrations: %d\n", len(pending))
+			cmd.Printf("Store type: %s\n", store.String())
+			cmd.Printf("Current migration version: %d\n", currentVersion)
+			cmd.Printf("Latest migration version: %d\n", latestVersion)
+			cmd.Printf("Pending migrations: %d\n", len(pending))
 
 			if len(pending) > 0 {
-				fmt.Println("\nPending migration files:")
+				cmd.Println("\nPending migration files:")
 				for _, m := range pending {
-					fmt.Printf("  %03d_%s.sql\n", m.Version, m.Name)
+					cmd.Printf("  %03d_%s.sql\n", m.Version, m.Name)
 				}
-				fmt.Println("\nStatus: MIGRATIONS PENDING")
+				cmd.Println("\nStatus: MIGRATIONS PENDING")
 			} else {
-				fmt.Println("\nStatus: UP TO DATE")
+				cmd.Println("\nStatus: UP TO DATE")
 			}
 
 			return nil
@@ -181,14 +181,14 @@ func newDryRunCmd(config *MigrateConfig) *cobra.Command {
 			}
 
 			if len(pending) == 0 {
-				fmt.Println("No pending migrations")
+				cmd.Println("No pending migrations")
 				return nil
 			}
 
-			fmt.Printf("Would apply the following %d migration(s):\n\n", len(pending))
+			cmd.Printf("Would apply the following %d migration(s):\n\n", len(pending))
 			for _, m := range pending {
-				fmt.Printf("%03d_%s.sql\n", m.Version, m.Name)
-				fmt.Printf("%s\n\n", m.SQL)
+				cmd.Printf("%03d_%s.sql\n", m.Version, m.Name)
+				cmd.Printf("%s\n\n", m.SQL)
 			}
 
 			return nil
@@ -218,7 +218,7 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 			}
 
 			if len(pending) == 0 {
-				fmt.Println("No pending migrations")
+				cmd.Println("No pending migrations")
 				return nil
 			}
 
@@ -227,14 +227,14 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Applying %d migration(s)...\n\n", len(pending))
+			cmd.Printf("Applying %d migration(s)...\n\n", len(pending))
 
 			if err := migrations.ApplyMigrations(pending, store, true); err != nil {
 				return err
 			}
 
 			latestVersion := pending[len(pending)-1].Version
-			fmt.Printf("\n✓ Successfully applied %d migration(s). Database is now at version %d.\n",
+			cmd.Printf("\n✓ Successfully applied %d migration(s). Database is now at version %d.\n",
 				len(pending), latestVersion)
 
 			return nil
