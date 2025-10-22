@@ -1,7 +1,6 @@
 package test
 
 import (
-	"errors"
 	"testing"
 
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
@@ -9,12 +8,12 @@ import (
 
 func TestParseMigrationFilename(t *testing.T) {
 	tests := []struct {
-		name          string
-		filename      string
-		wantVersion   int
-		wantName      string
-		wantErr       bool
-		errContains   string
+		name        string
+		filename    string
+		wantVersion int
+		wantName    string
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name:        "valid migration file",
@@ -226,98 +225,6 @@ func TestValidateMigrationSequence(t *testing.T) {
 
 			if err != nil {
 				t.Errorf("ValidateMigrationSequence() unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestSuggestFixes(t *testing.T) {
-	tests := []struct {
-		name        string
-		err         error
-		wantContain []string
-	}{
-		{
-			name: "permission error",
-			err:  errors.New("permission denied for table users"),
-			wantContain: []string{
-				"database user permissions",
-				"DDL privileges",
-			},
-		},
-		{
-			name: "access denied error",
-			err:  errors.New("access denied for user"),
-			wantContain: []string{
-				"database user permissions",
-				"DDL privileges",
-			},
-		},
-		{
-			name: "syntax error",
-			err:  errors.New("syntax error at or near SELECT"),
-			wantContain: []string{
-				"SQL syntax",
-				"compatible with the target database",
-			},
-		},
-		{
-			name: "constraint violation",
-			err:  errors.New("constraint violation: NOT NULL"),
-			wantContain: []string{
-				"existing data violates",
-				"data migration step",
-			},
-		},
-		{
-			name: "foreign key violation",
-			err:  errors.New("foreign key constraint fails"),
-			wantContain: []string{
-				"existing data violates",
-				"data migration step",
-			},
-		},
-		{
-			name: "already exists error",
-			err:  errors.New("table users already exists"),
-			wantContain: []string{
-				"already exist",
-				"IF NOT EXISTS",
-			},
-		},
-		{
-			name: "duplicate error",
-			err:  errors.New("duplicate key value violates unique constraint"),
-			wantContain: []string{
-				"existing data violates",
-				"data migration step",
-			},
-		},
-		{
-			name: "unknown error",
-			err:  errors.New("something went wrong"),
-			wantContain: []string{
-				"Review the migration SQL",
-				"database logs",
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Note: suggestFixes is not exported, so we test it indirectly through MigrationError
-			migErr := &migrations.MigrationError{
-				Version: 1,
-				Name:    "test",
-				Err:     tt.err,
-			}
-
-			errorMsg := migErr.Error()
-
-			for _, want := range tt.wantContain {
-				if !contains(errorMsg, want) {
-					t.Errorf("MigrationError with %v should contain %q in suggestions", tt.err, want)
-				}
 			}
 		})
 	}

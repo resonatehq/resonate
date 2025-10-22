@@ -162,37 +162,9 @@ type MigrationError struct {
 }
 
 func (e *MigrationError) Error() string {
-	suggestions := suggestFixes(e.Err)
-	return fmt.Sprintf("Migration %03d_%s failed: %v\n\n%s",
-		e.Version, e.Name, e.Err, suggestions)
+	return fmt.Sprintf("Migration %03d_%s failed: %v\n", e.Version, e.Name, e.Err)
 }
 
 func (e *MigrationError) Unwrap() error {
 	return e.Err
-}
-
-// suggestFixes provides helpful suggestions based on the error
-func suggestFixes(err error) string {
-	errStr := err.Error()
-
-	suggestions := "Suggestions:\n"
-
-	if regexp.MustCompile(`(?i)permission|access denied`).MatchString(errStr) {
-		suggestions += "- Check database user permissions\n"
-		suggestions += "- Verify the database user has DDL privileges\n"
-	} else if regexp.MustCompile(`(?i)syntax error`).MatchString(errStr) {
-		suggestions += "- Review the SQL syntax in the migration file\n"
-		suggestions += "- Ensure the SQL is compatible with the target database\n"
-	} else if regexp.MustCompile(`(?i)constraint|violation|foreign key`).MatchString(errStr) {
-		suggestions += "- Check if existing data violates the new constraints\n"
-		suggestions += "- Consider adding a data migration step before the constraint\n"
-	} else if regexp.MustCompile(`(?i)already exists|duplicate`).MatchString(errStr) {
-		suggestions += "- The object may already exist from a previous migration\n"
-		suggestions += "- Use IF NOT EXISTS clauses where appropriate\n"
-	} else {
-		suggestions += "- Review the migration SQL\n"
-		suggestions += "- Check database logs for more details\n"
-	}
-
-	return suggestions
 }
