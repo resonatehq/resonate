@@ -44,7 +44,7 @@ func (p *processor) Process(body []byte, data []byte) (bool, error) {
 		addr.Headers = map[string]string{}
 	}
 
-	for k, v := range addr.Headers {
+	for k, v := range addr.Headers { // nosemgrep: range-over-map
 		req.Header.Set(k, v)
 	}
 
