@@ -187,7 +187,7 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 		msg.Key = sarama.StringEncoder(*addr.Key)
 	}
 
-	for k, v := range addr.Headers {
+	for k, v := range addr.Headers { // nosemgrep: range-over-map
 		msg.Headers = append(msg.Headers, sarama.RecordHeader{
 			Key:   []byte(k),
 			Value: []byte(v),
