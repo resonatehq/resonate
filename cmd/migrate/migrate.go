@@ -1,15 +1,15 @@
 package migrate
 
 import (
-	"database/sql"
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/resonatehq/resonate/cmd/config"
 	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -30,13 +30,13 @@ type MigrateStoreConfig struct {
 
 // PostgresMigrateConfig holds postgres-specific configuration
 type PostgresMigrateConfig struct {
-	Enabled  bool   `flag:"enable" desc:"enable postgres store" default:"false"`
-	Host     string `flag:"host" desc:"postgres host" default:"localhost"`
-	Port     string `flag:"port" desc:"postgres port" default:"5432"`
-	Username string `flag:"username" desc:"postgres username"`
-	Password string `flag:"password" desc:"postgres password"`
-	Database string `flag:"database" desc:"postgres database" default:"resonate"`
-	Sslmode  string `flag:"sslmode" desc:"postgres SSL mode (disable, require, verify-ca, verify-full)" default:"disable"`
+	Enabled  bool              `flag:"enable" desc:"enable postgres store" default:"false"`
+	Host     string            `flag:"host" desc:"postgres host" default:"localhost"`
+	Port     string            `flag:"port" desc:"postgres port" default:"5432"`
+	Username string            `flag:"username" desc:"postgres username"`
+	Password string            `flag:"password" desc:"postgres password"`
+	Database string            `flag:"database" desc:"postgres database" default:"resonate"`
+	Query    map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
 }
 
 // SqliteMigrateConfig holds sqlite-specific configuration
@@ -250,83 +250,30 @@ func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error)
 	sqliteEnabled := config.Store.Sqlite.Enabled
 	postgresEnabled := config.Store.Postgres.Enabled
 
-	if postgresEnabled && sqliteEnabled {
-		return nil, fmt.Errorf("both postgres and sqlite stores are enabled; enable only one")
-	}
-
 	if !postgresEnabled && !sqliteEnabled {
 		return nil, fmt.Errorf("no store enabled; enable either sqlite or postgres")
 	}
 
-	// Open database connection and create store
 	if postgresEnabled {
-		db, err := openPostgresDB(config)
+		pgConfig := config.Store.Postgres
+
+		db, err := postgres.NewConn(&postgres.ConnConfig{
+			Host:     pgConfig.Host,
+			Port:     pgConfig.Port,
+			Username: pgConfig.Username,
+			Password: pgConfig.Password,
+			Database: pgConfig.Database,
+			Query:    pgConfig.Query,
+		})
 		if err != nil {
 			return nil, err
 		}
 		return migrations.NewPostgresMigrationStore(db), nil
+	} else {
+		db, err := sqlite.NewConn(config.Store.Sqlite.Path)
+		if err != nil {
+			return nil, err
+		}
+		return migrations.NewSqliteMigrationStore(db), nil
 	}
-
-	db, err := openSQLiteDB(config)
-	if err != nil {
-		return nil, err
-	}
-	return migrations.NewSqliteMigrationStore(db), nil
-}
-
-func openSQLiteDB(config *MigrateConfig) (*sql.DB, error) {
-	path := config.Store.Sqlite.Path
-	if path == "" {
-		path = "resonate.db"
-	}
-
-	db, err := sql.Open("sqlite3", path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open SQLite database: %w", err)
-	}
-
-	return db, nil
-}
-
-func openPostgresDB(config *MigrateConfig) (*sql.DB, error) {
-	pgConfig := config.Store.Postgres
-
-	host := pgConfig.Host
-	port := pgConfig.Port
-	user := pgConfig.Username
-	password := pgConfig.Password
-	dbname := pgConfig.Database
-	sslmode := pgConfig.Sslmode
-
-	if host == "" {
-		host = "localhost"
-	}
-	if port == "" {
-		port = "5432"
-	}
-	if dbname == "" {
-		dbname = "resonate"
-	}
-	if sslmode == "" {
-		sslmode = "disable"
-	}
-
-	// Build connection string using url.URL for proper escaping
-	query := url.Values{}
-	query.Set("sslmode", sslmode)
-
-	dbUrl := &url.URL{
-		User:     url.UserPassword(user, password),
-		Host:     fmt.Sprintf("%s:%s", host, port),
-		Path:     dbname,
-		Scheme:   "postgres",
-		RawQuery: query.Encode(),
-	}
-
-	db, err := sql.Open("postgres", dbUrl.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to open PostgreSQL database: %w", err)
-	}
-
-	return db, nil
 }

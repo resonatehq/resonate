@@ -311,10 +311,14 @@ type SqliteStore struct {
 	worker *SqliteStoreWorker
 }
 
+func NewConn(path string) (*sql.DB, error) {
+	return sql.Open("sqlite3", path)
+}
+
 func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*SqliteStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
-	db, err := sql.Open("sqlite3", config.Path)
+	db, err := NewConn(config.Path)
 	if err != nil {
 		return nil, err
 	}

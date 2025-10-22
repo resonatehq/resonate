@@ -323,10 +323,16 @@ type PostgresStore struct {
 	workers []*PostgresStoreWorker
 }
 
-func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore, error) {
-	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
-	workers := make([]*PostgresStoreWorker, config.Workers)
+type ConnConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	Database string
+	Query    map[string]string
+}
 
+func NewConn(config *ConnConfig) (*sql.DB, error) {
 	rawQuery := make([]string, len(config.Query))
 	for i, q := range util.OrderedRangeKV(config.Query) {
 		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
@@ -340,7 +346,28 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore,
 		RawQuery: strings.Join(rawQuery, "&"),
 	}
 
-	db, err := sql.Open("postgres", dbUrl.String())
+	return sql.Open("postgres", dbUrl.String())
+}
+
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore, error) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*PostgresStoreWorker, config.Workers)
+
+	rawQuery := make([]string, len(config.Query))
+	for i, q := range util.OrderedRangeKV(config.Query) {
+		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
+	}
+
+	connConfig := &ConnConfig{
+		Host:     config.Host,
+		Port:     config.Port,
+		Username: config.Username,
+		Password: config.Password,
+		Database: config.Database,
+		Query:    config.Query,
+	}
+
+	db, err := NewConn(connConfig)
 	if err != nil {
 		return nil, err
 	}
