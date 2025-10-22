@@ -6,6 +6,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 func TestSQLiteMigrationLifecycle(t *testing.T) {
@@ -14,7 +15,7 @@ func TestSQLiteMigrationLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to open in-memory SQLite: %v", err)
 	}
-	defer db.Close()
+	defer util.DeferAndLog(db.Close)
 
 	// Test 1: Database without migrations table should return an error
 	t.Run("database without migrations table returns error", func(t *testing.T) {
@@ -106,7 +107,7 @@ func TestApplyMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open in-memory SQLite: %v", err)
 		}
-		defer db.Close()
+		defer util.DeferAndLog(db.Close)
 
 		// Initialize schema with migrations table at version 1
 		_, err = db.Exec("CREATE TABLE migrations (id INTEGER PRIMARY KEY)")
@@ -164,7 +165,7 @@ func TestApplyMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open in-memory SQLite: %v", err)
 		}
-		defer db.Close()
+		defer util.DeferAndLog(db.Close)
 
 		// Initialize schema with migrations table at version 1
 		_, err = db.Exec("CREATE TABLE migrations (id INTEGER PRIMARY KEY)")
@@ -227,7 +228,7 @@ func TestApplyMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open in-memory SQLite: %v", err)
 		}
-		defer db.Close()
+		defer util.DeferAndLog(db.Close)
 
 		// Initialize schema with migrations table at version 1
 		_, err = db.Exec("CREATE TABLE migrations (id INTEGER PRIMARY KEY)")
@@ -284,7 +285,7 @@ func TestApplyMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open in-memory SQLite: %v", err)
 		}
-		defer db.Close()
+		defer util.DeferAndLog(db.Close)
 
 		// Initialize schema with migrations table at version 1
 		_, err = db.Exec("CREATE TABLE migrations (id INTEGER PRIMARY KEY)")
@@ -319,7 +320,7 @@ func TestApplyMigrations(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to open in-memory SQLite: %v", err)
 		}
-		defer db.Close()
+		defer util.DeferAndLog(db.Close)
 
 		// Initialize schema with migrations table at version 1
 		_, err = db.Exec("CREATE TABLE migrations (id INTEGER PRIMARY KEY)")
@@ -403,7 +404,7 @@ func TestGetPendingMigrations(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to open in-memory SQLite: %v", err)
 			}
-			defer db.Close()
+			defer util.DeferAndLog(db.Close)
 
 			store := migrations.NewSqliteMigrationStore(db)
 			pending, err := migrations.GetPendingMigrations(tt.currentVersion, store)

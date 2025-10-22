@@ -10,6 +10,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/postgres"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
+	internalUtil "github.com/resonatehq/resonate/internal/util"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -115,7 +116,7 @@ func newStatusCmd(config *MigrateConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer internalUtil.DeferAndLog(store.Close)
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
@@ -168,7 +169,7 @@ func newDryRunCmd(config *MigrateConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer internalUtil.DeferAndLog(store.Close)
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {
@@ -205,7 +206,7 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer store.Close()
+			defer internalUtil.DeferAndLog(store.Close)
 
 			currentVersion, err := store.GetCurrentVersion()
 			if err != nil {

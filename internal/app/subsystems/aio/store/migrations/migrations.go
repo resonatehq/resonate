@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 var ErrPendingMigrations = errors.New("pending migrations exist")
@@ -111,7 +113,7 @@ func ApplyMigrations(migrations []Migration, store MigrationStore, verbose bool)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback() // Rollback if not committed
+	defer util.DeferAndLog(tx.Rollback)
 
 	for _, migration := range migrations {
 		if verbose {

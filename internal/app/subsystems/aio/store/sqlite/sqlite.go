@@ -379,7 +379,7 @@ func (s *SqliteStore) Start(chan<- error) error {
 	} else {
 		// For existing databases, check for pending migrations and error if any exist
 		if len(pending) > 0 {
-			return errors.New("Pending migrations, run `resonate migrate` for more information")
+			return errors.New("pending migrations, run `resonate migrate` for more information")
 		}
 	}
 
