@@ -72,30 +72,58 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 		util.Assert(promisesCompletion.Store != nil, "completion must not be nil")
 		util.Assert(len(promisesCompletion.Store.Results) == len(promiseCmds), "There must be one result per cmd")
 
-		promisesResults := promisesCompletion.Store.Results
-
 		commands := []t_aio.Command{}
 		awaiting := make([]gocoroPromise.Awaitable[*t_aio.Completion], len(tasksResult.Records))
 
 		for i, r := range tasksResult.Records {
-			if c.Time() < r.Timeout {
-				t, err := r.Task()
+			var p *promise.Promise
+			promiseResult := t_aio.AsQueryPromises(promisesCompletion.Store.Results[i])
+
+			if promiseResult.RowsReturned > 0 {
+				p, err = promiseResult.Records[0].Promise()
 				if err != nil {
-					slog.Warn("failed to parse task", "err", err)
+					slog.Warn("failed to parse promise", "err", err)
 					continue
 				}
+			}
 
-				pResult := t_aio.AsQueryPromises(promisesResults[i])
+			t, err := r.Task()
+			if err != nil {
+				slog.Warn("failed to parse task", "err", err)
+				continue
+			}
 
-				var promise *promise.Promise
-				if pResult.RowsReturned > 0 {
-					promise, err = pResult.Records[0].Promise()
-					if err != nil {
-						slog.Warn("failed to parse promise", "err", err)
-						continue
-					}
-				}
+			if c.Time() >= t.Timeout {
+				// go straight to jail, do not collect $200
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             t.Id,
+					ProcessId:      nil,
+					State:          task.Timedout,
+					Counter:        t.Counter,
+					Attempt:        t.Attempt,
+					Ttl:            0,
+					ExpiresAt:      0,
+					CompletedOn:    &t.Timeout,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: t.Counter,
+				})
+			} else if p != nil && p.State != promise.Pending && t.Mesg.Type != message.Notify {
+				completedOn := c.Time()
 
+				// also go straight to jail, do not collect $200
+				commands = append(commands, &t_aio.UpdateTaskCommand{
+					Id:             t.Id,
+					ProcessId:      nil,
+					State:          task.Completed,
+					Counter:        t.Counter,
+					Attempt:        t.Attempt,
+					Ttl:            0,
+					ExpiresAt:      0,
+					CompletedOn:    &completedOn,
+					CurrentStates:  []task.State{task.Init},
+					CurrentCounter: t.Counter,
+				})
+			} else {
 				awaiting[i] = gocoro.Yield(c, &t_aio.Submission{
 					Kind: t_aio.Sender,
 					Tags: metadata,
@@ -115,47 +143,33 @@ func EnqueueTasks(config *system.Config, metadata map[string]string) gocoro.Coro
 							CreatedOn:     t.CreatedOn,
 							CompletedOn:   t.CompletedOn,
 						},
-						Promise:       promise,
+						Promise:       p,
 						BaseHref:      config.Url,
 						ClaimHref:     fmt.Sprintf("%s/tasks/claim/%s/%d", config.Url, t.Id, t.Counter),
 						CompleteHref:  fmt.Sprintf("%s/tasks/complete/%s/%d", config.Url, t.Id, t.Counter),
 						HeartbeatHref: fmt.Sprintf("%s/tasks/heartbeat/%s/%d", config.Url, t.Id, t.Counter),
 					},
 				})
-			} else {
-				// go straight to jail, do not collect $200
-				commands = append(commands, &t_aio.UpdateTaskCommand{
-					Id:             r.Id,
-					ProcessId:      nil,
-					State:          task.Timedout,
-					Counter:        r.Counter,
-					Attempt:        r.Attempt,
-					Ttl:            0,
-					ExpiresAt:      0,
-					CompletedOn:    &r.Timeout,
-					CurrentStates:  []task.State{task.Init},
-					CurrentCounter: r.Counter,
-				})
 			}
 		}
 
-		for i, t := range tasksResult.Records {
+		for i, r := range tasksResult.Records {
 			if awaiting[i] == nil {
 				continue
 			}
 
-			decodedT, decodeErr := t.Task()
-			if decodeErr != nil {
-				slog.Warn("error decoding task, continuing", "err", decodeErr)
+			t, err := r.Task()
+			if err != nil {
+				slog.Warn("failed to parse task", "err", err)
 				continue
 			}
 
 			completion, err := gocoro.Await(c, awaiting[i])
-			if err != nil && decodedT.Mesg.Type != message.Notify {
+			if err != nil && t.Mesg.Type != message.Notify {
 				slog.Warn("failed to send task", "err", err)
 			}
 
-			if decodedT.Mesg.Type == message.Notify {
+			if t.Mesg.Type == message.Notify {
 				commands = append(commands, &t_aio.UpdateTaskCommand{
 					Id:             t.Id,
 					ProcessId:      nil,
