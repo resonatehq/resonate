@@ -259,13 +259,13 @@ func TestMigrationConfigAndServeConfigMatch(t *testing.T) {
 		{
 			srcName:    "PostgresMigrateConfig",
 			destName:   "postgres.Config",
-			srcConfig:  &migrate.PostgresMigrateConfig{},
+			srcConfig:  &migrate.PostgresConfig{},
 			destConfig: &postgres.Config{},
 		},
 		{
 			srcName:    "SqliteMigrateConfig",
 			destName:   "sqlite.Config",
-			srcConfig:  &migrate.SqliteMigrateConfig{},
+			srcConfig:  &migrate.SqliteConfig{},
 			destConfig: &sqlite.Config{},
 		},
 	}

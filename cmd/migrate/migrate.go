@@ -20,30 +20,41 @@ import (
 
 // MigrateConfig holds configuration for the migrate command
 type MigrateConfig struct {
-	Store MigrateStoreConfig `flag:"aio-store"`
+	AIO MigrateAIO `flag:"aio"`
 }
 
-// MigrateStoreConfig holds store-specific configuration
-type MigrateStoreConfig struct {
-	Postgres PostgresMigrateConfig `flag:"postgres"`
-	Sqlite   SqliteMigrateConfig   `flag:"sqlite"`
+type MigrateAIO struct {
+	Subsystems MigrateSubsystems `flag:"-"`
 }
 
-// PostgresMigrateConfig holds postgres-specific configuration
-type PostgresMigrateConfig struct {
-	Enabled  bool              `flag:"enable" desc:"enable postgres store" default:"false"`
-	Host     string            `flag:"host" desc:"postgres host" default:"localhost"`
-	Port     string            `flag:"port" desc:"postgres port" default:"5432"`
-	Username string            `flag:"username" desc:"postgres username"`
-	Password string            `flag:"password" desc:"postgres password"`
-	Database string            `flag:"database" desc:"postgres database" default:"resonate"`
-	Query    map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
+type PersistentEnabledSubsystem[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable subsystem" default:"true" persistent:"true"`
+	Config  T    `flag:"-"`
 }
 
-// SqliteMigrateConfig holds sqlite-specific configuration
-type SqliteMigrateConfig struct {
-	Enabled bool   `flag:"enable" desc:"enable sqlite store" default:"true"`
-	Path    string `flag:"path" desc:"sqlite database path" default:"resonate.db"`
+type PersistenDisabledSubsystem[T any] struct {
+	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false" persistent:"true"`
+	Config  T    `flag:"-"`
+}
+
+type MigrateSubsystems struct {
+	StorePostgress PersistenDisabledSubsystem[PostgresConfig] `flag:"store-postgres"`
+	StoreSqlite    PersistentEnabledSubsystem[SqliteConfig]   `flag:"store-sqlite"`
+}
+
+// PostgresConfig holds postgres-specific configuration
+type PostgresConfig struct {
+	Host     string            `flag:"host" desc:"postgres host" default:"localhost" persistent:"true"`
+	Port     string            `flag:"port" desc:"postgres port" default:"5432" persistent:"true"`
+	Username string            `flag:"username" desc:"postgres username" persistent:"true"`
+	Password string            `flag:"password" desc:"postgres password" persistent:"true"`
+	Database string            `flag:"database" desc:"postgres database" default:"resonate" persistent:"true"`
+	Query    map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}" persistent:"true"`
+}
+
+// SqliteConfig holds sqlite-specific configuration
+type SqliteConfig struct {
+	Path string `flag:"path" desc:"sqlite database path" default:"resonate.db" persistent:"true"`
 }
 
 func (c *MigrateConfig) Bind(cmd *cobra.Command, vip *viper.Viper) error {
@@ -248,15 +259,15 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 // connection and the caller is responsible for calling Close() on the store.
 func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error) {
 	// Infer store type from enable flags
-	sqliteEnabled := config.Store.Sqlite.Enabled
-	postgresEnabled := config.Store.Postgres.Enabled
+	sqliteEnabled := config.AIO.Subsystems.StoreSqlite.Enabled
+	postgresEnabled := config.AIO.Subsystems.StorePostgress.Enabled
 
 	if !postgresEnabled && !sqliteEnabled {
 		return nil, fmt.Errorf("no store enabled; enable either sqlite or postgres")
 	}
 
 	if postgresEnabled {
-		pgConfig := config.Store.Postgres
+		pgConfig := config.AIO.Subsystems.StorePostgress.Config
 
 		db, err := postgres.NewConn(&postgres.ConnConfig{
 			Host:     pgConfig.Host,
@@ -271,7 +282,7 @@ func getMigrationStore(config *MigrateConfig) (migrations.MigrationStore, error)
 		}
 		return migrations.NewPostgresMigrationStore(db), nil
 	} else {
-		db, err := sqlite.NewConn(config.Store.Sqlite.Path)
+		db, err := sqlite.NewConn(config.AIO.Subsystems.StoreSqlite.Config.Path)
 		if err != nil {
 			return nil, err
 		}

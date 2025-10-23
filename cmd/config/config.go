@@ -282,6 +282,13 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 		field := t.Field(i)
 		flag := field.Tag.Get("flag")
 		desc := field.Tag.Get("desc")
+		persistentTag := field.Tag.Get("persistent")
+		persistent, _ := strconv.ParseBool(persistentTag)
+
+		flags := cmd.Flags()
+		if persistent {
+			flags = cmd.PersistentFlags()
+		}
 
 		var value string
 		if v := field.Tag.Get(tag); v != "" {
@@ -308,11 +315,11 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 
 		switch field.Type.Kind() {
 		case reflect.String:
-			cmd.Flags().String(n, value, desc)
-			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.String(n, value, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Bool:
-			cmd.Flags().Bool(n, value == "true", desc)
-			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.Bool(n, value == "true", desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Int:
 			if strings.Contains(value, ":") {
 				flag := util.NewRangeIntFlag(0, 0)
@@ -320,12 +327,12 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 					return err
 				}
 
-				cmd.Flags().Var(flag, n, desc)
-				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			} else {
 				v, _ := strconv.Atoi(value)
-				cmd.Flags().Int(n, v, desc)
-				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Int(n, v, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			}
 		case reflect.Int64:
 			if field.Type == reflect.TypeOf(time.Duration(0)) {
@@ -335,12 +342,12 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 						return err
 					}
 
-					cmd.Flags().Var(flag, n, desc)
-					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				} else {
 					v, _ := time.ParseDuration(value)
-					cmd.Flags().Duration(n, v, desc)
-					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Duration(n, v, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				}
 			} else {
 				if strings.Contains(value, ":") {
@@ -349,12 +356,12 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 						return err
 					}
 
-					cmd.Flags().Var(flag, n, desc)
-					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Var(flag, n, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				} else {
 					v, _ := strconv.ParseInt(value, 10, 64)
-					cmd.Flags().Int64(n, v, desc)
-					_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+					flags.Int64(n, v, desc)
+					_ = vip.BindPFlag(k, flags.Lookup(n))
 				}
 			}
 		case reflect.Float64:
@@ -364,12 +371,12 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 					return err
 				}
 
-				cmd.Flags().Var(flag, n, desc)
-				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Var(flag, n, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			} else {
 				v, _ := strconv.ParseFloat(value, 64)
-				cmd.Flags().Float64(n, v, desc)
-				_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+				flags.Float64(n, v, desc)
+				_ = vip.BindPFlag(k, flags.Lookup(n))
 			}
 		case reflect.Slice:
 			// TODO: support additional slice types via flags
@@ -383,8 +390,8 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 			} else {
 				v = []string{value}
 			}
-			cmd.Flags().StringArray(n, v, desc)
-			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.StringArray(n, v, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Map:
 			if field.Type != reflect.TypeOf(map[string]string{}) {
 				panic(fmt.Sprintf("unsupported map type: %s", field.Type.Kind()))
@@ -396,8 +403,8 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 			if err := json.Unmarshal([]byte(value), &v); err != nil {
 				return err
 			}
-			cmd.Flags().StringToString(n, v, desc)
-			_ = vip.BindPFlag(k, cmd.Flags().Lookup(n))
+			flags.StringToString(n, v, desc)
+			_ = vip.BindPFlag(k, flags.Lookup(n))
 		case reflect.Struct:
 			if err := Bind(cmd, v.Field(i).Addr().Interface(), vip, tag, n, k); err != nil {
 				return err
