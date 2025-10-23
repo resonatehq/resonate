@@ -32,14 +32,14 @@ type PersistentEnabledSubsystem[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-type PersistenDisabledSubsystem[T any] struct {
+type PersistentDisabledSubsystem[T any] struct {
 	Enabled bool `flag:"enable" desc:"enable subsystem" default:"false" persistent:"true"`
 	Config  T    `flag:"-"`
 }
 
 type MigrateSubsystems struct {
-	StorePostgress PersistenDisabledSubsystem[PostgresConfig] `flag:"store-postgres"`
-	StoreSqlite    PersistentEnabledSubsystem[SqliteConfig]   `flag:"store-sqlite"`
+	StorePostgress PersistentDisabledSubsystem[PostgresConfig] `flag:"store-postgres"`
+	StoreSqlite    PersistentEnabledSubsystem[SqliteConfig]    `flag:"store-sqlite"`
 }
 
 // PostgresConfig holds postgres-specific configuration

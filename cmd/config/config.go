@@ -282,11 +282,10 @@ func Bind(cmd *cobra.Command, cfg any, vip *viper.Viper, tag string, fPrefix str
 		field := t.Field(i)
 		flag := field.Tag.Get("flag")
 		desc := field.Tag.Get("desc")
-		persistentTag := field.Tag.Get("persistent")
-		persistent, _ := strconv.ParseBool(persistentTag)
+		persistent := field.Tag.Get("persistent")
 
 		flags := cmd.Flags()
-		if persistent {
+		if persistent == "true" {
 			flags = cmd.PersistentFlags()
 		}
 
