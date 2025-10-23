@@ -234,19 +234,22 @@ func newUpCmd(config *MigrateConfig) *cobra.Command {
 				return nil
 			}
 
-			// Validate migration sequence
 			if err := migrations.ValidateMigrationSequence(pending, currentVersion); err != nil {
 				return err
 			}
 
 			cmd.Printf("Applying %d migration(s)...\n\n", len(pending))
 
-			if err := migrations.ApplyMigrations(pending, store, true); err != nil {
+			if err := migrations.ApplyMigrations(pending, store); err != nil {
 				return err
 			}
 
+			for _, migration := range pending {
+				cmd.Printf("✓  %03d_%s.sql\n", migration.Version, migration.Name)
+			}
+
 			latestVersion := pending[len(pending)-1].Version
-			cmd.Printf("\n✓ Successfully applied %d migration(s). Database is now at version %d.\n",
+			cmd.Printf("\nSuccessfully applied %d migration(s). Database is now at version %d.\n",
 				len(pending), latestVersion)
 
 			return nil

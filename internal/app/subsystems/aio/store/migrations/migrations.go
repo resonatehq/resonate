@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
-
-	"github.com/resonatehq/resonate/internal/util"
 )
 
 var ErrPendingMigrations = errors.New("pending migrations exist")
@@ -100,32 +98,25 @@ func ValidateMigrationSequence(migrations []Migration, startVersion int) error {
 }
 
 // ApplyMigrations executes migrations in a transaction
-func ApplyMigrations(migrations []Migration, store MigrationStore, verbose bool) error {
+func ApplyMigrations(migrations []Migration, store MigrationStore) error {
 	if len(migrations) == 0 {
 		return nil
 	}
 
-	// Get DB from store
 	db := store.GetDB()
 
-	// Start transaction
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer util.DeferAndLog(tx.Rollback)
 
 	for _, migration := range migrations {
-		if verbose {
-			fmt.Printf("Applying migration %03d_%s.sql... ", migration.Version, migration.Name)
-		}
-
-		// Execute migration SQL
 		_, err := tx.Exec(migration.SQL)
 		if err != nil {
-			if verbose {
-				fmt.Println("✗")
+			if rbErr := tx.Rollback(); rbErr != nil {
+				return fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 			}
+
 			return &MigrationError{
 				Version: migration.Version,
 				Name:    migration.Name,
@@ -133,22 +124,16 @@ func ApplyMigrations(migrations []Migration, store MigrationStore, verbose bool)
 			}
 		}
 
-		// Update migrations table using store-specific SQL
 		updateSQL := store.GetInsertMigrationSQL()
 		_, err = tx.Exec(updateSQL, migration.Version)
 		if err != nil {
-			if verbose {
-				fmt.Println("✗")
+			if rbErr := tx.Rollback(); rbErr != nil {
+				return fmt.Errorf("tx failed: %v, unable to rollback: %v", err, rbErr)
 			}
 			return fmt.Errorf("failed to update migrations table: %w", err)
 		}
 
-		if verbose {
-			fmt.Println("✓")
-		}
 	}
-
-	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}

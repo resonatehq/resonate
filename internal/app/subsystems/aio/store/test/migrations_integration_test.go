@@ -135,7 +135,7 @@ func TestApplyMigrations(t *testing.T) {
 
 		store := migrations.NewSqliteMigrationStore(db)
 
-		err = migrations.ApplyMigrations(testMigrations, store, true)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed: %v", err)
 		}
@@ -192,7 +192,7 @@ func TestApplyMigrations(t *testing.T) {
 		}
 
 		store := migrations.NewSqliteMigrationStore(db)
-		err = migrations.ApplyMigrations(testMigrations, store, true)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed: %v", err)
 		}
@@ -255,7 +255,7 @@ func TestApplyMigrations(t *testing.T) {
 		}
 
 		store := migrations.NewSqliteMigrationStore(db)
-		err = migrations.ApplyMigrations(testMigrations, store, true)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err == nil {
 			t.Fatal("ApplyMigrations() should have failed but succeeded")
 		}
@@ -300,7 +300,7 @@ func TestApplyMigrations(t *testing.T) {
 		store := migrations.NewSqliteMigrationStore(db)
 
 		// Apply empty migrations - should be no-op
-		err = migrations.ApplyMigrations([]migrations.Migration{}, store, true)
+		err = migrations.ApplyMigrations([]migrations.Migration{}, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed with empty list: %v", err)
 		}
@@ -342,7 +342,7 @@ func TestApplyMigrations(t *testing.T) {
 		}
 
 		store := migrations.NewSqliteMigrationStore(db)
-		err = migrations.ApplyMigrations(testMigrations, store, true)
+		err = migrations.ApplyMigrations(testMigrations, store)
 		if err != nil {
 			t.Fatalf("ApplyMigrations() failed on first run: %v", err)
 		}

@@ -372,7 +372,7 @@ func (s *SqliteStore) Start(chan<- error) error {
 			}
 
 			// Apply all migrations
-			if err := migrations.ApplyMigrations(pending, ms, false); err != nil {
+			if err := migrations.ApplyMigrations(pending, ms); err != nil {
 				return err
 			}
 		}
