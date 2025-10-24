@@ -12,7 +12,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
@@ -211,7 +210,8 @@ func TestPollPlugin(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &Config{
-				BaseConfig:     base.BaseConfig{Size: 100, Workers: 1},
+				Size:           100,
+				Workers:        1,
 				BufferSize:     100,
 				MaxConnections: tc.mc,
 				Addr:           ":0",
@@ -342,7 +342,8 @@ func TestPollPluginAuth(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
 	config := &Config{
-		BaseConfig:     base.BaseConfig{Size: 10, Workers: 1},
+		Size:           10,
+		Workers:        1,
 		BufferSize:     10,
 		MaxConnections: 1,
 		Addr:           ":0",

@@ -14,19 +14,21 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Config struct {
-	base.BaseConfig
+	Size            int               `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers         int               `flag:"workers" desc:"number of workers" default:"4"`
+	Timeout         time.Duration     `flag:"timeout" desc:"request timeout" default:"30s"`
+	TimeToRetry     time.Duration     `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim     time.Duration     `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 	BufferSize      int               `flag:"buffer-size" desc:"connection buffer size" default:"100"`
 	MaxConnections  int               `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
 	Addr            string            `flag:"addr" desc:"http server address" default:":8002"`
 	Cors            Cors              `flag:"cors" desc:"http cors settings"`
-	Timeout         time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
 	DisconnectAfter time.Duration     `flag:"disconnect-after" desc:"time to wait before closing a connections, defaults to never" default:"0"`
 	Auth            map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
 }

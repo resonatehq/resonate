@@ -31,7 +31,6 @@ func TestNewPlugin(t *testing.T) {
 	config := &BaseConfig{
 		Size:        10,
 		Workers:     3,
-		Timeout:     1 * time.Second,
 		TimeToRetry: 15 * time.Second,
 		TimeToClaim: 60 * time.Second,
 	}
@@ -151,7 +150,6 @@ func TestWorkerProcessing(t *testing.T) {
 	config := &BaseConfig{
 		Size:        10,
 		Workers:     1,
-		Timeout:     100 * time.Millisecond,
 		TimeToRetry: 10 * time.Second,
 		TimeToClaim: 30 * time.Second,
 	}
@@ -260,14 +258,12 @@ func TestBaseConfig(t *testing.T) {
 	config := BaseConfig{
 		Size:        100,
 		Workers:     5,
-		Timeout:     30 * time.Second,
 		TimeToRetry: 15 * time.Second,
 		TimeToClaim: 60 * time.Second,
 	}
 
 	assert.Equal(t, 100, config.Size)
 	assert.Equal(t, 5, config.Workers)
-	assert.Equal(t, 30*time.Second, config.Timeout)
 	assert.Equal(t, int64(15000), config.TimeToRetry.Milliseconds())
 	assert.Equal(t, int64(60000), config.TimeToClaim.Milliseconds())
 }

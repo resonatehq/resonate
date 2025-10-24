@@ -11,7 +11,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/stretchr/testify/assert"
@@ -56,7 +55,7 @@ func TestHttpPlugin(t *testing.T) {
 		{"ko", &Addr{Url: koUrl}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			http, err := New(nil, metrics, &Config{BaseConfig: base.BaseConfig{Size: 1, Workers: 1}, Timeout: 1 * time.Second})
+			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
 			assert.Nil(t, err)
 
 			data, err := json.Marshal(tc.data)

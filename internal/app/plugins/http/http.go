@@ -12,8 +12,11 @@ import (
 )
 
 type Config struct {
-	base.BaseConfig
-	Timeout time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
+	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Http struct {
@@ -64,7 +67,14 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 		client: &http.Client{Timeout: config.Timeout},
 	}
 
-	plugin := base.NewPlugin(a, "http", &config.BaseConfig, metrics, proc, nil)
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
+	plugin := base.NewPlugin(a, "http", baseConfig, metrics, proc, nil)
 
 	return &Http{
 		Plugin: plugin,
