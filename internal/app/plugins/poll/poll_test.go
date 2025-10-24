@@ -211,7 +211,6 @@ func TestPollPlugin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			config := &Config{
 				Size:           100,
-				Workers:        1,
 				BufferSize:     100,
 				MaxConnections: tc.mc,
 				Addr:           ":0",
@@ -343,7 +342,6 @@ func TestPollPluginAuth(t *testing.T) {
 
 	config := &Config{
 		Size:           10,
-		Workers:        1,
 		BufferSize:     10,
 		MaxConnections: 1,
 		Addr:           ":0",
