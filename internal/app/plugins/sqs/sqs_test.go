@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/stretchr/testify/assert"
@@ -106,7 +107,7 @@ func TestSQSPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sqs, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
+			sqs, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 30 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 0}, tc.client)
 			assert.Nil(t, err)
 
 			err = sqs.Start(nil)
