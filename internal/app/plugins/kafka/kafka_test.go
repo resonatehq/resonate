@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
@@ -26,36 +26,41 @@ type SendMessageParams struct {
 	Headers map[string]string
 }
 
-func (m *MockKafkaProducer) SendMessage(msg *sarama.ProducerMessage) (partition int32, offset int64, err error) {
+func (m *MockKafkaProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
 	if !m.ok {
-		return 0, 0, errors.New("mock error")
+		return errors.New("mock error")
 	}
 
 	headers := make(map[string]string)
 	for _, h := range msg.Headers {
-		headers[string(h.Key)] = string(h.Value)
+		headers[h.Key] = string(h.Value)
 	}
 
 	key := ""
 	if msg.Key != nil {
-		if se, ok := msg.Key.(sarama.StringEncoder); ok {
-			key = string(se)
-		}
+		key = string(msg.Key)
+	}
+
+	topic := ""
+	if msg.TopicPartition.Topic != nil {
+		topic = *msg.TopicPartition.Topic
 	}
 
 	m.ch <- &SendMessageParams{
-		Topic:   msg.Topic,
+		Topic:   topic,
 		Key:     key,
-		Value:   msg.Value.(sarama.ByteEncoder),
+		Value:   msg.Value,
 		Headers: headers,
 	}
 
-	return 0, 12345, nil
-}
-
-func (m *MockKafkaProducer) Close() error {
 	return nil
 }
+
+func (m *MockKafkaProducer) Flush(timeoutMs int) int {
+	return 1
+}
+
+func (m *MockKafkaProducer) Close() {}
 
 func TestKafkaPlugin(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())

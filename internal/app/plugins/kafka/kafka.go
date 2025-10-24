@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/IBM/sarama"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -25,8 +25,9 @@ type Config struct {
 }
 
 type Producer interface {
-	SendMessage(msg *sarama.ProducerMessage) (partition int32, offset int64, err error)
-	Close() error
+	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
+	Flush(timeoutMs int) int
+	Close()
 }
 
 type Worker struct {
@@ -58,36 +59,22 @@ func (a *Addr) validate() error {
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Kafka, error) {
-	producer, err := sarama.NewSyncProducer(config.Brokers, newConfig(config))
+	producer, err := kafka.NewProducer(newConfig(config))
 	if err != nil {
 		return nil, fmt.Errorf("kafka producer: %w", err)
 	}
 	return NewWithProducer(a, metrics, config, producer)
 }
 
-func newConfig(config *Config) *sarama.Config {
-	c := sarama.NewConfig()
-	c.Producer.Return.Successes = true
-	c.Producer.Return.Errors = true
-	c.Producer.Timeout = config.Timeout
-	c.Producer.Retry.Max = 3
-	c.Producer.Compression = compression(config.Compression)
-	return c
-}
-
-func compression(s string) sarama.CompressionCodec {
-	switch s {
-	case "gzip":
-		return sarama.CompressionGZIP
-	case "snappy":
-		return sarama.CompressionSnappy
-	case "lz4":
-		return sarama.CompressionLZ4
-	case "zstd":
-		return sarama.CompressionZSTD
-	default:
-		return sarama.CompressionNone
+func newConfig(config *Config) *kafka.ConfigMap {
+	c := &kafka.ConfigMap{
+		"bootstrap.servers":   fmt.Sprintf("%v", config.Brokers),
+		"delivery.timeout.ms": int(config.Timeout.Milliseconds()),
+		"compression.type":    config.Compression,
+		"retries":             3,
+		"acks":                "all",
 	}
+	return c
 }
 
 func NewWithProducer(a aio.AIO, metrics *metrics.Metrics, config *Config, producer Producer) (*Kafka, error) {
@@ -128,9 +115,7 @@ func (k *Kafka) Start(chan<- error) error {
 func (k *Kafka) Stop() error {
 	close(k.sq)
 	if len(k.workers) > 0 && k.workers[0].producer != nil {
-		if err := k.workers[0].producer.Close(); err != nil {
-			return fmt.Errorf("failed to close kafka producer: %w", err)
-		}
+		k.workers[0].producer.Close()
 	}
 	return nil
 }
@@ -178,22 +163,30 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 		return false, err
 	}
 
-	msg := &sarama.ProducerMessage{
-		Topic: addr.Topic,
-		Value: sarama.ByteEncoder(body),
+	msg := &kafka.Message{
+		TopicPartition: kafka.TopicPartition{Topic: &addr.Topic, Partition: kafka.PartitionAny},
+		Value:          body,
 	}
 
 	if addr.Key != nil {
-		msg.Key = sarama.StringEncoder(*addr.Key)
+		msg.Key = []byte(*addr.Key)
 	}
 
-	for k, v := range addr.Headers { // nosemgrep: range-over-map
-		msg.Headers = append(msg.Headers, sarama.RecordHeader{
-			Key:   []byte(k),
-			Value: []byte(v),
-		})
+	if len(addr.Headers) > 0 {
+		msg.Headers = make([]kafka.Header, 0, len(addr.Headers))
+		for k, v := range addr.Headers { // nosemgrep: range-over-map
+			msg.Headers = append(msg.Headers, kafka.Header{
+				Key:   k,
+				Value: []byte(v),
+			})
+		}
 	}
 
-	_, _, err := w.producer.SendMessage(msg)
-	return err == nil, err
+	err := w.producer.Produce(msg, nil)
+	if err != nil {
+		return false, err
+	}
+
+	w.producer.Flush(1000)
+	return true, nil
 }
