@@ -106,3 +106,18 @@ export function semverLessThan(a: string, b: string): boolean {
   if (aMinor !== bMinor) return aMinor < bMinor;
   return aPatch < bPatch;
 }
+
+export function getCallerInfo(): string {
+  const err = new Error();
+  if (!err.stack) return "";
+
+  const stack = err.stack.split("\n");
+
+  // stack[0] is "Error"
+  // stack[1] is this function (getCallerInfo)
+  // stack[2] is the caller of this function
+  // stack[3] is the info we want
+  const callerLine = stack?.[3];
+
+  return callerLine.trim();
+}

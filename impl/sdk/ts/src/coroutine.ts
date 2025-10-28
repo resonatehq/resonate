@@ -298,6 +298,19 @@ export class Coroutine<T> {
           return; // Exit the while loop to wait for async callback
         }
 
+        // Handle die
+        if (action.type === "internal.die" && !action.condition) {
+          input = {
+            type: "internal.nothing",
+          };
+          continue;
+        }
+
+        if (action.type === "internal.die" && action.condition) {
+          action.error.log(this.verbose);
+          return callback(true);
+        }
+
         // Handle await
         if (action.type === "internal.await" && action.promise.state === "completed") {
           util.assert(

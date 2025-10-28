@@ -88,6 +88,12 @@ export default {
       cause: c,
     });
   },
+  PANIC: (source: string, msg: string | undefined) => {
+    msg = msg ? `: ${msg}` : "";
+    return new ResonateError("98", "Panic", `${source}${msg}`, {
+      next: "Will drop",
+    });
+  },
   SERVER_ERROR: (m: any, r?: boolean, e?: ResonateServerError) => {
     return new ResonateError("99", "Server", m, { retriable: r, serverError: e });
   },

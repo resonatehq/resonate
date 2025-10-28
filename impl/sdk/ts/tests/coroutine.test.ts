@@ -279,4 +279,42 @@ describe("Coroutine", () => {
     r = await exec("foo.1", foo, [], h);
     expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 84 } } });
   });
+
+  test("DIE with condition true aborts execution", async () => {
+    function* foo(ctx: Context) {
+      yield* ctx.panic(true, "Abort execution");
+      return 42;
+    }
+
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
+
+    // DIE with condition=true causes callback to be called with err=true
+    const result = await new Promise<any>((resolve) => {
+      Coroutine.exec(
+        "foo.1",
+        false,
+        InnerContext.root("foo.1", "poll://any@default", 0, new Never(), new WallClock(), new Map()),
+        foo,
+        [],
+        h,
+        (err, res) => {
+          resolve({ err, res });
+        },
+      );
+    });
+
+    expect(result.err).toBe(true);
+    expect(result.res).toBeUndefined();
+  });
+
+  test("DIE with condition false continues execution", async () => {
+    function* foo(ctx: Context) {
+      yield* ctx.panic(false, "Should not abort");
+      return 42;
+    }
+
+    const h = new Handler(new DummyNetwork(), new JsonEncoder(), new NoopEncryptor());
+    const r = await exec("foo.1", foo, [], h);
+    expect(r).toMatchObject({ type: "completed", promise: { id: "foo.1", value: { data: 42 } } });
+  });
 });

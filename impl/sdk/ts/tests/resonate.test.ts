@@ -1133,4 +1133,70 @@ describe("Resonate environment variable initialization", () => {
     await p2.promise;
     resonate.stop();
   });
+
+  test("ctx.panic aborts execution when condition is true", async () => {
+    const resonate = Resonate.local();
+
+    let completed = false;
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.panic(true, "This should abort");
+      completed = true;
+      return "should not reach here";
+    });
+
+    await f.beginRun("test");
+    await setTimeout(100); // Give time for function to run
+
+    // Promise is dropped, but execution after panic should not run
+    expect(completed).toBe(false);
+
+    resonate.stop();
+  });
+
+  test("ctx.panic continues execution when condition is false", async () => {
+    const resonate = Resonate.local();
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.panic(false, "This should not abort");
+      return "success";
+    });
+
+    const result = await f.run("test");
+    expect(result).toBe("success");
+
+    resonate.stop();
+  });
+
+  test("ctx.assert aborts execution when condition is false", async () => {
+    const resonate = Resonate.local();
+
+    let completed = false;
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.assert(false, "Assertion failed");
+      completed = true;
+      return "should not reach here";
+    });
+
+    await f.beginRun("test");
+    await setTimeout(100); // Give time for function to run
+
+    // Promise is dropped, but execution after assert should not run
+    expect(completed).toBe(false);
+
+    resonate.stop();
+  });
+
+  test("ctx.assert continues execution when condition is true", async () => {
+    const resonate = Resonate.local();
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.assert(true, "This should pass");
+      return "success";
+    });
+
+    const result = await f.run("test");
+    expect(result).toBe("success");
+
+    resonate.stop();
+  });
 });

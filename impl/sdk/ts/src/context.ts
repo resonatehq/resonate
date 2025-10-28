@@ -1,9 +1,25 @@
 import type { Clock } from "./clock";
+import exceptions, { type ResonateError } from "./exceptions";
 import type { CreatePromiseReq } from "./network/network";
 import { Options } from "./options";
 import { Exponential, Never, type RetryPolicy } from "./retries";
 import type { Func, ParamsWithOptions, Result, Return } from "./types";
 import * as util from "./util";
+
+export class DIE implements Iterable<DIE> {
+  public condition: boolean;
+  public error: ResonateError;
+
+  constructor(condition: boolean, error: ResonateError) {
+    this.condition = condition;
+    this.error = error;
+  }
+
+  *[Symbol.iterator](): Generator<DIE, void, any> {
+    yield this;
+    return;
+  }
+}
 
 export class LFI<T> implements Iterable<LFI<T>> {
   public id: string;
@@ -171,6 +187,14 @@ export interface Context {
   detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   detached<T>(func: string, ...args: any[]): RFI<T>;
   detached(func: Func | string, ...args: any[]): RFI<any>;
+
+  // die
+
+  // Aborts the execution of the root promise if condition is true
+  panic(condition: boolean, msg?: string): DIE;
+
+  // Aborts the execution of the root promise if condition is false
+  assert(condition: boolean, msg?: string): DIE;
 
   // getDependency
   getDependency<T = any>(key: string): T | undefined;
@@ -359,6 +383,15 @@ export class InnerContext implements Context {
     };
 
     return new RFI(opts.id, this.remoteCreateReq(data, opts, Number.MAX_SAFE_INTEGER), "detached");
+  }
+
+  panic(condition: boolean, msg?: string): DIE {
+    const src = util.getCallerInfo();
+    return new DIE(condition, exceptions.PANIC(src, msg));
+  }
+
+  assert(condition: boolean, msg?: string): DIE {
+    return this.panic(!condition, msg);
   }
 
   getDependency<T = any>(name: string): T | undefined {

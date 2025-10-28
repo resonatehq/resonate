@@ -232,4 +232,46 @@ describe("Decorator", () => {
       },
     });
   });
+
+  it("handles internal.die when condition is true", () => {
+    function* foo(ctx: Context): Generator<any, any, any> {
+      yield* ctx.panic(true, "Should panic");
+      return "should not reach here";
+    }
+
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
+    const r = d.next({ type: "internal.nothing" });
+
+    expect(r).toMatchObject({
+      type: "internal.die",
+      condition: true,
+      error: {
+        code: "98",
+        type: "Panic",
+      },
+    });
+  });
+
+  it("handles internal.die when condition is false", () => {
+    function* foo(ctx: Context): Generator<any, any, any> {
+      yield* ctx.panic(false, "Should not die");
+      return 42;
+    }
+
+    const d = new Decorator(
+      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+    );
+    d.next({ type: "internal.nothing" }); // Process the die with condition=false
+    const r = d.next({ type: "internal.nothing" }); // Continue to return
+
+    expect(r).toMatchObject({
+      type: "internal.return",
+      value: {
+        type: "internal.literal",
+        value: ok(42),
+      },
+    });
+  });
 });

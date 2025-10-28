@@ -1,4 +1,5 @@
-import { Future, LFC, LFI, RFC, RFI } from "./context";
+import type { ResonateError } from "exceptions";
+import { DIE, Future, LFC, LFI, RFC, RFI } from "./context";
 import type { CreatePromiseReq } from "./network/network";
 import type { RetryPolicy } from "./retries";
 import { type Func, ko, ok, type Result, type Yieldable } from "./types";
@@ -6,7 +7,13 @@ import * as util from "./util";
 
 // Expr
 
-export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalReturn<T>;
+export type InternalExpr<T> = InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalReturn<T> | InternalDie;
+
+export type InternalDie = {
+  type: "internal.die";
+  condition: boolean;
+  error: ResonateError;
+};
 
 export type InternalAsyncR = {
   type: "internal.async.r";
@@ -140,8 +147,8 @@ export class Decorator<TRet> {
 
   // From external type to internal type
   private toInternal<T>(
-    event: LFI<T> | RFI<T> | LFC<T> | RFC<T> | Future<T>,
-  ): InternalAsyncL | InternalAsyncR | InternalAwait<T> {
+    event: LFI<T> | RFI<T> | LFC<T> | RFC<T> | Future<T> | DIE,
+  ): InternalAsyncL | InternalAsyncR | InternalAwait<T> | InternalDie {
     if (event instanceof LFI || event instanceof LFC) {
       this.invokes.push({
         kind: event instanceof LFI ? "invoke" : "call",
@@ -171,6 +178,14 @@ export class Decorator<TRet> {
         id: event.id,
         mode: event.mode,
         createReq: event.createReq,
+      };
+    }
+    if (event instanceof DIE) {
+      this.nextState = "internal.nothing";
+      return {
+        type: "internal.die",
+        condition: event.condition,
+        error: event.error,
       };
     }
     if (event instanceof Future) {
