@@ -88,9 +88,10 @@ export default {
       cause: c,
     });
   },
-  PANIC: (source: string, msg: string | undefined) => {
+  PANIC: (src: string, msg: string | undefined) => {
+    src = src.charAt(0).toUpperCase() + src.slice(1);
     msg = msg ? `: ${msg}` : "";
-    return new ResonateError("98", "Panic", `${source}${msg}`, {
+    return new ResonateError("98", "Panic", `${src}${msg}`, {
       next: "Will drop",
     });
   },
