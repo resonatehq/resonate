@@ -57,6 +57,8 @@ message CreatePromiseRequest {
     int64 timeout = 5;
     map<string, string> tags = 6;
     string requestId = 7;
+    string traceparent = 8;
+    string tracestate = 9;
 }
 
 message CreatePromiseResponse {
@@ -124,6 +126,8 @@ message CreateCallbackRequest {
     int64 timeout = 3;
     callback_t.Recv recv = 4;
     string requestId = 5;
+    string traceparent = 6;
+    string tracestate = 7;
 }
 
 message CreateCallbackResponse {
@@ -138,6 +142,8 @@ message CreateSubscriptionRequest {
     int64 timeout = 4;
     callback_t.Recv recv = 5;
     string requestId = 6;
+    string traceparent = 7;
+    string tracestate = 8;
 }
 
 message CreateSubscriptionResponse {
