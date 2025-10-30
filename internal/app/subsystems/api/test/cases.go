@@ -660,6 +660,69 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		Name: "CreatePromiseWithTraceContext",
+		Req: &t_api.Request{
+			Metadata: map[string]string{"id": "CreatePromiseWithTraceContext", "name": "CreatePromise", "traceparent": "foo", "tracestate": "bar"},
+			Payload: &t_api.CreatePromiseRequest{
+				Id:             "foo",
+				IdempotencyKey: nil,
+				Strict:         false,
+				Param:          promise.Value{},
+				Timeout:        1,
+			},
+		},
+		Res: &t_api.Response{
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseResponse{
+				Promise: &promise.Promise{
+					Id:                      "foo",
+					State:                   promise.Pending,
+					IdempotencyKeyForCreate: nil,
+					Param:                   promise.Value{},
+					Timeout:                 1,
+				},
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises",
+				Headers: map[string]string{
+					"Request-Id":  "CreatePromiseWithTraceContext",
+					"Traceparent": "foo",
+					"Tracestate":  "bar",
+				},
+				Body: []byte(`{
+					"id": "foo",
+					"timeout": 1
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreatePromiseRequest{
+				Id:          "foo",
+				Timeout:     1,
+				RequestId:   "CreatePromiseWithTraceContext",
+				Traceparent: "foo",
+				Tracestate:  "bar",
+			},
+			Res: &pb.CreatePromiseResponse{
+				Noop: false,
+				Promise: &pb.Promise{
+					Id:                      "foo",
+					State:                   pb.State_PENDING,
+					IdempotencyKeyForCreate: "",
+					Param:                   &pb.Value{},
+					Value:                   &pb.Value{},
+					Timeout:                 1,
+				},
+			},
+		},
+	},
+	{
 		Name: "CreatePromiseAndTask",
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CreatePromiseAndTask", "name": "CreatePromiseAndTask"},
@@ -712,6 +775,82 @@ var TestCases = []*testCase{
 					Timeout:   1,
 					RequestId: "CreatePromiseAndTask",
 					Tags:      map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &pb.CreatePromiseTaskRequest{
+					ProcessId: "bar",
+					Ttl:       2,
+				},
+			},
+			Res: &pb.CreatePromiseAndTaskResponse{
+				Noop: false,
+				Promise: &pb.Promise{
+					Id:                      "foo",
+					State:                   pb.State_PENDING,
+					IdempotencyKeyForCreate: "",
+					Param:                   &pb.Value{},
+					Value:                   &pb.Value{},
+					Timeout:                 1,
+				},
+			},
+		},
+	},
+	{
+		Name: "CreatePromiseAndTaskWithTraceContext",
+		Req: &t_api.Request{
+			Metadata: map[string]string{"id": "CreatePromiseAndTaskWithTraceContext", "name": "CreatePromiseAndTask", "traceparent": "baz", "tracestate": "qux"},
+			Payload: &t_api.CreatePromiseAndTaskRequest{
+				Promise: &t_api.CreatePromiseRequest{
+					Id:      "foo",
+					Timeout: 1,
+					Tags:    map[string]string{"resonate:invoke": "baz"},
+				},
+				Task: &t_api.CreateTaskRequest{
+					PromiseId: "foo",
+					ProcessId: "bar",
+					Ttl:       2,
+					Timeout:   1,
+				},
+			},
+		},
+		Res: &t_api.Response{
+			Status: t_api.StatusCreated,
+			Payload: &t_api.CreatePromiseAndTaskResponse{
+				Promise: &promise.Promise{
+					Id:      "foo",
+					State:   promise.Pending,
+					Param:   promise.Value{},
+					Timeout: 1,
+				},
+				Task: &task.Task{},
+			},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/task",
+				Headers: map[string]string{
+					"Request-Id":  "CreatePromiseAndTaskWithTraceContext",
+					"Traceparent": "baz",
+					"Tracestate":  "qux",
+				},
+				Body: []byte(`{
+					"promise": {"id": "foo", "timeout": 1, "tags": {"resonate:invoke": "baz"}},
+					"task": {"processId": "bar", "ttl": 2}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreatePromiseAndTaskRequest{
+				Promise: &pb.CreatePromiseRequest{
+					Id:          "foo",
+					Timeout:     1,
+					Tags:        map[string]string{"resonate:invoke": "baz"},
+					RequestId:   "CreatePromiseAndTaskWithTraceContext",
+					Traceparent: "baz",
+					Tracestate:  "qux",
 				},
 				Task: &pb.CreatePromiseTaskRequest{
 					ProcessId: "bar",
@@ -1452,6 +1591,53 @@ var TestCases = []*testCase{
 		},
 	},
 	{
+		Name: "CreateCallbackWithTraceContext",
+		Req: &t_api.Request{
+			Metadata: map[string]string{"id": "CreateCallbackWithTraceContext", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
+				Id:        "__resume:bar:foo",
+				PromiseId: "foo",
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "resume", Head: map[string]string{"traceparent": "foo", "tracestate": "bar"}, Root: "bar", Leaf: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "promises/callback/foo",
+				Headers: map[string]string{
+					"Request-Id":  "CreateCallbackWithTraceContext",
+					"Traceparent": "foo",
+					"Tracestate":  "bar",
+				},
+				Body: []byte(`{
+					"rootPromiseId": "bar",
+					"timeout": 1,
+					"recv": {"type":"http","data":{"url":"http://localhost:3000"}}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateCallbackRequest{
+				PromiseId:     "foo",
+				RootPromiseId: "bar",
+				Timeout:       1,
+				Recv:          &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
+				RequestId:     "CreateCallbackWithTraceContext",
+				Traceparent:   "foo",
+				Tracestate:    "bar",
+			},
+		},
+	},
+	{
 		Name: "CreateCallbackNotFound",
 		Req: &t_api.Request{
 			Metadata: map[string]string{"id": "CreateCallbackNotFound", "name": "CreateCallback"},
@@ -1713,6 +1899,54 @@ var TestCases = []*testCase{
 				Timeout:   1,
 				Recv:      &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
 				RequestId: "CreateSubscriptionPhysicalRecv",
+			},
+		},
+	},
+	{
+		Name: "CreateSubscriptionWithTraceContext",
+		Req: &t_api.Request{
+			Metadata: map[string]string{"id": "CreateSubscriptionWithTraceContext", "name": "CreateCallback"},
+			Payload: &t_api.CreateCallbackRequest{
+				Id:        "__notify:foo:foo.1",
+				PromiseId: "foo",
+				Recv:      []byte(`{"type":"http","data":{"url":"http://localhost:3000"}}`),
+				Mesg:      &message.Mesg{Type: "notify", Head: map[string]string{"traceparent": "baz", "tracestate": "qux"}, Root: "foo"},
+				Timeout:   1,
+			},
+		},
+		Res: &t_api.Response{
+			Status:  t_api.StatusCreated,
+			Payload: &t_api.CreateCallbackResponse{},
+		},
+		Http: &httpTestCase{
+			Req: &httpTestCaseRequest{
+				Method: "POST",
+				Path:   "subscriptions",
+				Headers: map[string]string{
+					"Request-Id":  "CreateSubscriptionWithTraceContext",
+					"Traceparent": "baz",
+					"Tracestate":  "qux",
+				},
+				Body: []byte(`{
+					"id": "foo.1",
+					"promiseId": "foo",
+					"timeout": 1,
+					"recv": {"type":"http","data":{"url":"http://localhost:3000"}}
+				}`),
+			},
+			Res: &httpTestCaseResponse{
+				Code: 201,
+			},
+		},
+		Grpc: &grpcTestCase{
+			Req: &pb.CreateSubscriptionRequest{
+				Id:          "foo.1",
+				PromiseId:   "foo",
+				Timeout:     1,
+				Recv:        &pb.Recv{Recv: &pb.Recv_Physical{Physical: &pb.PhysicalRecv{Type: "http", Data: []byte(`{"url":"http://localhost:3000"}`)}}},
+				RequestId:   "CreateSubscriptionWithTraceContext",
+				Traceparent: "baz",
+				Tracestate:  "qux",
 			},
 		},
 	},

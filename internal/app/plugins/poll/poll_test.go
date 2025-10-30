@@ -63,6 +63,24 @@ func TestPollPlugin(t *testing.T) {
 			},
 		},
 		{
+			name: "SameGroupWithHeaders",
+			mc:   5,
+			connections: []*Conn{
+				{"foo", "a"},
+				{"foo", "b"},
+			},
+			messages: []*Mesg{
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"foo": "bar"}, Body: []byte(`{"body": "ok1"}`)}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"baz": "qux"}, Body: []byte(`{"body": "ok2"}`)}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"foo": "bar", "baz": "qux"}, Body: []byte(`{"body": "ok3"}`)}},
+			},
+			expected: []*Resp{
+				{"foo", []string{"a", "b"}, `data: {"body":"ok1","head":{"foo":"bar"}}`},
+				{"foo", []string{"a", "b"}, `data: {"body":"ok2","head":{"baz":"qux"}}`},
+				{"foo", []string{"a", "b"}, `data: {"body":"ok3","head":{"baz":"qux","foo":"bar"}}`},
+			},
+		},
+		{
 			name: "SameGroupAndId",
 			mc:   5,
 			connections: []*Conn{
