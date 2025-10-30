@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -339,7 +340,7 @@ func TestPollPlugin(t *testing.T) {
 			for mesg := range backchannel {
 				assert.Condition(t, func() bool {
 					for i, expected := range tc.expected {
-						if mesg.group == expected.group && contains(expected.id, mesg.id) && mesg.data == expected.data {
+						if mesg.group == expected.group && slices.Contains(expected.id, mesg.id) && mesg.data == expected.data {
 							// remove from expected
 							tc.expected = append(tc.expected[:i], tc.expected[i+1:]...)
 							return true
@@ -412,15 +413,6 @@ func TestPollPluginAuth(t *testing.T) {
 	for err := range errors {
 		assert.Fail(t, err.Error())
 	}
-}
-
-func contains[T comparable](arr []T, val T) bool {
-	for _, v := range arr {
-		if v == val {
-			return true
-		}
-	}
-	return false
 }
 
 func unique(conns []*Conn) int {
