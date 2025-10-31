@@ -39,6 +39,7 @@ describe("Resonate usage tests", () => {
       "Function 'bar' (version 1) is not registered",
     );
   });
+
   test("done check", async () => {
     const resonate = Resonate.local();
 
@@ -141,6 +142,7 @@ describe("Resonate usage tests", () => {
     expect(r).toStrictEqual(["a", "b"]);
     resonate.stop();
   });
+
   test("sequential execution must be sequential", async () => {
     const resonate = Resonate.local();
 
@@ -664,6 +666,255 @@ describe("Resonate usage tests", () => {
     });
     resonate.stop();
   });
+
+  test("run/rpc with function pointer and string are equivalent", async () => {
+    const resonate = new Resonate();
+
+    function* foo() {
+      return "foo";
+    }
+
+    function bar() {
+      return "bar";
+    }
+
+    const f = resonate.register(foo);
+    const g = resonate.register(bar);
+
+    const r1 = [
+      await resonate.run("f1", foo),
+      await resonate.rpc("f2", foo),
+      await resonate.run("f3", "foo"),
+      await resonate.rpc("f4", "foo"),
+      await f.run("f5"),
+      await f.rpc("f6"),
+    ];
+
+    const r2 = [
+      await resonate.run("g1", bar),
+      await resonate.rpc("g2", bar),
+      await resonate.run("g3", "bar"),
+      await resonate.rpc("g4", "bar"),
+      await g.run("g5"),
+      await g.rpc("g6"),
+    ];
+
+    expect(r1.every((r) => r === "foo")).toBe(true);
+    expect(r2.every((r) => r === "bar")).toBe(true);
+
+    resonate.stop();
+  });
+
+  test("run/rpc with version specified", async () => {
+    const resonate = new Resonate();
+
+    function* foo(ctx: Context) {
+      return ctx.info.version;
+    }
+
+    function bar(ctx: Context) {
+      return ctx.info.version;
+    }
+
+    const f1 = resonate.register(foo);
+    const f2 = resonate.register(foo, { version: 2 });
+    const f3 = resonate.register(foo, { version: 3 });
+
+    const b1 = resonate.register(bar);
+    const b2 = resonate.register(bar, { version: 2 });
+    const b3 = resonate.register(bar, { version: 3 });
+
+    const rf1 = [
+      await resonate.run("f1", foo, resonate.options({ version: 1 })),
+      await resonate.rpc("f2", foo, resonate.options({ version: 1 })),
+      await resonate.run("f3", "foo", resonate.options({ version: 1 })),
+      await resonate.rpc("f4", "foo", resonate.options({ version: 1 })),
+      await f1.run("f5"),
+      await f1.rpc("f6"),
+    ];
+
+    const rf2 = [
+      await resonate.run("g1", foo, resonate.options({ version: 2 })),
+      await resonate.rpc("g2", foo, resonate.options({ version: 2 })),
+      await resonate.run("g3", "foo", resonate.options({ version: 2 })),
+      await resonate.rpc("g4", "foo", resonate.options({ version: 2 })),
+      await f2.run("g5"),
+      await f2.rpc("g6"),
+    ];
+
+    const rf3 = [
+      await resonate.run("h1", foo),
+      await resonate.rpc("h2", foo),
+      await resonate.run("h3", "foo"),
+      await resonate.rpc("h4", "foo"),
+      await resonate.run("h5", foo, resonate.options({ version: 3 })),
+      await resonate.rpc("h6", foo, resonate.options({ version: 3 })),
+      await resonate.run("h7", "foo", resonate.options({ version: 3 })),
+      await resonate.rpc("h8", "foo", resonate.options({ version: 3 })),
+      await f3.run("h9"),
+      await f3.rpc("h10"),
+    ];
+
+    const rb1 = [
+      await resonate.run("i1", bar, resonate.options({ version: 1 })),
+      await resonate.rpc("i2", bar, resonate.options({ version: 1 })),
+      await resonate.run("i3", "bar", resonate.options({ version: 1 })),
+      await resonate.rpc("i4", "bar", resonate.options({ version: 1 })),
+      await b1.run("i5"),
+      await b1.rpc("i6"),
+    ];
+
+    const rb2 = [
+      await resonate.run("j1", bar, resonate.options({ version: 2 })),
+      await resonate.rpc("j2", bar, resonate.options({ version: 2 })),
+      await resonate.run("j3", "bar", resonate.options({ version: 2 })),
+      await resonate.rpc("j4", "bar", resonate.options({ version: 2 })),
+      await b2.run("j5"),
+      await b2.rpc("j6"),
+    ];
+
+    const rb3 = [
+      await resonate.run("k1", bar),
+      await resonate.rpc("k2", bar),
+      await resonate.run("k3", "bar"),
+      await resonate.rpc("k4", "bar"),
+      await resonate.run("k5", bar, resonate.options({ version: 3 })),
+      await resonate.rpc("k6", bar, resonate.options({ version: 3 })),
+      await resonate.run("k7", "bar", resonate.options({ version: 3 })),
+      await resonate.rpc("k8", "bar", resonate.options({ version: 3 })),
+      await b3.run("k9"),
+      await b3.rpc("k10"),
+    ];
+
+    expect([...rf1, ...rb1].every((r) => r === 1)).toBe(true);
+    expect([...rf2, ...rb2].every((r) => r === 2)).toBe(true);
+    expect([...rf3, ...rb3].every((r) => r === 3)).toBe(true);
+
+    resonate.stop();
+  });
+});
+
+describe("Context usage tests", () => {
+  test("ctx.panic aborts execution when condition is true", async () => {
+    const resonate = Resonate.local();
+
+    let completed = false;
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.panic(true, "This should abort");
+      completed = true;
+      return "should not reach here";
+    });
+
+    await f.beginRun("test");
+    await setTimeout(100); // Give time for function to run
+
+    // Promise is dropped, but execution after panic should not run
+    expect(completed).toBe(false);
+
+    resonate.stop();
+  });
+
+  test("ctx.panic continues execution when condition is false", async () => {
+    const resonate = Resonate.local();
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.panic(false, "This should not abort");
+      return "success";
+    });
+
+    const result = await f.run("test");
+    expect(result).toBe("success");
+
+    resonate.stop();
+  });
+
+  test("ctx.assert aborts execution when condition is false", async () => {
+    const resonate = Resonate.local();
+
+    let completed = false;
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.assert(false, "Assertion failed");
+      completed = true;
+      return "should not reach here";
+    });
+
+    await f.beginRun("test");
+    await setTimeout(100); // Give time for function to run
+
+    // Promise is dropped, but execution after assert should not run
+    expect(completed).toBe(false);
+
+    resonate.stop();
+  });
+
+  test("ctx.assert continues execution when condition is true", async () => {
+    const resonate = Resonate.local();
+
+    const f = resonate.register("f", function* foo(ctx: Context) {
+      yield* ctx.assert(true, "This should pass");
+      return "success";
+    });
+
+    const result = await f.run("test");
+    expect(result).toBe("success");
+
+    resonate.stop();
+  });
+
+  test("lfi/lfc/rfi/rfc/detached with function pointer and string are equivalent", async () => {
+    const resonate = new Resonate();
+
+    function* foo1(ctx: Context) {
+      return [
+        yield* yield* ctx.lfi(bar),
+        yield* yield* ctx.lfi("bar"),
+        yield* ctx.lfc(bar),
+        yield* ctx.lfc("bar"),
+        yield* yield* ctx.rfi(bar),
+        yield* yield* ctx.rfi("bar"),
+        yield* ctx.rfc(bar),
+        yield* ctx.rfc("bar"),
+        yield* yield* ctx.detached(bar),
+        yield* yield* ctx.detached("bar"),
+      ];
+    }
+
+    function* foo2(ctx: Context) {
+      return [
+        yield* yield* ctx.lfi(baz),
+        yield* yield* ctx.lfi("baz"),
+        yield* ctx.lfc(baz),
+        yield* ctx.lfc("baz"),
+        yield* yield* ctx.rfi(baz),
+        yield* yield* ctx.rfi("baz"),
+        yield* ctx.rfc(baz),
+        yield* ctx.rfc("baz"),
+        yield* yield* ctx.detached(baz),
+        yield* yield* ctx.detached("baz"),
+      ];
+    }
+
+    function* bar() {
+      return "bar";
+    }
+
+    function baz() {
+      return "baz";
+    }
+
+    resonate.register(foo1);
+    resonate.register(foo2);
+    resonate.register(bar);
+    resonate.register(baz);
+
+    const r1 = await resonate.run("f1", foo1);
+    const r2 = await resonate.run("f2", foo2);
+
+    expect(r1.every((r) => r === "bar")).toBe(true);
+    expect(r2.every((r) => r === "baz")).toBe(true);
+
+    resonate.stop();
+  });
 });
 
 describe("Resonate environment variable initialization", () => {
@@ -1131,72 +1382,6 @@ describe("Resonate environment variable initialization", () => {
 
     await p1.promise;
     await p2.promise;
-    resonate.stop();
-  });
-
-  test("ctx.panic aborts execution when condition is true", async () => {
-    const resonate = Resonate.local();
-
-    let completed = false;
-    const f = resonate.register("f", function* foo(ctx: Context) {
-      yield* ctx.panic(true, "This should abort");
-      completed = true;
-      return "should not reach here";
-    });
-
-    await f.beginRun("test");
-    await setTimeout(100); // Give time for function to run
-
-    // Promise is dropped, but execution after panic should not run
-    expect(completed).toBe(false);
-
-    resonate.stop();
-  });
-
-  test("ctx.panic continues execution when condition is false", async () => {
-    const resonate = Resonate.local();
-
-    const f = resonate.register("f", function* foo(ctx: Context) {
-      yield* ctx.panic(false, "This should not abort");
-      return "success";
-    });
-
-    const result = await f.run("test");
-    expect(result).toBe("success");
-
-    resonate.stop();
-  });
-
-  test("ctx.assert aborts execution when condition is false", async () => {
-    const resonate = Resonate.local();
-
-    let completed = false;
-    const f = resonate.register("f", function* foo(ctx: Context) {
-      yield* ctx.assert(false, "Assertion failed");
-      completed = true;
-      return "should not reach here";
-    });
-
-    await f.beginRun("test");
-    await setTimeout(100); // Give time for function to run
-
-    // Promise is dropped, but execution after assert should not run
-    expect(completed).toBe(false);
-
-    resonate.stop();
-  });
-
-  test("ctx.assert continues execution when condition is true", async () => {
-    const resonate = Resonate.local();
-
-    const f = resonate.register("f", function* foo(ctx: Context) {
-      yield* ctx.assert(true, "This should pass");
-      return "success";
-    });
-
-    const result = await f.run("test");
-    expect(result).toBe("success");
-
     resonate.stop();
   });
 });

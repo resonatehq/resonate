@@ -1,4 +1,4 @@
-import type { RetryPolicy } from "../retries";
+import type { InnerContext } from "../context";
 import type { Result } from "../types";
 
 type F = () => Promise<unknown>;
@@ -6,11 +6,10 @@ type F = () => Promise<unknown>;
 export interface Processor {
   process(
     id: string,
+    ctx: InnerContext,
     name: string,
     func: F,
-    cb: (result: Result<unknown>) => void,
-    retryPolicy: RetryPolicy,
-    timeout: number,
+    done: (result: Result<unknown>) => void,
     verbose: boolean,
   ): void;
 }
@@ -18,41 +17,37 @@ export interface Processor {
 export class AsyncProcessor implements Processor {
   process<T>(
     id: string,
+    ctx: InnerContext,
     name: string,
     func: () => Promise<T>,
-    cb: (result: Result<T>) => void,
-    retryPolicy: RetryPolicy,
-    timeout: number,
+    done: (result: Result<T>) => void,
     verbose: boolean,
   ): void {
-    void this.run(id, name, func, cb, retryPolicy, timeout, verbose);
+    this.run(id, ctx, name, func, done, verbose);
   }
 
   private async run<T>(
     id: string,
+    ctx: InnerContext,
     name: string,
     func: () => Promise<T>,
-    cb: (result: Result<T>) => void,
-    retryPolicy: RetryPolicy,
-    timeout: number,
+    done: (result: Result<T>) => void,
     verbose: boolean,
   ) {
-    let attempt = 1;
-
     while (true) {
       try {
         const data = await func();
-        cb({ success: true, value: data });
+        done({ success: true, value: data });
         return;
       } catch (error) {
-        const retryIn = retryPolicy.next(attempt);
+        const retryIn = ctx.retryPolicy.next(ctx.info.attempt);
         if (retryIn === null) {
-          cb({ success: false, error });
+          done({ success: false, error });
           return;
         }
 
-        if (Date.now() + retryIn >= timeout) {
-          cb({ success: false, error });
+        if (Date.now() + retryIn >= ctx.info.timeout) {
+          done({ success: false, error });
           return;
         }
 
@@ -62,7 +57,7 @@ export class AsyncProcessor implements Processor {
         }
 
         await new Promise((resolve) => setTimeout(resolve, retryIn));
-        attempt++;
+        ctx.info.attempt++;
       }
     }
   }

@@ -1,6 +1,7 @@
 import { WallClock } from "../src/clock";
 import { type Context, Future, InnerContext, type LFI } from "../src/context";
 import { Decorator } from "../src/decorator";
+import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
 import { ok, type Yieldable } from "../src/types";
 
@@ -28,7 +29,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
     const r = d.next({ type: "internal.nothing" });
 
@@ -63,7 +75,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
     let r = d.next({ type: "internal.nothing" });
     expect(r).toMatchObject({
@@ -125,7 +148,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
 
     d.next({ type: "internal.nothing" }); // First yield
@@ -158,7 +192,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
 
     d.next({ type: "internal.nothing" }); // First yield
@@ -198,7 +243,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
 
     d.next({ type: "internal.nothing" }); // First yield
@@ -240,7 +296,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
     const r = d.next({ type: "internal.nothing" });
 
@@ -261,7 +328,18 @@ describe("Decorator", () => {
     }
 
     const d = new Decorator(
-      foo(InnerContext.root("foo", "poll://any@default", 0, new Never(), new WallClock(), new Map())),
+      foo(
+        new InnerContext({
+          id: "foo",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
+      ),
     );
     d.next({ type: "internal.nothing" }); // Process the die with condition=false
     const r = d.next({ type: "internal.nothing" }); // Continue to return

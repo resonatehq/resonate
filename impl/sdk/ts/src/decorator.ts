@@ -27,6 +27,7 @@ export type InternalAsyncL = {
   id: string;
   func: Func;
   args: any[];
+  version: number;
   retryPolicy: RetryPolicy;
   createReq: CreatePromiseReq<any>;
 };
@@ -160,6 +161,7 @@ export class Decorator<TRet> {
         id: event.id,
         func: event.func,
         args: event.args ?? [],
+        version: event.version,
         retryPolicy: event.retryPolicy,
         createReq: event.createReq,
       };

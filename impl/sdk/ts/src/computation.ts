@@ -169,14 +169,16 @@ export class Computation {
         });
       };
 
-      const ctx = InnerContext.root(
-        this.id,
-        this.anycastNoPreference,
-        rootPromise.timeout,
-        util.isGeneratorFunction(registered.func) ? new Never() : new Exponential(),
-        this.clock,
-        this.dependencies,
-      );
+      const ctx = new InnerContext({
+        id: this.id,
+        anycast: this.anycastNoPreference,
+        clock: this.clock,
+        registry: this.registry,
+        dependencies: this.dependencies,
+        timeout: rootPromise.timeout,
+        version: registered.version,
+        retryPolicy: util.isGeneratorFunction(registered.func) ? new Never() : new Exponential(),
+      });
 
       if (util.isGeneratorFunction(registered.func)) {
         this.processGenerator(nursery, ctx, registered.func, args, done);
@@ -215,7 +217,7 @@ export class Computation {
           if (status.todo.local.length > 0) {
             this.processLocalTodo(nursery, status.todo.local, done);
           } else if (status.todo.remote.length > 0) {
-            this.processRemoteTodo(nursery, status.todo.remote, ctx.timeout, done);
+            this.processRemoteTodo(nursery, status.todo.remote, ctx.info.timeout, done);
           }
 
           break;
@@ -232,6 +234,7 @@ export class Computation {
   ) {
     this.processor.process(
       id,
+      ctx,
       func.name,
       async () => await func(ctx, ...args),
       (res) =>
@@ -256,8 +259,6 @@ export class Computation {
           },
           func.name,
         ),
-      ctx.retryPolicy,
-      ctx.timeout,
       this.verbose,
     );
   }

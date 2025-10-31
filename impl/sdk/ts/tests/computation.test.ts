@@ -1,7 +1,7 @@
 import { LocalNetwork } from "../dev/network";
 import { WallClock } from "../src/clock";
 import { Computation, type Status } from "../src/computation";
-import type { Context } from "../src/context";
+import type { Context, InnerContext } from "../src/context";
 import { JsonEncoder } from "../src/encoder";
 import { NoopEncryptor } from "../src/encryptor";
 import { Handler } from "../src/handler";
@@ -62,7 +62,13 @@ class MockProcessor implements Processor {
   public pendingTodos: Map<string, PendingTodo> = new Map();
   private todoNotifier?: { expectedCount: number; resolve: () => void };
 
-  process(id: string, name: string, func: () => Promise<any>, callback: (result: Result<any>) => void): void {
+  process(
+    id: string,
+    ctx: InnerContext,
+    name: string,
+    func: () => Promise<any>,
+    callback: (result: Result<any>) => void,
+  ): void {
     // Instead of running the work, we just store it.
     this.pendingTodos.set(id, { id, func, callback });
 

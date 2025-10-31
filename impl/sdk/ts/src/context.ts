@@ -2,36 +2,31 @@ import type { Clock } from "./clock";
 import exceptions, { type ResonateError } from "./exceptions";
 import type { CreatePromiseReq } from "./network/network";
 import { Options } from "./options";
+import type { Registry } from "./registry";
 import { Exponential, Never, type RetryPolicy } from "./retries";
 import type { Func, ParamsWithOptions, Result, Return } from "./types";
 import * as util from "./util";
-
-export class DIE implements Iterable<DIE> {
-  public condition: boolean;
-  public error: ResonateError;
-
-  constructor(condition: boolean, error: ResonateError) {
-    this.condition = condition;
-    this.error = error;
-  }
-
-  *[Symbol.iterator](): Generator<DIE, void, any> {
-    yield this;
-    return;
-  }
-}
 
 export class LFI<T> implements Iterable<LFI<T>> {
   public id: string;
   public func: Func;
   public args: any[];
+  public version: number;
   public retryPolicy: RetryPolicy;
   public createReq: CreatePromiseReq<any>;
 
-  constructor(id: string, func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq<any>) {
+  constructor(
+    id: string,
+    func: Func,
+    args: any[],
+    version: number,
+    retryPolicy: RetryPolicy,
+    createReq: CreatePromiseReq<any>,
+  ) {
     this.id = id;
     this.func = func;
     this.args = args;
+    this.version = version;
     this.retryPolicy = retryPolicy;
     this.createReq = createReq;
   }
@@ -47,13 +42,22 @@ export class LFC<T> implements Iterable<LFC<T>> {
   public id: string;
   public func: Func;
   public args: any[];
+  public version: number;
   public retryPolicy: RetryPolicy;
   public createReq: CreatePromiseReq;
 
-  constructor(id: string, func: Func, args: any[], retryPolicy: RetryPolicy, createReq: CreatePromiseReq) {
+  constructor(
+    id: string,
+    func: Func,
+    args: any[],
+    version: number,
+    retryPolicy: RetryPolicy,
+    createReq: CreatePromiseReq,
+  ) {
     this.id = id;
     this.func = func;
     this.args = args;
+    this.version = version;
     this.retryPolicy = retryPolicy;
     this.createReq = createReq;
   }
@@ -100,6 +104,21 @@ export class RFC<T> implements Iterable<RFC<T>> {
   }
 }
 
+export class DIE implements Iterable<DIE> {
+  public condition: boolean;
+  public error: ResonateError;
+
+  constructor(condition: boolean, error: ResonateError) {
+    this.condition = condition;
+    this.error = error;
+  }
+
+  *[Symbol.iterator](): Generator<DIE, void, any> {
+    yield this;
+    return;
+  }
+}
+
 export class Future<T> implements Iterable<Future<T>> {
   private readonly value?: Result<T>;
   public readonly state: "pending" | "completed";
@@ -137,33 +156,37 @@ export class Future<T> implements Iterable<Future<T>> {
 
 export interface Context {
   readonly id: string;
-  readonly timeout: number;
+  readonly info: { readonly attempt: number; readonly timeout: number; readonly version: number };
 
   // core four
   lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
+  lfi<T>(func: string, ...args: any[]): LFI<T>;
   lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
+  lfc<T>(func: string, ...args: any[]): LFC<T>;
   rfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   rfi<T>(func: string, ...args: any[]): RFI<T>;
-  rfi(func: Func | string, ...args: any[]): RFI<any>;
   rfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
   rfc<T>(func: string, ...args: any[]): RFC<T>;
-  rfc(func: Func | string, ...args: any[]): RFC<any>;
 
   // beginRun (lfi alias)
   beginRun<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
+  beginRun<T>(func: string, ...args: any[]): LFI<T>;
 
   // run (lfc alias)
   run<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
+  run<T>(func: string, ...args: any[]): LFC<T>;
 
   // beginRpc (rfi alias)
   beginRpc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   beginRpc<T>(func: string, ...args: any[]): RFI<T>;
-  beginRpc(func: Func | string, ...args: any[]): RFI<any>;
 
   // rpc (rfc alias)
   rpc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
   rpc<T>(func: string, ...args: any[]): RFC<T>;
-  rpc(func: Func | string, ...args: any[]): RFC<any>;
+
+  // detached
+  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
+  detached<T>(func: string, ...args: any[]): RFI<T>;
 
   // sleep
   sleep(ms: number): RFC<void>;
@@ -182,11 +205,6 @@ export interface Context {
     data?: any;
     tags?: Record<string, string>;
   }): RFI<T>;
-
-  // detached
-  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
-  detached<T>(func: string, ...args: any[]): RFI<T>;
-  detached(func: Func | string, ...args: any[]): RFI<any>;
 
   // die
 
@@ -219,13 +237,14 @@ export interface ResonateMath {
 
 export class InnerContext implements Context {
   readonly id: string;
-  readonly timeout: number;
+  readonly info: { attempt: number; readonly timeout: number; readonly version: number };
   readonly retryPolicy: RetryPolicy;
 
   private rId: string;
   private pId: string;
+  private anycast: string;
   private clock: Clock;
-  private anycastNoPreference: string;
+  private registry: Registry;
   private dependencies: Map<string, any>;
   private seq = 0;
 
@@ -234,69 +253,123 @@ export class InnerContext implements Context {
   beginRun = this.lfi.bind(this);
   beginRpc = this.rfi.bind(this);
 
-  private constructor(
-    id: string,
-    rId: string,
-    pId: string,
-    anycastNoPreference: string,
-    timeout: number,
-    retryPolicy: RetryPolicy,
-    clock: Clock,
-    dependencies: Map<string, any>,
-  ) {
+  constructor({
+    id,
+    rId = id,
+    pId = id,
+    anycast,
+    clock,
+    registry,
+    dependencies,
+    timeout,
+    version,
+    retryPolicy,
+  }: {
+    id: string;
+    rId?: string;
+    pId?: string;
+    anycast: string;
+    clock: Clock;
+    registry: Registry;
+    dependencies: Map<string, any>;
+    timeout: number;
+    version: number;
+    retryPolicy: RetryPolicy;
+  }) {
     this.id = id;
     this.rId = rId;
     this.pId = pId;
-    this.anycastNoPreference = anycastNoPreference;
-    this.timeout = timeout;
-    this.retryPolicy = retryPolicy;
+    this.anycast = anycast;
     this.clock = clock;
+    this.registry = registry;
     this.dependencies = dependencies;
-  }
+    this.retryPolicy = retryPolicy;
 
-  static root(
-    id: string,
-    anycastNoPreference: string,
-    timeout: number,
-    retryPolicy: RetryPolicy,
-    clock: Clock,
-    dependencies: Map<string, any>,
-  ) {
-    return new InnerContext(id, id, id, anycastNoPreference, timeout, retryPolicy, clock, dependencies);
-  }
-
-  child(id: string, timeout: number, retryPolicy: RetryPolicy) {
-    return new InnerContext(
-      id,
-      this.rId,
-      this.id,
-      this.anycastNoPreference,
+    this.info = {
+      attempt: 1,
       timeout,
-      retryPolicy,
-      this.clock,
-      this.dependencies,
-    );
+      version,
+    };
   }
 
-  lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>> {
+  child({
+    id,
+    timeout,
+    version,
+    retryPolicy,
+  }: {
+    id: string;
+    timeout: number;
+    version: number;
+    retryPolicy: RetryPolicy;
+  }) {
+    return new InnerContext({
+      id,
+      rId: this.rId,
+      pId: this.id,
+      anycast: this.anycast,
+      clock: this.clock,
+      registry: this.registry,
+      dependencies: this.dependencies,
+      timeout,
+      version,
+      retryPolicy,
+    });
+  }
+
+  lfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFI<Return<F>>;
+  lfi<T>(func: string, ...args: any[]): LFI<T>;
+  lfi(funcOrName: Func | string, ...args: any[]): LFI<any> {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
+
+    if (typeof funcOrName === "string" && !registered) {
+      // This results in a dropped task and a value will never be
+      // yielded back to the users coroutine. However, the type
+      // system indicates the value is void. Casting to LFI "tricks"
+      // the type system to indicate the correct type.
+      return new DIE(
+        true,
+        exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName, opts.version),
+      ) as unknown as LFI<any>;
+    }
+
+    const func = registered ? registered.func : (funcOrName as Func);
 
     return new LFI(
       opts.id,
       func,
       argu,
+      registered ? registered.version : 1,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
       this.localCreateReq(opts),
     );
   }
 
-  lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>> {
+  lfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): LFC<Return<F>>;
+  lfc<T>(func: string, ...args: any[]): LFC<T>;
+  lfc(funcOrName: Func | string, ...args: any[]): LFC<any> {
     const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
+
+    if (typeof funcOrName === "string" && !registered) {
+      // This results in a dropped task and a value will never be
+      // yielded back to the users coroutine. However, the type
+      // system indicates the value is void. Casting to LFC "tricks"
+      // the type system to indicate the correct type.
+      return new DIE(
+        true,
+        exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName, opts.version),
+      ) as unknown as LFC<any>;
+    }
+
+    const func = registered ? registered.func : (funcOrName as Func);
 
     return new LFC(
       opts.id,
       func,
       argu,
+      registered ? registered.version : 1,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
       this.localCreateReq(opts),
     );
@@ -304,14 +377,23 @@ export class InnerContext implements Context {
 
   rfi<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
   rfi<T>(func: string, ...args: any[]): RFI<T>;
-  rfi(func: Func | string, ...args: any[]): RFI<any> {
-    if (typeof func === "function") {
-      throw new Error("not implemented");
+  rfi(funcOrName: Func | string, ...args: any[]): RFI<any> {
+    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
+
+    if (typeof funcOrName === "function" && !registered) {
+      // This results in a dropped task and a value will never be
+      // yielded back to the users coroutine. However, the type
+      // system indicates the value is void. Casting to RFI "tricks"
+      // the type system to indicate the correct type.
+      return new DIE(
+        true,
+        exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version),
+      ) as unknown as RFI<any>;
     }
 
-    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
     const data = {
-      func: func,
+      func: registered ? registered.name : (funcOrName as string),
       args: argu,
       version: opts.version,
     };
@@ -321,19 +403,54 @@ export class InnerContext implements Context {
 
   rfc<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFC<Return<F>>;
   rfc<T>(func: string, ...args: any[]): RFC<T>;
-  rfc(func: Func | string, ...args: any[]): RFC<any> {
-    if (typeof func === "function") {
-      throw new Error("not implemented");
+  rfc(funcOrName: Func | string, ...args: any[]): RFC<any> {
+    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
+
+    if (typeof funcOrName === "function" && !registered) {
+      // This results in a dropped task and a value will never be
+      // yielded back to the users coroutine. However, the type
+      // system indicates the value is void. Casting to RFC "tricks"
+      // the type system to indicate the correct type.
+      return new DIE(
+        true,
+        exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version),
+      ) as unknown as RFC<any>;
     }
 
-    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
     const data = {
-      func: func,
+      func: registered ? registered.name : (funcOrName as string),
       args: argu,
       version: opts.version,
     };
 
     return new RFC(opts.id, this.remoteCreateReq(data, opts));
+  }
+
+  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
+  detached<T>(func: string, ...args: any[]): RFI<T>;
+  detached(funcOrName: Func | string, ...args: any[]): RFI<any> {
+    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
+    const registered = this.registry.get(funcOrName, opts.version);
+
+    if (typeof funcOrName === "function" && !registered) {
+      // This results in a dropped task and a value will never be
+      // yielded back to the users coroutine. However, the type
+      // system indicates the value is void. Casting to RFI "tricks"
+      // the type system to indicate the correct type.
+      return new DIE(
+        true,
+        exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version),
+      ) as unknown as RFI<any>;
+    }
+
+    const data = {
+      func: registered ? registered.name : (funcOrName as string),
+      args: argu,
+      version: opts.version,
+    };
+
+    return new RFI(opts.id, this.remoteCreateReq(data, opts, Number.MAX_SAFE_INTEGER), "detached");
   }
 
   promise<T>({
@@ -368,23 +485,6 @@ export class InnerContext implements Context {
     return new RFC(id, this.sleepCreateOpts(id, until));
   }
 
-  detached<F extends Func>(func: F, ...args: ParamsWithOptions<F>): RFI<Return<F>>;
-  detached<T>(func: string, ...args: any[]): RFI<T>;
-  detached(func: Func | string, ...args: any[]): RFI<any> {
-    if (typeof func === "function") {
-      throw new Error("not implemented");
-    }
-
-    const [argu, opts] = util.splitArgsAndOpts(args, this.options());
-    const data = {
-      func: func,
-      args: argu,
-      version: opts.version,
-    };
-
-    return new RFI(opts.id, this.remoteCreateReq(data, opts, Number.MAX_SAFE_INTEGER), "detached");
-  }
-
   panic(condition: boolean, msg?: string): DIE {
     const src = util.getCallerInfo();
     return new DIE(condition, exceptions.PANIC(src, msg));
@@ -399,8 +499,7 @@ export class InnerContext implements Context {
   }
 
   options(opts: Partial<Options> = {}): Options {
-    const target = opts.target ?? this.anycastNoPreference;
-    return new Options({ id: this.seqid(), target, ...opts });
+    return new Options({ id: this.seqid(), target: this.anycast, ...opts });
   }
 
   readonly date = {
@@ -420,7 +519,7 @@ export class InnerContext implements Context {
     };
 
     // timeout cannot be greater than parent timeout
-    const timeout = Math.min(this.clock.now() + opts.timeout, this.timeout);
+    const timeout = Math.min(this.clock.now() + opts.timeout, this.info.timeout);
 
     return {
       kind: "createPromise",
@@ -433,7 +532,7 @@ export class InnerContext implements Context {
     };
   }
 
-  remoteCreateReq(data: any, opts: Options, maxTimeout = this.timeout): CreatePromiseReq {
+  remoteCreateReq(data: any, opts: Options, maxTimeout = this.info.timeout): CreatePromiseReq {
     const tags = {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
@@ -465,7 +564,7 @@ export class InnerContext implements Context {
     };
 
     // timeout cannot be greater than parent timeout
-    const cTimeout = Math.min(this.clock.now() + (timeout ?? 24 * util.HOUR), this.timeout);
+    const cTimeout = Math.min(this.clock.now() + (timeout ?? 24 * util.HOUR), this.info.timeout);
 
     return {
       kind: "createPromise",
@@ -487,7 +586,7 @@ export class InnerContext implements Context {
     };
 
     // timeout cannot be greater than parent timeout
-    const timeout = Math.min(time, this.timeout);
+    const timeout = Math.min(time, this.info.timeout);
 
     return {
       kind: "createPromise",

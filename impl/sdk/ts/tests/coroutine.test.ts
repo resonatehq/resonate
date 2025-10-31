@@ -6,6 +6,7 @@ import { NoopEncryptor } from "../src/encryptor";
 import type { ResonateError } from "../src/exceptions";
 import { Handler } from "../src/handler";
 import type { DurablePromiseRecord, Message, Network, Request, ResponseFor } from "../src/network/network";
+import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
 import { ok, type Result } from "../src/types";
 
@@ -63,7 +64,16 @@ describe("Coroutine", () => {
       Coroutine.exec(
         uuid,
         false,
-        InnerContext.root(uuid, "poll://any@default", 0, new Never(), new WallClock(), new Map()),
+        new InnerContext({
+          id: uuid,
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
         func,
         args,
         handler,
@@ -293,7 +303,16 @@ describe("Coroutine", () => {
       Coroutine.exec(
         "foo.1",
         false,
-        InnerContext.root("foo.1", "poll://any@default", 0, new Never(), new WallClock(), new Map()),
+        new InnerContext({
+          id: "foo.1",
+          anycast: "poll://any@default",
+          clock: new WallClock(),
+          registry: new Registry(),
+          dependencies: new Map(),
+          timeout: 0,
+          version: 1,
+          retryPolicy: new Never(),
+        }),
         foo,
         [],
         h,
