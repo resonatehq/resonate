@@ -6,6 +6,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/dev"
 	"github.com/resonatehq/resonate/cmd/dst"
 	"github.com/resonatehq/resonate/cmd/invoke"
+	"github.com/resonatehq/resonate/cmd/migrate"
 	"github.com/resonatehq/resonate/cmd/projects"
 	"github.com/resonatehq/resonate/cmd/promises"
 	"github.com/resonatehq/resonate/cmd/schedules"
@@ -26,6 +27,7 @@ func init() {
 	rootCmd.AddCommand(dev.NewCmd())
 	rootCmd.AddCommand(dst.NewCmd())
 	rootCmd.AddCommand(invoke.NewCmd())
+	rootCmd.AddCommand(migrate.NewCmd())
 	rootCmd.AddCommand(projects.NewCmd())
 	rootCmd.AddCommand(promises.NewCmd())
 	rootCmd.AddCommand(schedules.NewCmd())
