@@ -41,7 +41,7 @@ type processor struct {
 }
 
 func (p *processor) Process(body []byte, data []byte) (bool, error) {
-	var addr Addr
+	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
 	}
