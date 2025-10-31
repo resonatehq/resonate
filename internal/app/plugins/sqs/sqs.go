@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	awstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
@@ -42,7 +44,7 @@ type processor struct {
 	timeout time.Duration
 }
 
-func (p *processor) Process(body []byte, data []byte) (bool, error) {
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
 	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
@@ -51,10 +53,20 @@ func (p *processor) Process(body []byte, data []byte) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
-	msg := string(body)
+	msgBody := string(body)
+	msgAttrs := map[string]awstypes.MessageAttributeValue{}
+
+	for k, v := range head { // nosemgrep: range-over-map
+		msgAttrs[k] = awstypes.MessageAttributeValue{
+			DataType:    aws.String("String"),
+			StringValue: aws.String(v),
+		}
+	}
+
 	_, err := p.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    &addr.Url,
-		MessageBody: &msg,
+		QueueUrl:          &addr.Url,
+		MessageBody:       &msgBody,
+		MessageAttributes: msgAttrs,
 	}, func(o *sqs.Options) {
 		if addr.Region != nil {
 			o.Region = *addr.Region

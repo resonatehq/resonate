@@ -314,6 +314,8 @@ type CreatePromiseRequest struct {
 	Timeout        int64                  `protobuf:"varint,5,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	Tags           map[string]string      `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	RequestId      string                 `protobuf:"bytes,7,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	Traceparent    string                 `protobuf:"bytes,8,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate     string                 `protobuf:"bytes,9,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -393,6 +395,20 @@ func (x *CreatePromiseRequest) GetTags() map[string]string {
 func (x *CreatePromiseRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreatePromiseRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *CreatePromiseRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
 	}
 	return ""
 }
@@ -996,6 +1012,8 @@ type CreateCallbackRequest struct {
 	Timeout       int64                  `protobuf:"varint,3,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	Recv          *Recv                  `protobuf:"bytes,4,opt,name=recv,proto3" json:"recv,omitempty"`
 	RequestId     string                 `protobuf:"bytes,5,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	Traceparent   string                 `protobuf:"bytes,6,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate    string                 `protobuf:"bytes,7,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1061,6 +1079,20 @@ func (x *CreateCallbackRequest) GetRecv() *Recv {
 func (x *CreateCallbackRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateCallbackRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *CreateCallbackRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
 	}
 	return ""
 }
@@ -1132,6 +1164,8 @@ type CreateSubscriptionRequest struct {
 	Timeout       int64                  `protobuf:"varint,4,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	Recv          *Recv                  `protobuf:"bytes,5,opt,name=recv,proto3" json:"recv,omitempty"`
 	RequestId     string                 `protobuf:"bytes,6,opt,name=requestId,proto3" json:"requestId,omitempty"`
+	Traceparent   string                 `protobuf:"bytes,7,opt,name=traceparent,proto3" json:"traceparent,omitempty"`
+	Tracestate    string                 `protobuf:"bytes,8,opt,name=tracestate,proto3" json:"tracestate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1197,6 +1231,20 @@ func (x *CreateSubscriptionRequest) GetRecv() *Recv {
 func (x *CreateSubscriptionRequest) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateSubscriptionRequest) GetTraceparent() string {
+	if x != nil {
+		return x.Traceparent
+	}
+	return ""
+}
+
+func (x *CreateSubscriptionRequest) GetTracestate() string {
+	if x != nil {
+		return x.Tracestate
 	}
 	return ""
 }
@@ -1283,7 +1331,7 @@ const file_internal_app_subsystems_api_grpc_pb_promise_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"`\n" +
 	"\x16SearchPromisesResponse\x12.\n" +
 	"\bpromises\x18\x01 \x03(\v2\x12.promise_t.PromiseR\bpromises\x12\x16\n" +
-	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"\xbc\x02\n" +
+	"\x06cursor\x18\x02 \x01(\tR\x06cursor\"\xfe\x02\n" +
 	"\x14CreatePromiseRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12&\n" +
 	"\x0eidempotencyKey\x18\x02 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
@@ -1291,7 +1339,11 @@ const file_internal_app_subsystems_api_grpc_pb_promise_proto_rawDesc = "" +
 	"\x05param\x18\x04 \x01(\v2\x10.promise_t.ValueR\x05param\x12\x18\n" +
 	"\atimeout\x18\x05 \x01(\x03R\atimeout\x12;\n" +
 	"\x04tags\x18\x06 \x03(\v2'.promise.CreatePromiseRequest.TagsEntryR\x04tags\x12\x1c\n" +
-	"\trequestId\x18\a \x01(\tR\trequestId\x1a7\n" +
+	"\trequestId\x18\a \x01(\tR\trequestId\x12 \n" +
+	"\vtraceparent\x18\b \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\t \x01(\tR\n" +
+	"tracestate\x1a7\n" +
 	"\tTagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"Y\n" +
@@ -1333,23 +1385,31 @@ const file_internal_app_subsystems_api_grpc_pb_promise_proto_rawDesc = "" +
 	"\trequestId\x18\x05 \x01(\tR\trequestId\"Y\n" +
 	"\x15CancelPromiseResponse\x12\x12\n" +
 	"\x04noop\x18\x01 \x01(\bR\x04noop\x12,\n" +
-	"\apromise\x18\x02 \x01(\v2\x12.promise_t.PromiseR\apromise\"\xb9\x01\n" +
+	"\apromise\x18\x02 \x01(\v2\x12.promise_t.PromiseR\apromise\"\xfb\x01\n" +
 	"\x15CreateCallbackRequest\x12\x1c\n" +
 	"\tpromiseId\x18\x01 \x01(\tR\tpromiseId\x12$\n" +
 	"\rrootPromiseId\x18\x02 \x01(\tR\rrootPromiseId\x12\x18\n" +
 	"\atimeout\x18\x03 \x01(\x03R\atimeout\x12$\n" +
 	"\x04recv\x18\x04 \x01(\v2\x10.callback_t.RecvR\x04recv\x12\x1c\n" +
-	"\trequestId\x18\x05 \x01(\tR\trequestId\"\x8c\x01\n" +
+	"\trequestId\x18\x05 \x01(\tR\trequestId\x12 \n" +
+	"\vtraceparent\x18\x06 \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\a \x01(\tR\n" +
+	"tracestate\"\x8c\x01\n" +
 	"\x16CreateCallbackResponse\x12\x12\n" +
 	"\x04noop\x18\x01 \x01(\bR\x04noop\x120\n" +
 	"\bcallback\x18\x02 \x01(\v2\x14.callback_t.CallbackR\bcallback\x12,\n" +
-	"\apromise\x18\x03 \x01(\v2\x12.promise_t.PromiseR\apromise\"\xa7\x01\n" +
+	"\apromise\x18\x03 \x01(\v2\x12.promise_t.PromiseR\apromise\"\xe9\x01\n" +
 	"\x19CreateSubscriptionRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1c\n" +
 	"\tpromiseId\x18\x02 \x01(\tR\tpromiseId\x12\x18\n" +
 	"\atimeout\x18\x04 \x01(\x03R\atimeout\x12$\n" +
 	"\x04recv\x18\x05 \x01(\v2\x10.callback_t.RecvR\x04recv\x12\x1c\n" +
-	"\trequestId\x18\x06 \x01(\tR\trequestId\"\x90\x01\n" +
+	"\trequestId\x18\x06 \x01(\tR\trequestId\x12 \n" +
+	"\vtraceparent\x18\a \x01(\tR\vtraceparent\x12\x1e\n" +
+	"\n" +
+	"tracestate\x18\b \x01(\tR\n" +
+	"tracestate\"\x90\x01\n" +
 	"\x1aCreateSubscriptionResponse\x12\x12\n" +
 	"\x04noop\x18\x01 \x01(\bR\x04noop\x120\n" +
 	"\bcallback\x18\x02 \x01(\v2\x14.callback_t.CallbackR\bcallback\x12,\n" +

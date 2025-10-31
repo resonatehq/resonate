@@ -61,10 +61,18 @@ func CreatePromiseAndTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completio
 		CreatedOn:      c.Time(),
 	}
 
+	head := map[string]string{}
+	if traceparent, ok := r.Metadata["traceparent"]; ok {
+		head["traceparent"] = traceparent
+	}
+	if tracestate, ok := r.Metadata["tracestate"]; ok {
+		head["tracestate"] = tracestate
+	}
+
 	completion, err := gocoro.SpawnAndAwait(c, createPromise(r.Metadata, nil, cmd, &t_aio.CreateTaskCommand{
 		Id:        util.InvokeId(req.Task.PromiseId),
 		Recv:      nil,
-		Mesg:      &message.Mesg{Type: message.Invoke, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
+		Mesg:      &message.Mesg{Type: message.Invoke, Head: head, Root: req.Task.PromiseId, Leaf: req.Task.PromiseId},
 		Timeout:   req.Task.Timeout,
 		ProcessId: &req.Task.ProcessId,
 		State:     task.Claimed,
@@ -187,11 +195,19 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 						}
 					}
 
+					head := map[string]string{}
+					if traceparent, ok := tags["traceparent"]; ok {
+						head["traceparent"] = traceparent
+					}
+					if tracestate, ok := tags["tracestate"]; ok {
+						head["tracestate"] = tracestate
+					}
+
 					// add the task command
 					taskCmd = &t_aio.CreateTaskCommand{
 						Id:        util.InvokeId(promiseCmd.Id),
 						Recv:      completion.Router.Recv,
-						Mesg:      &message.Mesg{Type: message.Invoke, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
+						Mesg:      &message.Mesg{Type: message.Invoke, Head: head, Root: promiseCmd.Id, Leaf: promiseCmd.Id},
 						Timeout:   promiseCmd.Timeout,
 						State:     task.Init,
 						ExpiresAt: expiresAt,
