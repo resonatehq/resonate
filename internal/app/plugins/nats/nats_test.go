@@ -39,9 +39,8 @@ func (m *MockNATSClient) Publish(subject string, data []byte) error {
 func TestNATSPlugin(t *testing.T) {
 	metrics := metrics.New(prometheus.NewRegistry())
 
-	// create a backchannel
-	ch := make(chan *PublishParams, 1)
-	defer close(ch)
+	// create a backchannel with larger buffer to prevent blocking
+	ch := make(chan *PublishParams, 100)
 
 	successClient := &MockNATSClient{ch, true}
 	failureClient := &MockNATSClient{ch, false}
@@ -93,7 +92,7 @@ func TestNATSPlugin(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			natsPlugin, err := newWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, successClient)
+			natsPlugin, err := newWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, tc.client)
 			assert.Nil(t, err)
 
 			err = natsPlugin.Start(nil)

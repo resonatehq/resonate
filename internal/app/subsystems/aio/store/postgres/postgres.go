@@ -306,7 +306,7 @@ type Config struct {
 	Workers   int               `flag:"workers" desc:"number of workers" default:"1" dst:"1"`
 	Host      string            `flag:"host" desc:"postgres host" default:"localhost"`
 	Port      string            `flag:"port" desc:"postgres port" default:"5432"`
-	Username  string            `flag:"username" desc:"postgres username" default:"postgres"`
+	Username  string            `flag:"username" desc:"postgres username"`
 	Password  string            `flag:"password" desc:"postgres password"`
 	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
 	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`

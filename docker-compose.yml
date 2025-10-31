@@ -9,7 +9,7 @@ services:
       - --aio-store-postgres-host
       - postgres
       - --aio-store-postgres-username
-      - postgres
+      - username
       - --aio-store-postgres-password
       - password
       - --aio-store-postgres-database
@@ -28,7 +28,7 @@ services:
     image: postgres:15
     container_name: postgres
     environment:
-      POSTGRES_USER: postgres
+      POSTGRES_USER: username
       POSTGRES_PASSWORD: password
       POSTGRES_DB: resonate
     ports:
@@ -38,7 +38,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d resonate"]
+      test: ["CMD-SHELL", "pg_isready -U username -d resonate"]
       interval: 10s
       timeout: 5s
       retries: 5

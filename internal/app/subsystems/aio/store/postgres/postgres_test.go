@@ -22,17 +22,6 @@ func TestPostgresStore(t *testing.T) {
 		t.Skip("Postgres is not configured, skipping")
 	}
 
-	// Apply defaults to match Config struct defaults
-	if username == "" {
-		username = "postgres"
-	}
-	if port == "" {
-		port = "5432"
-	}
-	if database == "" {
-		database = "resonate"
-	}
-
 	metrics := metrics.New(prometheus.NewRegistry())
 
 	for _, tc := range test.TestCases {
