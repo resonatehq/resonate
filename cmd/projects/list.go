@@ -52,8 +52,6 @@ func display(templates Projects) {
 	}
 }
 
-
-
 func filterByLang(projects Projects, lang string) Projects {
 	filtered := Projects{}
 	for name, p := range projects {

@@ -34,15 +34,15 @@ jobs:
         id: cache
         with:
           path: resonate
-          key: resonate-${{ github.sha }}  # Cache key tied to the commit SHA
+          key: resonate-${{ github.sha }} # Cache key tied to the commit SHA
 
       - name: Build resonate
-        if: steps.cache.outputs.cache-hit != 'true'  # Only run if cache missed
+        if: steps.cache.outputs.cache-hit != 'true' # Only run if cache missed
         run: |
           go build -o resonate main.go
 
       - name: Save resonate to cache
-        if: steps.cache.outputs.cache-hit != 'true'  # Only save if cache was missed
+        if: steps.cache.outputs.cache-hit != 'true' # Only save if cache was missed
         uses: actions/cache/save@v4
         with:
           path: resonate
@@ -74,11 +74,11 @@ jobs:
         run: [1, 2]
 
     env:
-      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
-      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
-      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
-      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
-      DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_dst"
+      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_HOST: "localhost"
+      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PORT: "5432"
+      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME: "username"
+      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD: "password"
+      AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE: "resonate_dst"
 
     services:
       postgres:
@@ -87,9 +87,9 @@ jobs:
         # see: https://github.com/actions/runner/issues/822
         image: ${{ matrix.store == 'postgres' && 'postgres:15' || '' }}
         env:
-          POSTGRES_USER: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
-          POSTGRES_PASSWORD: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
-          POSTGRES_DB: ${{ env.DST_AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
+          POSTGRES_USER: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_USERNAME }}
+          POSTGRES_PASSWORD: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_PASSWORD }}
+          POSTGRES_DB: ${{ env.AIO_SUBSYSTEMS_STOREPOSTGRES_CONFIG_DATABASE }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -129,12 +129,12 @@ jobs:
             --repo $GITHUB_REPOSITORY \
             --commit $GITHUB_SHA \
             --url $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-logs
           path: logs.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() && matrix.scenario != 'fault' }}
         with:
           name: ${{ matrix.scenario }}-${{ matrix.store }}-${{ matrix.run }}-visualization
@@ -168,12 +168,12 @@ jobs:
           key: resonate-${{ github.sha }}
           fail-on-cache-miss: true
       - name: Download logs from run 1
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs1 }}
           path: logs-1.txt
       - name: Download logs from run 2
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v6
         with:
           name: ${{ matrix.scenario }}-${{ matrix.logs2 }}
           path: logs-2.txt

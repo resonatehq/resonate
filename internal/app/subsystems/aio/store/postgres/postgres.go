@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -26,97 +28,12 @@ import (
 )
 
 const (
+	// Schema is now managed by migrations (see internal/migrationfiles/migrations/postgres/)
 	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE IF NOT EXISTS promises (
-		id                           TEXT,
-		sort_id                      SERIAL,
-		state                        INTEGER DEFAULT 1,
-		param_headers                JSONB,
-		param_data                   BYTEA,
-		value_headers                JSONB,
-		value_data                   BYTEA,
-		timeout                      BIGINT,
-		idempotency_key_for_create   TEXT,
-		idempotency_key_for_complete TEXT,
-		tags                         JSONB,
-		created_on                   BIGINT,
-		completed_on                 BIGINT,
-		PRIMARY KEY(id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_promises_sort_id ON promises(sort_id);
-
-	CREATE TABLE IF NOT EXISTS callbacks (
-		id              TEXT UNIQUE,
-		promise_id      TEXT,
-		root_promise_id TEXT,
-		recv            BYTEA,
-		mesg            BYTEA,
-		timeout         BIGINT,
-		created_on      BIGINT
-	);
-
-	CREATE TABLE IF NOT EXISTS schedules (
-		id                    TEXT,
-		sort_id               SERIAL,
-		description           TEXT,
-		cron                  TEXT,
-		tags                  JSONB,
-		promise_id            TEXT,
-		promise_timeout       BIGINT,
-		promise_param_headers JSONB,
-		promise_param_data    BYTEA,
-		promise_tags          JSONB,
-		last_run_time         BIGINT,
-		next_run_time         BIGINT,
-		idempotency_key       TEXT,
-		created_on            BIGINT,
-		PRIMARY KEY(id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_schedules_sort_id ON schedules(sort_id);
-	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
-
-	CREATE TABLE IF NOT EXISTS locks (
-		resource_id  TEXT,
-		execution_id TEXT,
-		process_id   TEXT,
-		ttl          BIGINT,
-		expires_at   BIGINT,
-		PRIMARY KEY(resource_id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_locks_id ON locks(resource_id, execution_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_process_id ON locks(process_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
-
-	CREATE TABLE IF NOT EXISTS tasks (
-		id              TEXT,
-		sort_id         SERIAL,
-		process_id      TEXT,
-		state           INTEGER DEFAULT 1,
-		root_promise_id TEXT,
-		recv            BYTEA,
-		mesg            BYTEA,
-		timeout         BIGINT,
-		counter         INTEGER DEFAULT 1,
-		attempt         INTEGER DEFAULT 0,
-		ttl             BIGINT DEFAULT 0,
-		expires_at      BIGINT DEFAULT 0,
-		created_on      BIGINT,
-		completed_on    BIGINT,
-		PRIMARY KEY(id)
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
-	CREATE INDEX IF NOT EXISTS idx_tasks_expires_at ON tasks(expires_at);
-
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER,
 		PRIMARY KEY(id)
-	);
-
-	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
+	);`
 
 	DROP_TABLE_STATEMENT = `
 	DROP TABLE promises;
@@ -392,7 +309,7 @@ type Config struct {
 	Username  string            `flag:"username" desc:"postgres username"`
 	Password  string            `flag:"password" desc:"postgres password"`
 	Database  string            `flag:"database" desc:"postgres database" default:"resonate" dst:"resonate_dst"`
-	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}"`
+	Query     map[string]string `flag:"query" desc:"postgres query options" dst:"{\"sslmode\":\"disable\"}" dev:"{\"sslmode\":\"disable\"}"`
 	TxTimeout time.Duration     `flag:"tx-timeout" desc:"postgres transaction timeout" default:"10s"`
 	Reset     bool              `flag:"reset" desc:"reset postgres db on shutdown" default:"false" dst:"true"`
 }
@@ -406,10 +323,16 @@ type PostgresStore struct {
 	workers []*PostgresStoreWorker
 }
 
-func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore, error) {
-	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
-	workers := make([]*PostgresStoreWorker, config.Workers)
+type ConnConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	Database string
+	Query    map[string]string
+}
 
+func NewConn(config *ConnConfig) (*sql.DB, error) {
 	rawQuery := make([]string, len(config.Query))
 	for i, q := range util.OrderedRangeKV(config.Query) {
 		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
@@ -423,7 +346,28 @@ func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore,
 		RawQuery: strings.Join(rawQuery, "&"),
 	}
 
-	db, err := sql.Open("postgres", dbUrl.String())
+	return sql.Open("postgres", dbUrl.String())
+}
+
+func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*PostgresStore, error) {
+	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
+	workers := make([]*PostgresStoreWorker, config.Workers)
+
+	rawQuery := make([]string, len(config.Query))
+	for i, q := range util.OrderedRangeKV(config.Query) {
+		rawQuery[i] = fmt.Sprintf("%s=%s", q.Key, q.Value)
+	}
+
+	connConfig := &ConnConfig{
+		Host:     config.Host,
+		Port:     config.Port,
+		Username: config.Username,
+		Password: config.Password,
+		Database: config.Database,
+		Query:    config.Query,
+	}
+
+	db, err := NewConn(connConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -463,6 +407,38 @@ func (s *PostgresStore) Kind() t_aio.Kind {
 func (s *PostgresStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
+	}
+	ms := migrations.NewPostgresMigrationStore(s.db)
+
+	version, err := ms.GetCurrentVersion()
+	if err != nil {
+		return err
+	}
+
+	// Get pending migrations
+	pending, err := migrations.GetPendingMigrations(version, ms)
+	if err != nil {
+		return err
+	}
+
+	// If version == 0, the db is fresh and we can apply all migrations automatically
+	if version == 0 {
+		if len(pending) > 0 {
+			// Validate migration sequence
+			if err := migrations.ValidateMigrationSequence(pending, version); err != nil {
+				return err
+			}
+
+			// Apply all migrations
+			if err := migrations.ApplyMigrations(pending, ms); err != nil {
+				return err
+			}
+		}
+	} else {
+		// For existing databases, check for pending migrations and error if any exist
+		if len(pending) > 0 {
+			return errors.New("pending migrations, run `resonate migrate` for more information")
+		}
 	}
 
 	for _, worker := range s.workers {

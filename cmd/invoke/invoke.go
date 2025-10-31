@@ -36,17 +36,18 @@ func NewCmd() *cobra.Command {
 		funcName string
 		args     []string
 		jsonArgs string
+		version  int
 		timeout  time.Duration
 		target   string
+		delay    time.Duration
 		server   string
 		username string
 		password string
-		version  int
 	)
 
 	cmd := &cobra.Command{
 		Use:     "invoke <promise-id> --func <function-name> [flags]",
-		Short:   "Invoke a function (--func is required)",
+		Short:   "Invoke a function",
 		Example: invokeExample,
 		PreRunE: func(cmd *cobra.Command, cmdArgs []string) error {
 			if username != "" || password != "" {
@@ -105,7 +106,7 @@ func NewCmd() *cobra.Command {
 			createCmd := promises.CreatePromiseCmd(c)
 			createArgs := []string{promiseId}
 
-			err = createCmd.Flags().Set("timeout", timeout.String())
+			err = createCmd.Flags().Set("timeout", (timeout + delay).String())
 			if err != nil {
 				return fmt.Errorf("failed to set timeout: %v", err)
 			}
@@ -120,6 +121,13 @@ func NewCmd() *cobra.Command {
 				return fmt.Errorf("failed to set tag: %v", err)
 			}
 
+			if delay > 0 {
+				err = createCmd.Flags().Set("tag", fmt.Sprintf("resonate:delay=%d", time.Now().Add(delay).UnixMilli()))
+				if err != nil {
+					return fmt.Errorf("failed to set tag: %v", err)
+				}
+			}
+
 			return createCmd.RunE(createCmd, createArgs)
 		},
 	}
@@ -127,12 +135,13 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringVar(&funcName, "func", "", "function to invoke")
 	cmd.Flags().StringArrayVarP(&args, "arg", "a", []string{}, "function argument, can be provided multiple times")
 	cmd.Flags().StringVar(&jsonArgs, "json-args", "", "function arguments as json array")
+	cmd.Flags().IntVar(&version, "version", 1, "function version")
 	cmd.Flags().DurationVar(&timeout, "timeout", time.Hour, "promise timeout")
 	cmd.Flags().StringVar(&target, "target", "poll://any@default", "invoke target")
+	cmd.Flags().DurationVar(&delay, "delay", 0, "promise delay")
 	cmd.Flags().StringVar(&server, "server", "http://localhost:8001", "resonate server url")
 	cmd.Flags().StringVarP(&username, "username", "U", "", "basic auth username")
 	cmd.Flags().StringVarP(&password, "password", "P", "", "basic auth password")
-	cmd.Flags().IntVar(&version, "version", 1, "function version")
 
 	cmd.Flags().SortFlags = false
 	_ = cmd.MarkFlagRequired("func")

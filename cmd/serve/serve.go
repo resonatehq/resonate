@@ -6,15 +6,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/resonatehq/resonate/cmd/config"
+	"github.com/resonatehq/resonate/cmd/util"
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/coroutines"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -25,166 +29,53 @@ import (
 
 func NewCmd() *cobra.Command {
 	var (
+		v      = viper.New()
 		config = &config.Config{}
 	)
 
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start Resonate server",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := config.Parse(); err != nil {
-				return err
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if file, _ := cmd.Flags().GetString("config"); file != "" {
+				v.SetConfigFile(file)
+			} else {
+				v.SetConfigName("resonate")
+				v.AddConfigPath(".")
+				v.AddConfigPath("$HOME")
 			}
 
-			// logger
-			logLevel, err := log.ParseLevel(config.LogLevel)
-			if err != nil {
-				slog.Error("failed to parse log level", "error", err)
-				return err
-			}
-			logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
-			slog.SetDefault(logger)
+			v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+			v.AutomaticEnv()
 
-			// metrics
-			reg := prometheus.NewRegistry()
-			metrics := metrics.New(reg)
-
-			// api/aio
-			api := api.New(config.API.Size, metrics)
-			aio := aio.New(config.AIO.Size, metrics)
-
-			// plugins
-			aioPlugins, pollAddr, err := config.AIOPlugins(aio, metrics)
-			if err != nil {
-				return err
-			}
-
-			// api subsystems
-			apiSubsystems, err := config.APISubsystems(api, pollAddr)
-			if err != nil {
-				return err
-			}
-			for _, subsystem := range apiSubsystems {
-				api.AddSubsystem(subsystem)
-			}
-
-			// aio subsystems
-			aioSubsystems, err := config.AIOSubsystems(aio, metrics, aioPlugins)
-			if err != nil {
-				return err
-			}
-			for _, subsystem := range aioSubsystems {
-				aio.AddSubsystem(subsystem)
-			}
-
-			// start api/aio
-			if err := api.Start(); err != nil {
-				slog.Error("failed to start api", "error", err)
-				return err
-			}
-			if err := aio.Start(); err != nil {
-				slog.Error("failed to start aio", "error", err)
-				return err
-			}
-
-			// set default url
-			if config.System.Url == "" {
-				config.System.Url = fmt.Sprintf("http://%s", api.Addr())
-			}
-
-			// instantiate system
-			system := system.New(api, aio, &config.System, metrics)
-
-			// request coroutines
-			system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
-			system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
-			system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
-			system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
-			system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
-			system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
-			system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
-			system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
-			system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
-			system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
-			system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
-			system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
-			system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
-			system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
-			system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
-			system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
-			system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
-
-			// background coroutines
-			system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
-			system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
-			system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
-			system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
-			system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
-
-			// metrics server
-			mux := http.NewServeMux()
-			mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-			metricsServer := &http.Server{Addr: config.MetricsAddr, Handler: mux}
-
-			go func() {
-				for {
-					slog.Info("starting metrics server", "addr", metricsServer.Addr)
-					if err := metricsServer.ListenAndServe(); err != nil && err == http.ErrServerClosed {
-						return
-					}
-
-					slog.Error("restarting metrics server...", "error", err)
-					time.Sleep(5 * time.Second)
+			if err := v.ReadInConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+					return err
 				}
-			}()
-
-			// listen for shutdown signal
-			go func() {
-				sig := make(chan os.Signal, 1)
-				signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
-
-				// halt until we get a shutdown signal or an error
-				// occurs, whichever happens first
-				select {
-				case s := <-sig:
-					slog.Info("shutdown signal received, shutting down", "signal", s)
-				case err := <-api.Errors():
-					slog.Error("api error received, shutting down", "error", err)
-				case err := <-aio.Errors():
-					slog.Error("aio error received, shutting down", "error", err)
-				}
-
-				// shutdown system
-				<-system.Shutdown()
-
-				// shutdown metrics server
-				if err := metricsServer.Close(); err != nil {
-					slog.Warn("error stopping metrics server", "error", err)
-				}
-			}()
-
-			// control loop
-			if err := system.Loop(); err != nil {
-				slog.Error("control loop failed", "error", err)
-				return err
-			}
-
-			// stop api/aio
-			if err := api.Stop(); err != nil {
-				slog.Error("failed to stop api", "error", err)
-				return err
-			}
-			if err := aio.Stop(); err != nil {
-				slog.Error("failed to stop aio", "error", err)
-				return err
 			}
 
 			return nil
 		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			hooks := mapstructure.ComposeDecodeHookFunc(
+				util.MapToBytes(),
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+			)
+
+			if err := v.Unmarshal(&config, viper.DecodeHook(hooks)); err != nil {
+				return err
+			}
+
+			return Serve(config)
+		},
 	}
 
+	// bind config file flag
+	cmd.Flags().StringP("config", "c", "", "config file (default resonate.yaml)")
+
 	// bind config
-	_ = config.Bind(cmd)
+	_ = config.Bind(cmd, v, "default")
 
 	// bind other flags
 	cmd.Flags().Bool("ignore-asserts", false, "ignore-asserts mode")
@@ -194,4 +85,155 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().SortFlags = false
 
 	return cmd
+}
+
+func Serve(config *config.Config) error {
+	// logger
+	logLevel, err := log.ParseLevel(config.LogLevel)
+	if err != nil {
+		slog.Error("failed to parse log level", "error", err)
+		return err
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	slog.SetDefault(logger)
+
+	// metrics
+	reg := prometheus.NewRegistry()
+	metrics := metrics.New(reg)
+
+	// api/aio
+	api := api.New(config.API.Size, metrics)
+	aio := aio.New(config.AIO.Size, metrics)
+
+	// plugins
+	aioPlugins, pollAddr, err := config.AIOPlugins(aio, metrics)
+	if err != nil {
+		return err
+	}
+
+	// api subsystems
+	apiSubsystems, err := config.APISubsystems(api, pollAddr)
+	if err != nil {
+		return err
+	}
+	for _, subsystem := range apiSubsystems {
+		api.AddSubsystem(subsystem)
+	}
+
+	// aio subsystems
+	aioSubsystems, err := config.AIOSubsystems(aio, metrics, aioPlugins)
+	if err != nil {
+		return err
+	}
+	for _, subsystem := range aioSubsystems {
+		aio.AddSubsystem(subsystem)
+	}
+
+	// start api/aio
+	if err := api.Start(); err != nil {
+		slog.Error("failed to start api", "error", err)
+		return err
+	}
+	if err := aio.Start(); err != nil {
+		if migrationErr, ok := err.(*migrations.MigrationError); ok {
+			slog.Error("failed to start aio", "error", fmt.Sprintf("Migration %03d_%s failed: %v", migrationErr.Version, migrationErr.Name, migrationErr.Err))
+		} else {
+			slog.Error("failed to start aio", "error", err)
+		}
+		return err
+	}
+
+	// set default url
+	if config.System.Url == "" {
+		config.System.Url = fmt.Sprintf("http://%s", api.Addr())
+	}
+
+	// instantiate system
+	system := system.New(api, aio, &config.System, metrics)
+
+	// request coroutines
+	system.AddOnRequest(t_api.ReadPromise, coroutines.ReadPromise)
+	system.AddOnRequest(t_api.SearchPromises, coroutines.SearchPromises)
+	system.AddOnRequest(t_api.CreatePromise, coroutines.CreatePromise)
+	system.AddOnRequest(t_api.CreatePromiseAndTask, coroutines.CreatePromiseAndTask)
+	system.AddOnRequest(t_api.CreateCallback, coroutines.CreateCallback)
+	system.AddOnRequest(t_api.CompletePromise, coroutines.CompletePromise)
+	system.AddOnRequest(t_api.ReadSchedule, coroutines.ReadSchedule)
+	system.AddOnRequest(t_api.SearchSchedules, coroutines.SearchSchedules)
+	system.AddOnRequest(t_api.CreateSchedule, coroutines.CreateSchedule)
+	system.AddOnRequest(t_api.DeleteSchedule, coroutines.DeleteSchedule)
+	system.AddOnRequest(t_api.AcquireLock, coroutines.AcquireLock)
+	system.AddOnRequest(t_api.HeartbeatLocks, coroutines.HeartbeatLocks)
+	system.AddOnRequest(t_api.ReleaseLock, coroutines.ReleaseLock)
+	system.AddOnRequest(t_api.ClaimTask, coroutines.ClaimTask)
+	system.AddOnRequest(t_api.CompleteTask, coroutines.CompleteTask)
+	system.AddOnRequest(t_api.DropTask, coroutines.DropTask)
+	system.AddOnRequest(t_api.HeartbeatTasks, coroutines.HeartbeatTasks)
+
+	// background coroutines
+	system.AddBackground("TimeoutPromises", coroutines.TimeoutPromises)
+	system.AddBackground("SchedulePromises", coroutines.SchedulePromises)
+	system.AddBackground("TimeoutLocks", coroutines.TimeoutLocks)
+	system.AddBackground("EnqueueTasks", coroutines.EnqueueTasks)
+	system.AddBackground("TimeoutTasks", coroutines.TimeoutTasks)
+
+	// metrics server
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	metricsServer := &http.Server{Addr: config.MetricsAddr, Handler: mux}
+
+	go func() {
+		for {
+			slog.Info("starting metrics server", "addr", metricsServer.Addr)
+			if err := metricsServer.ListenAndServe(); err != nil && err == http.ErrServerClosed {
+				return
+			}
+
+			slog.Error("restarting metrics server...", "error", err)
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	// listen for shutdown signal
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+
+		// halt until we get a shutdown signal or an error
+		// occurs, whichever happens first
+		select {
+		case s := <-sig:
+			slog.Info("shutdown signal received, shutting down", "signal", s)
+		case err := <-api.Errors():
+			slog.Error("api error received, shutting down", "error", err)
+		case err := <-aio.Errors():
+			slog.Error("aio error received, shutting down", "error", err)
+		}
+
+		// shutdown system
+		<-system.Shutdown()
+
+		// shutdown metrics server
+		if err := metricsServer.Close(); err != nil {
+			slog.Warn("error stopping metrics server", "error", err)
+		}
+	}()
+
+	// control loop
+	if err := system.Loop(); err != nil {
+		slog.Error("control loop failed", "error", err)
+		return err
+	}
+
+	// stop api/aio
+	if err := api.Stop(); err != nil {
+		slog.Error("failed to stop api", "error", err)
+		return err
+	}
+	if err := aio.Stop(); err != nil {
+		slog.Error("failed to stop aio", "error", err)
+		return err
+	}
+
+	return nil
 }

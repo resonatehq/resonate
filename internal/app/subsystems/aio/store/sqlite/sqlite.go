@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store"
+	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/migrations"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -25,92 +27,12 @@ import (
 )
 
 const (
-	CREATE_TABLE_STATEMENT = `
-	CREATE TABLE IF NOT EXISTS promises (
-		id                           TEXT UNIQUE,
-		sort_id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-		state                        INTEGER DEFAULT 1,
-		param_headers                BLOB,
-		param_data                   BLOB,
-		value_headers                BLOB,
-		value_data                   BLOB,
-		timeout                      INTEGER,
-		idempotency_key_for_create   TEXT,
-		idempotency_key_for_complete TEXT,
-		tags                         BLOB,
-		created_on                   INTEGER,
-		completed_on                 INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_promises_id ON promises(id);
-
-	CREATE TABLE IF NOT EXISTS callbacks (
-		id              TEXT UNIQUE,
-		promise_id      TEXT,
-		root_promise_id TEXT,
-		recv            BLOB,
-		mesg            BLOB,
-		timeout         INTEGER,
-		created_on      INTEGER
-	);
-
-	CREATE TABLE IF NOT EXISTS schedules (
-		id                    TEXT UNIQUE,
-		sort_id               INTEGER PRIMARY KEY AUTOINCREMENT,
-		description           TEXT,
-		cron                  TEXT,
-		tags                  BLOB,
-		promise_id            TEXT,
-		promise_timeout       INTEGER,
-		promise_param_headers BLOB,
-		promise_param_data    BLOB,
-		promise_tags          BLOB,
-		last_run_time         INTEGER,
-		next_run_time         INTEGER,
-		idempotency_key       TEXT,
-		created_on            INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_schedules_id ON schedules(id);
-	CREATE INDEX IF NOT EXISTS idx_schedules_next_run_time ON schedules(next_run_time);
-
-	CREATE TABLE IF NOT EXISTS locks (
-		resource_id  TEXT UNIQUE,
-		execution_id TEXT,
-		process_id   TEXT,
-		ttl          INTEGER,
-		expires_at   INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_locks_id ON locks(resource_id, execution_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_process_id ON locks(process_id);
-	CREATE INDEX IF NOT EXISTS idx_locks_expires_at ON locks(expires_at);
-
-	CREATE TABLE IF NOT EXISTS tasks (
-		id              TEXT UNIQUE,
-		sort_id         INTEGER PRIMARY KEY AUTOINCREMENT,
-		process_id      TEXT,
-		state           INTEGER DEFAULT 1,
-		root_promise_id TEXT,
-		recv            BLOB,
-		mesg            BLOB,
-		timeout         INTEGER,
-		counter         INTEGER DEFAULT 1,
-		attempt         INTEGER DEFAULT 0,
-		ttl             INTEGER DEFAULT 0,
-		expires_at      INTEGER DEFAULT 0,
-		created_on      INTEGER,
-		completed_on    INTEGER
-	);
-
-	CREATE INDEX IF NOT EXISTS idx_tasks_process_id ON tasks(process_id);
-	CREATE INDEX IF NOT EXISTS idx_tasks_expires_at ON tasks(expires_at);
-
+	// Schema is now managed by migrations (see internal/migrationfiles/migrations/sqlite/)
+	// We create the migrations table to handle
+	CREATE_TABLE_STATEMENT = `		
 	CREATE TABLE IF NOT EXISTS migrations (
 		id INTEGER PRIMARY KEY
-	);
-
-	INSERT INTO migrations (id) VALUES (1) ON CONFLICT(id) DO NOTHING;`
+	);`
 
 	PROMISE_SELECT_STATEMENT = `
 	SELECT
@@ -375,7 +297,7 @@ const (
 type Config struct {
 	Size      int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	BatchSize int           `flag:"batch-size" desc:"max submissions processed per iteration" default:"1000"`
-	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:"`
+	Path      string        `flag:"path" desc:"sqlite database path" default:"resonate.db" dst:":memory:" dev:":memory:"`
 	TxTimeout time.Duration `flag:"tx-timeout" desc:"sqlite transaction timeout" default:"10s"`
 	Reset     bool          `flag:"reset" desc:"reset sqlite db on shutdown" default:"false" dst:"true"`
 }
@@ -389,10 +311,14 @@ type SqliteStore struct {
 	worker *SqliteStoreWorker
 }
 
+func NewConn(path string) (*sql.DB, error) {
+	return sql.Open("sqlite3", path)
+}
+
 func New(aio aio.AIO, metrics *metrics.Metrics, config *Config) (*SqliteStore, error) {
 	sq := make(chan *bus.SQE[t_aio.Submission, t_aio.Completion], config.Size)
 
-	db, err := sql.Open("sqlite3", config.Path)
+	db, err := NewConn(config.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -423,6 +349,38 @@ func (s *SqliteStore) Kind() t_aio.Kind {
 func (s *SqliteStore) Start(chan<- error) error {
 	if _, err := s.db.Exec(CREATE_TABLE_STATEMENT); err != nil {
 		return err
+	}
+	ms := migrations.NewSqliteMigrationStore(s.db)
+
+	version, err := ms.GetCurrentVersion()
+	if err != nil {
+		return err
+	}
+
+	// Get pending migrations
+	pending, err := migrations.GetPendingMigrations(version, ms)
+	if err != nil {
+		return err
+	}
+
+	// If version == 0, the db is fresh and we can apply all migrations automatically
+	if version == 0 {
+		if len(pending) > 0 {
+			// Validate migration sequence
+			if err := migrations.ValidateMigrationSequence(pending, version); err != nil {
+				return err
+			}
+
+			// Apply all migrations
+			if err := migrations.ApplyMigrations(pending, ms); err != nil {
+				return err
+			}
+		}
+	} else {
+		// For existing databases, check for pending migrations and error if any exist
+		if len(pending) > 0 {
+			return errors.New("pending migrations, run `resonate migrate` for more information")
+		}
 	}
 
 	// start worker on a goroutine

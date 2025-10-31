@@ -55,7 +55,7 @@ func TestHttpPlugin(t *testing.T) {
 		{"ko", &Addr{Url: koUrl}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second})
+			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
 			assert.Nil(t, err)
 
 			data, err := json.Marshal(tc.data)
