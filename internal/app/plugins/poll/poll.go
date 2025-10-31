@@ -14,22 +14,23 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/app/auth"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Config struct {
-	Size            int               `flag:"size" desc:"submission buffered channel size" default:"100"`
-	BufferSize      int               `flag:"buffer-size" desc:"connection buffer size" default:"100"`
-	MaxConnections  int               `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
-	Addr            string            `flag:"addr" desc:"http server address" default:":8002"`
-	Cors            Cors              `flag:"cors" desc:"http cors settings"`
-	Timeout         time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
-	DisconnectAfter time.Duration     `flag:"disconnect-after" desc:"time to wait before closing a connections, defaults to never" default:"0"`
-	Auth            map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
-	TimeToRetry     time.Duration     `flag:"ttr" desc:"time to wait before resending" default:"15s"`
-	TimeToClaim     time.Duration     `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
+	Size            int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	BufferSize      int           `flag:"buffer-size" desc:"connection buffer size" default:"100"`
+	MaxConnections  int           `flag:"max-connections" desc:"maximum number of connections" default:"1000"`
+	Addr            string        `flag:"addr" desc:"http server address" default:":8002"`
+	Cors            Cors          `flag:"cors" desc:"http cors settings"`
+	Timeout         time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	DisconnectAfter time.Duration `flag:"disconnect-after" desc:"time to wait before closing a connections, defaults to never" default:"0"`
+	Auth            auth.Config   `flag:"auth" desc:"http auth settings"`
+	TimeToRetry     time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim     time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Cors struct {
@@ -144,11 +145,17 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Poll, error) {
 	// connection manager (worker)
 	disconnect := make(chan *connection, config.MaxConnections)
 
+	authenticator, err := auth.New(&config.Auth)
+	if err != nil {
+		return nil, err
+	}
+
 	handler := &PollHandler{
-		config:     config,
-		metrics:    metrics,
-		connect:    connect,
-		disconnect: disconnect,
+		config:        config,
+		metrics:       metrics,
+		connect:       connect,
+		disconnect:    disconnect,
+		authenticator: authenticator,
 	}
 
 	listen, err := net.Listen("tcp", config.Addr)
@@ -196,7 +203,7 @@ func (p *Poll) Type() string {
 }
 
 func (p *Poll) Addr() string {
-	return p.server.listen.Addr().String()
+	return listenAddr(p.server.listen.Addr())
 }
 
 func (p *Poll) Start(errors chan<- error) error {
@@ -387,27 +394,16 @@ func (s *PollServer) Stop() error {
 }
 
 type PollHandler struct {
-	config     *Config
-	metrics    *metrics.Metrics
-	connect    chan<- *connection
-	disconnect chan<- *connection
+	config        *Config
+	metrics       *metrics.Metrics
+	connect       chan<- *connection
+	disconnect    chan<- *connection
+	authenticator auth.Authenticator
 }
 
 func (h *PollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// authentication
-	if len(h.config.Auth) > 0 {
-		username, password, ok := r.BasicAuth()
-		if !ok {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		if p, ok := h.config.Auth[username]; !ok || p != password {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
+	if _, ok := auth.RequireHTTP(h.authenticator, w, r); !ok {
+		return
 	}
 
 	// only GET requests are allowed
@@ -509,4 +505,18 @@ func (h *PollHandler) Disconnect(conn *connection) {
 	default:
 		panic("disconnect buffered channel must never be full")
 	}
+}
+
+func listenAddr(addr net.Addr) string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	return net.JoinHostPort(host, port)
 }

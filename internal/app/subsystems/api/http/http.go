@@ -15,6 +15,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/go-playground/validator/v10"
 	"github.com/resonatehq/resonate/internal"
+	"github.com/resonatehq/resonate/internal/app/auth"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 
@@ -24,11 +25,11 @@ import (
 )
 
 type Config struct {
-	Addr          string            `flag:"addr" desc:"http server address" default:":8001"`
-	Auth          map[string]string `flag:"auth" desc:"http basic auth username password pairs"`
-	Cors          Cors              `flag:"cors" desc:"http cors settings"`
-	Timeout       time.Duration     `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
-	TaskFrequency time.Duration     `flag:"task-frequency" desc:"default task frequency" default:"1m"`
+	Addr          string        `flag:"addr" desc:"http server address" default:":8001"`
+	Auth          auth.Config   `flag:"auth" desc:"http auth settings"`
+	Cors          Cors          `flag:"cors" desc:"http cors settings"`
+	Timeout       time.Duration `flag:"timeout" desc:"http server graceful shutdown timeout" default:"10s"`
+	TaskFrequency time.Duration `flag:"task-frequency" desc:"default task frequency" default:"1m"`
 }
 
 type Cors struct {
@@ -47,6 +48,11 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 
 	handler := gin.New()
 	server := &server{api: api.New(a, "http"), config: config}
+
+	authenticator, err := auth.New(&config.Auth)
+	if err != nil {
+		return nil, err
+	}
 
 	// create a shutdown channel
 	shutdown := make(chan struct{})
@@ -76,8 +82,8 @@ func New(a i_api.API, config *Config, pollAddr string) (i_api.Subsystem, error) 
 
 	// Authentication
 	authorized := handler.Group("/")
-	if len(config.Auth) > 0 {
-		authorized.Use(gin.BasicAuth(config.Auth))
+	if middleware := auth.GinMiddleware(authenticator); middleware != nil {
+		authorized.Use(middleware)
 	}
 
 	// Resonate header middleware
@@ -169,7 +175,7 @@ func (h *Http) Kind() string {
 }
 
 func (h *Http) Addr() string {
-	return h.listen.Addr().String()
+	return listenAddr(h.listen.Addr())
 }
 
 func (h *Http) Start(errors chan<- error) {
@@ -204,6 +210,20 @@ func (s *server) code(status t_api.StatusCode) int {
 func (s *server) log(c *gin.Context) {
 	slog.Debug("http", "method", c.Request.Method, "url", c.Request.RequestURI, "status", c.Writer.Status())
 	c.Next()
+}
+
+func listenAddr(addr net.Addr) string {
+	host, port, err := net.SplitHostPort(addr.String())
+	if err != nil {
+		return addr.String()
+	}
+
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	return net.JoinHostPort(host, port)
 }
 
 // Helper functions

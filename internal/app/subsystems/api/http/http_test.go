@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/resonatehq/resonate/internal/api"
+	"github.com/resonatehq/resonate/internal/app/auth"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/stretchr/testify/assert"
@@ -21,12 +23,12 @@ type httpTest struct {
 	client    *http.Client
 }
 
-func setup(auth map[string]string) (*httpTest, error) {
+func setup(authConfig auth.Config) (*httpTest, error) {
 	api := &test.API{}
 	errors := make(chan error)
 	subsystem, err := New(api, &Config{
 		Addr:          ":0",
-		Auth:          auth,
+		Auth:          authConfig,
 		Timeout:       1 * time.Second,
 		TaskFrequency: 1 * time.Minute, // used as default
 	}, "")
@@ -56,23 +58,62 @@ func (t *httpTest) teardown() error {
 func TestHttp(t *testing.T) {
 	for _, ts := range []struct {
 		name         string
-		auth         map[string]string
-		reqUsername  string
-		reqPassword  string
+		auth         auth.Config
+		setupRequest func(t *testing.T, req *http.Request)
 		codeOverride int
 	}{
 		{
-			name:        "BasicAuthCorrectCredentials",
-			auth:        map[string]string{"user": "pass"},
-			reqUsername: "user",
-			reqPassword: "pass",
+			name: "BasicAuthCorrectCredentials",
+			auth: auth.Config{
+				Provider: "basic",
+				Basic:    map[string]string{"user": "pass"},
+			},
+			setupRequest: func(_ *testing.T, req *http.Request) {
+				req.SetBasicAuth("user", "pass")
+			},
 		},
 		{
-			name:         "BasicAuthIncorrectCredentials",
-			auth:         map[string]string{"user": "pass"},
-			reqUsername:  "user",
-			reqPassword:  "notthepassword",
-			codeOverride: 401,
+			name: "BasicAuthIncorrectCredentials",
+			auth: auth.Config{
+				Provider: "basic",
+				Basic:    map[string]string{"user": "pass"},
+			},
+			setupRequest: func(_ *testing.T, req *http.Request) {
+				req.SetBasicAuth("user", "notthepassword")
+			},
+			codeOverride: http.StatusUnauthorized,
+		},
+		{
+			name: "JWTBearerCorrectToken",
+			auth: auth.Config{
+				Provider: "jwt",
+				JWT: auth.JWTConfig{
+					Algorithm: "HS256",
+					Issuer:    "resonate",
+					Audience:  []string{"resonate"},
+					Key:       "secret",
+				},
+			},
+			setupRequest: func(t *testing.T, req *http.Request) {
+				token := issueTestJWT(t, "secret", "resonate", []string{"resonate"}, "user")
+				req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", token))
+			},
+		},
+		{
+			name: "JWTBearerInvalidToken",
+			auth: auth.Config{
+				Provider: "jwt",
+				JWT: auth.JWTConfig{
+					Algorithm: "HS256",
+					Issuer:    "resonate",
+					Audience:  []string{"resonate"},
+					Key:       "secret",
+				},
+			},
+			setupRequest: func(_ *testing.T, req *http.Request) {
+				req.Header.Set("Authorization", "Bearer invalid")
+			},
+			codeOverride: http.StatusUnauthorized,
 		},
 	} {
 		// start the server
@@ -102,9 +143,8 @@ func TestHttp(t *testing.T) {
 						req.Header.Set(key, val)
 					}
 
-					// set authorization
-					if ts.auth != nil {
-						req.SetBasicAuth(ts.reqUsername, ts.reqPassword)
+					if ts.setupRequest != nil {
+						ts.setupRequest(t, req)
 					}
 
 					res, err := httpTest.client.Do(req)
@@ -144,4 +184,24 @@ func TestHttp(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func issueTestJWT(t *testing.T, secret, issuer string, audience []string, subject string) string {
+	t.Helper()
+
+	claims := jwt.RegisteredClaims{
+		Subject:   subject,
+		Issuer:    issuer,
+		Audience:  jwt.ClaimStrings(audience),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+		ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute)),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+
+	return signed
 }
