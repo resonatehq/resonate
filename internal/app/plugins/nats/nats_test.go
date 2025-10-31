@@ -217,9 +217,6 @@ func TestNATSEnqueue(t *testing.T) {
 	nats, _ := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1}, &MockNATSClient{})
 
 	assert.False(t, nats.Enqueue(nil))
-
-	nats.sq = nil
-	assert.False(t, nats.Enqueue(&aio.Message{}))
 }
 
 func TestWorkerProcessTimeout(t *testing.T) {
