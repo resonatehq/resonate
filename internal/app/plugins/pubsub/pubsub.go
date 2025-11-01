@@ -36,7 +36,7 @@ type ClientWrapper struct {
 }
 
 func (w *ClientWrapper) Publish(ctx context.Context, topic string, data []byte) (string, error) {
-	publisher := w.Client.Publisher(topic)
+	publisher := w.Publisher(topic)
 	result := publisher.Publish(ctx, &pubsub.Message{Data: data})
 	return result.Get(ctx)
 }
