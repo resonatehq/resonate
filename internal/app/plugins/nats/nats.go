@@ -40,7 +40,7 @@ type processor struct {
 	timeout time.Duration
 }
 
-func (p *processor) Process(body []byte, head map[string]string, data []byte) (bool, error) {
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
 	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
