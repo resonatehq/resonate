@@ -93,14 +93,14 @@ func TestPubSubBasics(t *testing.T) {
 func TestProcessorProcessing(t *testing.T) {
 	t.Run("ProcessInvalidJSON", func(t *testing.T) {
 		proc := &processor{timeout: 1 * time.Second}
-		success, err := proc.Process([]byte("test"), []byte("invalid"))
+		success, err := proc.Process([]byte("invalid"), nil, []byte("test"))
 		assert.False(t, success)
 		assert.Error(t, err)
 	})
 
 	t.Run("ProcessMissingTopic", func(t *testing.T) {
 		proc := &processor{timeout: 1 * time.Second}
-		success, err := proc.Process([]byte("test"), []byte(`{}`))
+		success, err := proc.Process([]byte(`{}`), nil, []byte("test"))
 		assert.False(t, success)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "missing topic")
@@ -108,7 +108,7 @@ func TestProcessorProcessing(t *testing.T) {
 
 	t.Run("ProcessEmptyTopic", func(t *testing.T) {
 		proc := &processor{timeout: 1 * time.Second}
-		success, err := proc.Process([]byte("test"), []byte(`{"topic":""}`))
+		success, err := proc.Process([]byte(`{"topic":""}`), nil, []byte("test"))
 		assert.False(t, success)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "missing topic")
@@ -116,7 +116,7 @@ func TestProcessorProcessing(t *testing.T) {
 
 	t.Run("ProcessMalformedJSON", func(t *testing.T) {
 		proc := &processor{timeout: 1 * time.Second}
-		success, err := proc.Process([]byte("test"), []byte(`{"topic":"test"`))
+		success, err := proc.Process([]byte(`{"topic":"test"`), nil, []byte("test"))
 		assert.False(t, success)
 		assert.Error(t, err)
 	})

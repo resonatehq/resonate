@@ -79,7 +79,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 	}, nil
 }
 
-func (p *processor) Process(body []byte, data []byte) (bool, error) {
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
 	var addr Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
