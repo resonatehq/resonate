@@ -107,6 +107,61 @@ func TestUrlParse(t *testing.T) {
 			recv: &receiver.Recv{Type: "sqs", Data: []byte(`{"url":"https://sqs.us-west-2.amazonaws.com/123456789012/my-queue_123-456"}`)},
 			ok:   true,
 		},
+		// nats scheme
+		{
+			name: "valid nats url",
+			url:  "nats:///my-queue",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"my-queue"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with nested subject name",
+			url:  "nats:///orders.processing.priority",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"orders.processing.priority"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with queue group subject",
+			url:  "nats:///workers.queue",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"workers.queue"}`)},
+			ok:   true,
+		},
+		{
+			name: "valid nats url with special characters in subject name",
+			url:  "nats:///my-queue_123-456",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"my-queue_123-456"}`)},
+			ok:   true,
+		},
+		{
+			name: "nats url with empty subject",
+			url:  "nats:///",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "nats url with missing subject",
+			url:  "nats://",
+			recv: nil,
+			ok:   false,
+		},
+		{
+			name: "nats url with wildcard subject",
+			url:  "nats:///orders.*",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"orders.*"}`)},
+			ok:   true,
+		},
+		{
+			name: "nats url with multi-level wildcard subject",
+			url:  "nats:///orders.>",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"orders.\u003e"}`)},
+			ok:   true,
+		},
+		{
+			name: "nats url with subject containing dots and slashes",
+			url:  "nats:///api/v1/orders.process",
+			recv: &receiver.Recv{Type: "nats", Data: []byte(`{"subject":"api/v1/orders.process"}`)},
+			ok:   true,
+		},
 		// unsupported scheme
 		{
 			name: "scheme must be http, https, poll, or sqs+https",
