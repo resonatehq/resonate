@@ -225,17 +225,15 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	var body []byte
 	var err error
 
-	mesgType := sqe.Submission.Sender.Task.Mesg.Type
-
-	if mesgType == message.Notify {
+	if sqe.Submission.Sender.Task.Mesg.Type == message.Notify {
 		util.Assert(sqe.Submission.Sender.Promise != nil, "promise must not be nil for a notify message")
 		body, err = json.Marshal(map[string]interface{}{
-			"type":    mesgType,
+			"type":    sqe.Submission.Sender.Task.Mesg.Type,
 			"promise": sqe.Submission.Sender.Promise,
 		})
 	} else {
 		body, err = json.Marshal(map[string]interface{}{
-			"type": mesgType,
+			"type": sqe.Submission.Sender.Task.Mesg.Type,
 			"task": sqe.Submission.Sender.Task,
 			"href": map[string]string{
 				"base":      sqe.Submission.Sender.BaseHref,
@@ -255,8 +253,9 @@ func (w *SenderWorker) Process(sqe *bus.SQE[t_aio.Submission, t_aio.Completion])
 	counter := w.metrics.AioInFlight.WithLabelValues(plugin.String())
 
 	ok := plugin.Enqueue(&aio.Message{
-		Type: mesgType,
+		Type: sqe.Submission.Sender.Task.Mesg.Type,
 		Addr: recv.Data,
+		Head: sqe.Submission.Sender.Task.Mesg.Head,
 		Body: body,
 		Done: func(completion *t_aio.SenderCompletion) {
 			cqe.Completion = &t_aio.Completion{

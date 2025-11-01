@@ -14,14 +14,14 @@ import (
 )
 
 type MockProcessor struct {
-	process func(body, addr []byte) (bool, error)
+	process func(addr []byte, head map[string]string, body []byte) (bool, error)
 	count   int
 }
 
-func (m *MockProcessor) Process(body, addr []byte) (bool, error) {
+func (m *MockProcessor) Process(addr []byte, head map[string]string, body []byte) (bool, error) {
 	m.count++
 	if m.process != nil {
-		return m.process(body, addr)
+		return m.process(addr, head, body)
 	}
 	return true, nil
 }
@@ -156,9 +156,10 @@ func TestWorkerProcessing(t *testing.T) {
 
 	t.Run("SuccessfulProcessing", func(t *testing.T) {
 		proc := &MockProcessor{
-			process: func(body, addr []byte) (bool, error) {
-				assert.Equal(t, []byte("test body"), body)
+			process: func(addr []byte, head map[string]string, body []byte) (bool, error) {
 				assert.Equal(t, []byte("test addr"), addr)
+				assert.Equal(t, []byte("test body"), body)
+				assert.Equal(t, map[string]string{"foo": "bar"}, head)
 				return true, nil
 			},
 		}
@@ -172,6 +173,7 @@ func TestWorkerProcessing(t *testing.T) {
 		done := make(chan bool, 1)
 		msg := &aio.Message{
 			Addr: []byte("test addr"),
+			Head: map[string]string{"foo": "bar"},
 			Body: []byte("test body"),
 			Done: func(c *t_aio.SenderCompletion) {
 				assert.True(t, c.Success)
@@ -195,7 +197,7 @@ func TestWorkerProcessing(t *testing.T) {
 
 	t.Run("FailedProcessing", func(t *testing.T) {
 		proc := &MockProcessor{
-			process: func(body, addr []byte) (bool, error) {
+			process: func(addr []byte, head map[string]string, body []byte) (bool, error) {
 				return false, errors.New("processing failed")
 			},
 		}

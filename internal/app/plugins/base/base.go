@@ -19,7 +19,7 @@ type BaseConfig struct {
 }
 
 type Processor interface {
-	Process(body []byte, addr []byte) (bool, error)
+	Process(addr []byte, head map[string]string, body []byte) (bool, error)
 }
 
 type Worker struct {
@@ -117,7 +117,7 @@ func (w *Worker) Start() {
 		}
 
 		counter.Inc()
-		success, err := w.processor.Process(msg.Body, msg.Addr)
+		success, err := w.processor.Process(msg.Addr, msg.Head, msg.Body)
 		if err != nil {
 			slog.Warn("failed to process message", "plugin", w.name, "err", err)
 		}
