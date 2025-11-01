@@ -8,7 +8,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
@@ -81,8 +80,10 @@ func TestPubSubBasics(t *testing.T) {
 
 	t.Run("ConfigValidation", func(t *testing.T) {
 		_, err := New(nil, metrics, &Config{
-			BaseConfig: base.BaseConfig{Size: 10, Workers: 2, Timeout: 1 * time.Second},
-			ProjectID:  "",
+			Size:      10,
+			Workers:   2,
+			Timeout:   1 * time.Second,
+			ProjectID: "",
 		})
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "GCP project ID is required")
@@ -123,10 +124,8 @@ func TestProcessorProcessing(t *testing.T) {
 
 func TestCompletionValues(t *testing.T) {
 	config := &Config{
-		BaseConfig: base.BaseConfig{
-			TimeToRetry: 15 * time.Second,
-			TimeToClaim: 60 * time.Second,
-		},
+		TimeToRetry: 15 * time.Second,
+		TimeToClaim: 60 * time.Second,
 	}
 
 	assert.Equal(t, int64(15000), config.TimeToRetry.Milliseconds())

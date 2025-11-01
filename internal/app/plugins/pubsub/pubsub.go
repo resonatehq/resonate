@@ -14,8 +14,12 @@ import (
 )
 
 type Config struct {
-	base.BaseConfig
-	ProjectID string `flag:"project-id" desc:"GCP project ID" default:""`
+	Size        int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"4"`
+	Timeout     time.Duration `flag:"timeout" desc:"request timeout" default:"30s"`
+	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
+	ProjectID   string        `flag:"project-id" desc:"GCP project ID" default:""`
 }
 
 type PubSub struct {
@@ -48,10 +52,17 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 		timeout: config.Timeout,
 	}
 
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
 	plugin := base.NewPlugin(
 		a,
 		"pubsub",
-		&config.BaseConfig,
+		baseConfig,
 		metrics,
 		proc,
 		func() error {

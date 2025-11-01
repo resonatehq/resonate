@@ -14,7 +14,6 @@ import (
 type BaseConfig struct {
 	Size        int           `flag:"size" desc:"submission buffered channel size" default:"1000"`
 	Workers     int           `flag:"workers" desc:"number of workers" default:"4"`
-	Timeout     time.Duration `flag:"timeout" desc:"request timeout" default:"30s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
