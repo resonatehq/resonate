@@ -106,6 +106,8 @@ func (s *server) searchPromises(c *gin.Context) {
 
 type createPromiseHeader struct {
 	RequestId      string           `header:"request-id"`
+	Traceparent    string           `header:"traceparent"`
+	Tracestate     string           `header:"tracestate"`
 	IdempotencyKey *idempotency.Key `header:"idempotency-key"`
 	Strict         bool             `header:"strict"`
 	TaskId         string           `header:"task-id"`
@@ -144,8 +146,17 @@ func (s *server) createPromise(c *gin.Context) {
 		}
 	}
 
+	metadata := map[string]string{}
+	if header.Traceparent != "" {
+		metadata["traceparent"] = header.Traceparent
+		if header.Tracestate != "" {
+			metadata["tracestate"] = header.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
-		Fence: fence,
+		Metadata: metadata,
+		Fence:    fence,
 		Payload: &t_api.CreatePromiseRequest{
 			Id:             body.Id,
 			IdempotencyKey: header.IdempotencyKey,
@@ -190,7 +201,16 @@ func (s *server) createPromiseAndTask(c *gin.Context) {
 		return
 	}
 
+	metadata := map[string]string{}
+	if header.Traceparent != "" {
+		metadata["traceparent"] = header.Traceparent
+		if header.Tracestate != "" {
+			metadata["tracestate"] = header.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.CreatePromiseAndTaskRequest{
 			Promise: &t_api.CreatePromiseRequest{
 				Id:             body.Promise.Id,
@@ -286,6 +306,8 @@ func (s *server) completePromise(c *gin.Context) {
 
 type createCallbackHeader struct {
 	RequestId   string `header:"request-id"`
+	Traceparent string `header:"traceparent"`
+	Tracestate  string `header:"tracestate"`
 	TaskId      string `header:"task-id"`
 	TaskCounter int64  `header:"task-counter"`
 }
@@ -319,6 +341,14 @@ func (s *server) createCallback(c *gin.Context) {
 		body.PromiseId = extractId(c.Param("id"))
 	}
 
+	head := map[string]string{}
+	if header.Traceparent != "" {
+		head["traceparent"] = header.Traceparent
+		if header.Tracestate != "" {
+			head["tracestate"] = header.Tracestate
+		}
+	}
+
 	var fence *task.FencingToken
 	if header.TaskId != "" {
 		fence = &task.FencingToken{
@@ -333,7 +363,7 @@ func (s *server) createCallback(c *gin.Context) {
 			Id:        util.ResumeId(body.RootPromiseId, body.PromiseId),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
-			Mesg:      &message.Mesg{Type: "resume", Root: body.RootPromiseId, Leaf: body.PromiseId},
+			Mesg:      &message.Mesg{Type: "resume", Head: head, Root: body.RootPromiseId, Leaf: body.PromiseId},
 			Timeout:   body.Timeout,
 		},
 	})
@@ -352,7 +382,9 @@ func (s *server) createCallback(c *gin.Context) {
 // Subscribe
 
 type createSubscriptionHeader struct {
-	RequestId string `header:"request-id"`
+	RequestId   string `header:"request-id"`
+	Traceparent string `header:"traceparent"`
+	Tracestate  string `header:"tracestate"`
 }
 
 type createSubscriptionBody struct {
@@ -384,12 +416,20 @@ func (s *server) createSubscription(c *gin.Context) {
 		body.PromiseId = extractId(c.Param("id"))
 	}
 
+	head := map[string]string{}
+	if header.Traceparent != "" {
+		head["traceparent"] = header.Traceparent
+		if header.Tracestate != "" {
+			head["tracestate"] = header.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(header.RequestId, &t_api.Request{
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.NotifyId(body.PromiseId, body.Id),
 			PromiseId: body.PromiseId,
 			Recv:      body.Recv,
-			Mesg:      &message.Mesg{Type: "notify", Root: body.PromiseId},
+			Mesg:      &message.Mesg{Type: "notify", Head: head, Root: body.PromiseId},
 			Timeout:   body.Timeout,
 		},
 	})

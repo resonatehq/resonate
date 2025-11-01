@@ -73,7 +73,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           codecov_yml_path: codecov.yml
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() }}
         with:
           name: dst-results
@@ -148,7 +148,7 @@ jobs:
         run: |
           ./dpth verify -r 1000 -c 10
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: ${{ always() }}
         with:
           name: test-harness-results

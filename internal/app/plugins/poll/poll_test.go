@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -60,6 +61,24 @@ func TestPollPlugin(t *testing.T) {
 				{"foo", []string{"a", "b"}, "data: ok1"},
 				{"foo", []string{"a", "b"}, "data: ok2"},
 				{"foo", []string{"a", "b"}, "data: ok3"},
+			},
+		},
+		{
+			name: "SameGroupWithHeaders",
+			mc:   5,
+			connections: []*Conn{
+				{"foo", "a"},
+				{"foo", "b"},
+			},
+			messages: []*Mesg{
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"foo": "bar"}, Body: []byte(`{"body": "ok1"}`)}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"baz": "qux"}, Body: []byte(`{"body": "ok2"}`)}},
+				{true, &aio.Message{Addr: []byte(`{"cast":"any","group":"foo","id":"c"}`), Head: map[string]string{"foo": "bar", "baz": "qux"}, Body: []byte(`{"body": "ok3"}`)}},
+			},
+			expected: []*Resp{
+				{"foo", []string{"a", "b"}, `data: {"body":"ok1","head":{"foo":"bar"}}`},
+				{"foo", []string{"a", "b"}, `data: {"body":"ok2","head":{"baz":"qux"}}`},
+				{"foo", []string{"a", "b"}, `data: {"body":"ok3","head":{"baz":"qux","foo":"bar"}}`},
 			},
 		},
 		{
@@ -321,7 +340,7 @@ func TestPollPlugin(t *testing.T) {
 			for mesg := range backchannel {
 				assert.Condition(t, func() bool {
 					for i, expected := range tc.expected {
-						if mesg.group == expected.group && contains(expected.id, mesg.id) && mesg.data == expected.data {
+						if mesg.group == expected.group && slices.Contains(expected.id, mesg.id) && mesg.data == expected.data {
 							// remove from expected
 							tc.expected = append(tc.expected[:i], tc.expected[i+1:]...)
 							return true
@@ -394,15 +413,6 @@ func TestPollPluginAuth(t *testing.T) {
 	for err := range errors {
 		assert.Fail(t, err.Error())
 	}
-}
-
-func contains[T comparable](arr []T, val T) bool {
-	for _, v := range arr {
-		if v == val {
-			return true
-		}
-	}
-	return false
 }
 
 func unique(conns []*Conn) int {

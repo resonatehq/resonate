@@ -4,24 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	awstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 
 	"github.com/resonatehq/resonate/internal/aio"
-	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
 )
 
 type Config struct {
 	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
 	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout     time.Duration `flag:"timeout" desc:"aws request timeout" default:"30s"`
+	Timeout     time.Duration `flag:"timeout" desc:"request timeout" default:"30s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"0"`
 }
@@ -30,24 +30,55 @@ type Client interface {
 	SendMessage(ctx context.Context, params *sqs.SendMessageInput, opt ...func(*sqs.Options)) (*sqs.SendMessageOutput, error)
 }
 
-type Worker struct {
-	i       int
-	sq      <-chan *aio.Message
-	timeout time.Duration
-	aio     aio.AIO
-	metrics *metrics.Metrics
-	config  *Config
-	client  Client
-}
-
 type SQS struct {
-	sq      chan *aio.Message
-	workers []*Worker
+	*base.Plugin
 }
 
 type Addr struct {
 	Url    string  `json:"url"`
 	Region *string `json:"region,omitempty"`
+}
+
+type processor struct {
+	client  Client
+	timeout time.Duration
+}
+
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
+	var addr *Addr
+	if err := json.Unmarshal(data, &addr); err != nil {
+		return false, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	msgBody := string(body)
+	msgAttrs := map[string]awstypes.MessageAttributeValue{}
+
+	for k, v := range head { // nosemgrep: range-over-map
+		msgAttrs[k] = awstypes.MessageAttributeValue{
+			DataType:    aws.String("String"),
+			StringValue: aws.String(v),
+		}
+	}
+
+	_, err := p.client.SendMessage(ctx, &sqs.SendMessageInput{
+		QueueUrl:          &addr.Url,
+		MessageBody:       &msgBody,
+		MessageAttributes: msgAttrs,
+	}, func(o *sqs.Options) {
+		if addr.Region != nil {
+			o.Region = *addr.Region
+		} else if region, ok := parseSQSRegion(addr.Url); ok {
+			o.Region = region
+		}
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
@@ -61,112 +92,23 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*SQS, error) {
 }
 
 func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*SQS, error) {
-	sq := make(chan *aio.Message, config.Size)
-	workers := make([]*Worker, config.Workers)
-
-	for i := 0; i < config.Workers; i++ {
-		workers[i] = &Worker{
-			i:       i,
-			sq:      sq,
-			timeout: config.Timeout,
-			aio:     a,
-			metrics: metrics,
-			config:  config,
-			client:  client,
-		}
+	proc := &processor{
+		client:  client,
+		timeout: config.Timeout,
 	}
+
+	baseConfig := &base.BaseConfig{
+		Size:        config.Size,
+		Workers:     config.Workers,
+		TimeToRetry: config.TimeToRetry,
+		TimeToClaim: config.TimeToClaim,
+	}
+
+	plugin := base.NewPlugin(a, "sqs", baseConfig, metrics, proc, nil)
 
 	return &SQS{
-		sq:      sq,
-		workers: workers,
+		Plugin: plugin,
 	}, nil
-}
-
-func (s *SQS) String() string {
-	return fmt.Sprintf("%s:sqs", t_aio.Sender.String())
-}
-
-func (s *SQS) Type() string {
-	return "sqs"
-}
-
-func (s *SQS) Start(chan<- error) error {
-	for _, worker := range s.workers {
-		go worker.Start()
-	}
-
-	return nil
-}
-
-func (s *SQS) Stop() error {
-	close(s.sq)
-	return nil
-}
-
-func (s *SQS) Enqueue(msg *aio.Message) bool {
-	select {
-	case s.sq <- msg:
-		return true
-	default:
-		return false
-	}
-}
-
-func (w *Worker) String() string {
-	return fmt.Sprintf("%s:sqs", t_aio.Sender.String())
-}
-
-func (w *Worker) Start() {
-	counter := w.metrics.AioWorkerInFlight.WithLabelValues(w.String(), strconv.Itoa(w.i))
-	w.metrics.AioWorker.WithLabelValues(w.String()).Inc()
-	defer w.metrics.AioWorker.WithLabelValues(w.String()).Dec()
-
-	for {
-		msg, ok := <-w.sq
-		if !ok {
-			return
-		}
-
-		counter.Inc()
-		success, err := w.Process(msg.Addr, msg.Body)
-		if err != nil {
-			slog.Warn("failed to send task", "err", err)
-		}
-
-		msg.Done(&t_aio.SenderCompletion{
-			Success:     success,
-			TimeToRetry: w.config.TimeToRetry.Milliseconds(),
-			TimeToClaim: w.config.TimeToClaim.Milliseconds(),
-		})
-		counter.Dec()
-	}
-}
-
-func (w *Worker) Process(data []byte, body []byte) (bool, error) {
-	var addr *Addr
-	if err := json.Unmarshal(data, &addr); err != nil {
-		return false, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
-	defer cancel()
-
-	msg := string(body)
-	_, err := w.client.SendMessage(ctx, &sqs.SendMessageInput{
-		QueueUrl:    &addr.Url,
-		MessageBody: &msg,
-	}, func(o *sqs.Options) {
-		if addr.Region != nil {
-			o.Region = *addr.Region
-		} else if region, ok := parseSQSRegion(addr.Url); ok {
-			o.Region = region
-		}
-	})
-	if err != nil {
-		return false, err
-	}
-
-	return true, nil
 }
 
 func parseSQSRegion(sqsUrl string) (string, bool) {

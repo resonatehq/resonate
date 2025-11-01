@@ -345,6 +345,39 @@ func (w *PollWorker) Process(mesg *aio.Message) {
 		return
 	}
 
+	if mesg.Head != nil {
+		var body map[string]any
+		var err error
+
+		// sse does not support headers per se, so we need to include them in the body
+		if err = json.Unmarshal(mesg.Body, &body); err != nil {
+			slog.Warn("failed to parse message body", "err", err)
+
+			mesg.Done(&t_aio.SenderCompletion{
+				Success:     false,
+				TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+				TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+			})
+			return
+		}
+
+		// add head to body
+		body["head"] = mesg.Head
+
+		// and back to bytes
+		mesg.Body, err = json.Marshal(body)
+		if err != nil {
+			slog.Warn("failed to marshal message body", "err", err)
+
+			mesg.Done(&t_aio.SenderCompletion{
+				Success:     false,
+				TimeToRetry: w.config.TimeToRetry.Milliseconds(),
+				TimeToClaim: w.config.TimeToClaim.Milliseconds(),
+			})
+			return
+		}
+	}
+
 	// send message to connection
 	select {
 	case conn.ch <- mesg.Body:
