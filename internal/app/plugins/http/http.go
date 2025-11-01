@@ -32,7 +32,7 @@ type processor struct {
 	client *http.Client
 }
 
-func (p *processor) Process(body []byte, data []byte) (bool, error) {
+func (p *processor) Process(data []byte, head map[string]string, body []byte) (bool, error) {
 	var addr *Addr
 	if err := json.Unmarshal(data, &addr); err != nil {
 		return false, err
@@ -45,6 +45,10 @@ func (p *processor) Process(body []byte, data []byte) (bool, error) {
 
 	if addr.Headers == nil {
 		addr.Headers = map[string]string{}
+	}
+
+	for k, v := range head { // nosemgrep: range-over-map
+		req.Header.Set(k, v)
 	}
 
 	for k, v := range addr.Headers { // nosemgrep: range-over-map
