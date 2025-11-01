@@ -1,76 +1,122 @@
 package pubsub
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/stretchr/testify/assert"
-
+	"github.com/resonatehq/resonate/internal/aio"
+	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/stretchr/testify/assert"
 )
 
+type MockPubSubClient struct {
+	ch chan<- *request
+	ok bool
+}
+
+type request struct {
+	topic string
+	body  []byte
+}
+
+func (m *MockPubSubClient) Publish(ctx context.Context, topic string, data []byte) (string, error) {
+	if !m.ok {
+		return "", errors.New("mock error: failed to publish message")
+	}
+	m.ch <- &request{topic: topic, body: data}
+	return "test-message-id", nil
+}
+
+func (m *MockPubSubClient) Close() error {
+	return nil
+}
+
 func TestPubSubPlugin(t *testing.T) {
-	tests := []struct {
-		name           string
-		addr           []byte
-		expect_success bool
-		expected_topic string
+	metrics := metrics.New(prometheus.NewRegistry())
+
+	ch := make(chan *request, 1)
+	defer close(ch)
+
+	successClient := &MockPubSubClient{ch, true}
+	failureClient := &MockPubSubClient{ch, false}
+
+	for _, tc := range []struct {
+		name    string
+		addr    []byte
+		client  *MockPubSubClient
+		success bool
+		request *request
 	}{
 		{
-			name:           "Success",
-			addr:           []byte(`{"topic": "test-topic"}`),
-			expect_success: false,
-			expected_topic: "test-topic",
+			name:    "Success",
+			addr:    []byte(`{"topic": "test-topic"}`),
+			client:  successClient,
+			success: true,
+			request: &request{
+				topic: "test-topic",
+				body:  []byte("test message"),
+			},
 		},
 		{
-			name:           "SuccessWithDifferentTopic",
-			addr:           []byte(`{"topic": "orders-topic"}`),
-			expect_success: false,
-			expected_topic: "orders-topic",
+			name:    "SuccessWithDifferentTopic",
+			addr:    []byte(`{"topic": "orders-topic"}`),
+			client:  successClient,
+			success: true,
+			request: &request{
+				topic: "orders-topic",
+				body:  []byte("test message"),
+			},
 		},
 		{
-			name:           "SuccessWithComplexTopic",
-			addr:           []byte(`{"topic": "projects/my-project/topics/my-topic"}`),
-			expect_success: false,
-			expected_topic: "projects/my-project/topics/my-topic",
+			name:    "FailureDueToJson",
+			addr:    []byte(""),
+			client:  successClient,
+			success: false,
 		},
 		{
-			name:           "FailureDueToJson",
-			addr:           []byte(""),
-			expect_success: false,
+			name:    "FailureDueToMissingTopic",
+			addr:    []byte(`{}`),
+			client:  successClient,
+			success: false,
 		},
 		{
-			name:           "FailureDueToMissingTopic",
-			addr:           []byte(`{}`),
-			expect_success: false,
+			name:    "FailureDueToClient",
+			addr:    []byte(`{"topic": "test-topic"}`),
+			client:  failureClient,
+			success: false,
 		},
-		{
-			name:           "FailureDueToEmptyTopic",
-			addr:           []byte(`{"topic": ""}`),
-			expect_success: false,
-		},
-		{
-			name:           "FailureDueToMalformedJSON",
-			addr:           []byte(`{"topic": "test-topic"`),
-			expect_success: false,
-		},
-	}
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pubsub, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, tc.client)
+			assert.Nil(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var addr Addr
-			err := json.Unmarshal(tt.addr, &addr)
+			err = pubsub.Start(nil)
+			assert.Nil(t, err)
 
-			if tt.expected_topic != "" {
-				assert.Nil(t, err, "JSON should parse correctly")
-				assert.Equal(t, tt.expected_topic, addr.Topic)
-			} else {
-				if err == nil {
-					assert.Empty(t, addr.Topic, "Topic should be empty for invalid cases")
-				}
+			ok := pubsub.Enqueue(&aio.Message{
+				Addr: tc.addr,
+				Head: map[string]string{
+					"foo": "bar",
+					"baz": "qux",
+				},
+				Body: []byte("test message"),
+				Done: func(completion *t_aio.SenderCompletion) {
+					assert.Equal(t, tc.success, completion.Success)
+				},
+			})
+
+			assert.True(t, ok)
+
+			if tc.success {
+				assert.Equal(t, tc.request, <-ch)
 			}
+
+			err = pubsub.Stop()
+			assert.Nil(t, err)
 		})
 	}
 }
@@ -122,71 +168,12 @@ func TestProcessorProcessing(t *testing.T) {
 	})
 }
 
-func TestCompletionValues(t *testing.T) {
-	config := &Config{
-		TimeToRetry: 15 * time.Second,
-		TimeToClaim: 60 * time.Second,
-	}
+func TestPubSubWithNilClient(t *testing.T) {
+	metrics := metrics.New(prometheus.NewRegistry())
 
-	assert.Equal(t, int64(15000), config.TimeToRetry.Milliseconds())
-	assert.Equal(t, int64(60000), config.TimeToClaim.Milliseconds())
-}
+	pubsub, err := NewWithClient(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute}, nil)
+	assert.Nil(t, err)
 
-func TestAddrParsing(t *testing.T) {
-	tests := []struct {
-		name       string
-		json       string
-		want_topic string
-		want_err   bool
-	}{
-		{
-			name:       "SimpleTopic",
-			json:       `{"topic":"my-topic"}`,
-			want_topic: "my-topic",
-			want_err:   false,
-		},
-		{
-			name:       "TopicWithHyphens",
-			json:       `{"topic":"my-topic-name"}`,
-			want_topic: "my-topic-name",
-			want_err:   false,
-		},
-		{
-			name:       "FullTopicPath",
-			json:       `{"topic":"projects/my-project/topics/my-topic"}`,
-			want_topic: "projects/my-project/topics/my-topic",
-			want_err:   false,
-		},
-		{
-			name:     "EmptyTopic",
-			json:     `{"topic":""}`,
-			want_err: false,
-		},
-		{
-			name:     "MissingTopic",
-			json:     `{}`,
-			want_err: false,
-		},
-		{
-			name:     "InvalidJSON",
-			json:     `{invalid}`,
-			want_err: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var addr Addr
-			err := json.Unmarshal([]byte(tt.json), &addr)
-
-			if tt.want_err {
-				assert.Error(t, err)
-			} else {
-				assert.Nil(t, err)
-				if tt.want_topic != "" {
-					assert.Equal(t, tt.want_topic, addr.Topic)
-				}
-			}
-		})
-	}
+	err = pubsub.Stop()
+	assert.Nil(t, err)
 }

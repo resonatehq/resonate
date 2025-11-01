@@ -24,11 +24,25 @@ type Config struct {
 
 type PubSub struct {
 	*base.Plugin
-	client *pubsub.Client
+}
+
+type Client interface {
+	Publish(ctx context.Context, topic string, data []byte) (string, error)
+	Close() error
+}
+
+type clientWrapper struct {
+	*pubsub.Client
+}
+
+func (w *clientWrapper) Publish(ctx context.Context, topic string, data []byte) (string, error) {
+	publisher := w.Client.Publisher(topic)
+	result := publisher.Publish(ctx, &pubsub.Message{Data: data})
+	return result.Get(ctx)
 }
 
 type processor struct {
-	client  *pubsub.Client
+	client  Client
 	timeout time.Duration
 }
 
@@ -47,6 +61,11 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 		return nil, fmt.Errorf("failed to create Pub/Sub client: %w", err)
 	}
 
+	wrapper := &clientWrapper{client}
+	return NewWithClient(a, metrics, config, wrapper)
+}
+
+func NewWithClient(a aio.AIO, metrics *metrics.Metrics, config *Config, client Client) (*PubSub, error) {
 	proc := &processor{
 		client:  client,
 		timeout: config.Timeout,
@@ -59,23 +78,15 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 		TimeToClaim: config.TimeToClaim,
 	}
 
-	plugin := base.NewPlugin(
-		a,
-		"pubsub",
-		baseConfig,
-		metrics,
-		proc,
-		func() error {
-			if client != nil {
-				return client.Close()
-			}
-			return nil
-		},
-	)
+	plugin := base.NewPlugin(a, "pubsub", baseConfig, metrics, proc, func() error {
+		if client != nil {
+			return client.Close()
+		}
+		return nil
+	})
 
 	return &PubSub{
 		Plugin: plugin,
-		client: client,
 	}, nil
 }
 
@@ -92,10 +103,7 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
-	publisher := p.client.Publisher(addr.Topic)
-	result := publisher.Publish(ctx, &pubsub.Message{Data: body})
-
-	_, err := result.Get(ctx)
+	_, err := p.client.Publish(ctx, addr.Topic, body)
 	if err != nil {
 		return false, err
 	}
