@@ -80,7 +80,16 @@ func (s *server) CreatePromise(c context.Context, r *pb.CreatePromiseRequest) (*
 		data = r.Param.Data
 	}
 
+	metadata := map[string]string{}
+	if r.Traceparent != "" {
+		metadata["traceparent"] = r.Traceparent
+		if r.Tracestate != "" {
+			metadata["tracestate"] = r.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.CreatePromiseRequest{
 			Id:             r.Id,
 			IdempotencyKey: idempotencyKey,
@@ -127,7 +136,16 @@ func (s *server) CreatePromiseAndTask(c context.Context, r *pb.CreatePromiseAndT
 		data = r.Promise.Param.Data
 	}
 
+	metadata := map[string]string{}
+	if r.Promise.Traceparent != "" {
+		metadata["traceparent"] = r.Promise.Traceparent
+		if r.Promise.Tracestate != "" {
+			metadata["tracestate"] = r.Promise.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(r.Promise.RequestId, &t_api.Request{
+		Metadata: metadata,
 		Payload: &t_api.CreatePromiseAndTaskRequest{
 			Promise: &t_api.CreatePromiseRequest{
 				Id:             r.Promise.Id,
@@ -266,12 +284,20 @@ func (s *server) CreateCallback(c context.Context, r *pb.CreateCallbackRequest) 
 		return nil, rErr
 	}
 
+	head := map[string]string{}
+	if r.Traceparent != "" {
+		head["traceparent"] = r.Traceparent
+		if r.Tracestate != "" {
+			head["tracestate"] = r.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.ResumeId(r.RootPromiseId, r.PromiseId),
 			PromiseId: r.PromiseId,
 			Recv:      recv,
-			Mesg:      &message.Mesg{Type: "resume", Root: r.RootPromiseId, Leaf: r.PromiseId},
+			Mesg:      &message.Mesg{Type: "resume", Head: head, Root: r.RootPromiseId, Leaf: r.PromiseId},
 			Timeout:   r.Timeout,
 		},
 	})
@@ -293,12 +319,20 @@ func (s *server) CreateSubscription(c context.Context, r *pb.CreateSubscriptionR
 		return nil, rErr
 	}
 
+	head := map[string]string{}
+	if r.Traceparent != "" {
+		head["traceparent"] = r.Traceparent
+		if r.Tracestate != "" {
+			head["tracestate"] = r.Tracestate
+		}
+	}
+
 	res, err := s.api.Process(r.RequestId, &t_api.Request{
 		Payload: &t_api.CreateCallbackRequest{
 			Id:        util.NotifyId(r.PromiseId, r.Id),
 			PromiseId: r.PromiseId,
 			Recv:      recv,
-			Mesg:      &message.Mesg{Type: "notify", Root: r.PromiseId},
+			Mesg:      &message.Mesg{Type: "notify", Head: head, Root: r.PromiseId},
 			Timeout:   r.Timeout,
 		},
 	})

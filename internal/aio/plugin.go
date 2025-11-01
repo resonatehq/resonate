@@ -8,6 +8,7 @@ import (
 type Message struct {
 	Type message.Type
 	Addr []byte
+	Head map[string]string
 	Body []byte
 	Done func(*t_aio.SenderCompletion)
 }

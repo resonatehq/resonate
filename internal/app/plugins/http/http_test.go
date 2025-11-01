@@ -16,20 +16,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+type request struct {
+	head map[string][]string
+	body []byte
+}
+
 func TestHttpPlugin(t *testing.T) {
 	// create a backchannel
-	ch := make(chan []byte, 1)
+	ch := make(chan *request, 1)
 	defer close(ch)
 
 	// start a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		b, err := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// send the request to the backchannel
-		ch <- b
+		ch <- &request{r.Header, body}
 
 		switch r.URL.Path {
 		case "/ok":
@@ -66,14 +71,18 @@ func TestHttpPlugin(t *testing.T) {
 
 			ok := http.Enqueue(&aio.Message{
 				Addr: data,
+				Head: map[string]string{"foo": "bar", "baz": "qux"},
 				Body: []byte("ok"),
 				Done: func(completion *t_aio.SenderCompletion) {
 					assert.Equal(t, tc.success, completion.Success)
 				},
 			})
 
+			res := <-ch
 			assert.True(t, ok)
-			assert.Equal(t, []byte("ok"), <-ch)
+			assert.Equal(t, []string{"bar"}, res.head["Foo"])
+			assert.Equal(t, []string{"qux"}, res.head["Baz"])
+			assert.Equal(t, []byte("ok"), res.body)
 
 			err = http.Stop()
 			assert.Nil(t, err)
