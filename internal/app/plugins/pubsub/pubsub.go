@@ -31,11 +31,11 @@ type Client interface {
 	Close() error
 }
 
-type clientWrapper struct {
+type ClientWrapper struct {
 	*pubsub.Client
 }
 
-func (w *clientWrapper) Publish(ctx context.Context, topic string, data []byte) (string, error) {
+func (w *ClientWrapper) Publish(ctx context.Context, topic string, data []byte) (string, error) {
 	publisher := w.Client.Publisher(topic)
 	result := publisher.Publish(ctx, &pubsub.Message{Data: data})
 	return result.Get(ctx)
@@ -61,7 +61,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*PubSub, error) {
 		return nil, fmt.Errorf("failed to create Pub/Sub client: %w", err)
 	}
 
-	wrapper := &clientWrapper{client}
+	wrapper := &ClientWrapper{client}
 	return NewWithClient(a, metrics, config, wrapper)
 }
 
