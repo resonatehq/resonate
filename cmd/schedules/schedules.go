@@ -23,15 +23,15 @@ func NewCmd() *cobra.Command {
 		Use:     "schedules",
 		Aliases: []string{"schedule"},
 		Short:   "Resonate schedules",
-		Run: func(cmd *cobra.Command, args []string) {
-			_ = cmd.Help()
-		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
 
 			return c.Setup(server)
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
 		},
 	}
 
