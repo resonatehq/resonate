@@ -505,11 +505,11 @@ export class InnerContext implements Context {
   }
 
   readonly date = {
-    now: () => this.lfc(() => (this.getDependency<DateConstructor>("resonate:date") ?? Date).now()),
+    now: () => this.lfc((this.getDependency<DateConstructor>("resonate:date") ?? Date).now),
   };
 
   readonly math = {
-    random: () => this.lfc(() => (this.getDependency<Math>("resonate:math") ?? Math).random()),
+    random: () => this.lfc((this.getDependency<Math>("resonate:math") ?? Math).random),
   };
 
   localCreateReq(data: any, opts: Options): CreatePromiseReq {
