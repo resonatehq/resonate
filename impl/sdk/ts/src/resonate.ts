@@ -462,8 +462,10 @@ export class Resonate {
         },
         tags: {
           ...opts.tags,
-          "resonate:invoke": this.anycastPreference,
+          "resonate:root": id,
+          "resonate:parent": id,
           "resonate:scope": "global",
+          "resonate:invoke": this.anycastPreference,
         },
       },
       task: {
@@ -575,7 +577,13 @@ export class Resonate {
           version: registered ? registered.version : opts.version || 1,
         },
       },
-      tags: { ...opts.tags, "resonate:invoke": opts.target, "resonate:scope": "global" },
+      tags: {
+        ...opts.tags,
+        "resonate:root": id,
+        "resonate:parent": id,
+        "resonate:scope": "global",
+        "resonate:invoke": opts.target,
+      },
       iKey: id,
       strict: false,
     });

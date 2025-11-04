@@ -335,14 +335,15 @@ export class InnerContext implements Context {
     }
 
     const func = registered ? registered.func : (funcOrName as Func);
+    const version = registered ? registered.version : 1;
 
     return new LFI(
       opts.id,
       func,
       argu,
-      registered ? registered.version : 1,
+      version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq(opts),
+      this.localCreateReq({ func: func.name, version }, opts),
     );
   }
 
@@ -364,14 +365,15 @@ export class InnerContext implements Context {
     }
 
     const func = registered ? registered.func : (funcOrName as Func);
+    const version = registered ? registered.version : 1;
 
     return new LFC(
       opts.id,
       func,
       argu,
-      registered ? registered.version : 1,
+      version,
       opts.retryPolicy ?? (util.isGeneratorFunction(func) ? new Never() : new Exponential()),
-      this.localCreateReq(opts),
+      this.localCreateReq({ func: func.name, version }, opts),
     );
   }
 
@@ -395,7 +397,7 @@ export class InnerContext implements Context {
     const data = {
       func: registered ? registered.name : (funcOrName as string),
       args: argu,
-      version: opts.version,
+      version: registered ? registered.version : opts.version || 1,
     };
 
     return new RFI(opts.id, this.remoteCreateReq(data, opts));
@@ -421,7 +423,7 @@ export class InnerContext implements Context {
     const data = {
       func: registered ? registered.name : (funcOrName as string),
       args: argu,
-      version: opts.version,
+      version: registered ? registered.version : opts.version || 1,
     };
 
     return new RFC(opts.id, this.remoteCreateReq(data, opts));
@@ -447,7 +449,7 @@ export class InnerContext implements Context {
     const data = {
       func: registered ? registered.name : (funcOrName as string),
       args: argu,
-      version: opts.version,
+      version: registered ? registered.version : opts.version || 1,
     };
 
     return new RFI(opts.id, this.remoteCreateReq(data, opts, Number.MAX_SAFE_INTEGER), "detached");
@@ -510,11 +512,11 @@ export class InnerContext implements Context {
     random: () => this.lfc(() => (this.getDependency<Math>("resonate:math") ?? Math).random()),
   };
 
-  localCreateReq(opts: Options): CreatePromiseReq {
+  localCreateReq(data: any, opts: Options): CreatePromiseReq {
     const tags = {
       "resonate:scope": "local",
       "resonate:root": this.rId,
-      "resonate:parent": this.pId,
+      "resonate:parent": this.id,
       ...opts.tags,
     };
 
@@ -525,7 +527,7 @@ export class InnerContext implements Context {
       kind: "createPromise",
       id: opts.id,
       timeout: timeout,
-      param: {},
+      param: { data },
       tags,
       iKey: opts.id,
       strict: false,
@@ -537,7 +539,7 @@ export class InnerContext implements Context {
       "resonate:scope": "global",
       "resonate:invoke": opts.target,
       "resonate:root": this.rId,
-      "resonate:parent": this.pId,
+      "resonate:parent": this.id,
       ...opts.tags,
     };
 
@@ -559,7 +561,7 @@ export class InnerContext implements Context {
     const cTags = {
       "resonate:scope": "global",
       "resonate:root": this.rId,
-      "resonate:parent": this.pId,
+      "resonate:parent": this.id,
       ...tags,
     };
 
@@ -581,7 +583,7 @@ export class InnerContext implements Context {
     const tags = {
       "resonate:scope": "global",
       "resonate:root": this.rId,
-      "resonate:parent": this.pId,
+      "resonate:parent": this.id,
       "resonate:timeout": "true",
     };
 
