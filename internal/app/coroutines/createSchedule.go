@@ -26,6 +26,9 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		req.PromiseTags = map[string]string{}
 	}
 
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have config dependency")
+
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Metadata,
@@ -111,9 +114,6 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					},
 				},
 			}
-
-			metrics, ok := c.Get("metrics").(*metrics.Metrics)
-			util.Assert(ok, "coroutine must have config dependency")
 
 			// count schedules
 			metrics.SchedulesInFlight.WithLabelValues().Inc()

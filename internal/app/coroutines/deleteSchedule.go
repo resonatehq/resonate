@@ -12,6 +12,10 @@ import (
 
 func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.DeleteScheduleRequest)
+
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have config dependency")
+
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
 		Tags: r.Metadata,
@@ -37,9 +41,6 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	var status t_api.StatusCode
 	if result.RowsAffected == 1 {
 		status = t_api.StatusNoContent
-
-		metrics, ok := c.Get("metrics").(*metrics.Metrics)
-		util.Assert(ok, "coroutine must have config dependency")
 
 		// count schedules
 		metrics.SchedulesInFlight.WithLabelValues().Dec()

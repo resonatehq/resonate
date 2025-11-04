@@ -8,6 +8,7 @@ import (
 	gocoroPromise "github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -15,9 +16,13 @@ import (
 )
 
 func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
+
 	config, ok := c.Get("config").(*system.Config)
 	util.Assert(ok, "coroutine must have config dependency")
-	util.Assert(m != nil, "metadata must be set")
+
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have metrics dependency")
 
 	tasksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -225,7 +230,7 @@ func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	}
 
 	if len(commands) > 0 {
-		_, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: m,
 			Store: &t_aio.StoreSubmission{
@@ -237,6 +242,23 @@ func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 		if err != nil {
 			slog.Error("failed to update tasks", "err", err)
+		}
+
+		util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
+
+		for i, r := range completion.Store.Results {
+			result := t_aio.AsAlterTasks(r)
+			command := commands[i].(*t_aio.UpdateTaskCommand)
+			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
+
+			if command.State == task.Completed && result.RowsAffected == 1 {
+				metrics.TasksInFlight.WithLabelValues().Dec()
+				metrics.TasksTotal.WithLabelValues("completed").Inc()
+			}
+			if command.State == task.Timedout && result.RowsAffected == 1 {
+				metrics.TasksInFlight.WithLabelValues().Dec()
+				metrics.TasksTotal.WithLabelValues("timedout").Inc()
+			}
 		}
 	}
 

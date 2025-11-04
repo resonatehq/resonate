@@ -14,6 +14,9 @@ import (
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.CompleteTaskRequest)
 
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have metrics dependency")
+
 	var status t_api.StatusCode
 	var t *task.Task
 
@@ -96,9 +99,6 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				t.Ttl = 0
 				t.ExpiresAt = 0
 				t.CompletedOn = &completedOn
-
-				metrics, ok := c.Get("metrics").(*metrics.Metrics)
-				util.Assert(ok, "coroutine must have config dependency")
 
 				// count tasks
 				metrics.TasksInFlight.WithLabelValues().Dec()

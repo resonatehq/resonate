@@ -12,9 +12,13 @@ import (
 )
 
 func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
+	util.Assert(m != nil, "metadata must be set")
+
 	config, ok := c.Get("config").(*system.Config)
 	util.Assert(ok, "coroutine must have config dependency")
-	util.Assert(m != nil, "metadata must be set")
+
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have metrics dependency")
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -87,23 +91,21 @@ func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			},
 		})
 
-		util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
+		if err != nil {
+			slog.Error("failed to update tasks", "err", err)
+		}
 
-		metrics, ok := c.Get("metrics").(*metrics.Metrics)
-		util.Assert(ok, "coroutine must have config dependency")
+		util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
 
 		for i, r := range completion.Store.Results {
 			result := t_aio.AsAlterTasks(r)
+			command := commands[i].(*t_aio.UpdateTaskCommand)
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
-			if commands[i].(*t_aio.UpdateTaskCommand).State == task.Timedout && result.RowsAffected == 1 {
+			if command.State == task.Timedout && result.RowsAffected == 1 {
 				metrics.TasksInFlight.WithLabelValues().Dec()
 				metrics.TasksTotal.WithLabelValues("timedout").Inc()
 			}
-		}
-
-		if err != nil {
-			slog.Error("failed to update tasks", "err", err)
 		}
 	}
 

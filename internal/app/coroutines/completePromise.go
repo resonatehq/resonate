@@ -153,6 +153,9 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
+		metrics, ok := c.Get("metrics").(*metrics.Metrics)
+		util.Assert(ok, "coroutine must have metrics dependency")
+
 		commands := []t_aio.Command{
 			updatePromiseCmd,
 			&t_aio.CompleteTasksCommand{
@@ -202,9 +205,6 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 		util.Assert(updatePromiseResult != nil, "result must not be nil")
 		util.Assert(updatePromiseResult.RowsAffected == 0 || updatePromiseResult.RowsAffected == 1, "result must return 0 or 1 rows")
 		util.Assert(createTasksResult.RowsAffected == deleteCallbacksResult.RowsAffected, "created rows must equal deleted rows")
-
-		metrics, ok := c.Get("metrics").(*metrics.Metrics)
-		util.Assert(ok, "coroutine must have config dependency")
 
 		// count promises
 		if updatePromiseResult.RowsAffected == 1 {

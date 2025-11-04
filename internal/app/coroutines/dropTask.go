@@ -14,6 +14,9 @@ import (
 func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.DropTaskRequest)
 
+	metrics, ok := c.Get("metrics").(*metrics.Metrics)
+	util.Assert(ok, "coroutine must have config dependency")
+
 	var status t_api.StatusCode
 	var t *task.Task
 
@@ -96,9 +99,6 @@ func DropTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *
 				t.Attempt = 0
 				t.Ttl = 0
 				t.ExpiresAt = 0
-
-				metrics, ok := c.Get("metrics").(*metrics.Metrics)
-				util.Assert(ok, "coroutine must have config dependency")
 
 				// count tasks
 				metrics.TasksTotal.WithLabelValues("dropped").Inc()
