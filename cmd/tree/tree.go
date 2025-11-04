@@ -157,7 +157,7 @@ func details(p *v1.Promise) string {
 	}
 
 	var f string
-	var postfix string
+	var details string
 
 	if p.Param.Data != nil {
 		if b, err := base64.StdEncoding.DecodeString(*p.Param.Data); err == nil {
@@ -173,12 +173,12 @@ func details(p *v1.Promise) string {
 	}
 
 	if p.Tags["resonate:timeout"] != "" {
-		postfix = "(sleep)"
+		details = "(sleep)"
 	} else if p.Tags["resonate:scope"] == "global" {
-		postfix = fmt.Sprintf("(rpc%s)", f)
+		details = fmt.Sprintf("(rpc%s)", f)
 	} else if p.Tags["resonate:scope"] == "local" {
-		postfix = fmt.Sprintf("(run%s)", f)
+		details = fmt.Sprintf("(run%s)", f)
 	}
 
-	return postfix
+	return details
 }
