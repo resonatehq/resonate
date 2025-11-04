@@ -2,6 +2,8 @@ package tree
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -41,8 +43,9 @@ func NewCmd() *cobra.Command {
 				return errors.New("must specify an id")
 			}
 
+			var rootPromise *v1.Promise
 			searches := []*searchParams{{id: "*", root: args[0]}}
-			promises := map[string][]v1.Promise{}
+			promises := map[string][]*v1.Promise{}
 
 			for len(searches) > 0 {
 				params := searches[0]
@@ -62,16 +65,15 @@ func NewCmd() *cobra.Command {
 				}
 
 				for _, p := range *res.JSON200.Promises {
+					if p.Id == args[0] {
+						rootPromise = &p
+					}
 					if parent, ok := p.Tags["resonate:parent"]; ok && parent != p.Id {
-						promises[parent] = append(promises[parent], p)
+						promises[parent] = append(promises[parent], &p)
 					}
 
 					if p.Tags["resonate:scope"] == "global" && p.Id != params.root {
-						searches = append(searches, &searchParams{
-							id:     "*",
-							root:   p.Id,
-							cursor: nil,
-						})
+						searches = append(searches, &searchParams{id: "*", root: p.Id})
 					}
 				}
 
@@ -88,10 +90,9 @@ func NewCmd() *cobra.Command {
 				sort.Slice(children, func(i, j int) bool { return *children[i].CreatedOn < *children[j].CreatedOn })
 			}
 
-			var printTree func(id string, prefix string, postfix string, isLast bool, isRoot bool)
-			printTree = func(id string, prefix string, postfix string, isLast bool, isRoot bool) {
+			var printTree func(promise *v1.Promise, prefix string, isLast bool, isRoot bool)
+			printTree = func(promise *v1.Promise, prefix string, isLast bool, isRoot bool) {
 				var connector string
-
 				if isRoot {
 					connector = ""
 				} else if !isLast {
@@ -100,14 +101,23 @@ func NewCmd() *cobra.Command {
 					connector = "└── "
 				}
 
+				var status string
+				switch promise.State {
+				case v1.PromiseStatePENDING:
+					status = " 🟡"
+				case v1.PromiseStateRESOLVED:
+					status = " 🟢"
+				case v1.PromiseStateREJECTED, v1.PromiseStateREJECTEDCANCELED, v1.PromiseStateREJECTEDTIMEDOUT:
+					status = " 🔴"
+				}
+
 				// Print the current node
-				cmd.Printf("%s%s%s %s\n", prefix, connector, id, postfix)
+				cmd.Printf("%s%s%s%s %s\n", prefix, connector, promise.Id, status, details(promise))
 
 				// Recurse into children
-				children := promises[id]
+				children := promises[promise.Id]
 				for i, child := range children {
 					var newPrefix string
-					var newPostfix string
 
 					if isRoot {
 						newPrefix = prefix
@@ -117,25 +127,18 @@ func NewCmd() *cobra.Command {
 						newPrefix = prefix + "    "
 					}
 
-					var f string
-					if child.Tags["resonate:func"] != "" {
-						f = " " + child.Tags["resonate:func"]
-					}
-					if child.Tags["resonate:timeout"] != "" {
-						f = " sleep"
-					}
-
-					if child.Tags["resonate:scope"] == "global" {
-						newPostfix = fmt.Sprintf("(rpc%s)", f)
-					} else {
-						newPostfix = fmt.Sprintf("(run%s)", f)
-					}
-
-					printTree(child.Id, newPrefix, newPostfix, i == len(children)-1, false)
+					printTree(child, newPrefix, i == len(children)-1, false)
 				}
 			}
 
-			printTree(args[0], "", "", true, true)
+			var promise *v1.Promise
+			if rootPromise != nil {
+				promise = rootPromise
+			} else {
+				promise = &v1.Promise{Id: args[0]}
+			}
+
+			printTree(promise, "", true, true)
 			return nil
 		},
 	}
@@ -146,4 +149,36 @@ func NewCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVarP(&password, "password", "P", "", "basic auth password")
 
 	return cmd
+}
+
+func details(p *v1.Promise) string {
+	if p == nil {
+		return ""
+	}
+
+	var f string
+	var postfix string
+
+	if p.Param.Data != nil {
+		if b, err := base64.StdEncoding.DecodeString(*p.Param.Data); err == nil {
+			var d map[string]any
+			if err := json.Unmarshal(b, &d); err == nil {
+				f, _ = d["func"].(string)
+			}
+
+			if f != "" {
+				f = " " + f
+			}
+		}
+	}
+
+	if p.Tags["resonate:timeout"] != "" {
+		postfix = "(sleep)"
+	} else if p.Tags["resonate:scope"] == "global" {
+		postfix = fmt.Sprintf("(rpc%s)", f)
+	} else if p.Tags["resonate:scope"] == "local" {
+		postfix = fmt.Sprintf("(run%s)", f)
+	}
+
+	return postfix
 }
