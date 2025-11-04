@@ -84,7 +84,7 @@ func NewCmd() *cobra.Command {
 				}
 			}
 
-			for _, children := range promises {
+			for _, children := range promises { // nosemgrep: range-over-map
 				sort.Slice(children, func(i, j int) bool { return *children[i].CreatedOn < *children[j].CreatedOn })
 			}
 
