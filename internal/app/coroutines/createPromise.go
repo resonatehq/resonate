@@ -8,6 +8,7 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/message"
 	"github.com/resonatehq/resonate/pkg/promise"
@@ -268,6 +269,16 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 				// It's possible that the promise was created by another coroutine
 				// while we were creating. In that case, we should just retry.
 				return gocoro.SpawnAndAwait(c, createPromise(tags, fence, promiseCmd, taskCmd, additionalCmds...))
+			}
+
+			// count promise
+			metrics, ok := c.Get("metrics").(*metrics.Metrics)
+			util.Assert(ok, "coroutine must have config dependency")
+			metrics.PromisesInFlight.WithLabelValues().Inc()
+
+			// count task (if applicable)
+			if t != nil {
+				metrics.TasksInFlight.WithLabelValues().Inc()
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil

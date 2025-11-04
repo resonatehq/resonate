@@ -6,6 +6,7 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 )
 
@@ -36,6 +37,12 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	var status t_api.StatusCode
 	if result.RowsAffected == 1 {
 		status = t_api.StatusNoContent
+
+		metrics, ok := c.Get("metrics").(*metrics.Metrics)
+		util.Assert(ok, "coroutine must have config dependency")
+
+		// count schedules
+		metrics.SchedulesInFlight.WithLabelValues().Dec()
 	} else {
 		status = t_api.StatusScheduleNotFound
 	}
