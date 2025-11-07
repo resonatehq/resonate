@@ -78,7 +78,7 @@ func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 	}
 
 	if len(commands) > 0 {
-		completion, err = gocoro.YieldAndAwait(c, &t_aio.Submission{
+		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 			Kind: t_aio.Store,
 			Tags: m,
 			Store: &t_aio.StoreSubmission{
@@ -90,6 +90,7 @@ func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 		if err != nil {
 			slog.Error("failed to update tasks", "err", err)
+			return nil, nil
 		}
 
 		util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
