@@ -298,8 +298,8 @@ export type SearchSchedulesRes = {
 // Message
 
 export type Message =
-  | { type: "invoke" | "resume"; task: TaskRecord }
-  | { type: "notify"; promise: DurablePromiseRecord };
+  | { type: "invoke" | "resume"; task: TaskRecord; headers: Record<string, string> }
+  | { type: "notify"; promise: DurablePromiseRecord; headers: Record<string, string> };
 
 // Network
 
@@ -309,6 +309,7 @@ export interface Network {
   send<T extends Request>(
     req: T,
     callback: (err?: ResonateError, res?: ResponseFor<T>) => void,
+    headers?: Record<string, string>,
     retryForever?: boolean,
   ): void;
   stop(): void;

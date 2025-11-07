@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import type { Value } from "types";
 import { type Encryptor, NoopEncryptor } from "../src/encryptor";
 
-export class DummyEncryptor implements Encryptor {
+export class DummyEncryptor {
   private key: Buffer;
 
   constructor(secret: string) {

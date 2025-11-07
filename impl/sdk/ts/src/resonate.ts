@@ -22,6 +22,7 @@ import { Promises } from "./promises";
 import { Registry } from "./registry";
 import { ResonateInner } from "./resonate-inner";
 import { Schedules } from "./schedules";
+import { NoopTracer, type Tracer } from "./tracer";
 import type { Func, ParamsWithOptions, Return } from "./types";
 import * as util from "./util";
 
@@ -51,6 +52,8 @@ type SubscriptionEntry = {
 };
 
 export class Resonate {
+  private clock: WallClock;
+
   private unicast: string;
   private anycastPreference: string;
   private anycastNoPreference: string;
@@ -63,6 +66,8 @@ export class Resonate {
   private encryptor: Encryptor;
   private verbose: boolean;
   private messageSource: MessageSource;
+
+  private tracer: Tracer;
   private handler: Handler;
   private registry: Registry;
   private heartbeat: Heartbeat;
@@ -82,6 +87,7 @@ export class Resonate {
     auth = undefined,
     verbose = false,
     encryptor = undefined,
+    tracer = undefined,
   }: {
     url?: string;
     group?: string;
@@ -90,12 +96,15 @@ export class Resonate {
     auth?: { username: string; password: string };
     verbose?: boolean;
     encryptor?: Encryptor;
+    tracer?: Tracer;
   } = {}) {
+    this.clock = new WallClock();
     this.unicast = `poll://uni@${group}/${pid}`;
     this.anycastPreference = `poll://any@${group}/${pid}`;
     this.anycastNoPreference = `poll://any@${group}`;
     this.pid = pid;
     this.ttl = ttl;
+    this.tracer = tracer ?? new NoopTracer();
     this.encryptor = encryptor ?? new NoopEncryptor();
     this.encoder = new JsonEncoder();
 
@@ -156,7 +165,7 @@ export class Resonate {
       anycastNoPreference: this.anycastNoPreference,
       pid: this.pid,
       ttl: this.ttl,
-      clock: new WallClock(),
+      clock: this.clock,
       network: this.network,
       messageSource: this.messageSource,
       handler: this.handler,
@@ -164,6 +173,7 @@ export class Resonate {
       heartbeat: this.heartbeat,
       dependencies: this.dependencies,
       verbose: this.verbose,
+      tracer: this.tracer,
     });
 
     this.promises = new Promises(this.network);
@@ -220,9 +230,11 @@ export class Resonate {
   static local({
     verbose = false,
     encryptor = undefined,
+    tracer = undefined,
   }: {
     verbose?: boolean;
     encryptor?: Encryptor;
+    tracer?: Tracer;
   } = {}): Resonate {
     return new Resonate({
       group: "default",
@@ -230,6 +242,7 @@ export class Resonate {
       ttl: Number.MAX_SAFE_INTEGER,
       verbose,
       encryptor,
+      tracer,
     });
   }
 
@@ -276,6 +289,7 @@ export class Resonate {
     auth = undefined,
     verbose = false,
     encryptor = undefined,
+    tracer = undefined,
   }: {
     url?: string;
     group?: string;
@@ -284,9 +298,10 @@ export class Resonate {
     auth?: { username: string; password: string };
     verbose?: boolean;
     encryptor?: Encryptor;
+    tracer?: Tracer;
     messageSourceAuth?: { username: string; password: string };
   } = {}): Resonate {
-    return new Resonate({ url, group, pid, ttl, auth, verbose, encryptor });
+    return new Resonate({ url, group, pid, ttl, auth, verbose, encryptor, tracer });
   }
 
   /**
@@ -448,40 +463,54 @@ export class Resonate {
 
     util.assert(registered.version > 0, "function version must be greater than zero");
 
-    const { promise, task } = await this.createPromiseAndTask({
-      kind: "createPromiseAndTask",
-      promise: {
-        id: id,
-        timeout: Date.now() + opts.timeout,
-        param: {
-          data: {
-            func: registered.name,
-            args: args,
-            retry: opts.retryPolicy?.encode(),
-            version: registered.version,
+    const span = this.tracer.startSpan(id, this.clock.now());
+
+    try {
+      const { promise, task } = await this.createPromiseAndTask(
+        {
+          kind: "createPromiseAndTask",
+          promise: {
+            id: id,
+            timeout: Date.now() + opts.timeout,
+            param: {
+              data: {
+                func: registered.name,
+                args: args,
+                retry: opts.retryPolicy?.encode(),
+                version: registered.version,
+              },
+            },
+            tags: {
+              ...opts.tags,
+              "resonate:root": id,
+              "resonate:parent": id,
+              "resonate:scope": "global",
+              "resonate:invoke": this.anycastPreference,
+            },
           },
+          task: {
+            processId: this.pid,
+            ttl: this.ttl,
+          },
+          iKey: id,
+          strict: false,
         },
-        tags: {
-          ...opts.tags,
-          "resonate:root": id,
-          "resonate:parent": id,
-          "resonate:scope": "global",
-          "resonate:invoke": this.anycastPreference,
-        },
-      },
-      task: {
-        processId: this.pid,
-        ttl: this.ttl,
-      },
-      iKey: id,
-      strict: false,
-    });
+        span.encode(),
+      );
 
-    if (task) {
-      this.inner.process({ kind: "claimed", task: task, rootPromise: promise }, () => {});
+      if (task) {
+        this.inner.process(span, { kind: "claimed", task: task, rootPromise: promise }, () => {
+          span.end(this.clock.now());
+        });
+      } else {
+        span.end(this.clock.now());
+      }
+
+      return this.createHandle(promise);
+    } catch (e) {
+      span.end(this.clock.now());
+      throw e;
     }
-
-    return this.createHandle(promise);
   }
 
   /**
@@ -567,30 +596,38 @@ export class Resonate {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
-    const promise = await this.createPromise({
-      kind: "createPromise",
-      id: id,
-      timeout: Date.now() + opts.timeout,
-      param: {
-        data: {
-          func: registered ? registered.name : (funcOrName as string),
-          args: args,
-          retry: opts.retryPolicy?.encode(),
-          version: registered ? registered.version : opts.version || 1,
-        },
-      },
-      tags: {
-        ...opts.tags,
-        "resonate:root": id,
-        "resonate:parent": id,
-        "resonate:scope": "global",
-        "resonate:invoke": opts.target,
-      },
-      iKey: id,
-      strict: false,
-    });
+    const span = this.tracer.startSpan(id, this.clock.now());
 
-    return this.createHandle(promise);
+    try {
+      const promise = await this.createPromise(
+        {
+          kind: "createPromise",
+          id: id,
+          timeout: Date.now() + opts.timeout,
+          param: {
+            data: {
+              func: registered ? registered.name : (funcOrName as string),
+              args: args,
+              retry: opts.retryPolicy?.encode(),
+              version: registered ? registered.version : opts.version || 1,
+            },
+          },
+          tags: {
+            ...opts.tags,
+            "resonate:root": id,
+            "resonate:parent": id,
+            "resonate:scope": "global",
+            "resonate:invoke": opts.target,
+          },
+          iKey: id,
+          strict: false,
+        },
+        span.encode(),
+      );
+      return this.createHandle(promise);
+    } finally {
+      span.end(this.clock.now());
+    }
   }
 
   public async schedule<F extends Func>(
@@ -683,6 +720,7 @@ export class Resonate {
 
   private createPromiseAndTask(
     req: CreatePromiseAndTaskReq<any>,
+    headers: Record<string, string>,
   ): Promise<{ promise: DurablePromiseRecord; task?: TaskRecord }> {
     return new Promise((resolve, reject) =>
       this.handler.createPromiseAndTask(
@@ -695,12 +733,16 @@ export class Resonate {
           }
         },
         undefined,
+        headers,
         true,
       ),
     );
   }
 
-  private createPromise(req: CreatePromiseReq<any>): Promise<DurablePromiseRecord<any>> {
+  private createPromise(
+    req: CreatePromiseReq<any>,
+    headers: Record<string, string>,
+  ): Promise<DurablePromiseRecord<any>> {
     return new Promise((resolve, reject) =>
       this.handler.createPromise(
         req,
@@ -712,6 +754,7 @@ export class Resonate {
           }
         },
         undefined,
+        headers,
         true,
       ),
     );

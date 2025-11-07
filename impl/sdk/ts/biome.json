@@ -7,18 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": [
-      "**/src/**/*.js",
-      "**/src/**/*.ts",
-      "**/tests/**/*.js",
-      "**/tests/**/*.ts",
-      "**/sim/**/*.ts",
-      "**/sim/**/*.js",
-      "**/dev/**/*.ts",
-      "**/dev/**/*.js",
-      "!**/dist",
-      "!**/node_modules"
-    ]
+    "includes": ["**/*.ts", "**/*.js", "!**/dist/*", "!**/node_modules/*"]
   },
   "formatter": {
     "enabled": true,

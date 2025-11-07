@@ -3,6 +3,7 @@ import { type Context, Future, InnerContext, type LFI } from "../src/context";
 import { Decorator } from "../src/decorator";
 import { Registry } from "../src/registry";
 import { Never } from "../src/retries";
+import { NoopSpan } from "../src/tracer";
 import { ok, type Yieldable } from "../src/types";
 
 describe("Decorator", () => {
@@ -40,6 +41,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -87,6 +89,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -161,6 +164,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -206,6 +210,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -258,6 +263,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -312,6 +318,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );
@@ -345,6 +352,7 @@ describe("Decorator", () => {
           timeout: 0,
           version: 1,
           retryPolicy: new Never(),
+          span: new NoopSpan(),
         }),
       ),
     );

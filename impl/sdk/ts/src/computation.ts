@@ -10,6 +10,7 @@ import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
 import type { ClaimedTask, Task } from "./resonate-inner";
 import { Exponential, Never, type RetryPolicyConstructor } from "./retries";
+import type { Span, Tracer } from "./tracer";
 import type { Callback, Func } from "./types";
 import * as util from "./util";
 
@@ -48,6 +49,8 @@ export class Computation {
   private verbose: boolean;
   private heartbeat: Heartbeat;
   private processor: Processor;
+  private span: Span;
+  private spans: Map<string, Span>;
 
   private seen: Set<string> = new Set();
   private processing = false;
@@ -67,6 +70,8 @@ export class Computation {
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
     verbose: boolean,
+    tracer: Tracer,
+    span: Span,
     processor?: Processor,
   ) {
     this.id = id;
@@ -84,6 +89,8 @@ export class Computation {
     this.dependencies = dependencies;
     this.verbose = verbose;
     this.processor = processor ?? new AsyncProcessor();
+    this.span = span;
+    this.spans = new Map();
   }
 
   public process(task: Task, done: Callback<Status>) {
@@ -117,14 +124,17 @@ export class Computation {
               return doneProcessing(true);
             }
             util.assertDefined(promise);
-            this.processClaimed({ kind: "claimed", task: task.task, rootPromise: promise }, doneProcessing);
+            this.processClaimed(
+              { kind: "claimed", task: task.task, rootPromise: promise.root, leafPromise: promise.leaf },
+              doneProcessing,
+            );
           },
         );
         break;
     }
   }
 
-  private processClaimed({ task, rootPromise }: ClaimedTask, done: Callback<Status>) {
+  private processClaimed({ task, rootPromise, leafPromise }: ClaimedTask, done: Callback<Status>) {
     util.assert(task.rootPromiseId === this.id, "task root promise id must match computation id");
 
     const doneAndDropTaskIfErr = (err?: boolean, res?: Status) => {
@@ -190,6 +200,7 @@ export class Computation {
         timeout: rootPromise.timeout,
         version: registered.version,
         retryPolicy: retryPolicy,
+        span: this.span,
       });
 
       if (util.isGeneratorFunction(registered.func)) {
@@ -212,7 +223,7 @@ export class Computation {
     args: any[],
     done: Callback<Status>,
   ) {
-    Coroutine.exec(this.id, this.verbose, ctx, func, args, this.handler, (err, status) => {
+    Coroutine.exec(this.id, this.verbose, ctx, func, args, this.handler, this.spans, (err, status) => {
       if (err) {
         return done(err);
       }
@@ -229,7 +240,7 @@ export class Computation {
           if (status.todo.local.length > 0) {
             this.processLocalTodo(nursery, status.todo.local, done);
           } else if (status.todo.remote.length > 0) {
-            this.processRemoteTodo(nursery, status.todo.remote, ctx.info.timeout, done);
+            this.processRemoteTodo(nursery, status.todo.remote, status.spans, ctx.info.timeout, done);
           }
 
           break;
@@ -272,11 +283,12 @@ export class Computation {
           func.name,
         ),
       this.verbose,
+      ctx.span,
     );
   }
 
   private processLocalTodo(nursery: Nursery<boolean, Status>, todo: LocalTodo[], done: Callback<Status>) {
-    for (const { id, ctx, func, args } of todo) {
+    for (const { id, ctx, span, func, args } of todo) {
       if (this.seen.has(id)) {
         continue;
       }
@@ -285,6 +297,7 @@ export class Computation {
 
       nursery.hold((next) => {
         this.processFunction(id, ctx, func, args, (err) => {
+          span.end(this.clock.now());
           next();
 
           if (err) {
@@ -302,6 +315,7 @@ export class Computation {
   private processRemoteTodo(
     nursery: Nursery<boolean, Status>,
     todo: RemoteTodo[],
+    spans: Span[],
     timeout: number,
     done: Callback<Status>,
   ) {
@@ -328,9 +342,15 @@ export class Computation {
             util.assertDefined(res);
             done(false, res);
           },
+          this.span.encode(),
         ),
       (err, results) => {
-        if (err) return done(err);
+        if (err) {
+          for (const span of spans) {
+            span.end(this.clock.now());
+          }
+          return done(err);
+        }
         util.assertDefined(results);
 
         const callbacks: CallbackRecord[] = [];
@@ -345,6 +365,10 @@ export class Computation {
               callbacks.push(res.callback);
               break;
           }
+        }
+
+        for (const span of spans) {
+          span.end(this.clock.now());
         }
 
         // once all callbacks are created we can call done

@@ -1,5 +1,5 @@
-import type { ResonateError } from "exceptions";
 import { DIE, Future, LFC, LFI, RFC, RFI } from "./context";
+import type { ResonateError } from "./exceptions";
 import type { CreatePromiseReq } from "./network/network";
 import type { RetryPolicy } from "./retries";
 import { type Func, ko, ok, type Result, type Yieldable } from "./types";

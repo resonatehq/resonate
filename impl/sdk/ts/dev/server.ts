@@ -192,6 +192,7 @@ export class Server {
               ...task,
               timeout: this.getPromise({ id: task.rootPromiseId }).timeout,
             },
+            headers: {},
           },
           recv: task.recv,
         };
@@ -203,6 +204,7 @@ export class Server {
               ...task,
               timeout: this.getPromise({ id: task.rootPromiseId }).timeout,
             },
+            headers: {},
           },
           recv: task.recv,
         };
@@ -212,6 +214,7 @@ export class Server {
           msg: {
             type: "notify",
             promise: this.getPromise({ id: task.rootPromiseId }),
+            headers: {},
           },
           recv: task.recv,
         };
@@ -358,9 +361,6 @@ export class Server {
       case "searchSchedules": {
         return { kind: "searchSchedules", schedules: this.searchSchedules({ ...requ }) };
       }
-
-      default:
-        throw exceptions.SERVER_ERROR(`Unsupported request kind ${(requ as any).kind}`);
     }
   }
 
@@ -663,8 +663,8 @@ export class Server {
           },
         };
       }
-      default:
-        throw exceptions.SERVER_ERROR(`Unexpected task type '${task.type}'`);
+      case "notify":
+        throw exceptions.SERVER_ERROR(`Unexpected task type '${task.type}' notify`);
     }
   }
 
