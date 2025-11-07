@@ -239,6 +239,7 @@ func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 
 		if err != nil {
 			slog.Error("failed to update tasks", "err", err)
+			return nil, nil
 		}
 
 		util.Assert(len(completion.Store.Results) == len(commands), "must have same number of results as commands")
