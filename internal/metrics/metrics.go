@@ -12,11 +12,9 @@ type Metrics struct {
 	ApiInFlight        *prometheus.GaugeVec
 	CoroutinesTotal    *prometheus.CounterVec
 	CoroutinesInFlight *prometheus.GaugeVec
-	PromisesTotal      *prometheus.CounterVec
-	PromisesInFlight   *prometheus.GaugeVec
-	SchedulesInFlight  *prometheus.GaugeVec
-	TasksTotal         *prometheus.CounterVec
-	TasksInFlight      *prometheus.GaugeVec
+	Promises           *prometheus.CounterVec
+	Schedules          *prometheus.CounterVec
+	Tasks              *prometheus.CounterVec
 }
 
 func New(reg prometheus.Registerer) *Metrics {
@@ -57,26 +55,18 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "coroutines_in_flight",
 			Help: "number of in flight coroutines",
 		}, []string{"type"}),
-		PromisesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "promises_total",
-			Help: "number of completed promises",
+		Promises: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "promises",
+			Help: "count of promises",
 		}, []string{"state"}),
-		PromisesInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "promises_in_flight",
-			Help: "number of pending promises",
-		}, []string{}),
-		SchedulesInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "schedules_in_flight",
+		Schedules: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "schedules",
 			Help: "number of schedules",
-		}, []string{}),
-		TasksTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "tasks_total",
-			Help: "number of completed tasks",
 		}, []string{"state"}),
-		TasksInFlight: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "tasks_in_flight",
-			Help: "number of active tasks",
-		}, []string{}),
+		Tasks: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "tasks",
+			Help: "number of tasks",
+		}, []string{"state"}),
 	}
 
 	metrics.Enable(reg)
@@ -93,11 +83,9 @@ func (m *Metrics) Enable(reg prometheus.Registerer) {
 	reg.MustRegister(m.ApiInFlight)
 	reg.MustRegister(m.CoroutinesTotal)
 	reg.MustRegister(m.CoroutinesInFlight)
-	reg.MustRegister(m.PromisesTotal)
-	reg.MustRegister(m.PromisesInFlight)
-	reg.MustRegister(m.SchedulesInFlight)
-	reg.MustRegister(m.TasksTotal)
-	reg.MustRegister(m.TasksInFlight)
+	reg.MustRegister(m.Promises)
+	reg.MustRegister(m.Schedules)
+	reg.MustRegister(m.Tasks)
 }
 
 func (m *Metrics) Disable(reg prometheus.Registerer) {
@@ -110,9 +98,7 @@ func (m *Metrics) Disable(reg prometheus.Registerer) {
 	reg.Unregister(m.ApiInFlight)
 	reg.Unregister(m.CoroutinesTotal)
 	reg.Unregister(m.CoroutinesInFlight)
-	reg.Unregister(m.PromisesTotal)
-	reg.Unregister(m.PromisesInFlight)
-	reg.Unregister(m.SchedulesInFlight)
-	reg.Unregister(m.TasksTotal)
-	reg.Unregister(m.TasksInFlight)
+	reg.Unregister(m.Promises)
+	reg.Unregister(m.Schedules)
+	reg.Unregister(m.Tasks)
 }

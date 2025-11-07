@@ -101,8 +101,7 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				t.CompletedOn = &completedOn
 
 				// count tasks
-				metrics.TasksInFlight.WithLabelValues().Dec()
-				metrics.TasksTotal.WithLabelValues("completed").Inc()
+				metrics.Tasks.WithLabelValues("completed").Inc()
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to complete. In that case, we should just retry.

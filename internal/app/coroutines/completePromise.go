@@ -207,14 +207,11 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 		util.Assert(createTasksResult.RowsAffected == deleteCallbacksResult.RowsAffected, "created rows must equal deleted rows")
 
 		// count promises
-		if updatePromiseResult.RowsAffected == 1 {
-			metrics.PromisesInFlight.WithLabelValues().Dec()
-			metrics.PromisesTotal.WithLabelValues(strings.ToLower(updatePromiseCmd.State.String())).Inc()
-		}
+		metrics.Promises.WithLabelValues(strings.ToLower(updatePromiseCmd.State.String())).Add(float64(updatePromiseResult.RowsAffected))
 
 		// count tasks
-		metrics.TasksInFlight.WithLabelValues().Add(float64(createTasksResult.RowsAffected - completeTasksResult.RowsAffected))
-		metrics.TasksTotal.WithLabelValues("completed").Add(float64(completeTasksResult.RowsAffected))
+		metrics.Tasks.WithLabelValues("created").Add(float64(createTasksResult.RowsAffected))
+		metrics.Tasks.WithLabelValues("completed").Add(float64(completeTasksResult.RowsAffected))
 
 		return updatePromiseResult.RowsAffected == 1, nil
 	}

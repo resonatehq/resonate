@@ -275,11 +275,11 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 			}
 
 			// count promise
-			metrics.PromisesInFlight.WithLabelValues().Inc()
+			metrics.Promises.WithLabelValues("created").Inc()
 
 			// count task (if applicable)
 			if t != nil {
-				metrics.TasksInFlight.WithLabelValues().Inc()
+				metrics.Tasks.WithLabelValues("created").Inc()
 			}
 
 			return &promiseAndTask{created: true, promise: p, task: t}, nil

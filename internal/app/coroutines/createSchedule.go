@@ -116,7 +116,7 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 			}
 
 			// count schedules
-			metrics.SchedulesInFlight.WithLabelValues().Inc()
+			metrics.Schedules.WithLabelValues("created").Inc()
 		} else {
 			// It's possible that the schedule was completed by another coroutine
 			// while we were creating. In that case, we should just retry.
