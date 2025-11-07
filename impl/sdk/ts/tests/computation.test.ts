@@ -128,6 +128,7 @@ describe("Computation Event Queue Concurrency", () => {
       new WallClock(),
       network,
       handler,
+      new Map(),
       registry,
       new NoopHeartbeat(),
       new Map(),

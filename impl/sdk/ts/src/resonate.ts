@@ -1,10 +1,9 @@
 import { LocalNetwork } from "../dev/network";
-import { type Encryptor, NoopEncryptor } from "../src/encryptor";
-import { Handler } from "../src/handler";
-import { Registry } from "../src/registry";
 import { WallClock } from "./clock";
 import { type Encoder, JsonEncoder } from "./encoder";
+import { type Encryptor, NoopEncryptor } from "./encryptor";
 import exceptions from "./exceptions";
+import { Handler } from "./handler";
 import { AsyncHeartbeat, type Heartbeat, NoopHeartbeat } from "./heartbeat";
 import type {
   CreatePromiseAndTaskReq,
@@ -20,6 +19,7 @@ import type {
 import { HttpMessageSource, HttpNetwork } from "./network/remote";
 import { Options } from "./options";
 import { Promises } from "./promises";
+import { Registry } from "./registry";
 import { ResonateInner } from "./resonate-inner";
 import { Schedules } from "./schedules";
 import type { Func, ParamsWithOptions, Return } from "./types";
@@ -457,6 +457,7 @@ export class Resonate {
           data: {
             func: registered.name,
             args: args,
+            retry: opts.retryPolicy?.encode(),
             version: registered.version,
           },
         },
@@ -574,6 +575,7 @@ export class Resonate {
         data: {
           func: registered ? registered.name : (funcOrName as string),
           args: args,
+          retry: opts.retryPolicy?.encode(),
           version: registered ? registered.version : opts.version || 1,
         },
       },
@@ -661,8 +663,7 @@ export class Resonate {
   }
 
   public options(opts: Partial<Options> = {}): Options {
-    const target = opts.target ?? this.anycastNoPreference;
-    return new Options({ target, ...opts });
+    return new Options({ target: this.anycastNoPreference, ...opts });
   }
 
   private getArgsAndOpts(args: any[], version?: number): [any[], Options] {

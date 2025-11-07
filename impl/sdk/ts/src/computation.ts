@@ -9,7 +9,7 @@ import { Nursery } from "./nursery";
 import { AsyncProcessor, type Processor } from "./processor/processor";
 import type { Registry } from "./registry";
 import type { ClaimedTask, Task } from "./resonate-inner";
-import { Exponential, Never } from "./retries";
+import { Exponential, Never, type RetryPolicyConstructor } from "./retries";
 import type { Callback, Func } from "./types";
 import * as util from "./util";
 
@@ -25,6 +25,13 @@ export type Suspended = {
   callbacks: CallbackRecord[];
 };
 
+interface Data {
+  func: string;
+  args: any[];
+  retry?: { type: string; data: any };
+  version?: number;
+}
+
 export class Computation {
   private id: string;
   private pid: string;
@@ -35,6 +42,7 @@ export class Computation {
   private anycastNoPreference: string;
   private network: Network;
   private handler: Handler;
+  private retries: Map<string, RetryPolicyConstructor>;
   private registry: Registry;
   private dependencies: Map<string, any>;
   private verbose: boolean;
@@ -54,6 +62,7 @@ export class Computation {
     clock: Clock,
     network: Network,
     handler: Handler,
+    retries: Map<string, RetryPolicyConstructor>,
     registry: Registry,
     heartbeat: Heartbeat,
     dependencies: Map<string, any>,
@@ -69,6 +78,7 @@ export class Computation {
     this.clock = clock;
     this.network = network;
     this.handler = handler;
+    this.retries = retries;
     this.registry = registry;
     this.heartbeat = heartbeat;
     this.dependencies = dependencies;
@@ -129,31 +139,21 @@ export class Computation {
       done(false, res!);
     };
 
-    if (
-      rootPromise.param === null ||
-      typeof rootPromise.param !== "object" ||
-      rootPromise.param.data === null ||
-      typeof rootPromise.param.data !== "object" ||
-      !("func" in rootPromise.param.data) ||
-      typeof rootPromise.param.data.func !== "string" ||
-      !("args" in rootPromise.param.data) ||
-      !Array.isArray(rootPromise.param.data.args) ||
-      ("version" in rootPromise.param.data && typeof rootPromise.param.data.version !== "number")
-    ) {
+    if (!isValidData(rootPromise.param?.data)) {
       return doneAndDropTaskIfErr(true);
     }
 
-    const { func: funcName, version = 1, args } = rootPromise.param.data;
-    const registered = this.registry.get(funcName, version);
+    const { func, args, retry, version = 1 } = rootPromise.param.data;
+    const registered = this.registry.get(func, version);
 
     // function must be registered
     if (!registered) {
-      exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcName, version).log(this.verbose);
+      exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(func, version).log(this.verbose);
       return doneAndDropTaskIfErr(true);
     }
 
     if (version !== 0) util.assert(version === registered.version, "versions must match");
-    util.assert(funcName === registered.name, "names must match");
+    util.assert(func === registered.name, "names must match");
 
     // start heartbeat
     this.heartbeat.start();
@@ -169,15 +169,27 @@ export class Computation {
         });
       };
 
+      const retryCtor = retry ? this.retries.get(retry.type) : undefined;
+      const retryPolicy = retryCtor
+        ? new retryCtor(retry?.data)
+        : util.isGeneratorFunction(registered.func)
+          ? new Never()
+          : new Exponential();
+
+      if (retry && !retryCtor) {
+        console.warn(`Options. Retry policy '${retry.type}' not found. Will ignore.`);
+      }
+
       const ctx = new InnerContext({
         id: this.id,
+        func: registered.func.name,
         anycast: this.anycastNoPreference,
         clock: this.clock,
         registry: this.registry,
         dependencies: this.dependencies,
         timeout: rootPromise.timeout,
         version: registered.version,
-        retryPolicy: util.isGeneratorFunction(registered.func) ? new Never() : new Exponential(),
+        retryPolicy: retryPolicy,
       });
 
       if (util.isGeneratorFunction(registered.func)) {
@@ -340,4 +352,32 @@ export class Computation {
       },
     );
   }
+}
+
+// Helper functions
+
+function isValidData(data: unknown): data is Data {
+  if (data === null || typeof data !== "object") return false;
+
+  const d = data as any;
+
+  // func must be a string
+  if (typeof d.func !== "string") return false;
+
+  // args must be an array
+  if (!Array.isArray(d.args)) return false;
+
+  // retry (if present) must be an object with string `type` and any `data`
+  if (d.retry !== undefined) {
+    if (d.retry === null || typeof d.retry !== "object" || typeof d.retry.type !== "string" || !("data" in d.retry)) {
+      return false;
+    }
+  }
+
+  // version (if present) must be a number
+  if (d.version !== undefined && typeof d.version !== "number") {
+    return false;
+  }
+
+  return true;
 }

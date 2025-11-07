@@ -30,3 +30,15 @@ describe("RetryPolicy delay progression", () => {
     expect(delays).toEqual(progression);
   });
 });
+
+describe("encoding and decoding produces same retry policy", () => {
+  test.each([Constant, Linear, Exponential, Never])("policy %p encode/decode", (policyCtor) => {
+    const policy = new policyCtor();
+
+    const encoded = policy.encode();
+    expect(encoded.type).toBe(policyCtor.type);
+
+    const decoded = new policyCtor(encoded.data);
+    expect(decoded).toEqual(policy);
+  });
+});

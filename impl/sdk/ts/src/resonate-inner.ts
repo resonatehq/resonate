@@ -4,6 +4,7 @@ import type { Handler } from "./handler";
 import type { Heartbeat } from "./heartbeat";
 import type { DurablePromiseRecord, Message, MessageSource, Network, TaskRecord } from "./network/network";
 import type { Registry } from "./registry";
+import { Constant, Exponential, Linear, Never, type RetryPolicyConstructor } from "./retries";
 import type { Callback } from "./types";
 import * as util from "./util";
 
@@ -34,6 +35,7 @@ export class ResonateInner {
   private clock: Clock;
   private network: Network;
   private handler: Handler;
+  private retries: Map<string, RetryPolicyConstructor>;
   private registry: Registry;
   private heartbeat: Heartbeat;
   private dependencies: Map<string, any>;
@@ -82,6 +84,14 @@ export class ResonateInner {
     this.dependencies = dependencies;
     this.verbose = verbose;
 
+    // default retry policies
+    this.retries = new Map<string, RetryPolicyConstructor>([
+      [Constant.type, Constant],
+      [Exponential.type, Exponential],
+      [Linear.type, Linear],
+      [Never.type, Never],
+    ]);
+
     // subscribe to invoke and resume
     messageSource?.subscribe("invoke", this.onMessage.bind(this));
     messageSource?.subscribe("resume", this.onMessage.bind(this));
@@ -100,6 +110,7 @@ export class ResonateInner {
         this.clock,
         this.network,
         this.handler,
+        this.retries,
         this.registry,
         this.heartbeat,
         this.dependencies,

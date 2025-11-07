@@ -1,8 +1,8 @@
 import { setTimeout } from "node:timers/promises";
-import type { Context } from "../src/context";
+import type { Context, InnerContext } from "../src/context";
 import { JsonEncoder } from "../src/encoder";
 import { Resonate } from "../src/resonate";
-import { Constant, Never } from "../src/retries";
+import { Constant, Exponential, Linear, Never, type RetryPolicy } from "../src/retries";
 import * as util from "../src/util";
 
 describe("Resonate usage tests", () => {
@@ -802,6 +802,27 @@ describe("Resonate usage tests", () => {
 
     resonate.stop();
   });
+
+  test.each([Constant, Linear, Exponential, Never])("run/rpc with %p retry policy", async (policyCtor) => {
+    const resonate = new Resonate();
+    const retryPolicy = new policyCtor();
+
+    let ctxRetryPolicy: RetryPolicy | undefined;
+
+    resonate.register("foo", (ctx: Context) => {
+      ctxRetryPolicy = (ctx as InnerContext).retryPolicy;
+    });
+
+    for (const [i, f] of [resonate.run.bind(resonate), resonate.rpc.bind(resonate)].entries()) {
+      ctxRetryPolicy = undefined;
+      await f(`f${i}`, "foo", resonate.options({ retryPolicy }));
+      expect(ctxRetryPolicy).toBeDefined();
+      expect(ctxRetryPolicy).toEqual(retryPolicy);
+
+      const p = await resonate.promises.get(`f${i}`);
+      expect(JSON.parse(util.base64Decode(p.param?.data!)).retry).toEqual(retryPolicy.encode());
+    }
+  });
 });
 
 describe("Context usage tests", () => {
@@ -924,6 +945,43 @@ describe("Context usage tests", () => {
     expect(r2.every((r) => r === "baz")).toBe(true);
 
     resonate.stop();
+  });
+
+  test.each([Constant])("lfi/lfc/rfi/rfc/detached with %p retry policy", async (policyCtor) => {
+    const resonate = new Resonate();
+    const retryPolicy = new policyCtor();
+
+    let ctxRetryPolicy: RetryPolicy | undefined;
+
+    resonate.register("foo", function* (ctx: Context, method: string) {
+      if (method === "lfi") {
+        yield* ctx.lfi("bar", ctx.options({ retryPolicy }));
+      } else if (method === "lfc") {
+        yield* ctx.lfc("bar", ctx.options({ retryPolicy }));
+      } else if (method === "rfi") {
+        yield* ctx.rfi("bar", ctx.options({ retryPolicy }));
+      } else if (method === "rfc") {
+        yield* ctx.rfc("bar", ctx.options({ retryPolicy }));
+      } else if (method === "detached") {
+        yield* yield* ctx.detached("bar", ctx.options({ retryPolicy }));
+      }
+    });
+
+    resonate.register("bar", (ctx: Context) => {
+      ctxRetryPolicy = (ctx as InnerContext).retryPolicy;
+    });
+
+    for (const [i, f] of ["lfi", "lfc", "rfi", "rfc", "detached"].entries()) {
+      ctxRetryPolicy = undefined;
+      await resonate.run(`f${i}`, "foo", f);
+      expect(ctxRetryPolicy).toBeDefined();
+      expect(ctxRetryPolicy).toEqual(retryPolicy);
+
+      if (f === "rfi" || f === "rfc" || f === "detached") {
+        const p = await resonate.promises.get(`f${i}.0`);
+        expect(JSON.parse(util.base64Decode(p.param?.data!)).retry).toEqual(retryPolicy.encode());
+      }
+    }
   });
 });
 

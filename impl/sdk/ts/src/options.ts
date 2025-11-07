@@ -4,7 +4,7 @@ import * as util from "./util";
 export const RESONATE_OPTIONS: unique symbol = Symbol("ResonateOptions");
 
 export class Options {
-  public readonly id: string;
+  public readonly id: string | undefined;
   public readonly tags: Record<string, string>;
   public readonly target: string;
   public readonly timeout: number;
@@ -14,7 +14,7 @@ export class Options {
   [RESONATE_OPTIONS] = true;
 
   constructor({
-    id = "",
+    id = undefined,
     tags = {},
     target = "default",
     timeout = 24 * util.HOUR,
