@@ -12,9 +12,7 @@ import (
 
 func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.DeleteScheduleRequest)
-
-	metrics, ok := c.Get("metrics").(*metrics.Metrics)
-	util.Assert(ok, "coroutine must have config dependency")
+	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,

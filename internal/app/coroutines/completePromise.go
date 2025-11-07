@@ -153,8 +153,7 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
-		metrics, ok := c.Get("metrics").(*metrics.Metrics)
-		util.Assert(ok, "coroutine must have metrics dependency")
+		metrics := c.Get("metrics").(*metrics.Metrics)
 
 		commands := []t_aio.Command{
 			updatePromiseCmd,

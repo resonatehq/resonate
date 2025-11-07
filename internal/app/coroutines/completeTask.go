@@ -13,9 +13,7 @@ import (
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.CompleteTaskRequest)
-
-	metrics, ok := c.Get("metrics").(*metrics.Metrics)
-	util.Assert(ok, "coroutine must have metrics dependency")
+	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	var status t_api.StatusCode
 	var t *task.Task

@@ -16,11 +16,10 @@ import (
 
 func ClaimTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.ClaimTaskRequest)
-
-	config, ok := c.Get("config").(*system.Config)
-	util.Assert(ok, "coroutine must have config dependency")
 	util.Assert(req.ProcessId != "", "process id must be set")
 	util.Assert(req.Ttl >= 0, "ttl must be greater than or equal to 0")
+
+	config := c.Get("config").(*system.Config)
 
 	var status t_api.StatusCode
 	var t *task.Task

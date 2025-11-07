@@ -121,8 +121,7 @@ func createPromise(tags map[string]string, fence *task.FencingToken, promiseCmd 
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, *promiseAndTask]) (*promiseAndTask, error) {
-		metrics, ok := c.Get("metrics").(*metrics.Metrics)
-		util.Assert(ok, "coroutine must have metrics dependency")
+		metrics := c.Get("metrics").(*metrics.Metrics)
 
 		// first read the promise to see if it already exists
 		completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{

@@ -12,9 +12,9 @@ import (
 )
 
 func TimeoutPromises(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
-	config, ok := c.Get("config").(*system.Config)
-	util.Assert(ok, "coroutine must have config dependency")
 	util.Assert(m != nil, "metadata must be set")
+
+	config := c.Get("config").(*system.Config)
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,

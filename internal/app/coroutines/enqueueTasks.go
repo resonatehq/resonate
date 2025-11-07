@@ -18,11 +18,8 @@ import (
 func EnqueueTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], m map[string]string) (any, error) {
 	util.Assert(m != nil, "metadata must be set")
 
-	config, ok := c.Get("config").(*system.Config)
-	util.Assert(ok, "coroutine must have config dependency")
-
-	metrics, ok := c.Get("metrics").(*metrics.Metrics)
-	util.Assert(ok, "coroutine must have metrics dependency")
+	config := c.Get("config").(*system.Config)
+	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	tasksCompletion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
