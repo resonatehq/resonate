@@ -82,12 +82,12 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        run: |
-          # Use 0.0.0 so as to not conflict with a newer version
-          # Use the commit sha as a unique identifier
-          npm version 0.0.0-SNAPSHOT-$GITHUB_SHA --git-tag-version false
+      # - name: Publish
+      #   if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      #   run: |
+      #     # Use 0.0.0 so as to not conflict with a newer version
+      #     # Use the commit sha as a unique identifier
+      #     npm version 0.0.0-SNAPSHOT-$GITHUB_SHA --git-tag-version false
 
-          # Publish to the main tag
-          npm publish --provenance --access public --tag main
+      #     # Publish to the main tag
+      #     npm publish --provenance --access public --tag main
