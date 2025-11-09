@@ -41,7 +41,7 @@ func (c *Config) String() string {
 }
 
 type backgroundCoroutine struct {
-	coroutine func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
+	coroutine func(map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	name      string
 	last      int64
 	promise   promise.Promise[any]
@@ -55,8 +55,8 @@ type System struct {
 	scheduler    gocoro.Scheduler[*t_aio.Submission, *t_aio.Completion]
 	onRequest    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]
 	background   []*backgroundCoroutine
-	shutdown     chan interface{}
-	shortCircuit chan interface{}
+	shutdown     chan any
+	shortCircuit chan any
 }
 
 func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *System {
@@ -68,8 +68,8 @@ func New(api api.API, aio aio.AIO, config *Config, metrics *metrics.Metrics) *Sy
 		scheduler:    gocoro.New(aio, config.CoroutineMaxSize),
 		onRequest:    map[t_api.Kind]func(req *t_api.Request, res func(*t_api.Response, error)) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]{},
 		background:   []*backgroundCoroutine{},
-		shutdown:     make(chan interface{}),
-		shortCircuit: make(chan interface{}),
+		shutdown:     make(chan any),
+		shortCircuit: make(chan any),
 	}
 }
 
@@ -138,7 +138,7 @@ func (s *System) Tick(t int64) {
 				"name": bg.name,
 			}
 
-			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(s.config, tags)); ok {
+			if p, ok := gocoro.Add(s.scheduler, bg.coroutine(tags)); ok {
 				bg.promise = p
 				s.coroutineMetrics(p, tags)
 			} else {
@@ -169,7 +169,7 @@ func (s *System) Tick(t int64) {
 	s.aio.Flush(t)
 }
 
-func (s *System) Shutdown() <-chan interface{} {
+func (s *System) Shutdown() <-chan any {
 	// start by shutting down the api
 	s.api.Shutdown()
 
@@ -194,6 +194,9 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			// set config
 			c.Set("config", s.config)
 
+			// set metrics
+			c.Set("metrics", s.metrics)
+
 			// run coroutine
 			res, err := constructor(c, req)
 
@@ -209,10 +212,21 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 	}
 }
 
-func (s *System) AddBackground(name string, constructor func(*Config, map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any]) {
+func (s *System) AddBackground(name string, constructor func(gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], map[string]string) (any, error)) {
 	s.background = append(s.background, &backgroundCoroutine{
-		coroutine: constructor,
-		name:      name,
+		name: name,
+		coroutine: func(m map[string]string) gocoro.CoroutineFunc[*t_aio.Submission, *t_aio.Completion, any] {
+			return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any]) (any, error) {
+				// set config
+				c.Set("config", s.config)
+
+				// set metrics
+				c.Set("metrics", s.metrics)
+
+				// run coroutine
+				return constructor(c, m)
+			}
+		},
 	})
 }
 

@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/promise"
 	"github.com/resonatehq/resonate/pkg/task"
@@ -151,6 +153,8 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 	}
 
 	return func(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, bool]) (bool, error) {
+		metrics := c.Get("metrics").(*metrics.Metrics)
+
 		commands := []t_aio.Command{
 			updatePromiseCmd,
 			&t_aio.CompleteTasksCommand{
@@ -193,13 +197,20 @@ func completePromise(tags map[string]string, fence *task.FencingToken, updatePro
 		util.Assert(len(completion.Store.Results) == len(commands), "completion must have same number of results as commands")
 
 		updatePromiseResult := t_aio.AsAlterPromises(completion.Store.Results[0])
-		_ = t_aio.AsAlterTasks(completion.Store.Results[1]) // serves as type assertion
+		completeTasksResult := t_aio.AsAlterTasks(completion.Store.Results[1])
 		createTasksResult := t_aio.AsAlterTasks(completion.Store.Results[2])
-		deleteCallbacksRusult := t_aio.AsAlterCallbacks(completion.Store.Results[3])
+		deleteCallbacksResult := t_aio.AsAlterCallbacks(completion.Store.Results[3])
 
 		util.Assert(updatePromiseResult != nil, "result must not be nil")
 		util.Assert(updatePromiseResult.RowsAffected == 0 || updatePromiseResult.RowsAffected == 1, "result must return 0 or 1 rows")
-		util.Assert(createTasksResult.RowsAffected == deleteCallbacksRusult.RowsAffected, "created rows must equal deleted rows")
+		util.Assert(createTasksResult.RowsAffected == deleteCallbacksResult.RowsAffected, "created rows must equal deleted rows")
+
+		// count promises
+		metrics.Promises.WithLabelValues(strings.ToLower(updatePromiseCmd.State.String())).Add(float64(updatePromiseResult.RowsAffected))
+
+		// count tasks
+		metrics.Tasks.WithLabelValues("created").Add(float64(createTasksResult.RowsAffected))
+		metrics.Tasks.WithLabelValues("completed").Add(float64(completeTasksResult.RowsAffected))
 
 		return updatePromiseResult.RowsAffected == 1, nil
 	}
