@@ -27,7 +27,6 @@ type Config struct {
 
 type Producer interface {
 	Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error
-	Flush(timeoutMs int) int
 	Close()
 }
 

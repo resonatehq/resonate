@@ -46,6 +46,15 @@ func (m *MockKafkaProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.
 		topic = *msg.TopicPartition.Topic
 	}
 
+	if deliveryChan != nil {
+		deliveryChan <- &kafka.Message{
+			TopicPartition: kafka.TopicPartition{
+				Topic:     &topic,
+				Partition: kafka.PartitionAny,
+			},
+		}
+	}
+
 	m.ch <- &SendMessageParams{
 		Topic:   topic,
 		Key:     key,
@@ -54,10 +63,6 @@ func (m *MockKafkaProducer) Produce(msg *kafka.Message, deliveryChan chan kafka.
 	}
 
 	return nil
-}
-
-func (m *MockKafkaProducer) Flush(timeoutMs int) int {
-	return 1
 }
 
 func (m *MockKafkaProducer) Close() {}
