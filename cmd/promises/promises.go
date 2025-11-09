@@ -23,15 +23,15 @@ func NewCmd() *cobra.Command {
 		Use:     "promises",
 		Aliases: []string{"promise"},
 		Short:   "Resonate promises",
-		Run: func(cmd *cobra.Command, args []string) {
-			_ = cmd.Help()
-		},
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			if username != "" || password != "" {
 				c.SetBasicAuth(username, password)
 			}
 
 			return c.Setup(server)
+		},
+		Run: func(cmd *cobra.Command, args []string) {
+			_ = cmd.Help()
 		},
 	}
 

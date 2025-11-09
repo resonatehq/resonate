@@ -6,6 +6,7 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/schedule"
 )
@@ -24,6 +25,8 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 	if req.PromiseTags == nil {
 		req.PromiseTags = map[string]string{}
 	}
+
+	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	completion, err := gocoro.YieldAndAwait(c, &t_aio.Submission{
 		Kind: t_aio.Store,
@@ -110,6 +113,9 @@ func CreateSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 					},
 				},
 			}
+
+			// count schedules
+			metrics.Schedules.WithLabelValues("created").Inc()
 		} else {
 			// It's possible that the schedule was completed by another coroutine
 			// while we were creating. In that case, we should just retry.

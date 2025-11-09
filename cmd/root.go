@@ -12,6 +12,7 @@ import (
 	"github.com/resonatehq/resonate/cmd/schedules"
 	"github.com/resonatehq/resonate/cmd/serve"
 	"github.com/resonatehq/resonate/cmd/tasks"
+	"github.com/resonatehq/resonate/cmd/tree"
 	"github.com/resonatehq/resonate/internal"
 	"github.com/spf13/cobra"
 )
@@ -33,6 +34,7 @@ func init() {
 	rootCmd.AddCommand(schedules.NewCmd())
 	rootCmd.AddCommand(serve.NewCmd())
 	rootCmd.AddCommand(tasks.NewCmd())
+	rootCmd.AddCommand(tree.NewCmd())
 
 	// Set default output
 	rootCmd.SetOut(os.Stdout)

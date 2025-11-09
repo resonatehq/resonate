@@ -6,12 +6,14 @@ import (
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/resonatehq/resonate/pkg/task"
 )
 
 func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any], r *t_api.Request) (*t_api.Response, error) {
 	req := r.Payload.(*t_api.CompleteTaskRequest)
+	metrics := c.Get("metrics").(*metrics.Metrics)
 
 	var status t_api.StatusCode
 	var t *task.Task
@@ -95,6 +97,9 @@ func CompleteTask(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 				t.Ttl = 0
 				t.ExpiresAt = 0
 				t.CompletedOn = &completedOn
+
+				// count tasks
+				metrics.Tasks.WithLabelValues("completed").Inc()
 			} else {
 				// It's possible that the task was modified by another coroutine
 				// while we were trying to complete. In that case, we should just retry.
