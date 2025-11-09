@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
@@ -59,22 +60,18 @@ func (a *Addr) validate() error {
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Kafka, error) {
-	producer, err := kafka.NewProducer(newConfig(config))
-	if err != nil {
-		return nil, fmt.Errorf("kafka producer: %w", err)
-	}
-	return NewWithProducer(a, metrics, config, producer)
-}
-
-func newConfig(config *Config) *kafka.ConfigMap {
-	c := &kafka.ConfigMap{
-		"bootstrap.servers":   fmt.Sprintf("%v", config.Brokers),
-		"delivery.timeout.ms": int(config.Timeout.Milliseconds()),
+	producerConfig := &kafka.ConfigMap{
+		"bootstrap.servers":   strings.Join(config.Brokers, ", "),
+		"delivery.timeout.ms": strconv.FormatInt(config.Timeout.Milliseconds(), 10),
 		"compression.type":    config.Compression,
 		"retries":             3,
 		"acks":                "all",
 	}
-	return c
+	producer, err := kafka.NewProducer(producerConfig)
+	if err != nil {
+		return nil, fmt.Errorf("kafka producer: %w", err)
+	}
+	return NewWithProducer(a, metrics, config, producer)
 }
 
 func NewWithProducer(a aio.AIO, metrics *metrics.Metrics, config *Config, producer Producer) (*Kafka, error) {
@@ -182,11 +179,23 @@ func (w *Worker) Process(data []byte, body []byte) (bool, error) {
 		}
 	}
 
-	err := w.producer.Produce(msg, nil)
+	deliveryChan := make(chan kafka.Event, 1)
+	defer close(deliveryChan)
+
+	err := w.producer.Produce(msg, deliveryChan)
 	if err != nil {
 		return false, err
 	}
 
-	w.producer.Flush(1000)
+	e := <-deliveryChan
+	m, ok := e.(*kafka.Message)
+	if !ok {
+		return false, fmt.Errorf("expected kafka.Message delivery event, got %T", e)
+	}
+
+	if m.TopicPartition.Error != nil {
+		return false, m.TopicPartition.Error
+	}
+
 	return true, nil
 }
