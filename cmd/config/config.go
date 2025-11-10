@@ -22,6 +22,7 @@ import (
 	"github.com/resonatehq/resonate/internal/app/subsystems/aio/store/sqlite"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/grpc"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/http"
+	"github.com/resonatehq/resonate/internal/app/subsystems/api/nats"
 	"github.com/resonatehq/resonate/internal/kernel/system"
 	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/spf13/cobra"
@@ -78,6 +79,7 @@ type AIODST struct {
 type APISubsystems struct {
 	Http EnabledSubsystem[http.Config] `flag:"http"`
 	Grpc EnabledSubsystem[grpc.Config] `flag:"grpc"`
+	Nats DisabledSubsystem[nats.Config] `flag:"nats"`
 }
 
 type AIOSubsystems struct {
@@ -110,6 +112,14 @@ func (c *Config) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, err
 	}
 	if c.API.Subsystems.Grpc.Enabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Nats.Enabled {
+		subsystem, err := nats.New(a, &c.API.Subsystems.Nats.Config)
 		if err != nil {
 			return nil, err
 		}
@@ -202,6 +212,7 @@ func (c *Config) store(a aio.AIO, metrics *metrics.Metrics) (aio.Subsystem, erro
 type APIDSTSubsystems struct {
 	Http DisabledSubsystem[http.Config] `flag:"http"`
 	Grpc DisabledSubsystem[grpc.Config] `flag:"grpc"`
+	Nats DisabledSubsystem[nats.Config] `flag:"nats"`
 }
 
 type AIODSTSubsystems struct {
@@ -223,6 +234,14 @@ func (c *ConfigDST) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, 
 	}
 	if c.API.Subsystems.Grpc.Enabled {
 		subsystem, err := grpc.New(a, &c.API.Subsystems.Grpc.Config)
+		if err != nil {
+			return nil, err
+		}
+
+		subsystems = append(subsystems, subsystem)
+	}
+	if c.API.Subsystems.Nats.Enabled {
+		subsystem, err := nats.New(a, &c.API.Subsystems.Nats.Config)
 		if err != nil {
 			return nil, err
 		}
