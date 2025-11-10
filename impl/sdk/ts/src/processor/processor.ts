@@ -8,7 +8,6 @@ export interface Processor {
   process(
     id: string,
     ctx: InnerContext,
-    name: string,
     func: F,
     done: (result: Result<unknown>) => void,
     verbose: boolean,
@@ -17,22 +16,9 @@ export interface Processor {
 }
 
 export class AsyncProcessor implements Processor {
-  process<T>(
+  async process<T>(
     id: string,
     ctx: InnerContext,
-    name: string,
-    func: () => Promise<T>,
-    done: (result: Result<T>) => void,
-    verbose: boolean,
-    span: Span,
-  ): void {
-    this.run(id, ctx, name, func, done, verbose, span);
-  }
-
-  private async run<T>(
-    id: string,
-    ctx: InnerContext,
-    name: string,
     func: () => Promise<T>,
     done: (result: Result<T>) => void,
     verbose: boolean,
@@ -45,9 +31,12 @@ export class AsyncProcessor implements Processor {
 
       try {
         const data = await func();
+        childSpan.setStatus(true);
         done({ success: true, value: data });
         return;
       } catch (error) {
+        childSpan.setStatus(false, String(error));
+
         retryIn = ctx.retryPolicy.next(ctx.info.attempt);
         if (retryIn === null) {
           done({ success: false, error });
@@ -60,7 +49,9 @@ export class AsyncProcessor implements Processor {
           return;
         }
 
-        console.warn(`Runtime. Function '${name}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`);
+        console.warn(
+          `Runtime. Function '${ctx.func}' failed with '${String(error)}' (retrying in ${retryIn / 1000} secs)`,
+        );
         if (verbose) {
           console.warn(error);
         }

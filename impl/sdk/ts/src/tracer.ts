@@ -7,6 +7,7 @@ export interface Span {
   startSpan(id: string, startTime: number): Span;
   encode(): Record<string, string>;
   setAttribute(key: string, value: string | number | boolean): void;
+  setStatus(success: boolean, message?: string): void;
   end(endTime: number): void;
 }
 
@@ -24,6 +25,7 @@ export class NoopSpan {
     return new NoopSpan();
   }
   setAttribute(key: string, value: string | number | boolean): void {}
+  setStatus(success: boolean, message?: string): void {}
   encode(): Record<string, string> {
     return {};
   }

@@ -19,6 +19,8 @@ export type InternalAsyncR = {
   type: "internal.async.r";
   id: string;
   mode: "attached" | "detached";
+  func: string;
+  version: number;
   createReq: CreatePromiseReq<any>;
 };
 
@@ -179,6 +181,8 @@ export class Decorator<TRet> {
         type: "internal.async.r",
         id: event.id,
         mode: event.mode,
+        func: event.func,
+        version: event.version,
         createReq: event.createReq,
       };
     }

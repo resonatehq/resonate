@@ -1,7 +1,7 @@
 import type { Context, InnerContext } from "./context";
 import { Decorator, type Value } from "./decorator";
 import type { Handler } from "./handler";
-import type { DurablePromiseRecord } from "./network/network";
+import type { DurablePromiseRecord, TaskRecord } from "./network/network";
 import { Never } from "./retries";
 import type { Span } from "./tracer";
 import { type Callback, ko, ok, type Result, type Yieldable } from "./types";
@@ -47,6 +47,7 @@ const logged: Map<string, boolean> = new Map();
 
 export class Coroutine<T> {
   private ctx: InnerContext;
+  private task: TaskRecord;
   private verbose: boolean;
   private decorator: Decorator<T>;
   private handler: Handler;
@@ -56,6 +57,7 @@ export class Coroutine<T> {
 
   constructor(
     ctx: InnerContext,
+    task: TaskRecord,
     verbose: boolean,
     decorator: Decorator<T>,
     handler: Handler,
@@ -63,6 +65,7 @@ export class Coroutine<T> {
     depth = 1,
   ) {
     this.ctx = ctx;
+    this.task = task;
     this.verbose = verbose;
     this.decorator = decorator;
     this.handler = handler;
@@ -85,6 +88,7 @@ export class Coroutine<T> {
     ctx: InnerContext,
     func: (ctx: Context, ...args: any[]) => Generator<Yieldable, any, any>,
     args: any[],
+    task: TaskRecord,
     handler: Handler,
     spans: Map<string, Span>,
     callback: Callback<Suspended | Completed>,
@@ -107,7 +111,7 @@ export class Coroutine<T> {
           return callback(false, { type: "completed", promise: res });
         }
 
-        const coroutine = new Coroutine(ctx, verbose, new Decorator(func(ctx, ...args)), handler, spans);
+        const coroutine = new Coroutine(ctx, task, verbose, new Decorator(func(ctx, ...args)), handler, spans);
         coroutine.exec((err, status) => {
           if (err) return callback(err);
           util.assertDefined(status);
@@ -166,6 +170,11 @@ export class Coroutine<T> {
           let span: Span;
           if (!this.spans.has(action.createReq.id)) {
             span = this.ctx.span.startSpan(action.createReq.id, this.ctx.clock.now());
+            span.setAttribute("type", "run");
+            span.setAttribute("func", action.func.name);
+            span.setAttribute("version", action.version);
+            span.setAttribute("task.id", this.task.id);
+            span.setAttribute("task.counter", this.task.counter);
             this.spans.set(action.createReq.id, span);
           } else {
             span = this.spans.get(action.createReq.id)!;
@@ -176,10 +185,14 @@ export class Coroutine<T> {
             (err, res) => {
               if (err) {
                 err.log(this.verbose);
+                span.setStatus(false, String(err));
                 span.end(this.ctx.clock.now());
                 return callback(true);
               }
               util.assertDefined(res);
+
+              // if the promise is created, the span is considered successful
+              span.setStatus(true);
 
               const ctx = this.ctx.child({
                 id: res.id,
@@ -212,6 +225,7 @@ export class Coroutine<T> {
                 spans.push(span);
                 const coroutine = new Coroutine(
                   ctx,
+                  this.task,
                   this.verbose,
                   new Decorator(action.func(ctx, ...action.args)),
                   this.handler,
@@ -321,6 +335,12 @@ export class Coroutine<T> {
           let span: Span;
           if (!this.spans.has(action.createReq.id)) {
             span = this.ctx.span.startSpan(action.createReq.id, this.ctx.clock.now());
+            span.setAttribute("type", "rpc");
+            span.setAttribute("mode", action.mode);
+            span.setAttribute("func", action.func);
+            span.setAttribute("version", action.version);
+            span.setAttribute("task.id", this.task.id);
+            span.setAttribute("task.counter", this.task.counter);
             this.spans.set(action.createReq.id, span);
           } else {
             span = this.spans.get(action.createReq.id)!;
@@ -329,11 +349,17 @@ export class Coroutine<T> {
           this.handler.createPromise(
             action.createReq,
             (err, res) => {
-              span.end(this.ctx.clock.now());
               if (err) {
                 err.log(this.verbose);
+                span.setStatus(false, String(err));
+                span.end(this.ctx.clock.now());
                 return callback(true);
               }
+
+              // if the promise is created, the span is considered successful
+              span.setStatus(true);
+              span.end(this.ctx.clock.now());
+
               util.assertDefined(res);
 
               if (res.state === "pending") {

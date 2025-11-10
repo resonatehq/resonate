@@ -464,6 +464,9 @@ export class Resonate {
     util.assert(registered.version > 0, "function version must be greater than zero");
 
     const span = this.tracer.startSpan(id, this.clock.now());
+    span.setAttribute("type", "run");
+    span.setAttribute("func", registered.name);
+    span.setAttribute("version", registered.version);
 
     try {
       const { promise, task } = await this.createPromiseAndTask(
@@ -498,6 +501,9 @@ export class Resonate {
         span.encode(),
       );
 
+      // if the promise is created, the span is considered successful
+      span.setStatus(true);
+
       if (task) {
         this.inner.process(span, { kind: "claimed", task: task, rootPromise: promise }, () => {
           span.end(this.clock.now());
@@ -508,6 +514,7 @@ export class Resonate {
 
       return this.createHandle(promise);
     } catch (e) {
+      span.setStatus(false, String(e));
       span.end(this.clock.now());
       throw e;
     }
@@ -596,7 +603,13 @@ export class Resonate {
       throw exceptions.REGISTRY_FUNCTION_NOT_REGISTERED(funcOrName.name, opts.version);
     }
 
+    const func = registered ? registered.name : (funcOrName as string);
+    const version = registered ? registered.version : opts.version || 1;
+
     const span = this.tracer.startSpan(id, this.clock.now());
+    span.setAttribute("type", "rpc");
+    span.setAttribute("func", func);
+    span.setAttribute("version", version);
 
     try {
       const promise = await this.createPromise(
@@ -606,10 +619,10 @@ export class Resonate {
           timeout: Date.now() + opts.timeout,
           param: {
             data: {
-              func: registered ? registered.name : (funcOrName as string),
+              func: func,
               args: args,
               retry: opts.retryPolicy?.encode(),
-              version: registered ? registered.version : opts.version || 1,
+              version: version,
             },
           },
           tags: {
@@ -624,9 +637,16 @@ export class Resonate {
         },
         span.encode(),
       );
-      return this.createHandle(promise);
-    } finally {
+
+      // if the promise is created, the span is considered successful
+      span.setStatus(true);
       span.end(this.clock.now());
+
+      return this.createHandle(promise);
+    } catch (e) {
+      span.setStatus(false, String(e));
+      span.end(this.clock.now());
+      throw e;
     }
   }
 
