@@ -101,7 +101,7 @@ func TimeoutTasks(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any],
 			util.Assert(result.RowsAffected == 0 || result.RowsAffected == 1, "result must return 0 or 1 rows")
 
 			if command.State == task.Timedout && result.RowsAffected == 1 {
-				metrics.Tasks.WithLabelValues("timedout").Inc()
+				metrics.TasksTotal.WithLabelValues("timedout").Inc()
 			}
 		}
 	}

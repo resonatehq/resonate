@@ -7,6 +7,7 @@ import (
 
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
 	"github.com/resonatehq/resonate/internal/metrics"
@@ -137,10 +138,13 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 	util.Assert(sqe.Submission != nil, "submission must not be nil")
 	util.Assert(sqe.Submission.Metadata != nil, "submission tags must not be nil")
 
-	requestKind := sqe.Submission.Kind().String()
+	kind := sqe.Submission.Kind().String()
+	protocol := sqe.Submission.Metadata["protocol"]
 
 	slog.Debug("api:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
-	a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Inc()
+	timer := prometheus.NewTimer(a.metrics.ApiDuration.WithLabelValues(kind, protocol))
+	count := a.metrics.ApiInFlight.WithLabelValues(kind, protocol)
+	count.Inc()
 
 	// replace callback with a function that emits metrics
 	callback := sqe.Callback
@@ -157,8 +161,9 @@ func (a *api) EnqueueSQE(sqe *bus.SQE[t_api.Request, t_api.Response]) {
 			status = res.Status
 		}
 
-		a.metrics.ApiTotal.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"], strconv.Itoa(int(status))).Inc()
-		a.metrics.ApiInFlight.WithLabelValues(requestKind, sqe.Submission.Metadata["protocol"]).Dec()
+		timer.ObserveDuration()
+		count.Dec()
+		a.metrics.ApiTotal.WithLabelValues(kind, protocol, strconv.Itoa(int(status))).Inc()
 
 		callback(res, err)
 	}

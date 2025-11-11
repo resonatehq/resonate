@@ -162,7 +162,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Poll, error) {
 		server: &http.Server{Handler: handler},
 	}
 
-	counter := metrics.AioConnection.WithLabelValues((&Poll{}).String())
+	counter := metrics.AioPluginConnections.WithLabelValues((&Poll{}).String())
 
 	worker := &PollWorker{
 		sq:         sq,

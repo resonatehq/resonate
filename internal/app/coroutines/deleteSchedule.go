@@ -41,7 +41,7 @@ func DeleteSchedule(c gocoro.Coroutine[*t_aio.Submission, *t_aio.Completion, any
 		status = t_api.StatusNoContent
 
 		// count schedules
-		metrics.Schedules.WithLabelValues("deleted").Inc()
+		metrics.SchedulesTotal.WithLabelValues("deleted").Inc()
 	} else {
 		status = t_api.StatusScheduleNotFound
 	}

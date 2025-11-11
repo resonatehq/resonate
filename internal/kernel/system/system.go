@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/gocoro"
 	"github.com/resonatehq/gocoro/pkg/promise"
 	"github.com/resonatehq/resonate/internal/aio"
@@ -197,6 +198,9 @@ func (s *System) AddOnRequest(kind t_api.Kind, constructor func(gocoro.Coroutine
 			// set metrics
 			c.Set("metrics", s.metrics)
 
+			timer := prometheus.NewTimer(s.metrics.CoroutinesDuration.WithLabelValues(kind.String()))
+			defer timer.ObserveDuration()
+
 			// run coroutine
 			res, err := constructor(c, req)
 
@@ -222,6 +226,9 @@ func (s *System) AddBackground(name string, constructor func(gocoro.Coroutine[*t
 
 				// set metrics
 				c.Set("metrics", s.metrics)
+
+				timer := prometheus.NewTimer(s.metrics.CoroutinesDuration.WithLabelValues(name))
+				defer timer.ObserveDuration()
 
 				// run coroutine
 				return constructor(c, m)
