@@ -15,9 +15,9 @@ type Metrics struct {
 	CoroutinesTotal    *prometheus.CounterVec
 	CoroutinesInFlight *prometheus.GaugeVec
 	CoroutinesDuration *prometheus.HistogramVec
-	Promises           *prometheus.CounterVec
-	Schedules          *prometheus.CounterVec
-	Tasks              *prometheus.CounterVec
+	PromisesTotal      *prometheus.CounterVec
+	SchedulesTotal     *prometheus.CounterVec
+	TasksTotal         *prometheus.CounterVec
 }
 
 func New(reg prometheus.Registerer) *Metrics {
@@ -73,17 +73,17 @@ func New(reg prometheus.Registerer) *Metrics {
 			Help:    "duration of coroutines in seconds",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"type"}),
-		Promises: prometheus.NewCounterVec(prometheus.CounterOpts{
+		PromisesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "promises_total",
 			Help: "count of promises",
 		}, []string{"state"}),
-		Schedules: prometheus.NewCounterVec(prometheus.CounterOpts{
+		SchedulesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "schedules_total",
-			Help: "number of schedules",
+			Help: "count of schedules",
 		}, []string{"state"}),
-		Tasks: prometheus.NewCounterVec(prometheus.CounterOpts{
+		TasksTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "tasks_total",
-			Help: "number of tasks",
+			Help: "count of tasks",
 		}, []string{"state"}),
 	}
 
@@ -104,9 +104,9 @@ func (m *Metrics) Enable(reg prometheus.Registerer) {
 	reg.MustRegister(m.CoroutinesTotal)
 	reg.MustRegister(m.CoroutinesInFlight)
 	reg.MustRegister(m.CoroutinesDuration)
-	reg.MustRegister(m.Promises)
-	reg.MustRegister(m.Schedules)
-	reg.MustRegister(m.Tasks)
+	reg.MustRegister(m.PromisesTotal)
+	reg.MustRegister(m.SchedulesTotal)
+	reg.MustRegister(m.TasksTotal)
 }
 
 func (m *Metrics) Disable(reg prometheus.Registerer) {
@@ -122,7 +122,7 @@ func (m *Metrics) Disable(reg prometheus.Registerer) {
 	reg.Unregister(m.CoroutinesTotal)
 	reg.Unregister(m.CoroutinesInFlight)
 	reg.Unregister(m.CoroutinesDuration)
-	reg.Unregister(m.Promises)
-	reg.Unregister(m.Schedules)
-	reg.Unregister(m.Tasks)
+	reg.Unregister(m.PromisesTotal)
+	reg.Unregister(m.SchedulesTotal)
+	reg.Unregister(m.TasksTotal)
 }
