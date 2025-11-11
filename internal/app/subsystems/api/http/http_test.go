@@ -8,8 +8,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/api"
 	"github.com/resonatehq/resonate/internal/app/subsystems/api/test"
+	"github.com/resonatehq/resonate/internal/metrics"
 	"github.com/resonatehq/resonate/internal/util"
 	"github.com/stretchr/testify/assert"
 )
@@ -23,8 +25,9 @@ type httpTest struct {
 
 func setup(auth map[string]string) (*httpTest, error) {
 	api := &test.API{}
+	metrics := metrics.New(prometheus.NewRegistry())
 	errors := make(chan error)
-	subsystem, err := New(api, &Config{
+	subsystem, err := New(api, metrics, &Config{
 		Addr:          ":0",
 		Auth:          auth,
 		Timeout:       1 * time.Second,

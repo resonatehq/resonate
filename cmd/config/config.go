@@ -98,10 +98,10 @@ type DisabledSubsystem[T any] struct {
 	Config  T    `flag:"-"`
 }
 
-func (c *Config) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
+func (c *Config) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
+		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -211,10 +211,10 @@ type AIODSTSubsystems struct {
 	StoreSqlite   EnabledSubsystem[sqlite.Config]    `flag:"store-sqlite"`
 }
 
-func (c *ConfigDST) APISubsystems(a api.API, pollAddr string) ([]api.Subsystem, error) {
+func (c *ConfigDST) APISubsystems(a api.API, metrics *metrics.Metrics, pollAddr string) ([]api.Subsystem, error) {
 	subsystems := []api.Subsystem{}
 	if c.API.Subsystems.Http.Enabled {
-		subsystem, err := http.New(a, &c.API.Subsystems.Http.Config, pollAddr)
+		subsystem, err := http.New(a, metrics, &c.API.Subsystems.Http.Config, pollAddr)
 		if err != nil {
 			return nil, err
 		}

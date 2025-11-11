@@ -3,21 +3,23 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 type Metrics struct {
-	AioTotal           *prometheus.CounterVec
-	AioInFlight        *prometheus.GaugeVec
-	AioDuration        *prometheus.HistogramVec
-	AioWorker          *prometheus.GaugeVec
-	AioWorkerInFlight  *prometheus.GaugeVec
-	AioConnection      *prometheus.GaugeVec
-	ApiTotal           *prometheus.CounterVec
-	ApiInFlight        *prometheus.GaugeVec
-	ApiDuration        *prometheus.HistogramVec
-	CoroutinesTotal    *prometheus.CounterVec
-	CoroutinesInFlight *prometheus.GaugeVec
-	CoroutinesDuration *prometheus.HistogramVec
-	PromisesTotal      *prometheus.CounterVec
-	SchedulesTotal     *prometheus.CounterVec
-	TasksTotal         *prometheus.CounterVec
+	AioTotal             *prometheus.CounterVec
+	AioInFlight          *prometheus.GaugeVec
+	AioDuration          *prometheus.HistogramVec
+	AioWorker            *prometheus.GaugeVec
+	AioWorkerInFlight    *prometheus.GaugeVec
+	AioPluginConnections *prometheus.GaugeVec
+	ApiTotal             *prometheus.CounterVec
+	ApiInFlight          *prometheus.GaugeVec
+	ApiDuration          *prometheus.HistogramVec
+	CoroutinesTotal      *prometheus.CounterVec
+	CoroutinesInFlight   *prometheus.GaugeVec
+	CoroutinesDuration   *prometheus.HistogramVec
+	HttpRequestsTotal    *prometheus.CounterVec
+	HttpRequestsDuration *prometheus.HistogramVec
+	PromisesTotal        *prometheus.CounterVec
+	SchedulesTotal       *prometheus.CounterVec
+	TasksTotal           *prometheus.CounterVec
 }
 
 func New(reg prometheus.Registerer) *Metrics {
@@ -43,9 +45,9 @@ func New(reg prometheus.Registerer) *Metrics {
 			Name: "aio_worker_submissions_in_flight",
 			Help: "number of in flight aio submissions",
 		}, []string{"type", "worker"}),
-		AioConnection: prometheus.NewGaugeVec(prometheus.GaugeOpts{
-			Name: "aio_connection",
-			Help: "number of aio subsystem connections",
+		AioPluginConnections: prometheus.NewGaugeVec(prometheus.GaugeOpts{
+			Name: "aio_plugin_connections",
+			Help: "number of aio plugin connections",
 		}, []string{"type"}),
 		ApiTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "api_requests_total",
@@ -73,6 +75,15 @@ func New(reg prometheus.Registerer) *Metrics {
 			Help:    "duration of coroutines in seconds",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"type"}),
+		HttpRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "count of http requests",
+		}, []string{"method", "path", "status"}),
+		HttpRequestsDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "http_requests_duration_seconds",
+			Help:    "duration of http requests in seconds",
+			Buckets: prometheus.DefBuckets,
+		}, []string{"method", "path"}),
 		PromisesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "promises_total",
 			Help: "count of promises",
@@ -97,13 +108,15 @@ func (m *Metrics) Enable(reg prometheus.Registerer) {
 	reg.MustRegister(m.AioDuration)
 	reg.MustRegister(m.AioWorker)
 	reg.MustRegister(m.AioWorkerInFlight)
-	reg.MustRegister(m.AioConnection)
+	reg.MustRegister(m.AioPluginConnections)
 	reg.MustRegister(m.ApiTotal)
 	reg.MustRegister(m.ApiInFlight)
 	reg.MustRegister(m.ApiDuration)
 	reg.MustRegister(m.CoroutinesTotal)
 	reg.MustRegister(m.CoroutinesInFlight)
 	reg.MustRegister(m.CoroutinesDuration)
+	reg.MustRegister(m.HttpRequestsTotal)
+	reg.MustRegister(m.HttpRequestsDuration)
 	reg.MustRegister(m.PromisesTotal)
 	reg.MustRegister(m.SchedulesTotal)
 	reg.MustRegister(m.TasksTotal)
@@ -115,13 +128,15 @@ func (m *Metrics) Disable(reg prometheus.Registerer) {
 	reg.Unregister(m.AioDuration)
 	reg.Unregister(m.AioWorker)
 	reg.Unregister(m.AioWorkerInFlight)
-	reg.Unregister(m.AioConnection)
+	reg.Unregister(m.AioPluginConnections)
 	reg.Unregister(m.ApiTotal)
 	reg.Unregister(m.ApiInFlight)
 	reg.Unregister(m.ApiDuration)
 	reg.Unregister(m.CoroutinesTotal)
 	reg.Unregister(m.CoroutinesInFlight)
 	reg.Unregister(m.CoroutinesDuration)
+	reg.Unregister(m.HttpRequestsTotal)
+	reg.Unregister(m.HttpRequestsDuration)
 	reg.Unregister(m.PromisesTotal)
 	reg.Unregister(m.SchedulesTotal)
 	reg.Unregister(m.TasksTotal)

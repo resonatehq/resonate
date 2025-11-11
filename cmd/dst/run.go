@@ -140,7 +140,7 @@ func RunDSTCmd() *cobra.Command {
 			aio := aio.NewDST(r, p, metrics)
 
 			// api subsystems
-			apiSubsystems, err := config.APISubsystems(api, "")
+			apiSubsystems, err := config.APISubsystems(api, metrics, "")
 			if err != nil {
 				return err
 			}

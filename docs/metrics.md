@@ -56,10 +56,10 @@ Resonate emits the following Prometheus metrics.
 
 ---
 
-## aio_connection
+## aio_plugin_connections
 
 **Type:** Gauge
-**Help:** Number of AIO subsystem connections.
+**Help:** Number of AIO plugin connections.
 
 **Dimensions:**
 - `type`
@@ -127,6 +127,29 @@ Resonate emits the following Prometheus metrics.
 
 **Dimensions:**
 - `type`
+
+---
+
+## http_requests_total
+
+**Type:** Counter
+**Help:** Count of HTTP requests.
+
+**Dimensions:**
+- `method`
+- `path`
+- `status`
+
+---
+
+## http_requests_duration_seconds
+
+**Type:** Histogram
+**Help:** Duration of HTTP requests in seconds.
+
+**Dimensions:**
+- `method`
+- `path`
 
 ---
 
