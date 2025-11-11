@@ -162,7 +162,7 @@ func (a *aio) EnqueueSQE(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 
 		timer.ObserveDuration()
 		count.Dec()
-		a.metrics.AioTotal.WithLabelValues(sqe.Submission.Kind.String(), status).Inc()
+		a.metrics.AioTotal.WithLabelValues(kind, status).Inc()
 
 		callback(completion, err)
 	}
