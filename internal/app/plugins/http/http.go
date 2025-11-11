@@ -65,19 +65,26 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	defer cancel()
 
 	wroteReq := make(chan struct{})
-	trace := &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
-		select {
-		case <-wroteReq:
-		default:
-			close(wroteReq)
-		}
-	}}
+	trace := &httptrace.ClientTrace{
+		WroteRequest: func(httptrace.WroteRequestInfo) {
+			select {
+			case <-wroteReq:
+			default:
+				close(wroteReq)
+			}
+		},
+	}
 
 	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
 
+	// perform request synchronously
+	done := make(chan struct{})
+	var doErr error
 	go func() {
+		defer close(done)
 		resp, err := p.client.Do(req)
-		if err == nil && resp != nil {
+		doErr = err
+		if resp != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}
@@ -85,9 +92,12 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 
 	select {
 	case <-wroteReq:
-		return true, nil
+		return true, nil // request reached server
 	case <-ctx.Done():
 		return false, ctx.Err()
+	case <-done:
+		// request finished before write trace fired (e.g. connect failure)
+		return false, doErr
 	}
 }
 
