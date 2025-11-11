@@ -78,8 +78,8 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	go func() {
 		resp, err := p.client.Do(req)
 		if err == nil && resp != nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 	}()
 
