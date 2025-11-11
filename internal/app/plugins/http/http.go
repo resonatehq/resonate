@@ -41,10 +41,7 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 		return false, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.client.Timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, "POST", addr.Url, bytes.NewReader(body))
+	req, err := http.NewRequest("POST", addr.Url, bytes.NewReader(body))
 	if err != nil {
 		return false, err
 	}
@@ -63,6 +60,9 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(context.Background(), p.client.Timeout)
+	defer cancel()
 
 	wroteReq := make(chan struct{})
 	trace := &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
