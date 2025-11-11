@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/resonatehq/resonate/internal/kernel/bus"
 	"github.com/resonatehq/resonate/internal/kernel/t_aio"
 	"github.com/resonatehq/resonate/internal/kernel/t_api"
@@ -143,7 +144,10 @@ func (a *aio) EnqueueSQE(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 	}
 
 	slog.Debug("aio:sqe:enqueue", "id", sqe.Id, "sqe", sqe)
-	a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Inc()
+	kind := sqe.Submission.Kind.String()
+	timer := prometheus.NewTimer(a.metrics.AioDuration.WithLabelValues(kind))
+	count := a.metrics.AioInFlight.WithLabelValues(kind)
+	count.Inc()
 
 	callback := sqe.Callback
 	sqe.Callback = func(completion *t_aio.Completion, err error) {
@@ -156,8 +160,9 @@ func (a *aio) EnqueueSQE(sqe *bus.SQE[t_aio.Submission, t_aio.Completion]) {
 			status = "success"
 		}
 
+		timer.ObserveDuration()
+		count.Dec()
 		a.metrics.AioTotal.WithLabelValues(sqe.Submission.Kind.String(), status).Inc()
-		a.metrics.AioInFlight.WithLabelValues(sqe.Submission.Kind.String()).Dec()
 
 		callback(completion, err)
 	}
