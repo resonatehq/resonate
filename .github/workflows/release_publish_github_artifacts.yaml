@@ -30,11 +30,11 @@ jobs:
           - os: darwin
             arch: x86_64
             arch_grep: x86_64
-            runner: macos-13
+            runner: macos-15-intel
           - os: darwin
             arch: aarch64
             arch_grep: arm64
-            runner: macos-14
+            runner: macos-15
 
     steps:
       - name: Check out repository
