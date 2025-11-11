@@ -2,8 +2,11 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
@@ -13,8 +16,8 @@ import (
 
 type Config struct {
 	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"3"`
+	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"3m"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
@@ -38,7 +41,10 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 		return false, err
 	}
 
-	req, err := http.NewRequest("POST", addr.Url, bytes.NewReader(body))
+	ctx, cancel := context.WithTimeout(context.Background(), p.client.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "POST", addr.Url, bytes.NewReader(body))
 	if err != nil {
 		return false, err
 	}
@@ -58,12 +64,31 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := p.client.Do(req)
-	if err != nil {
-		return false, err
-	}
+	wroteReq := make(chan struct{})
+	trace := &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) {
+		select {
+		case <-wroteReq:
+		default:
+			close(wroteReq)
+		}
+	}}
 
-	return res.StatusCode == http.StatusOK, nil
+	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
+
+	go func() {
+		resp, err := p.client.Do(req)
+		if err == nil && resp != nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+
+	select {
+	case <-wroteReq:
+		return true, nil
+	case <-ctx.Done():
+		return false, ctx.Err()
+	}
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
