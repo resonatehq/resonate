@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"time"
@@ -61,49 +62,43 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
 
-	ctx, cancel := context.WithTimeout(context.Background(), p.client.Timeout)
-	defer cancel()
-
-	wroteReq := make(chan struct{})
+	connected := make(chan struct{})
 	trace := &httptrace.ClientTrace{
-		WroteRequest: func(httptrace.WroteRequestInfo) {
+		ConnectDone: func(network, addr string, err error) {
 			select {
-			case <-wroteReq:
+			case <-connected:
 			default:
-				close(wroteReq)
+				close(connected)
 			}
 		},
 	}
 
-	req = req.WithContext(httptrace.WithClientTrace(ctx, trace))
+	req = req.WithContext(httptrace.WithClientTrace(context.Background(), trace))
 
-	// perform request synchronously
-	done := make(chan struct{})
-	var doErr error
+	// perform request asynchronously
 	go func() {
-		defer close(done)
 		resp, err := p.client.Do(req)
-		doErr = err
-		if resp != nil {
+		if err == nil && resp != nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}
 	}()
 
-	select {
-	case <-wroteReq:
-		return true, nil // request reached server
-	case <-ctx.Done():
-		return false, ctx.Err()
-	case <-done:
-		// request finished before write trace fired (e.g. connect failure)
-		return false, doErr
-	}
+	// wait for connection to be established
+	<-connected
+	return true, nil
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 	proc := &processor{
-		client: &http.Client{Timeout: config.Timeout},
+		client: &http.Client{
+			Timeout: config.Timeout,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: 10 * time.Second, // connection timeout
+				}).DialContext,
+			},
+		},
 	}
 
 	baseConfig := &base.BaseConfig{
