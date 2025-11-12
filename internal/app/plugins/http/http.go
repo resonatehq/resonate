@@ -16,11 +16,12 @@ import (
 )
 
 type Config struct {
-	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers     int           `flag:"workers" desc:"number of workers" default:"3"`
-	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"3m"`
-	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
-	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
+	Size              int           `flag:"size" desc:"submission buffered channel size" default:"100"`
+	Workers           int           `flag:"workers" desc:"number of workers" default:"3"`
+	Timeout           time.Duration `flag:"timeout" desc:"http request timeout" default:"3m"`
+	ConnectionTimeout time.Duration `flag:"connection-timeout" desc:"http connection timeout" default:"10s"`
+	TimeToRetry       time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
+	TimeToClaim       time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
 
 type Http struct {
@@ -62,12 +63,15 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
 
+	succeeded := false
+
 	connected := make(chan struct{})
 	trace := &httptrace.ClientTrace{
 		ConnectDone: func(network, addr string, err error) {
 			select {
 			case <-connected:
 			default:
+				succeeded = true
 				close(connected)
 			}
 		},
@@ -82,11 +86,16 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
 		}
+
+		if err != nil {
+			close(connected)
+		}
+
 	}()
 
 	// wait for connection to be established
 	<-connected
-	return true, nil
+	return succeeded, nil
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
@@ -95,7 +104,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 			Timeout: config.Timeout,
 			Transport: &http.Transport{
 				DialContext: (&net.Dialer{
-					Timeout: 10 * time.Second, // connection timeout
+					Timeout: config.ConnectionTimeout,
 				}).DialContext,
 			},
 		},
