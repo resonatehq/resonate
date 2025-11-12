@@ -54,7 +54,7 @@ func TestHttpPlugin(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	assert.Nil(t, err)
 	unreachableAddr := l.Addr().String()
-	l.Close() // Now nothing is listening on that port
+	_ = l.Close() // Now nothing is listening on that port
 	unreachableUrl := fmt.Sprintf("http://%s/ko", unreachableAddr)
 	// -------------------------------------
 
