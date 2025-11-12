@@ -68,9 +68,7 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	connected := make(chan struct{})
 	trace := &httptrace.ClientTrace{
 		ConnectDone: func(network, addr string, err error) {
-			select {
-			case <-connected:
-			default:
+			if err == nil && !succeeded {
 				succeeded = true
 				close(connected)
 			}
@@ -90,10 +88,8 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 		if err != nil {
 			close(connected)
 		}
-
 	}()
 
-	// wait for connection to be established
 	<-connected
 	return succeeded, nil
 }
