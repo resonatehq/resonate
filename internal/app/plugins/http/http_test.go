@@ -67,33 +67,26 @@ func TestHttpPlugin(t *testing.T) {
 		{"unreachable", &Addr{Url: unreachableUrl}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			httpPlugin, err := New(nil, metrics, &Config{
-				Size:        1,
-				Workers:     1,
-				Timeout:     1 * time.Second,
-				TimeToRetry: 15 * time.Second,
-				TimeToClaim: 1 * time.Minute,
-			})
+			http, err := New(nil, metrics, &Config{Size: 1, Workers: 1, Timeout: 1 * time.Second, TimeToRetry: 15 * time.Second, TimeToClaim: 1 * time.Minute})
 			assert.Nil(t, err)
 
 			data, err := json.Marshal(tc.data)
 			assert.Nil(t, err)
 
-			err = httpPlugin.Start(nil)
+			err = http.Start(nil)
 			assert.Nil(t, err)
 
-			doneCalled := make(chan struct{})
-			ok := httpPlugin.Enqueue(&aio.Message{
+			ok := http.Enqueue(&aio.Message{
 				Addr: data,
 				Head: map[string]string{"foo": "bar", "baz": "qux"},
 				Body: []byte("ok"),
 				Done: func(completion *t_aio.SenderCompletion) {
 					assert.NotNil(t, completion)
-					close(doneCalled)
 				},
 			})
 			assert.True(t, ok)
-			err = httpPlugin.Stop()
+
+			err = http.Stop()
 			assert.Nil(t, err)
 		})
 	}
