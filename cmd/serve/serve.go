@@ -112,7 +112,7 @@ func Serve(config *config.Config) error {
 	}
 
 	// api subsystems
-	apiSubsystems, err := config.APISubsystems(api, pollAddr)
+	apiSubsystems, err := config.APISubsystems(api, metrics, pollAddr)
 	if err != nil {
 		return err
 	}
