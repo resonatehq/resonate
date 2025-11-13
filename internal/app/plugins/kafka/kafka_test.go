@@ -120,6 +120,42 @@ func TestKafkaPlugin(t *testing.T) {
 			},
 		},
 		{
+			name:     "SuccessWithHeadParameter",
+			addr:     []byte(`{"topic": "test-topic"}`),
+			producer: successProducer,
+			success:  true,
+			params: &SendMessageParams{
+				Topic:   "test-topic",
+				Key:     "",
+				Value:   []byte("test message"),
+				Headers: map[string]string{"foo": "bar", "baz": "qux"},
+			},
+		},
+		{
+			name:     "SuccessWithHeadAndAddrHeaders",
+			addr:     []byte(`{"topic": "test-topic", "headers": {"content-type": "application/json", "source": "resonate"}}`),
+			producer: successProducer,
+			success:  true,
+			params: &SendMessageParams{
+				Topic:   "test-topic",
+				Key:     "",
+				Value:   []byte("test message"),
+				Headers: map[string]string{"content-type": "application/json", "source": "resonate", "foo": "bar", "baz": "qux"},
+			},
+		},
+		{
+			name:     "SuccessWithHeadPrecedenceOverAddrHeaders",
+			addr:     []byte(`{"topic": "test-topic", "headers": {"source": "addr", "conflict": "addr-value"}}`),
+			producer: successProducer,
+			success:  true,
+			params: &SendMessageParams{
+				Topic:   "test-topic",
+				Key:     "",
+				Value:   []byte("test message"),
+				Headers: map[string]string{"source": "head", "conflict": "head-value", "foo": "bar", "baz": "qux"},
+			},
+		},
+		{
 			name:     "FailureDueToJson",
 			addr:     []byte(""),
 			producer: successProducer,
@@ -149,13 +185,27 @@ func TestKafkaPlugin(t *testing.T) {
 			err = kafka.Start(nil)
 			assert.Nil(t, err)
 
-			ok := kafka.Enqueue(&aio.Message{
+			msg := &aio.Message{
 				Addr: tc.addr,
 				Body: []byte("test message"),
 				Done: func(completion *t_aio.SenderCompletion) {
 					assert.Equal(t, tc.success, completion.Success)
 				},
-			})
+			}
+
+			// Add Head parameter for tests that need it
+			if tc.name == "SuccessWithHeadParameter" || tc.name == "SuccessWithHeadAndAddrHeaders" || tc.name == "SuccessWithHeadPrecedenceOverAddrHeaders" {
+				msg.Head = map[string]string{
+					"foo": "bar",
+					"baz": "qux",
+				}
+			}
+			if tc.name == "SuccessWithHeadPrecedenceOverAddrHeaders" {
+				msg.Head["source"] = "head"
+				msg.Head["conflict"] = "head-value"
+			}
+
+			ok := kafka.Enqueue(msg)
 
 			assert.True(t, ok)
 
