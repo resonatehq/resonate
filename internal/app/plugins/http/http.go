@@ -2,19 +2,24 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"time"
 
 	"github.com/resonatehq/resonate/internal/aio"
 	"github.com/resonatehq/resonate/internal/app/plugins/base"
 	"github.com/resonatehq/resonate/internal/metrics"
+	"github.com/resonatehq/resonate/internal/util"
 )
 
 type Config struct {
 	Size        int           `flag:"size" desc:"submission buffered channel size" default:"100"`
-	Workers     int           `flag:"workers" desc:"number of workers" default:"1"`
-	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"1s"`
+	Workers     int           `flag:"workers" desc:"number of workers" default:"3"`
+	Timeout     time.Duration `flag:"timeout" desc:"http request timeout" default:"3m"`
+	ConnTimeout time.Duration `flag:"conn-timeout" desc:"http connection timeout" default:"10s"`
 	TimeToRetry time.Duration `flag:"ttr" desc:"time to wait before resending" default:"15s"`
 	TimeToClaim time.Duration `flag:"ttc" desc:"time to wait for claim before resending" default:"1m"`
 }
@@ -58,17 +63,51 @@ func (p *processor) Process(data []byte, head map[string]string, body []byte) (b
 	// set non-overridable headers
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := p.client.Do(req)
-	if err != nil {
-		return false, err
+	succeeded := false
+	connected := make(chan struct{})
+
+	trace := &httptrace.ClientTrace{
+		ConnectDone: func(network, addr string, err error) {
+			// when a connection is established, close the channel and return
+			// true
+			if err == nil {
+				util.Assert(!succeeded, "connect done cannot be called multiple times successfully")
+
+				succeeded = true
+				close(connected)
+			}
+		},
 	}
 
-	return res.StatusCode == http.StatusOK, nil
+	// perform request asynchronously
+	go func() {
+		res, err := p.client.Do(req.WithContext(httptrace.WithClientTrace(context.Background(), trace)))
+
+		if res != nil {
+			_ = res.Body.Close()
+		}
+
+		// when request fails and the connection was not established, close
+		// the channel and return false
+		if err != nil && !succeeded {
+			close(connected)
+		}
+	}()
+
+	<-connected
+	return succeeded, nil
 }
 
 func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 	proc := &processor{
-		client: &http.Client{Timeout: config.Timeout},
+		client: &http.Client{
+			Timeout: config.Timeout,
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout: config.ConnTimeout,
+				}).DialContext,
+			},
+		},
 	}
 
 	baseConfig := &base.BaseConfig{
@@ -78,9 +117,7 @@ func New(a aio.AIO, metrics *metrics.Metrics, config *Config) (*Http, error) {
 		TimeToClaim: config.TimeToClaim,
 	}
 
-	plugin := base.NewPlugin(a, "http", baseConfig, metrics, proc, nil)
-
 	return &Http{
-		Plugin: plugin,
+		Plugin: base.NewPlugin(a, "http", baseConfig, metrics, proc, nil),
 	}, nil
 }
